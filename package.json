@@ -1,0 +1,16 @@
+{
+  "name": "pracai",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.13.1",
+  "scripts": {
+    "dev": "pnpm --filter @pracai/desktop dev",
+    "dev:api": "pnpm --filter @pracai/api dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "build": "pnpm -r build"
+  },
+  "engines": { "node": ">=22" }
+}
+
