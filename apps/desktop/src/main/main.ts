@@ -7,6 +7,7 @@ import { installMenu } from "./menu.js";
 import { LocalStore } from "./store.js";
 import { CloudSyncService } from "./sync.js";
 import { UtilityClient } from "./utilityClient.js";
+import { startUpdates } from "./updates.js";
 import { createMainWindow } from "./window.js";
 import { WorkspaceService } from "./workspaces.js";
 
@@ -24,7 +25,7 @@ else {
     const runner = new UtilityClient("runner", (event) => mainWindow?.webContents.send("runner:event", { id: event.requestId, stream: event.stream, data: event.data, exitCode: event.exitCode }));
     const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; mainWindow?.webContents.send("agent:event", { runId: event.requestId, ...value }); }, (name, input) => executeTrainingTool(name, input, store));
     const sync=new CloudSyncService(store,auth,apiOrigin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
-    installIpc({ store, workspaces, auth, runner, agent, window: () => mainWindow }); installMenu(() => mainWindow); mainWindow = createMainWindow();
+    installIpc({ store, workspaces, auth, runner, agent, window: () => mainWindow }); installMenu(() => mainWindow); mainWindow = createMainWindow(); startUpdates(mainWindow);
     app.on("before-quit", () => { sync.stop(); runner.stop(); agent.stop(); store.close(); });
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(); });
   });
