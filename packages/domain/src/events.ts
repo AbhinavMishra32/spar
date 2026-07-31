@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { id, isoDate } from "./model";
+import { id, isoDate } from "./model.js";
 
 export const attemptEventTypeSchema = z.enum([
   "attempt_started", "file_opened", "file_changed", "command_executed",
@@ -31,4 +31,3 @@ export const appendEventsRequestSchema = z.object({
     }
   });
 });
-

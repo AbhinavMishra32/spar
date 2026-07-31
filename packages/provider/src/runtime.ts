@@ -1,7 +1,7 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamText, tool } from "ai";
-import { normalizeProviderError, normalizeUsage } from "./normalize";
-import type { ProviderEvent, ProviderRunRequest, ProviderSettings } from "./types";
+import { normalizeProviderError, normalizeUsage } from "./normalize.js";
+import type { ProviderEvent, ProviderRunRequest, ProviderSettings } from "./types.js";
 
 export type SecretResolver = (keychainAccount: string) => Promise<string>;
 
@@ -16,10 +16,10 @@ export async function* runProvider(settings: ProviderSettings, request: Provider
       messages: request.messages,
       tools: Object.fromEntries(Object.entries(request.tools).map(([name, value]) => [name, tool({ description: value.description, parameters: value.inputSchema, execute: value.execute })])),
       maxSteps: 16,
-      abortSignal: request.signal
+      ...(request.signal ? { abortSignal: request.signal } : {})
     });
     for await (const part of result.fullStream) {
-      const event = normalizePart(part);
+      const event = normalizePart(part as unknown as Record<string, unknown>);
       if (event) yield event;
     }
     yield { type: "usage", usage: normalizeUsage(await result.usage) };
@@ -38,4 +38,3 @@ function normalizePart(part: Record<string, unknown>): ProviderEvent | null {
   if (type === "tool-error") return { type: "tool-result", providerCallId: String(part.toolCallId), toolName: String(part.toolName), output: null, error: String(part.error) };
   return null;
 }
-

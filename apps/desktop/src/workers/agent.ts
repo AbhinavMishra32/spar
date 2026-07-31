@@ -31,7 +31,7 @@ function hostTool(name: string, description: string, schema: z.ZodTypeAny) { ret
 
 async function run(request: Request) {
   const tools = Object.fromEntries(Object.entries(toolDefinitions).map(([name, [description, schema]]) => [name, hostTool(name, description, schema)]));
-  const provider = createOpenAI({ apiKey: request.payload.provider.apiKey, baseURL: request.payload.provider.baseUrl, compatibility: "compatible" });
+  const provider = createOpenAI({ apiKey: request.payload.provider.apiKey, baseURL: request.payload.provider.baseUrl });
   const agent = new Agent({ id: "practice-training-agent", name: "Practice Training Agent", model: provider(request.payload.provider.model), instructions: instructions(), tools, maxRetries: 1 });
   new Mastra({ agents: { training: agent }, logger: false });
   try {
@@ -43,4 +43,3 @@ async function run(request: Request) {
 function settle(message: Record<string, unknown>) { const pending = pendingTools.get(String(message.id)); if (!pending) return; pendingTools.delete(String(message.id)); if (message.ok) pending.resolve(message.value); else pending.reject(new Error(String(message.error))); }
 function normalize(part: Record<string, unknown>) { const type = String(part.type); if (type === "text-delta") return { type: "text", text: String(part.textDelta ?? part.payload ?? "") }; if (type.includes("tool")) return { type: "tool", tool: String(part.toolName ?? "tool"), detail: type }; return { type: "status", detail: type }; }
 function instructions() { return `You are the single Training Agent for a personalized coding gym. Own pedagogical decisions, not persistence or execution. Start broad goals by searching learner history. Every question needs one explicit Training Target. Use tools as reality and never claim a write, test, evaluation, or update without its tool result. Ask the learner only when history cannot answer something materially important. After an attempt choose exactly one action: diagnose, teach, practise, transfer, advance, or retain. Prefer evidence over scores. Never overreact to one attempt. Keep the coding task primary and chat concise.`; }
-

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { languageSchema, pedagogicalActionSchema } from "./model";
+import { languageSchema, pedagogicalActionSchema } from "./model.js";
 
 export const questionDesignSchema = z.object({
   title: z.string().min(3),
@@ -36,4 +36,3 @@ export const trainingToolNames = [
   "propose_ability_update", "commit_session_decision"
 ] as const;
 export type TrainingToolName = typeof trainingToolNames[number];
-

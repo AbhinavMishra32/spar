@@ -1,3 +1,3 @@
-export * from "./compiler";
-export * from "./trace";
-export * from "./decision";
+export * from "./compiler.js";
+export * from "./trace.js";
+export * from "./decision.js";

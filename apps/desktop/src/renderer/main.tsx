@@ -1,6 +1,16 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { loader } from "@monaco-editor/react";
+import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+import "monaco-editor/esm/vs/language/typescript/monaco.contribution";
+import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import TypeScriptWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import { MotionConfig } from "motion/react";
 import { App } from "./App";
+import "./shadcn.css";
 import "./styles.css";
-createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);
-
+import "./qa-fixes.css";
+window.MonacoEnvironment = { getWorker(_moduleId, label) { return label === "typescript" || label === "javascript" ? new TypeScriptWorker() : new EditorWorker(); } };
+document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches);
+loader.config({ monaco });
+createRoot(document.getElementById("root")!).render(<React.StrictMode><MotionConfig reducedMotion="user"><App /></MotionConfig></React.StrictMode>);

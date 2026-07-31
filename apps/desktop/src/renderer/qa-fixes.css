@@ -1,0 +1,7 @@
+@media (prefers-color-scheme: dark) {
+  .workspace-toolbar .secondary {
+    background: #fff;
+    border-color: #dcdcd6;
+    color: #252825;
+  }
+}

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { id, isoDate, trainingTargetSchema } from "./model";
+import { id, isoDate, trainingTargetSchema } from "./model.js";
 
 export const workspaceFileSchema = z.object({
   path: z.string().min(1),
@@ -42,4 +42,3 @@ export function chooseCheckpoint(local: SessionCheckpoint | null, remote: Sessio
   if (local.eventSequence !== remote.eventSequence) return local.eventSequence > remote.eventSequence ? local : remote;
   return Date.parse(local.savedAt) >= Date.parse(remote.savedAt) ? local : remote;
 }
-

@@ -1,4 +1,4 @@
-import type { NormalizedUsage, ProviderEvent } from "./types";
+import type { NormalizedUsage, ProviderEvent } from "./types.js";
 
 export function normalizeUsage(value: unknown): NormalizedUsage {
   const usage = (value ?? {}) as Record<string, unknown>;
@@ -15,4 +15,3 @@ export function normalizeProviderError(error: unknown): Extract<ProviderEvent, {
 }
 
 function numberFrom(value: unknown): number | undefined { return typeof value === "number" && Number.isFinite(value) ? value : undefined; }
-

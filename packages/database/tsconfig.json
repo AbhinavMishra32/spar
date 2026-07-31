@@ -1,2 +1,1 @@
-{"extends":"../../tsconfig.base.json","compilerOptions":{"noEmit":true},"include":["src/**/*.ts","drizzle.config.ts"]}
-
+{"extends":"../../tsconfig.base.json","compilerOptions":{"noEmit":true,"types":["node"]},"include":["src/**/*.ts","drizzle.config.ts"]}
