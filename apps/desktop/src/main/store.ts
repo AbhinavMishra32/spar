@@ -53,6 +53,9 @@ export class LocalStore {
 
   getSetting<T>(key: string, fallback: T): T { const row = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined; return row ? JSON.parse(row.value) as T : fallback; }
   setSetting(key: string, value: unknown) { this.db.prepare("INSERT INTO settings VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").run(key, JSON.stringify(value), new Date().toISOString()); }
+  pendingSync(limit=100) { return this.db.prepare("SELECT id, kind, payload, attempts FROM sync_outbox ORDER BY created_at LIMIT ?").all(limit) as Array<{id:string;kind:string;payload:string;attempts:number}>; }
+  acknowledgeSync(ids:string[]) { const remove=this.db.prepare("DELETE FROM sync_outbox WHERE id = ?"); this.db.transaction(()=>ids.forEach(id=>remove.run(id)))(); }
+  markSyncFailed(id:string) { this.db.prepare("UPDATE sync_outbox SET attempts = attempts + 1 WHERE id = ?").run(id); }
   close() { this.db.close(); }
   private enqueue(kind: string, payload: unknown) { this.db.prepare("INSERT INTO sync_outbox (id, kind, payload, created_at) VALUES (?, ?, ?, ?)").run(randomUUID(), kind, JSON.stringify(payload), new Date().toISOString()); }
 
@@ -71,4 +74,3 @@ function toSession(row: Row): SessionSummary {
   const active = questions.find((question) => question.status === "active");
   return { id: row.id, title: row.title, originalGoal: row.original_goal, objective: row.objective, status: row.status, currentFocus: JSON.parse(row.current_focus) as string[], completedQuestions: questions.filter((question) => question.status === "completed").length, activeQuestion: active ? { id: active.id, title: active.title, ordinal: questions.indexOf(active) + 1 } : null, questionTitles: questions, totalSeconds: row.total_seconds, updatedAt: row.updated_at };
 }
-

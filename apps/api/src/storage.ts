@@ -1,0 +1,4 @@
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { Env } from "./env.js";
+export class ObjectStorage { private readonly client:S3Client; constructor(private readonly env:Env){this.client=new S3Client({endpoint:env.OBJECT_STORAGE_ENDPOINT,region:"auto",forcePathStyle:true,credentials:{accessKeyId:env.OBJECT_STORAGE_ACCESS_KEY,secretAccessKey:env.OBJECT_STORAGE_SECRET_KEY}});} uploadUrl(key:string,contentType="application/octet-stream"){return getSignedUrl(this.client,new PutObjectCommand({Bucket:this.env.OBJECT_STORAGE_BUCKET,Key:key,ContentType:contentType}),{expiresIn:300});} downloadUrl(key:string){return getSignedUrl(this.client,new GetObjectCommand({Bucket:this.env.OBJECT_STORAGE_BUCKET,Key:key}),{expiresIn:300});}}

@@ -1,0 +1,12 @@
+import type { AuthService } from "./auth.js";
+import type { LocalStore } from "./store.js";
+
+export class CloudSyncService {
+  private timer: NodeJS.Timeout | null=null; private running=false;
+  constructor(private readonly store:LocalStore,private readonly auth:AuthService,private readonly origin:string,private readonly onState:(state:"offline"|"pending"|"synced")=>void){}
+  start(){this.timer=setInterval(()=>void this.flush(),5_000);void this.flush();}
+  stop(){if(this.timer)clearInterval(this.timer);this.timer=null;}
+  async flush(){if(this.running)return;const token=await this.auth.accessToken();if(!token){this.onState("offline");return;}const items=this.store.pendingSync();if(!items.length){this.onState("synced");return;}this.running=true;this.onState("pending");const acknowledged:string[]=[];try{for(const item of items){const target=route(item.kind,JSON.parse(item.payload) as Record<string,unknown>);if(!target){acknowledged.push(item.id);continue;}const response=await fetch(`${this.origin}${target.path}`,{method:target.method,headers:{authorization:`Bearer ${token}`,"content-type":"application/json","idempotency-key":item.id},body:JSON.stringify(target.body)});if(response.ok){acknowledged.push(item.id);continue;}if(response.status===401)throw new Error("Authentication expired");this.store.markSyncFailed(item.id);}this.store.acknowledgeSync(acknowledged);this.onState(this.store.pendingSync(1).length?"pending":"synced");}catch{this.onState("offline");}finally{this.running=false;}}
+}
+function route(kind:string,value:Record<string,unknown>):{path:string;method:string;body:unknown}|null{if(kind==="checkpoint")return{path:`/v1/sessions/${value.sessionId}/checkpoints/${value.version}`,method:"PUT",body:value};if(kind==="attempt-event")return{path:`/v1/attempts/${value.attemptId}/events`,method:"POST",body:{attemptId:value.attemptId,expectedSequence:value.sequence,events:[value]}};return null;}
+
