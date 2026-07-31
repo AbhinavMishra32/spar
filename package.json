@@ -11,6 +11,14 @@
     "lint": "pnpm -r lint",
     "build": "pnpm -r build"
   },
-  "engines": { "node": ">=22" }
+  "engines": { "node": ">=22" },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "electron",
+      "electron-winstaller",
+      "esbuild",
+      "keytar"
+    ]
+  }
 }
-
