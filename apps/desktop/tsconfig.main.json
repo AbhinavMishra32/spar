@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext","outDir":"dist","rootDir":"src","types":["node"],"noEmit":false},"include":["src/main/**/*.ts","src/preload/**/*.ts","src/shared/**/*.ts","src/workers/**/*.ts"]}
