@@ -1,0 +1,10 @@
+{
+  "name": "@pracai/domain",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run", "lint": "tsc --noEmit", "build": "tsc -p tsconfig.build.json" },
+  "dependencies": { "zod": "^3.25.76" },
+  "devDependencies": { "typescript": "^5.8.3", "vitest": "^3.2.4" }
+}
+
