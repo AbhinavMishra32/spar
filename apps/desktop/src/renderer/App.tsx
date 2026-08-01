@@ -1,67 +1,359 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import Editor from "@monaco-editor/react";
-import type { ActiveQuestion, AttemptEvent, SessionDetail, SessionSummary } from "@pracai/domain";
-import { AlertCircle, ArrowRight, Bot, BrainCircuit, Check, Clock3, Code2, FileCode2, FolderOpen, History, Home, LayoutGrid, Map, MessageSquareText, PanelRightClose, Play, Plus, Search, Settings, Sparkles, Terminal, UserRound } from "lucide-react";
+import { AlertCircle, History, Loader2, Map, Sparkles, X } from "lucide-react";
+import type { SessionDetail, SessionSummary } from "@pracai/domain";
 import type { AgentStreamEvent, BootstrapData, PracticeApi } from "../shared/api";
-import { Button } from "@/components/ui/button";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/animate-ui/components/radix/dialog";
+import { cn } from "@/lib/utils";
+import { clockTime, message } from "@/lib/format";
+import { Sidebar, type Page } from "./components/shell/Sidebar";
+import { Toolbar } from "./components/shell/Toolbar";
+import { CommandPalette } from "./components/common/CommandPalette";
+import { EmptyState } from "./components/common/EmptyState";
+import { HomePage } from "./components/pages/HomePage";
+import { SessionsPage } from "./components/pages/SessionsPage";
+import { SettingsPage } from "./components/pages/SettingsPage";
+import { AuthPage } from "./components/pages/AuthPage";
+import { Workspace } from "./components/workspace/Workspace";
+import { PlanningView } from "./components/workspace/PlanningView";
+import type { RuntimeLog } from "./components/agent/RuntimeConsole";
+import { reduceRun, type AgentRun } from "./components/agent/agentRun";
 
-type Page="home"|"sessions"|"ability"|"history"|"settings"|"workspace";
-type RuntimeLog={id:string;at:string;prefix:"TRAINING"|"TOOL"|"RUNNER"|"VALIDATOR"|"SYNC";message:string;tone?:"muted"|"success"|"error"};
-const api:PracticeApi|undefined=window.practice;
+const api: PracticeApi | undefined = window.practice;
 
-export function App(){
-  const[data,setData]=useState<BootstrapData|null>(null);const[error,setError]=useState<string|null>(null);const[page,setPage]=useState<Page>("home");const[detail,setDetail]=useState<SessionDetail|null>(null);const[newSession,setNewSession]=useState(false);const[runtimeLogs,setRuntimeLogs]=useState<RuntimeLog[]>([]);
-  const refresh=useCallback(async()=>{if(!api)throw new Error("Practice AI must run inside its Electron desktop shell.");const next=await api.bootstrap();setData(next);return next;},[]);
-  const openSession=useCallback(async(id:string)=>{if(!api)return;setPage("workspace");setDetail(null);const next=await api.openSession(id);if(!next)throw new Error("Session no longer exists");setDetail(next);},[]);
-  useEffect(()=>{void refresh().catch(e=>setError(message(e)));},[refresh]);
-  useEffect(()=>{if(!api)return;const append=(entry:Omit<RuntimeLog,"id"|"at">)=>setRuntimeLogs(current=>[...current,{...entry,id:crypto.randomUUID(),at:new Date().toLocaleTimeString([],{hour12:false,hour:"2-digit",minute:"2-digit",second:"2-digit"})}].slice(-300));const offAgent=api.onAgentEvent(event=>{append(agentLog(event));if(event.type==="error")setError(event.text??"Training Agent failed");if(event.type==="done"){if(detail?.summary.id)void openSession(detail.summary.id);void refresh();}});const offRunner=api.onRunnerEvent(event=>append({prefix:event.id.includes("validation")?"VALIDATOR":"RUNNER",message:`${event.stream} ${event.data.trim()||`exit ${event.exitCode??""}`}`,tone:event.stream==="stderr"?"error":event.stream==="exit"&&event.exitCode===0?"success":"muted"}));return()=>{offAgent();offRunner();};},[detail?.summary.id,openSession,refresh]);
-  useEffect(()=>{if(!detail||detail.question||detail.pendingLearnerQuestion||detail.summary.status!=="planning")return;const timer=setInterval(()=>void openSession(detail.summary.id),1500);return()=>clearInterval(timer);},[detail,openSession]);
-  useEffect(()=>{const listener=(event:KeyboardEvent)=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="n"){event.preventDefault();setNewSession(true);}};addEventListener("keydown",listener);return()=>removeEventListener("keydown",listener);},[]);
-  if(error&&!data)return <FatalError error={error}/>;if(!data)return <LoadingShell/>;if(!data.account)return <Auth error={error} onError={setError}/>;
-  const navigate=(next:Page)=>{setPage(next);if(next!=="workspace")setDetail(null);};
-  return <div className="app-shell"><Sidebar page={page} account={data.account} onPage={navigate}/><main className="main"><Titlebar page={page} title={detail?.summary.title} sync={data.syncState}/><div className={`content ${page==="workspace"?"workspace-content":""}`}>
-    {error&&<div className="app-alert"><Alert variant="destructive"><AlertCircle/><AlertTitle>Something failed</AlertTitle><AlertDescription>{error}</AlertDescription></Alert></div>}
-    {page==="home"&&<HomePage data={data} onNew={()=>setNewSession(true)} onOpen={session=>void openSession(session.id)}/>} {page==="sessions"&&<SessionsPage sessions={data.sessions} onOpen={session=>void openSession(session.id)} onNew={()=>setNewSession(true)}/>} {page==="ability"&&<TruthfulEmpty icon={Map} title="No ability evidence yet" description="Ability documents appear here only after evaluated attempts produce evidence."/>} {page==="history"&&<TruthfulEmpty icon={History} title="No evaluated attempts yet" description="Completed and paused attempts will appear here with their immutable event trace."/>} {page==="settings"&&<SettingsPage/>} {page==="workspace"&&(detail?<Workspace detail={detail} logs={runtimeLogs} onRefresh={()=>openSession(detail.summary.id)} onError={setError}/>:<WorkspaceSkeleton/>)}
-  </div></main>{newSession&&<NewSession onClose={()=>setNewSession(false)} onCreate={async goal=>{if(!api)return;setError(null);try{const result=await api.createSession({goal});setNewSession(false);await refresh();await openSession(result.sessionId);}catch(e){setError(message(e));}}}/>}</div>;
+const PAGE_TITLE: Record<Exclude<Page, "workspace">, string> = {
+  home: "Home",
+  sessions: "Sessions",
+  ability: "Ability map",
+  history: "History",
+  settings: "Settings",
+};
+
+export function App() {
+  const [data, setData] = useState<BootstrapData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState<Page>("home");
+  const [detail, setDetail] = useState<SessionDetail | null>(null);
+  const [opening, setOpening] = useState(false);
+  const [logs, setLogs] = useState<RuntimeLog[]>([]);
+  const [run, setRun] = useState<AgentRun | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [sidebar, setSidebar] = useState(() => localStorage.getItem("practice.sidebar") !== "hidden");
+  const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
+  const detailRef = useRef<SessionDetail | null>(null);
+  detailRef.current = detail;
+
+  const refresh = useCallback(async () => {
+    if (!api) throw new Error("Practice AI must run inside its Electron desktop shell.");
+    const next = await api.bootstrap();
+    setData(next);
+    return next;
+  }, []);
+
+  const openSession = useCallback(async (id: string) => {
+    if (!api) return;
+    setPage("workspace");
+    setOpening(true);
+    try {
+      const next = await api.openSession(id);
+      if (!next) throw new Error("That session no longer exists.");
+      setDetail(next);
+    } finally {
+      setOpening(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh().catch((cause) => setError(message(cause)));
+  }, [refresh]);
+
+  // Follows the system appearance; the window itself is vibrant, so the two must agree.
+  useEffect(() => {
+    const query = matchMedia("(prefers-color-scheme: dark)");
+    const sync = () => {
+      setDark(query.matches);
+      document.documentElement.classList.toggle("dark", query.matches);
+    };
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    if (!api) return;
+    const append = (entry: Omit<RuntimeLog, "id" | "at">) =>
+      setLogs((current) => [...current, { ...entry, id: crypto.randomUUID(), at: clockTime() }].slice(-400));
+
+    const offAgent = api.onAgentEvent((event) => {
+      append(agentLog(event));
+      setRun((current) => reduceRun(current, event));
+      if (event.type === "error") setError(event.text ?? "The Training Agent failed.");
+      if (event.type === "done") {
+        const id = detailRef.current?.summary.id;
+        if (id) void openSession(id).catch((cause) => setError(message(cause)));
+        void refresh().catch(() => undefined);
+      }
+    });
+
+    const offRunner = api.onRunnerEvent((event) =>
+      append({
+        prefix: event.id.includes("validation") ? "VALIDATOR" : "RUNNER",
+        message: `${event.stream} ${event.data.trim() || `exit ${event.exitCode ?? ""}`}`,
+        tone: event.stream === "stderr" ? "error" : event.stream === "exit" && event.exitCode === 0 ? "success" : "muted",
+      }),
+    );
+
+    return () => {
+      offAgent();
+      offRunner();
+    };
+  }, [openSession, refresh]);
+
+  // A planning session has no challenge to show yet, so poll until one exists.
+  useEffect(() => {
+    if (!detail || detail.question || detail.pendingLearnerQuestion || detail.summary.status !== "planning") return;
+    const timer = setInterval(() => void openSession(detail.summary.id).catch(() => undefined), 1_800);
+    return () => clearInterval(timer);
+  }, [detail, openSession]);
+
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      const meta = event.metaKey || event.ctrlKey;
+      if (!meta) return;
+      const key = event.key.toLowerCase();
+      if (key === "n") {
+        event.preventDefault();
+        setPage("home");
+        setDetail(null);
+      }
+      if (key === "k") {
+        event.preventDefault();
+        setPalette((value) => !value);
+      }
+      if (key === "b") {
+        event.preventDefault();
+        setSidebar((value) => {
+          localStorage.setItem("practice.sidebar", value ? "hidden" : "shown");
+          return !value;
+        });
+      }
+    };
+    addEventListener("keydown", listener);
+    return () => removeEventListener("keydown", listener);
+  }, []);
+
+  // The native menu bar drives the same actions as the in-app controls.
+  useEffect(() => {
+    if (!api) return;
+    return api.onMenuCommand((command) => {
+      if (command === "command-palette") setPalette(true);
+      if (command === "settings") {
+        setPage("settings");
+        setDetail(null);
+      }
+      if (command === "new-session") {
+        setPage("home");
+        setDetail(null);
+      }
+    });
+  }, []);
+
+  // Sync progress is pushed from the main process rather than polled at bootstrap.
+  useEffect(() => {
+    if (!api) return;
+    return api.onSyncState((syncState) => setData((current) => (current ? { ...current, syncState } : current)));
+  }, []);
+
+  if (error && !data) return <FatalError error={error} />;
+  if (!data) return <BootShell />;
+  if (!data.account) return <AuthPage api={api} error={error} onError={setError} />;
+
+  const navigate = (next: Page) => {
+    setPage(next);
+    if (next !== "workspace") setDetail(null);
+  };
+
+  const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
+
+  const start = async (goal: string) => {
+    if (!api) return;
+    setError(null);
+    setRun(null);
+    try {
+      const result = await api.createSession({ goal });
+      await refresh();
+      await openSession(result.sessionId);
+    } catch (cause) {
+      setError(message(cause));
+    }
+  };
+
+  const toggleSidebar = () =>
+    setSidebar((value) => {
+      localStorage.setItem("practice.sidebar", value ? "hidden" : "shown");
+      return !value;
+    });
+  const expandSidebar = sidebar ? undefined : toggleSidebar;
+
+  return (
+    <div className="flex h-full">
+      {/* Width, not display, so the vibrant layer never repaints while animating. */}
+      <div
+        className={cn(
+          "shrink-0 overflow-hidden transition-[width] duration-200 ease-out",
+          sidebar ? "w-[228px]" : "w-0",
+        )}
+      >
+        <Sidebar
+          account={data.account}
+          activeSessionId={detail?.summary.id}
+          onCollapse={toggleSidebar}
+          onCommandPalette={() => setPalette(true)}
+          onNewSession={() => navigate("home")}
+          onOpenSession={open}
+          onPage={navigate}
+          page={page}
+          sessions={data.sessions}
+          syncState={data.syncState}
+        />
+      </div>
+
+      <main className="app-opaque relative flex min-w-0 flex-1 flex-col">
+        {page !== "workspace" && (
+          <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace">]} />
+        )}
+
+        {error && (
+          <div className="absolute right-3 top-11 z-20 flex w-[min(26rem,calc(100vw-2rem))] items-start gap-2 rounded-xl border border-destructive/30 bg-popover px-3 py-2.5 text-ui text-destructive shadow-[var(--app-shadow-overlay)]">
+            <AlertCircle className="mt-px size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1">{error}</span>
+            <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setError(null)} type="button">
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
+
+        <div className="min-h-0 flex-1">
+          {page === "home" && <HomePage busy={opening} data={data} onOpen={open} onStart={(goal) => void start(goal)} />}
+          {page === "sessions" && <SessionsPage onOpen={open} sessions={data.sessions} />}
+          {page === "ability" && (
+            <PagePad>
+              <EmptyState
+                description="Ability documents appear here only after evaluated attempts produce evidence. Nothing is inferred from a goal alone."
+                icon={Map}
+                title="No ability evidence yet"
+              />
+            </PagePad>
+          )}
+          {page === "history" && (
+            <PagePad>
+              <EmptyState
+                description="Completed and paused attempts appear here with their immutable event trace."
+                icon={History}
+                title="No evaluated attempts yet"
+              />
+            </PagePad>
+          )}
+          {page === "settings" && <SettingsPage api={api} />}
+          {page === "workspace" &&
+            (detail ? (
+              detail.question ? (
+                <Workspace
+                  api={api}
+                  dark={dark}
+                  detail={detail}
+                  logs={logs}
+                  onBack={() => navigate("home")}
+                  onError={setError}
+                  onExpandSidebar={expandSidebar}
+                  onRefresh={() => openSession(detail.summary.id)}
+                  question={detail.question}
+                  run={run}
+                />
+              ) : (
+                <PlanningView
+                  api={api}
+                  detail={detail}
+                  logs={logs}
+                  onBack={() => navigate("home")}
+                  onError={setError}
+                  onExpandSidebar={expandSidebar}
+                  onRefresh={() => openSession(detail.summary.id)}
+                  run={run}
+                />
+              )
+            ) : (
+              <WorkspaceSkeleton />
+            ))}
+        </div>
+      </main>
+
+      <CommandPalette
+        onNewSession={() => navigate("home")}
+        onOpenChange={setPalette}
+        onOpenSession={open}
+        onPage={navigate}
+        open={palette}
+        sessions={data.sessions}
+      />
+    </div>
+  );
 }
 
-function LoadingShell(){return <div className="loading-state"><div className="loading-card"><Skeleton className="size-10"/><Skeleton className="h-5 w-48"/><Skeleton className="h-3 w-72"/></div></div>}
-function FatalError({error}:{error:string}){return <div className="fatal"><Alert variant="destructive"><AlertCircle/><AlertTitle>Practice AI could not start</AlertTitle><AlertDescription>{error}</AlertDescription></Alert></div>}
-function Auth({error,onError}:{error:string|null;onError(value:string):void}){const[email,setEmail]=useState("");const[password,setPassword]=useState("");const[busy,setBusy]=useState(false);const valid=/^\S+@\S+\.\S+$/.test(email)&&password.length>=8;const submit=(mode:"sign-in"|"sign-up")=>{if(!api||!valid)return;setBusy(true);void api.passwordAuth(mode,email,password).catch(e=>onError(message(e))).finally(()=>setBusy(false));};return <div className="auth real-auth"><section className="auth-panel"><div className="mark"><Code2/></div><h1>Train how you think.</h1><p>Your sessions, attempts, and ability evidence stay attached to your account.</p>{error&&<Alert variant="destructive"><AlertCircle/><AlertTitle>Authentication failed</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}<FieldGroup><Field><FieldLabel htmlFor="email">Email address</FieldLabel><Input id="email" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></Field><Field><FieldLabel htmlFor="password">Password</FieldLabel><Input id="password" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 8 characters"/></Field><Button disabled={!valid||busy} onClick={()=>submit("sign-in")}>{busy?"Signing in…":"Sign in"}<ArrowRight data-icon="inline-end"/></Button><Button variant="outline" disabled={!valid||busy} onClick={()=>submit("sign-up")}>Create account</Button></FieldGroup></section><aside className="auth-principle"><span>PERSONALIZED CODING GYM</span><h2>Evidence before conclusions.</h2><p>The agent retrieves relevant history, declares one training target, validates a runnable challenge, and records what actually happened.</p></aside></div>}
+function PagePad({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="app-scroll h-full overflow-y-auto">
+      <div className="mx-auto w-full max-w-[52rem] px-6 py-10">{children}</div>
+    </div>
+  );
+}
 
-function Sidebar({page,account,onPage}:{page:Page;account:NonNullable<BootstrapData["account"]>;onPage(page:Page):void}){const items:Array<[Page,string,typeof Home]>=[["home","Home",Home],["sessions","Sessions",LayoutGrid],["ability","Ability Map",Map],["history","History",History],["settings","Settings",Settings]];return <aside className="sidebar"><div className="traffic-space"/><div className="brand"><span className="brand-mark"><Code2/></span><span>Practice AI</span></div><nav>{items.map(([id,label,Icon])=><button key={id} className={page===id?"selected":""} onClick={()=>onPage(id)}><Icon/><span>{label}</span></button>)}</nav><div className="sidebar-bottom"><div className="account"><span>{account.displayName.slice(0,1).toUpperCase()}</span><div><b>{account.displayName}</b><small>{account.email}</small></div><UserRound/></div></div></aside>}
-function Titlebar({page,title,sync}:{page:Page;title:string|undefined;sync:string}){return <header className="titlebar"><span className="page-name">{page==="workspace"?title??"Session":label(page)}</span><div className="title-actions"><span className={`sync sync-${sync}`}><span/>{sync==="synced"?"Cloud synced":sync==="pending"?"Syncing":"Local checkpoint"}</span><button className="command-button"><Search/>Search or command<kbd>⌘⇧P</kbd></button></div></header>}
+function BootShell() {
+  return (
+    <div className="app-drag app-opaque grid h-full place-items-center">
+      <div className="flex flex-col items-center gap-3">
+        <span className="grid size-9 place-items-center rounded-[10px] bg-primary text-primary-foreground">
+          <Sparkles className="size-4" />
+        </span>
+        <span className="thinking-shimmer text-ui font-medium">Starting Practice AI…</span>
+      </div>
+    </div>
+  );
+}
 
-function HomePage({data,onNew,onOpen}:{data:BootstrapData;onNew():void;onOpen(session:SessionSummary):void}){return <div className="page dashboard"><section className="welcome"><div><span className="eyebrow">PERSONALIZED PRACTICE</span><h1>Welcome back, {data.account?.displayName.split(" ")[0]}.</h1><p>Choose a durable session or start with a broad learning goal.</p></div><Button onClick={onNew}><Plus data-icon="inline-start"/>New session</Button></section>{data.sessions.length?<><SectionHeader title="Continue learning"/><div className="session-grid">{data.sessions.slice(0,4).map(session=><SessionCard key={session.id} session={session} onOpen={()=>onOpen(session)}/>)}</div></>:<TruthfulEmpty compact icon={BrainCircuit} title="No sessions yet" description="Start with a broad goal. The Training Agent will inspect existing evidence before choosing what to test." action={<Button onClick={onNew}><Plus data-icon="inline-start"/>Start your first session</Button>}/>}</div>}
-function SessionsPage({sessions,onOpen,onNew}:{sessions:SessionSummary[];onOpen(session:SessionSummary):void;onNew():void}){return <div className="page"><div className="page-heading"><div><h1>Sessions</h1><p>Durable learning journeys generated one evidence target at a time.</p></div><Button onClick={onNew}><Plus data-icon="inline-start"/>New session</Button></div>{sessions.length?<div className="session-list">{sessions.map(session=><SessionCard key={session.id} session={session} onOpen={()=>onOpen(session)}/>)}</div>:<TruthfulEmpty compact icon={LayoutGrid} title="No sessions" description="Your authenticated sessions will appear here after creation."/>}</div>}
-function SessionCard({session,onOpen}:{session:SessionSummary;onOpen():void}){return <button className="session-card" onClick={onOpen}><div className="card-top"><span className="status-dot"/><span>{session.status}</span><time>{relativeTime(session.updatedAt)}</time></div><h2>{session.title}</h2><p className="goal">{session.originalGoal}</p><div className="improving"><small>CURRENT FOCUS</small><p>{session.currentFocus.join(" · ")||"Agent is investigating prior evidence"}</p></div>{session.questionTitles.length>0&&<ol className="question-list">{session.questionTitles.map(question=><li key={question.id} className={question.status}><span>{question.status==="completed"?<Check/>:"•"}</span>{question.title}</li>)}</ol>}<footer><span><Clock3/>{formatDuration(session.totalSeconds)}</span><strong>{session.status==="completed"?"Review":"Resume"}<ArrowRight/></strong></footer></button>}
+function WorkspaceSkeleton() {
+  return (
+    <div className="grid h-full place-items-center">
+      <div className="flex items-center gap-2 text-ui text-muted-foreground">
+        <Loader2 className="size-3.5 animate-spin" />
+        Opening session…
+      </div>
+    </div>
+  );
+}
 
-function Workspace({detail,logs,onRefresh,onError}:{detail:SessionDetail;logs:RuntimeLog[];onRefresh():Promise<void>;onError(value:string):void}){if(!detail.question)return <PlanningSession detail={detail} logs={logs} onRefresh={onRefresh} onError={onError}/>;return <QuestionWorkspace detail={detail} question={detail.question} logs={logs} onRefresh={onRefresh} onError={onError}/>}
-function PlanningSession({detail,logs,onRefresh,onError}:{detail:SessionDetail;logs:RuntimeLog[];onRefresh():Promise<void>;onError(value:string):void}){const[answer,setAnswer]=useState("");const[busy,setBusy]=useState(false);const pending=detail.pendingLearnerQuestion;const submit=async()=>{if(!api||!pending||!answer.trim())return;setBusy(true);try{await api.sendAgentMessage({sessionId:detail.summary.id,message:answer.trim()});setAnswer("");await onRefresh();}catch(error){onError(message(error));}finally{setBusy(false);}};return <div className="planning-shell"><div className="planning"><div className="planning-orbit"><BrainCircuit/></div><span className="eyebrow">{pending?"QUICK PLACEMENT CHECK":"TRAINING AGENT IS WORKING"}</span><h2>{pending?pending:detail.summary.objective}</h2>{pending?<><p>Your goal tells the agent what you want to learn, but not what prerequisites you already have. This answer controls the first challenge's assumptions.</p><div className="placement-answer"><Textarea autoFocus value={answer} onChange={event=>setAnswer(event.target.value)} placeholder="Describe what you know, or just say ‘none yet’."/><Button disabled={busy||!answer.trim()} onClick={()=>void submit()}>{busy?"Continuing…":"Continue"}<ArrowRight data-icon="inline-end"/></Button></div></>:<><p>It is retrieving relevant learner evidence, defining one target, generating a challenge, and running deterministic checks.</p><div className="planning-steps"><span>History retrieval</span><span>Target selection</span><span>Challenge compilation</span></div></>}</div><AgentConsole logs={logs}/></div>}
-function QuestionWorkspace({detail,question,logs,onRefresh,onError}:{detail:SessionDetail;question:ActiveQuestion;logs:RuntimeLog[];onRefresh():Promise<void>;onError(value:string):void}){const[activeFile,setActiveFile]=useState(question.files[0]?.path??"");const[content,setContent]=useState("");const[terminal,setTerminal]=useState("");const[running,setRunning]=useState(false);const[submitting,setSubmitting]=useState(false);const[remark,setRemark]=useState("");const[agentMessage,setAgentMessage]=useState("");const[bottomTab,setBottomTab]=useState<"terminal"|"agent">("terminal");
-  const load=useCallback(async(path:string)=>{if(!api||!path)return;setActiveFile(path);setContent(await api.readWorkspaceFile({sessionId:detail.summary.id,path}));},[detail.summary.id]);useEffect(()=>{void load(activeFile).catch(e=>onError(message(e)));},[]);
-  useEffect(()=>{if(!api)return;return api.onRunnerEvent(event=>{setTerminal(value=>value+event.data);if(event.stream==="exit")setRunning(false);});},[]);
-  const append=async(type:AttemptEvent["type"],payload:Record<string,unknown>,source:AttemptEvent["source"]="learner")=>{if(!api)return;await api.appendAttemptEvent({id:crypto.randomUUID(),attemptId:question.attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});};
-  const save=async()=>{if(!api||!activeFile)return;await api.writeWorkspaceFile({sessionId:detail.summary.id,path:activeFile,content});await append("file_changed",{path:activeFile,bytes:content.length});};
-  const run=async()=>{if(!api)return;try{setRunning(true);setTerminal(`$ run visible tests\n`);await save();await append("command_executed",{command:"test",language:question.language});await api.run({sessionId:detail.summary.id,language:question.language,command:"test",timeoutMs:8000});}catch(e){setRunning(false);onError(message(e));}};
-  const submit=async()=>{if(!api)return;try{setSubmitting(true);await save();setTerminal(value=>`${value}\n$ submit visible + hidden tests\n`);const result=await api.submitAttempt({sessionId:detail.summary.id,attemptId:question.attemptId});setTerminal(value=>`${value}\n${result.summary}\n`);await onRefresh();}catch(e){onError(message(e));}finally{setSubmitting(false);}};
-  const attachRemark=async()=>{const body=remark.trim();if(!body)return;try{await append("learner_remark",{body});setRemark("");await onRefresh();}catch(e){onError(message(e));}};
-  const send=async()=>{const body=agentMessage.trim();if(!body||!api)return;try{setAgentMessage("");await api.sendAgentMessage({sessionId:detail.summary.id,message:body});await onRefresh();}catch(e){onError(message(e));}};
-  return <div className="workspace"><div className="workspace-toolbar"><div><span className="crumb">Question {question.ordinal} · {question.language}</span><b>{question.title}</b></div><div><Button variant="outline" size="sm" disabled={running||submitting} onClick={()=>void run()}><Play data-icon="inline-start"/>{running?"Running…":"Run visible tests"}</Button><Button size="sm" disabled={running||submitting} onClick={()=>void submit()}>{submitting?"Evaluating…":"Submit"}</Button></div></div><div className="workspace-body"><aside className="files"><div className="panel-label">EXPLORER</div><div className="folder"><FolderOpen/>challenge</div>{question.files.map(file=><button key={file.path} className={activeFile===file.path?"active":""} onClick={()=>void load(file.path)}><FileCode2/>{file.path}</button>)}</aside><section className="editor-pane"><div className="tabs"><button className="active"><Code2/>{activeFile}</button></div><Editor height="100%" language={languageFor(activeFile)} theme="vs-dark" value={content} onChange={value=>setContent(value??"")} options={{fontSize:13,fontFamily:"SFMono-Regular, Menlo, monospace",minimap:{enabled:false},padding:{top:16},scrollBeyondLastLine:false,readOnly:Boolean(question.files.find(file=>file.path===activeFile)?.readOnly)}}/></section><aside className="agent-panel"><div className="agent-head"><div><BrainCircuit/><span><b>Training Agent</b><small>Evidence-aware, tool-backed</small></span></div><PanelRightClose/></div><div className="target-box"><small>TRAINING TARGET</small><b>{question.abilityTitle}</b><p>{question.specificGap}</p><span>Evidence wanted: {question.desiredEvidence}</span></div><div className="problem-statement"><h3>Challenge</h3><p>{question.statement}</p></div><div className="conversation">{detail.messages.map(item=><div key={item.id} className={`message ${item.role}`}><span>{item.role==="agent"?<Bot/>:<UserRound/>}</span><p>{item.body}</p></div>)}</div><div className="agent-compose"><Textarea value={agentMessage} onChange={e=>setAgentMessage(e.target.value)} placeholder="Ask the Training Agent…"/><Button variant="outline" size="sm" disabled={!agentMessage.trim()} onClick={()=>void send()}><MessageSquareText data-icon="inline-start"/>Send</Button></div><div className="remark"><Field><FieldLabel htmlFor="remark">Learner remark</FieldLabel><Textarea id="remark" value={remark} onChange={e=>setRemark(e.target.value)} placeholder="What are you thinking or uncertain about?"/></Field><Button variant="ghost" size="sm" disabled={!remark.trim()} onClick={()=>void attachRemark()}>Attach to attempt</Button></div></aside></div><div className="bottom-panel"><div className="bottom-tabs"><button className={bottomTab==="terminal"?"active":""} onClick={()=>setBottomTab("terminal")}><Terminal/>Terminal</button><button className={bottomTab==="agent"?"active":""} onClick={()=>setBottomTab("agent")}><Bot/>Agent Console · {logs.length}</button><button>Attempt events · {detail.events.length}</button></div>{bottomTab==="terminal"?<pre>{terminal||"Run the visible tests when you are ready."}</pre>:<AgentConsole logs={logs} compact/>}</div></div>}
+function FatalError({ error }: { error: string }) {
+  return (
+    <div className="app-drag app-opaque grid h-full place-items-center px-8">
+      <div className="max-w-[32rem] rounded-xl border border-destructive/30 bg-card p-4 shadow-[var(--app-shadow-card)]">
+        <p className="flex items-center gap-2 text-content font-semibold text-destructive">
+          <AlertCircle className="size-4" />
+          Practice AI could not start
+        </p>
+        <p className="mt-1.5 text-ui leading-[1.65] text-muted-foreground">{error}</p>
+      </div>
+    </div>
+  );
+}
 
-function AgentConsole({logs,compact=false}:{logs:RuntimeLog[];compact?:boolean}){const end=useRef<HTMLDivElement>(null);useEffect(()=>end.current?.scrollIntoView({block:"end"}),[logs.length]);return <section className={`agent-console ${compact?"compact":""}`} aria-label="Agent runtime console"><header><span><Terminal/>Agent Console</span><small>live utility-process trace</small></header><div className="agent-console-lines">{logs.length===0?<div className="console-empty">[SYSTEM] waiting for the Training Agent utility process…</div>:logs.map(log=><div key={log.id} className={log.tone??""}><time>{log.at}</time><b>[{log.prefix}]</b><span>{log.message}</span></div>)}<div ref={end}/></div></section>}
-
-function SettingsPage(){const[secret,setSecret]=useState("");const[saving,setSaving]=useState(false);const[saved,setSaved]=useState(false);const[error,setError]=useState("");const save=async()=>{if(!api)return;setSaving(true);setError("");setSaved(false);try{await api.saveProviderSecret({provider:"openrouter",model:"openrouter/free",baseUrl:"https://openrouter.ai/api/v1",secret});setSecret("");setSaved(true);}catch(cause){setError(message(cause));}finally{setSaving(false);}};return <div className="page settings"><div className="page-heading"><div><h1>Settings</h1><p>Runtime, privacy, and execution boundaries.</p></div></div><section><h3>AI provider</h3><div className="setting-row provider-setting"><div className="provider-copy"><b>OpenRouter Free Models Router</b><p><code>openrouter/free</code> · routes each request to a compatible free model</p><Field><FieldLabel htmlFor="openrouter-key">OpenRouter API key</FieldLabel><Input id="openrouter-key" type="password" autoComplete="off" value={secret} onChange={event=>{setSecret(event.target.value);setSaved(false);}} placeholder="Stored only in macOS Keychain"/></Field>{error&&<small className="setting-error">{error}</small>}{saved&&<small className="setting-success">Saved to macOS Keychain. The renderer cannot read it back.</small>}</div><Button size="sm" disabled={saving||secret.trim().length<8} onClick={()=>void save()}>{saving?"Saving…":"Save key"}</Button></div><div className="setting-row"><div><b>Provider resolution</b><p>The configured Practice AI provider is authoritative. Construct import or the authenticated gateway is used only when no Practice AI key exists.</p></div><span className="locked">Main process only</span></div></section><section><h3>Execution</h3><div className="setting-row"><div><b>Workspace isolation</b><p>Generated processes are restricted to per-session workspaces with time and output limits.</p></div><span className="locked">Enforced</span></div></section></div>}
-function TruthfulEmpty({icon:Icon,title,description,action,compact=false}:{icon:typeof Map;title:string;description:string;action?:React.ReactNode;compact?:boolean}){return <div className={compact?"empty-wrap compact":"empty-wrap"}><Empty className="border"><EmptyHeader><EmptyMedia variant="icon"><Icon/></EmptyMedia><EmptyTitle>{title}</EmptyTitle><EmptyDescription>{description}</EmptyDescription></EmptyHeader>{action&&<EmptyContent>{action}</EmptyContent>}</Empty></div>}
-function WorkspaceSkeleton(){return <div className="workspace-skeleton"><Skeleton className="h-14 w-full"/><div><Skeleton className="h-full w-48"/><Skeleton className="h-full flex-1"/><Skeleton className="h-full w-80"/></div></div>}
-function NewSession({onClose,onCreate}:{onClose():void;onCreate(goal:string):Promise<void>}){const[goal,setGoal]=useState("");const[busy,setBusy]=useState(false);return <Dialog open onOpenChange={open=>{if(!open&&!busy)onClose()}}><DialogContent className="max-w-lg" from="bottom"><DialogHeader><EmptyMedia variant="icon"><Sparkles/></EmptyMedia><DialogTitle>What do you want to improve?</DialogTitle><DialogDescription>Start broad. The agent will retrieve evidence before selecting one training target.</DialogDescription></DialogHeader><FieldGroup><Field><FieldLabel htmlFor="goal">Learning goal</FieldLabel><Textarea id="goal" autoFocus value={goal} onChange={e=>setGoal(e.target.value)} placeholder="I want to understand graph algorithms deeply…"/></Field></FieldGroup><DialogFooter><Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button><Button disabled={busy||goal.trim().length<3} onClick={()=>{setBusy(true);void onCreate(goal.trim()).finally(()=>setBusy(false));}}>{busy?"Starting agent…":"Investigate and start"}<ArrowRight data-icon="inline-end"/></Button></DialogFooter></DialogContent></Dialog>}
-function SectionHeader({title}:{title:string}){return <div className="section-header"><h2>{title}</h2></div>}
-function agentLog(event:AgentStreamEvent):Omit<RuntimeLog,"id"|"at">{if(event.type==="tool")return{prefix:"TOOL",message:`${event.tool??"unknown"} ${event.detail??""}`,tone:event.detail?.startsWith("error")?"error":event.detail?.startsWith("done")?"success":"muted"};if(event.type==="error")return{prefix:"TRAINING",message:event.text??"Agent turn failed",tone:"error"};if(event.type==="done")return{prefix:"TRAINING",message:"turn completed; durable state committed",tone:"success"};if(event.type==="text")return{prefix:"TRAINING",message:event.text?.trim()||"streaming response",tone:"muted"};return{prefix:"TRAINING",message:event.detail??"working",tone:"muted"}}
-function label(page:string){return page.charAt(0).toUpperCase()+page.slice(1)}function message(error:unknown){return error instanceof Error?error.message:String(error)}function formatDuration(seconds:number){const hours=Math.floor(seconds/3600);const minutes=Math.floor(seconds%3600/60);return hours?`${hours}h ${minutes}m`:`${minutes}m`}function relativeTime(value:string){const minutes=Math.max(0,Math.floor((Date.now()-Date.parse(value))/60000));if(minutes<1)return"now";if(minutes<60)return`${minutes}m ago`;const hours=Math.floor(minutes/60);if(hours<24)return`${hours}h ago`;return`${Math.floor(hours/24)}d ago`}function languageFor(path:string){if(path.endsWith(".ts"))return"typescript";if(path.endsWith(".js"))return"javascript";if(path.endsWith(".cpp"))return"cpp";if(path.endsWith(".md"))return"markdown";return"plaintext"}
+function agentLog(event: AgentStreamEvent): Omit<RuntimeLog, "id" | "at"> {
+  if (event.type === "tool") {
+    return {
+      prefix: "TOOL",
+      message: `${event.tool ?? "unknown"} ${event.detail ?? ""}`.trim(),
+      tone: event.detail?.startsWith("error") ? "error" : event.detail?.startsWith("done") ? "success" : "muted",
+    };
+  }
+  if (event.type === "error") return { prefix: "TRAINING", message: event.text ?? "Agent turn failed", tone: "error" };
+  if (event.type === "done") return { prefix: "TRAINING", message: "turn completed; durable state committed", tone: "success" };
+  if (event.type === "text") return { prefix: "TRAINING", message: event.text?.trim() || "streaming response", tone: "muted" };
+  return { prefix: "TRAINING", message: event.detail ?? "working", tone: "muted" };
+}
