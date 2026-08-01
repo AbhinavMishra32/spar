@@ -47,12 +47,10 @@ export function SessionCard({ session, onOpen }: { session: SessionSummary; onOp
               className={cn(
                 "h-1 flex-1 rounded-full",
                 question.status === "completed"
-                  ? "bg-[var(--success)]/70"
+                  ? "bg-foreground/70"
                   : question.status === "active" || question.status === "playable"
-                    ? "bg-foreground/45"
-                    : question.status === "invalid"
-                      ? "bg-destructive/50"
-                      : "bg-border",
+                    ? "bg-foreground/28"
+                    : "bg-foreground/10",
               )}
             />
           ))}
