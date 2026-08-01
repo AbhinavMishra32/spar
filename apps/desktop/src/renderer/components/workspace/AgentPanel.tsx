@@ -1,17 +1,23 @@
-import { useState } from "react";
-import { NotebookPen } from "lucide-react";
+import { useRef, useState } from "react";
+import { MessageSquare, NotebookPen, SquareCode } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import type { ActiveQuestion, SessionDetail } from "@spar/domain";
-import { cn } from "@/lib/utils";
+import { ViewSwitch } from "@/components/ui/view-switch";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
-import { DifficultyPill, ProblemCard } from "./ProblemCard";
+import { DifficultyPill } from "./Difficulty";
+import { ProblemView } from "./ProblemView";
+
+type View = "problem" | "chat";
+const ORDER: View[] = ["problem", "chat"];
 
 /**
- * The session surface. The challenge, the agent's live reasoning, and the
- * conversation are one continuous stream — the problem is something the agent
- * handed over, not a static reference panel sitting beside a chat.
+ * The session surface. Reading the problem and talking to the agent are the two
+ * things you do here, and they compete for the same column — so they take turns
+ * in it rather than stacking, and the composer stays put underneath both so a
+ * question is always one click away from the statement.
  */
 export function AgentPanel({
   detail,
@@ -24,6 +30,7 @@ export function AgentPanel({
   onRemark,
   onAttachRemark,
   onOpenSettings,
+  testFiles,
 }: {
   detail: SessionDetail;
   question: ActiveQuestion;
@@ -35,27 +42,73 @@ export function AgentPanel({
   onRemark(value: string): void;
   onAttachRemark(): void;
   onOpenSettings?: (() => void) | undefined;
+  testFiles: Record<string, string>;
 }) {
   const [remarkOpen, setRemarkOpen] = useState(false);
+  const [view, setView] = useState<View>("problem");
   const busy = run?.status === "streaming";
+
+  // The incoming view enters from the side it sits on in the switch, so the
+  // motion agrees with the thumb instead of fighting it.
+  const previous = useRef<View>(view);
+  const direction = ORDER.indexOf(view) >= ORDER.indexOf(previous.current) ? 1 : -1;
+  previous.current = view;
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--color-background-surface)]">
-      {/* Always-visible identity for the problem, even when the card is scrolled away. */}
-      <div className="hairline-b flex h-8 shrink-0 items-center gap-2 px-3">
-        <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/70">
-          #{question.ordinal}
-        </span>
+      {/* Identity stays put while the body swaps: which problem you are on is
+          not a property of the view you happen to be reading it in. */}
+      <div className="hairline-b flex h-10 shrink-0 items-center gap-2 px-2.5">
+        <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/70">#{question.ordinal}</span>
         <span className="min-w-0 flex-1 truncate text-ui font-medium">{question.title}</span>
         <DifficultyPill difficulty={question.difficulty} />
+        <ViewSwitch<View>
+          ariaLabel="Panel view"
+          className="ml-1 w-[12.5rem]"
+          onChange={setView}
+          options={[
+            { value: "problem", label: "Problem", icon: SquareCode },
+            {
+              value: "chat",
+              label: "Chat",
+              icon: MessageSquare,
+              // A live pulse only while the agent is working somewhere you
+              // cannot see it — on the Chat tab the transcript says so itself.
+              badge:
+                busy && view !== "chat" ? (
+                  <span className="relative flex size-1.5 shrink-0">
+                    <span className="absolute inline-flex size-full animate-ping rounded-full bg-[var(--success)] opacity-75" />
+                    <span className="relative inline-flex size-1.5 rounded-full bg-[var(--success)]" />
+                  </span>
+                ) : undefined,
+            },
+          ]}
+          value={view}
+        />
       </div>
 
-      <AgentThread
-        className="[--transcript-width:46rem]"
-        header={<ProblemCard question={question} />}
-        messages={detail.messages}
-        run={run}
-      />
+      {/* Both views are absolutely stacked so they cross-dissolve rather than
+          waiting for one another — a tab switch that takes two animations to
+          finish reads as lag. Blur carries the swap; opacity alone looks like a
+          dropped frame at this duration. */}
+      <div className="relative min-h-0 flex-1">
+        <AnimatePresence initial={false}>
+          <motion.div
+            key={view}
+            animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
+            className="absolute inset-0 flex flex-col"
+            exit={{ opacity: 0, filter: "blur(10px)", x: direction * -10 }}
+            initial={{ opacity: 0, filter: "blur(10px)", x: direction * 10 }}
+            transition={{ duration: 0.26, ease: [0.22, 0.61, 0.36, 1] }}
+          >
+            {view === "problem" ? (
+              <ProblemView question={question} testFiles={testFiles} />
+            ) : (
+              <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} run={run} />
+            )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
 
       {remarkOpen && (
         <div className="shrink-0 border-t border-border px-4 py-2">
@@ -64,14 +117,14 @@ export function AgentPanel({
               Learner remark — recorded on the attempt, not sent to the agent
             </label>
             <textarea
-              className="app-scroll block h-16 w-full resize-none rounded-lg border border-border bg-background px-2 py-1.5 text-ui outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-[var(--border-strong)]"
+              className="app-scroll block h-16 w-full resize-none rounded-[var(--radius-lg)] border border-border bg-background px-2 py-1.5 text-ui outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-[var(--border-strong)]"
               id="learner-remark"
               onChange={(event) => onRemark(event.target.value)}
               placeholder="What are you thinking or uncertain about?"
               value={remark}
             />
             <button
-              className="mt-1.5 h-6 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
+              className="mt-1.5 h-6 rounded-[var(--radius-md)] px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
               disabled={!remark.trim()}
               onClick={onAttachRemark}
               type="button"
@@ -91,16 +144,21 @@ export function AgentPanel({
               <>
                 <ComposerPill>{question.language}</ComposerPill>
                 <ComposerPill
+                  active={remarkOpen}
                   icon={NotebookPen}
                   onClick={() => setRemarkOpen((value) => !value)}
                   title="Attach a private remark to this attempt"
                 >
-                  <span className={cn(remarkOpen && "text-foreground")}>Remark</span>
+                  Remark
                 </ComposerPill>
               </>
             }
             onChange={onDraft}
-            onSubmit={onSend}
+            // Answering lands in the transcript, so go where the answer will be.
+            onSubmit={() => {
+              setView("chat");
+              onSend();
+            }}
             placeholder="Ask for a hint, or explain your approach…"
             trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}

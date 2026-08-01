@@ -341,6 +341,7 @@ export function Workspace({
             question={question}
             remark={remark}
             run={run}
+            testFiles={testFiles}
           />
         </Panel>
 

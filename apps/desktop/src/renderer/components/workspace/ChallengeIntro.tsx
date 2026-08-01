@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ActiveQuestion } from "@spar/domain";
 import { ChallengeEmblem } from "./ChallengeEmblem";
-import { DifficultyPill } from "./ProblemCard";
+import { DifficultyPill } from "./Difficulty";
 
 /**
  * The moment a challenge starts. The emblem is struck, the title resolves, and
