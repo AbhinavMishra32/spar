@@ -2,8 +2,8 @@ import { useState } from "react";
 import { ChevronDown, Target } from "lucide-react";
 import type { ActiveQuestion } from "@pracai/domain";
 import { cn } from "@/lib/utils";
-import { Markdown } from "../agent/Markdown";
 import { ChallengeEmblem } from "./ChallengeEmblem";
+import { ProblemStatement } from "./ProblemStatement";
 
 const DIFFICULTY_TONE: Record<ActiveQuestion["difficulty"], string> = {
   foundation: "text-[var(--success)] bg-[var(--success)]/12",
@@ -58,7 +58,7 @@ export function ProblemCard({ question }: { question: ActiveQuestion }) {
       <div className="border-t border-border/70 px-3 py-2.5">
         {open ? (
           <>
-            <Markdown source={question.statement} />
+            <ProblemStatement source={question.statement} />
 
             <div className="mt-3 rounded-lg border border-border bg-[var(--color-background-elevated-secondary)]">
               <button

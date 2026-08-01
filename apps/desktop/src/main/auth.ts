@@ -15,4 +15,12 @@ export class AuthService {
   async signOut() { await keytar.deletePassword(service, "access-token"); await keytar.deletePassword(service, "account"); }
   saveSecret(account: string, secret: string) { return keytar.setPassword(service, `provider:${account}`, secret).then(() => undefined); }
   readSecret(account: string) { return keytar.getPassword(service, `provider:${account}`); }
+  deleteSecret(account: string) { return keytar.deletePassword(service, `provider:${account}`).then(() => undefined); }
+  saveProviderOAuth(provider: string, credentials: unknown) { return keytar.setPassword(service, `provider-oauth:${provider}`, JSON.stringify(credentials)).then(() => undefined); }
+  async readProviderOAuth<T>(provider: string): Promise<T | null> {
+    const raw = await keytar.getPassword(service, `provider-oauth:${provider}`);
+    if (!raw) return null;
+    try { return JSON.parse(raw) as T; } catch { return null; }
+  }
+  deleteProviderOAuth(provider: string) { return keytar.deletePassword(service, `provider-oauth:${provider}`).then(() => undefined); }
 }

@@ -16,7 +16,9 @@
   "dependencies": {
     "@ai-sdk/openai": "^2.0.0",
     "@fontsource-variable/geist": "^5.3.0",
+    "@ai-sdk/provider": "2.0.3",
     "@mastra/core": "^1.49.0",
+    "@mariozechner/pi-ai": "^0.73.1",
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.7",
     "@pracai/domain": "workspace:*",

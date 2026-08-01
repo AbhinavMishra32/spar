@@ -327,7 +327,7 @@ export function Workspace({
 
       <PanelGroup autoSaveId="practice-problem" className="min-h-0 flex-1" direction="horizontal">
         {/* Left: the challenge and the agent that set it, as one live stream. */}
-        <Panel defaultSize={44} minSize={26} order={1}>
+        <Panel defaultSize={46} minSize={32} order={1}>
           <AgentPanel
             detail={detail}
             draft={draft}

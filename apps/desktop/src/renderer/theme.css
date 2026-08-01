@@ -382,6 +382,14 @@
     padding: 0.05em 0.32em;
     font-family: var(--font-mono);
     font-size: 0.92em;
+    /* A long identifier in a narrow column has to wrap. Cloning the decoration
+       gives each wrapped fragment its own complete border and padding, so it
+       reads as two chips rather than one torn in half. Breaking at word
+       boundaries first keeps `foo(bar)` intact whenever it actually fits. */
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
 
   .code-block {
