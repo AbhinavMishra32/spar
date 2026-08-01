@@ -64,7 +64,10 @@
 
 :root {
   color-scheme: light;
-  --squircle-factor: 1.4;
+  /* A superellipse hugs its corner box more tightly than the arc of the same
+     radius, so it reads smaller at an identical value — the multiplier is set
+     above the arc-era 1.4 to hold the curve everything was drawn against. */
+  --squircle-factor: 1.65;
   --hairline: 0.5px;
 
   /* Window chrome. The OS draws its own buttons over our first row, so these
@@ -248,12 +251,6 @@
       corner-shape: round;
     }
 
-    /* A superellipse fills more of its corner box than an arc of the same
-       radius, so radii tuned against arcs now read too round. Pulling the
-       multiplier back keeps the visual weight and gains the better curve. */
-    :root {
-      --squircle-factor: 1.15;
-    }
   }
 
   *,

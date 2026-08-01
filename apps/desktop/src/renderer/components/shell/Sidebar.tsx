@@ -52,7 +52,7 @@ export function Sidebar({
   const recent = sessions.slice(0, 8);
 
   return (
-    <aside className="app-drag app-vibrant flex h-full w-[228px] flex-col">
+    <aside className="app-drag app-vibrant flex h-full w-full flex-col">
       {/* Clears the native traffic lights, and carries the collapse control. The leading
           inset is the shared chrome token rather than a hand-measured margin, so the
           wordmark keeps its clearance if the button metrics ever move. */}

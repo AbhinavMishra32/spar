@@ -19,6 +19,7 @@ import { PlanningView } from "./components/workspace/PlanningView";
 import { ChatView } from "./components/workspace/ChatView";
 import type { RuntimeLog } from "./components/agent/RuntimeConsole";
 import { reduceRun, type AgentRun } from "./components/agent/agentRun";
+import { useSidebarWidth } from "./hooks/use-sidebar-width";
 
 const api: SparApi | undefined = window.spar;
 
@@ -40,6 +41,7 @@ export function App() {
   const [run, setRun] = useState<AgentRun | null>(null);
   const [palette, setPalette] = useState(false);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
+  const { width: sidebarWidth, dragging, handleProps: sidebarHandle } = useSidebarWidth();
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
   const detailRef = useRef<SessionDetail | null>(null);
   detailRef.current = detail;
@@ -218,13 +220,12 @@ export function App() {
   };
 
   return (
-    <div className="flex h-full">
-      {/* Width, not display, so the vibrant layer never repaints while animating. */}
+    <div className="relative flex h-full">
+      {/* Width, not display, so the vibrant layer never repaints while animating.
+          The transition is dropped mid-drag, or the edge lags the cursor. */}
       <div
-        className={cn(
-          "shrink-0 overflow-hidden transition-[width] duration-200 ease-out",
-          sidebar ? "w-[228px]" : "w-0",
-        )}
+        className={cn("shrink-0 overflow-hidden", !dragging && "transition-[width] duration-200 ease-out")}
+        style={{ width: sidebar ? sidebarWidth : 0 }}
       >
         <Sidebar
           account={data.account}
@@ -244,6 +245,27 @@ export function App() {
           material wraps around it and the two read as one continuous surface —
           but only while the sidebar is there to wrap it. Collapsed, the pane owns
           the window edge and has to meet it square. */}
+      {/* Floated over the seam rather than placed in the flex row: a handle with
+          real width would hold the two panes apart, and on a transparent window
+          that gap is a stripe of desktop. The grab target is 8px wide but shows
+          only a hairline, and only under the pointer — a permanently drawn
+          divider would cut the sidebar off from the pane it flows into. */}
+      {sidebar && (
+        <div
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          className={cn(
+            "app-no-drag absolute inset-y-0 z-20 w-2 cursor-col-resize",
+            "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent",
+            "after:transition-colors hover:after:bg-[var(--border-strong)]",
+            dragging && "after:bg-[var(--border-strong)]",
+          )}
+          role="separator"
+          style={{ left: sidebarWidth - 4 }}
+          {...sidebarHandle}
+        />
+      )}
+
       <main className={cn("app-opaque relative flex min-w-0 flex-1 flex-col", sidebar && "app-content-pane")}>
         {page !== "workspace" && (
           <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace">]} />
