@@ -6,6 +6,7 @@ import { z } from "zod";
 import { askUserQuestionInputSchema } from "@spar/domain";
 import { createPiMastraModel, type PiProviderInput } from "./piMastraModel.js";
 import { nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
+import { normalizeAgentStreamPart } from "./agentStream.js";
 
 const AGENT_MAX_STEPS = 96;
 const IDENTICAL_TOOL_CALL_LIMIT = 15;
@@ -186,7 +187,7 @@ async function run(request: Request) {
       try {
         const output = await agent.stream([{ role: "user", content: prompt }], { maxSteps: 1, activeTools: stage.activeTools, toolChoice: stage.toolChoice, abortSignal: phaseAbort.signal });
         for await (const part of output.fullStream) {
-          const normalized = normalize(part as Record<string, unknown>);
+          const normalized = normalizeAgentStreamPart(part as Record<string, unknown>);
           if (normalized.type === "error") streamError = normalized.text;
           parentPort.postMessage({ kind: "event", requestId: request.id, event: normalized });
         }
@@ -257,22 +258,4 @@ function allowedTools(turnKind: AgentTurnKind) {
   return new Set(["read_session", "inspect_current_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "read_concept_graph", "ask_user_question"]);
 }
 function settle(message: Record<string, unknown>) { const pending = pendingTools.get(String(message.id)); if (!pending) return; pendingTools.delete(String(message.id)); if (message.ok) pending.resolve(message.value); else pending.reject(new Error(String(message.error))); }
-function normalize(part: Record<string, unknown>): {type:"text"|"tool"|"status"|"error";text:string;tool?:string;detail?:string} { const type = String(part.type); if (type === "text-delta") return { type: "text", text: String(part.textDelta ?? part.payload ?? "") }; if (type === "error") return {type:"error",text:errorText(part.error ?? part)};// Provider stream parts describe protocol mechanics, not work. Host tool calls
-// already report the real activity, so these stay in the trace as status only.
-if (type.includes("tool")) return { type: "status", text:"", detail: `${type}:${String(part.toolName ?? "tool")}` }; return { type: "status", text:"",detail: type }; }
-function errorText(value: unknown): string {
-  const find = (candidate: unknown, depth = 0): string | null => {
-    if (depth > 8 || candidate == null) return null;
-    if (candidate instanceof Error) return candidate.message.slice(0, 1_000);
-    if (typeof candidate === "string") {
-      if (candidate.length < 1_200 && !candidate.trimStart().startsWith("{")) return candidate;
-      try { return find(JSON.parse(candidate), depth + 1); } catch { const match=candidate.match(/"message"\s*:\s*"((?:\\.|[^"\\])*)"/);return match?.[1]?JSON.parse(`"${match[1]}"`):null; }
-    }
-    if (typeof candidate !== "object") return null;
-    const record = candidate as Record<string, unknown>;
-    for (const key of ["message", "payload", "error", "data", "cause"]) { const found=find(record[key],depth+1);if(found)return found; }
-    return null;
-  };
-  return (find(value) ?? "The model provider returned an unknown error.").replace(/sk-[A-Za-z0-9_-]{8,}/g,"[redacted]").slice(0,1_000);
-}
 function instructions() { return `You are the single Training Agent for a personalized coding gym. Own pedagogical decisions, not persistence, execution, or correctness verification. On a cold-start turn, retrieve learner and attempt evidence once, then ask exactly one short, plain-language question establishing prerequisite experience and confidence for the stated goal; do not set a target or create a challenge. For a new broad goal with existing evidence or a completed cold-start answer: call search_learner_model once and search_attempt_history once using focused queries, then stop retrieving, set a concise session objective, set exactly one Training Target, and create one complete validated question. Retrieved history calibrates difficulty but must never replace the learner's current goal: use prior evidence only when it is materially relevant, and otherwise choose an accessible foundation diagnostic from the goal and placement answer. Treat a cold-start answer as evidence about accessibility and never infer advanced readiness merely because the learner named an advanced topic. When retrieved evidence contains an existing ability relevant to the target, reuse its exact title so evidence updates the same durable Ability Ledger identity. Prefer JavaScript unless the learner explicitly asks for TypeScript or C++. A JavaScript question must use Node's built-in test runner, .js files, no dependencies, and runCommand "node --test". Starter and reference maps must use the same implementation path. Visible and hidden tests must be separate .test.js files and import the implementation relatively. Every reference solution must pass all tests. Every known incorrect implementation must represent the targeted misconception, pass all visible tests, and fail when hidden tests are included. The question's observable return contract must expose the targeted misconception: for repeated invariant restoration, do not rely only on a monotone maximum if a one-step shrink can return the same maximum; prefer counting valid windows, returning restored state, or another output where incomplete restoration is behaviorally distinguishable. Before calling create_question, ensure its title, statement, function contract, examples, reference code, visible tests, hidden tests, and expected failure signatures all describe the same exact operation and constraints. The model only proposes candidate designs; it must never declare a candidate or learner submission correct. The deterministic host compiler and runner are the sole verification authority. When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run. There is no reviewer or judge model. Use tools as reality and never claim a write, test, evaluation, or update without its tool result. Ask the learner only when history cannot answer something materially important. After a completed attempt: inspect the attempt once, read its already-recorded deterministic evaluation once, read the active ability once, propose one evidence-backed markdown update, commit exactly one action (diagnose, teach, practise, transfer, advance, or retain), call search_learner_model once for wider context, then create the next target and validated question. The next question must discriminate what remains uncertain from the attempt in a meaningfully different representation while avoiding unrelated difficulty. Its persisted Training Target and generated task must name the same transfer context and constraint. Prefer evidence over scores and never overreact to one attempt. Keep chat concise.`; }
