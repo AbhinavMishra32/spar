@@ -8,7 +8,7 @@ type EventSink = (value: Record<string, unknown>) => void;
 export class UtilityClient {
   private child: UtilityProcess | null = null;
   private readonly pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
-  constructor(private readonly workerFile: string, private readonly onEvent: EventSink, private readonly onTool?: (name: string, input: unknown) => Promise<unknown>) {}
+  constructor(private readonly workerFile: string, private readonly onEvent: EventSink, private readonly onTool?: (name: string, input: unknown, context: { requestId: string; sessionId?: string }) => Promise<unknown>) {}
   request(method: string, payload: unknown) {
     const id = randomUUID();
     const promise = new Promise<unknown>((resolve, reject) => this.pending.set(id, { resolve, reject }));
@@ -27,8 +27,21 @@ export class UtilityClient {
   private async handle(message: Record<string, unknown>) {
     if (message.kind === "event") { this.onEvent(message); return; }
     if (message.kind === "tool-call" && this.onTool) {
-      try { const value = await this.onTool(String(message.name), message.input); this.child?.postMessage({ kind: "tool-result", id: message.id, ok: true, value }); }
-      catch (error) { this.child?.postMessage({ kind: "tool-result", id: message.id, ok: false, error: error instanceof Error ? error.message : String(error) }); }
+      const requestId = String(message.requestId ?? "");
+      const name = String(message.name);
+      const started = Date.now();
+      this.onEvent({ kind: "event", requestId, event: { type: "tool", tool: name, detail: "start" } });
+      try {
+        const value = await this.onTool(name, message.input, { requestId, ...(typeof message.sessionId === "string" ? {sessionId:message.sessionId}: {}) });
+        const status = value && typeof value === "object" && "status" in value ? String((value as {status?:unknown}).status) : "ok";
+        this.onEvent({ kind: "event", requestId, event: { type: "tool", tool: name, detail: `done:${status}:${Date.now()-started}ms` } });
+        this.child?.postMessage({ kind: "tool-result", id: message.id, ok: true, value });
+      }
+      catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        this.onEvent({ kind: "event", requestId, event: { type: "tool", tool: name, detail: `error:${detail}` } });
+        this.child?.postMessage({ kind: "tool-result", id: message.id, ok: false, error: detail });
+      }
       return;
     }
     if (message.kind === "result") {
@@ -37,4 +50,3 @@ export class UtilityClient {
     }
   }
 }
-

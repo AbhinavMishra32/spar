@@ -1,6 +1,9 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { AttemptEvent, SessionCheckpoint, SessionSummary } from "@pracai/domain";
+import type { AttemptEvent, QuestionDesign, SessionCheckpoint, SessionDetail, SessionSummary, TrainingTarget } from "@pracai/domain";
+
+type SessionRow = { id:string; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string };
+type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:"javascript"|"typescript"|"cpp"; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; created_at:string };
 
 export class LocalStore {
   private readonly db: Database.Database;
@@ -9,68 +12,68 @@ export class LocalStore {
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, original_goal TEXT NOT NULL, objective TEXT NOT NULL, status TEXT NOT NULL, current_focus TEXT NOT NULL, questions TEXT NOT NULL, total_seconds INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, original_goal TEXT NOT NULL, objective TEXT NOT NULL, status TEXT NOT NULL, current_focus TEXT NOT NULL DEFAULT '[]', questions TEXT NOT NULL DEFAULT '[]', total_seconds INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS training_targets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, ability_id TEXT NOT NULL, ability_title TEXT NOT NULL, specific_gap TEXT NOT NULL, desired_evidence TEXT NOT NULL, avoid_testing TEXT NOT NULL, action TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS questions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, training_target_id TEXT NOT NULL REFERENCES training_targets(id), ordinal INTEGER NOT NULL, title TEXT NOT NULL, statement TEXT NOT NULL, language TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL, difficulty TEXT NOT NULL, design TEXT NOT NULL, validation_report TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(session_id, ordinal));
+      CREATE TABLE IF NOT EXISTS attempts (id TEXT PRIMARY KEY, question_id TEXT NOT NULL REFERENCES questions(id) ON DELETE CASCADE, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, status TEXT NOT NULL, latest_event_sequence INTEGER NOT NULL DEFAULT -1, started_at TEXT NOT NULL, completed_at TEXT);
+      CREATE TABLE IF NOT EXISTS agent_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, role TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS session_intake (session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE, question TEXT NOT NULL, status TEXT NOT NULL, answer TEXT, created_at TEXT NOT NULL, answered_at TEXT);
+      CREATE TABLE IF NOT EXISTS session_decisions (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE, action TEXT NOT NULL, reason TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS ability_documents (id TEXT PRIMARY KEY, title TEXT NOT NULL, markdown TEXT NOT NULL, version INTEGER NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS checkpoints (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, version INTEGER NOT NULL, event_sequence INTEGER NOT NULL, payload TEXT NOT NULL, saved_at TEXT NOT NULL, UNIQUE(session_id, version));
       CREATE TABLE IF NOT EXISTS attempt_events (id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, occurred_at TEXT NOT NULL, payload TEXT NOT NULL, source TEXT NOT NULL, schema_version INTEGER NOT NULL, UNIQUE(attempt_id, sequence));
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sync_outbox (id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
     `);
-    this.seed();
+    // Remove the exact prototype fixture; it was never learner data.
+    this.db.prepare("DELETE FROM sessions WHERE title = ? AND original_goal = ? AND objective = ?").run("Deep JavaScript Runtime", "Understand JavaScript runtime behavior deeply", "Build reliable reasoning about reference ownership and asynchronous state.");
   }
 
-  listSessions(): SessionSummary[] {
-    return this.db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC").all().map((row) => toSession(row as Row));
+  listSessions(): SessionSummary[] { return (this.db.prepare("SELECT id,title,original_goal,objective,status,total_seconds,updated_at FROM sessions ORDER BY updated_at DESC").all() as SessionRow[]).map(row => this.toSession(row)); }
+  createSession(goal: string): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at) VALUES (?,?,?,?,?,'[]','[]',0,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now);this.enqueue("session-create",{sessionId,goal,title,createdAt:now});return{sessionId}; }
+
+  readSession(id: string): SessionDetail | null {
+    const row=this.db.prepare("SELECT id,title,original_goal,objective,status,total_seconds,updated_at FROM sessions WHERE id=?").get(id) as SessionRow|undefined;if(!row)return null;
+    const question=this.db.prepare("SELECT * FROM questions WHERE session_id=? ORDER BY ordinal DESC LIMIT 1").get(id) as QuestionRow|undefined;
+    let active: SessionDetail["question"]=null; let events:SessionDetail["events"]=[];
+    if(question){const target=this.db.prepare("SELECT * FROM training_targets WHERE id=?").get(question.training_target_id) as Record<string,unknown>;const attempt=this.db.prepare("SELECT * FROM attempts WHERE question_id=? ORDER BY started_at DESC LIMIT 1").get(question.id) as {id:string;latest_event_sequence:number}|undefined;const design=JSON.parse(question.design) as QuestionDesign;if(attempt)events=(this.db.prepare("SELECT id,sequence,type,occurred_at,payload,source FROM attempt_events WHERE attempt_id=? ORDER BY sequence").all(attempt.id) as Array<{id:string;sequence:number;type:string;occurred_at:string;payload:string;source:string}>).map(e=>({...e,occurredAt:e.occurred_at,payload:JSON.parse(e.payload)}));if(attempt)active={id:question.id,sessionId:id,trainingTargetId:question.training_target_id,ordinal:question.ordinal,title:question.title,statement:question.statement,language:question.language,kind:question.kind,status:question.status,difficulty:question.difficulty,createdAt:question.created_at,abilityId:String(target.ability_id),abilityTitle:String(target.ability_title),specificGap:String(target.specific_gap),desiredEvidence:String(target.desired_evidence),avoidTesting:JSON.parse(String(target.avoid_testing)) as string[],files:Object.keys({...design.starterFiles,...design.visibleTests}).sort().map(path=>({path,language:languageFor(path),readOnly:path.startsWith("tests/")})),visibleTestFiles:Object.keys(design.visibleTests),attemptId:attempt.id,latestEventSequence:attempt.latest_event_sequence};}
+    const messages=(this.db.prepare("SELECT id,role,body,created_at FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string}>).map(m=>({id:m.id,role:m.role,body:m.body,createdAt:m.created_at}));
+    return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)?.question??null,messages,events};
   }
 
-  createSession(goal: string): { sessionId: string } {
-    const sessionId = randomUUID();
-    const now = new Date().toISOString();
-    const title = goal.length > 44 ? `${goal.slice(0, 41)}...` : goal;
-    this.db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(sessionId, title, goal, "Investigate prior evidence and establish the first training target.", "planning", "[]", "[]", 0, now, now);
-    this.enqueue("session", { sessionId });
-    return { sessionId };
-  }
+  setObjective(sessionId:string,objective:string){this.db.prepare("UPDATE sessions SET objective=?,updated_at=? WHERE id=?").run(objective,new Date().toISOString(),sessionId);return{objective};}
+  setTrainingTarget(sessionId:string,input:{ability:string;specificGap:string;desiredEvidence:string;avoidTesting:string[];action?:TrainingTarget["action"]}){const id=randomUUID();const existing=this.db.prepare("SELECT id FROM ability_documents WHERE lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(input.ability) as {id:string}|undefined;const abilityId=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO training_targets VALUES (?,?,?,?,?,?,?,?,?)").run(id,sessionId,abilityId,input.ability,input.specificGap,input.desiredEvidence,JSON.stringify(input.avoidTesting),input.action??"practise",now);this.db.prepare("UPDATE sessions SET current_focus=?,updated_at=? WHERE id=?").run(JSON.stringify([input.ability]),now,sessionId);return{id,sessionId,abilityId,abilityTitle:input.ability,specificGap:input.specificGap,desiredEvidence:input.desiredEvidence,avoidTesting:input.avoidTesting,action:input.action??"practise",createdAt:now};}
+  latestTarget(sessionId:string){return this.db.prepare("SELECT * FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string,unknown>|undefined;}
+  createQuestion(sessionId:string,design:QuestionDesign,report:unknown){const target=this.latestTarget(sessionId);if(!target)throw new Error("A persisted training target is required before question creation");const id=randomUUID();const attemptId=randomUUID();const now=new Date().toISOString();const ordinal=(this.db.prepare("SELECT COALESCE(MAX(ordinal),0)+1 value FROM questions WHERE session_id=?").get(sessionId) as {value:number}).value;this.db.transaction(()=>{this.db.prepare("INSERT INTO questions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id,sessionId,String(target.id),ordinal,design.title,design.statement,design.language,design.kind,"active",design.difficulty??"developing",JSON.stringify(design),JSON.stringify(report),now);this.db.prepare("INSERT INTO attempts VALUES (?,?,?,?,?,?,NULL)").run(attemptId,id,sessionId,"active",0,now);const event={id:randomUUID(),attemptId,sequence:0,type:"attempt_started",occurredAt:now,payload:{questionId:id},source:"system",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);this.db.prepare("UPDATE sessions SET status='active',updated_at=? WHERE id=?").run(now,sessionId);this.enqueue("question-create",{sessionId,questionId:id,attemptId,design,report});})();return{id,attemptId,ordinal};}
+  addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string){const value={id:randomUUID(),role,body,createdAt:new Date().toISOString()};this.db.prepare("INSERT INTO agent_messages VALUES (?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt);return value;}
+  hasLearnerEvidence(){const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents").get() as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts WHERE status='completed'").get() as {count:number}).count;return abilities>0||completed>0;}
+  setPendingIntake(sessionId:string,question:string){const now=new Date().toISOString();this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,question,now);return{question,status:"pending" as const};}
+  pendingIntake(sessionId:string){return this.db.prepare("SELECT question FROM session_intake WHERE session_id=? AND status='pending'").get(sessionId) as {question:string}|undefined;}
+  answerIntake(sessionId:string,answer:string){const result=this.db.prepare("UPDATE session_intake SET status='answered',answer=?,answered_at=? WHERE session_id=? AND status='pending'").run(answer,new Date().toISOString(),sessionId);if(result.changes!==1)throw new Error("No pending placement question exists for this session");return{answered:true};}
+  commitDecision(sessionId:string,input:{action:string;reason:string}){const value={id:randomUUID(),...input,createdAt:new Date().toISOString()};this.db.prepare("INSERT INTO session_decisions VALUES (?,?,?,?,?)").run(value.id,sessionId,value.action,value.reason,value.createdAt);return value;}
+  searchLearner(query:string,limit:number){const terms=searchTerms(query);if(!terms.length)return[];const rows=this.db.prepare("SELECT id,title,markdown,version,status,updated_at FROM ability_documents ORDER BY updated_at DESC LIMIT 200").all() as Array<{id:string;title:string;markdown:string;version:number;status:string;updated_at:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.markdown}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updated_at.localeCompare(a.row.updated_at)).slice(0,limit).map(item=>item.row);}
+  readAbility(id:string){return this.db.prepare("SELECT * FROM ability_documents WHERE id=?").get(id)??null;}
+  searchAttempts(query:string,limit:number){const terms=searchTerms(query);if(!terms.length)return[];const rows=this.db.prepare("SELECT e.attempt_id,e.type,e.occurred_at,e.payload,q.title FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id ORDER BY e.occurred_at DESC LIMIT 500").all() as Array<{attempt_id:string;type:string;occurred_at:string;payload:string;title:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.type}\n${row.payload}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.occurred_at.localeCompare(a.row.occurred_at)).slice(0,limit).map(item=>item.row);}
+  readAttempt(id:string){return this.db.prepare("SELECT * FROM attempt_events WHERE attempt_id=? ORDER BY sequence").all(id);}
+  submissionBundle(attemptId:string){const row=this.db.prepare("SELECT a.id attempt_id,a.session_id,a.latest_event_sequence,q.id question_id,q.language,q.design FROM attempts a JOIN questions q ON q.id=a.question_id WHERE a.id=? AND a.status='active'").get(attemptId) as {attempt_id:string;session_id:string;latest_event_sequence:number;question_id:string;language:"javascript"|"typescript"|"cpp";design:string}|undefined;return row?{...row,design:JSON.parse(row.design) as QuestionDesign}:null;}
+  completeAttempt(attemptId:string,_outcome:"passed"|"failed"){const now=new Date().toISOString();this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id FROM attempts WHERE id=?").get(attemptId) as {question_id:string;session_id:string}|undefined;if(!attempt)throw new Error("Attempt not found");this.db.prepare("UPDATE attempts SET status='completed',completed_at=? WHERE id=?").run(now,attemptId);this.db.prepare("UPDATE questions SET status='completed' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(now,attempt.session_id);})();}
+  updateAbility(input:{abilityId:string;markdown:string;evidenceEventIds:string[]}){const target=this.db.prepare("SELECT ability_title FROM training_targets WHERE ability_id=? ORDER BY created_at DESC LIMIT 1").get(input.abilityId) as {ability_title:string}|undefined;const now=new Date().toISOString();const existing=this.db.prepare("SELECT version FROM ability_documents WHERE id=?").get(input.abilityId) as {version:number}|undefined;const version=(existing?.version??0)+1;this.db.prepare("INSERT INTO ability_documents VALUES (?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET markdown=excluded.markdown,version=excluded.version,status=excluded.status,updated_at=excluded.updated_at").run(input.abilityId,target?.ability_title??"Observed ability",input.markdown,version,"developing",now);return{id:input.abilityId,version,evidenceEventIds:input.evidenceEventIds,updatedAt:now};}
 
-  readSession(id: string) { const row = this.db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as Row | undefined; return row ? { summary: toSession(row), checkpoint: this.latestCheckpoint(id) } : null; }
-  latestCheckpoint(sessionId: string): SessionCheckpoint | null { const row = this.db.prepare("SELECT payload FROM checkpoints WHERE session_id = ? ORDER BY version DESC LIMIT 1").get(sessionId) as { payload: string } | undefined; return row ? JSON.parse(row.payload) as SessionCheckpoint : null; }
-
-  saveCheckpoint(value: SessionCheckpoint) {
-    this.db.transaction(() => {
-      this.db.prepare("INSERT OR IGNORE INTO checkpoints VALUES (?, ?, ?, ?, ?, ?)").run(value.id, value.sessionId, value.version, value.eventSequence, JSON.stringify(value), value.savedAt);
-      this.db.prepare("UPDATE sessions SET updated_at = ? WHERE id = ?").run(value.savedAt, value.sessionId);
-      this.enqueue("checkpoint", value);
-    })();
-  }
-
-  appendEvent(event: AttemptEvent) {
-    this.db.transaction(() => {
-      const latest = this.db.prepare("SELECT MAX(sequence) AS value FROM attempt_events WHERE attempt_id = ?").get(event.attemptId) as { value: number | null };
-      if (latest.value !== null && event.sequence > latest.value + 1) throw new Error(`Attempt event gap: expected ${latest.value + 1}, received ${event.sequence}`);
-      this.db.prepare("INSERT OR IGNORE INTO attempt_events VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(event.id, event.attemptId, event.sequence, event.type, event.occurredAt, JSON.stringify(event.payload), event.source, event.schemaVersion);
-      this.enqueue("attempt-event", event);
-    })();
-  }
-
-  getSetting<T>(key: string, fallback: T): T { const row = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined; return row ? JSON.parse(row.value) as T : fallback; }
-  setSetting(key: string, value: unknown) { this.db.prepare("INSERT INTO settings VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").run(key, JSON.stringify(value), new Date().toISOString()); }
-  pendingSync(limit=100) { return this.db.prepare("SELECT id, kind, payload, attempts FROM sync_outbox ORDER BY created_at LIMIT ?").all(limit) as Array<{id:string;kind:string;payload:string;attempts:number}>; }
-  acknowledgeSync(ids:string[]) { const remove=this.db.prepare("DELETE FROM sync_outbox WHERE id = ?"); this.db.transaction(()=>ids.forEach(id=>remove.run(id)))(); }
-  markSyncFailed(id:string) { this.db.prepare("UPDATE sync_outbox SET attempts = attempts + 1 WHERE id = ?").run(id); }
-  close() { this.db.close(); }
-  private enqueue(kind: string, payload: unknown) { this.db.prepare("INSERT INTO sync_outbox (id, kind, payload, created_at) VALUES (?, ?, ?, ?)").run(randomUUID(), kind, JSON.stringify(payload), new Date().toISOString()); }
-
-  private seed() {
-    const count = (this.db.prepare("SELECT COUNT(*) count FROM sessions").get() as { count: number }).count;
-    if (count) return;
-    const id = randomUUID(); const now = new Date().toISOString();
-    const questions = [{ id: randomUUID(), title: "Shared Configuration", status: "completed" }, { id: randomUUID(), title: "Promise Relay", status: "completed" }, { id: randomUUID(), title: "Event Queue Repair", status: "active" }];
-    this.db.prepare("INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, "Deep JavaScript Runtime", "Understand JavaScript runtime behavior deeply", "Build reliable reasoning about reference ownership and asynchronous state.", "active", JSON.stringify(["References", "Mutation", "Async ownership"]), JSON.stringify(questions), 6142, now, now);
-  }
+  latestCheckpoint(sessionId:string):SessionCheckpoint|null{const row=this.db.prepare("SELECT payload FROM checkpoints WHERE session_id=? ORDER BY version DESC LIMIT 1").get(sessionId) as {payload:string}|undefined;return row?JSON.parse(row.payload) as SessionCheckpoint:null;}
+  saveCheckpoint(value:SessionCheckpoint){this.db.transaction(()=>{this.db.prepare("INSERT OR IGNORE INTO checkpoints VALUES (?,?,?,?,?,?)").run(value.id,value.sessionId,value.version,value.eventSequence,JSON.stringify(value),value.savedAt);this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(value.savedAt,value.sessionId);this.enqueue("checkpoint",value);})();}
+  appendEvent(event:AttemptEvent){this.db.transaction(()=>{const attempt=this.db.prepare("SELECT latest_event_sequence FROM attempts WHERE id=?").get(event.attemptId) as {latest_event_sequence:number}|undefined;if(!attempt)throw new Error("Attempt not found");if(event.sequence!==attempt.latest_event_sequence+1)throw new Error(`Attempt event sequence conflict: expected ${attempt.latest_event_sequence+1}, received ${event.sequence}`);this.insertEvent(event);this.db.prepare("UPDATE attempts SET latest_event_sequence=? WHERE id=?").run(event.sequence,event.attemptId);this.enqueue("attempt-event",event);})();}
+  appendNextEvent(input:Omit<AttemptEvent,"sequence">):AttemptEvent{return this.db.transaction(()=>{const attempt=this.db.prepare("SELECT latest_event_sequence FROM attempts WHERE id=?").get(input.attemptId) as {latest_event_sequence:number}|undefined;if(!attempt)throw new Error("Attempt not found");const event={...input,sequence:attempt.latest_event_sequence+1};this.insertEvent(event);this.db.prepare("UPDATE attempts SET latest_event_sequence=? WHERE id=?").run(event.sequence,event.attemptId);this.enqueue("attempt-event",event);return event;})();}
+  getSetting<T>(key:string,fallback:T):T{const row=this.db.prepare("SELECT value FROM settings WHERE key=?").get(key) as {value:string}|undefined;return row?JSON.parse(row.value) as T:fallback;}
+  setSetting(key:string,value:unknown){this.db.prepare("INSERT INTO settings VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").run(key,JSON.stringify(value),new Date().toISOString());}
+  pendingSync(limit=100){return this.db.prepare("SELECT id,kind,payload,attempts FROM sync_outbox ORDER BY created_at LIMIT ?").all(limit) as Array<{id:string;kind:string;payload:string;attempts:number}>;}
+  acknowledgeSync(ids:string[]){const remove=this.db.prepare("DELETE FROM sync_outbox WHERE id=?");this.db.transaction(()=>ids.forEach(id=>remove.run(id)))();}
+  markSyncFailed(id:string){this.db.prepare("UPDATE sync_outbox SET attempts=attempts+1 WHERE id=?").run(id);}
+  close(){this.db.close();}
+  private insertEvent(event:AttemptEvent){this.db.prepare("INSERT INTO attempt_events VALUES (?,?,?,?,?,?,?,?)").run(event.id,event.attemptId,event.sequence,event.type,event.occurredAt,JSON.stringify(event.payload),event.source,event.schemaVersion);}
+  private enqueue(kind:string,payload:unknown){this.db.prepare("INSERT INTO sync_outbox (id,kind,payload,created_at) VALUES (?,?,?,?)").run(randomUUID(),kind,JSON.stringify(payload),new Date().toISOString());}
+  private toSession(row:SessionRow):SessionSummary{const questions=this.db.prepare("SELECT id,title,status FROM questions WHERE session_id=? ORDER BY ordinal").all(row.id) as Array<{id:string;title:string;status:SessionSummary["questionTitles"][number]["status"]}>;const active=questions.find(q=>q.status==="active");const focus=(this.db.prepare("SELECT ability_title FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 3").all(row.id) as Array<{ability_title:string}>).map(v=>v.ability_title);return{id:row.id,title:row.title,originalGoal:row.original_goal,objective:row.objective,status:row.status,currentFocus:focus,completedQuestions:questions.filter(q=>q.status==="completed").length,activeQuestion:active?{id:active.id,title:active.title,ordinal:questions.indexOf(active)+1}:null,questionTitles:questions,totalSeconds:row.total_seconds,updatedAt:row.updated_at};}
 }
 
-type Row = { id: string; title: string; original_goal: string; objective: string; status: SessionSummary["status"]; current_focus: string; questions: string; total_seconds: number; updated_at: string };
-function toSession(row: Row): SessionSummary {
-  const questions = JSON.parse(row.questions) as SessionSummary["questionTitles"];
-  const active = questions.find((question) => question.status === "active");
-  return { id: row.id, title: row.title, originalGoal: row.original_goal, objective: row.objective, status: row.status, currentFocus: JSON.parse(row.current_focus) as string[], completedQuestions: questions.filter((question) => question.status === "completed").length, activeQuestion: active ? { id: active.id, title: active.title, ordinal: questions.indexOf(active) + 1 } : null, questionTitles: questions, totalSeconds: row.total_seconds, updatedAt: row.updated_at };
-}
+function languageFor(path:string){if(path.endsWith(".ts")||path.endsWith(".tsx"))return"typescript";if(path.endsWith(".js")||path.endsWith(".mjs")||path.endsWith(".cjs"))return"javascript";if(/\.(cpp|cc|hpp|h)$/.test(path))return"cpp";if(path.endsWith(".md"))return"markdown";return"plaintext";}
+function searchTerms(query:string){return [...new Set(query.toLowerCase().replace(/[^a-z0-9+#-]+/g," ").split(/\s+/).filter(term=>term.length>1))].slice(0,12);}
+function relevance(text:string,terms:string[]){const haystack=text.toLowerCase();return terms.reduce((score,term)=>score+(haystack.includes(term)?1:0),0);}

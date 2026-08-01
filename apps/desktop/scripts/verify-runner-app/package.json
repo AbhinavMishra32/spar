@@ -1,0 +1,6 @@
+{
+  "name": "practice-ai-runner-verification",
+  "private": true,
+  "type": "module",
+  "main": "../verify-runner.mjs"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "practice-ai-adaptive-loop-verification",
+  "private": true,
+  "type": "module",
+  "main": "../../dist/verification/verify-adaptive-loop.js"
+}

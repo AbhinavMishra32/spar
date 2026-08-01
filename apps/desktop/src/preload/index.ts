@@ -10,8 +10,9 @@ const api: PracticeApi = {
   readWorkspaceFile: (input) => ipcRenderer.invoke(ipc.workspaceRead, input),
   writeWorkspaceFile: (input) => ipcRenderer.invoke(ipc.workspaceWrite, input),
   run: (input) => ipcRenderer.invoke(ipc.runnerRun, input),
+  submitAttempt:(input)=>ipcRenderer.invoke(ipc.attemptSubmit,input),
   sendAgentMessage: (input) => ipcRenderer.invoke(ipc.agentSend, input),
-  startAuth: (provider, email) => ipcRenderer.invoke(ipc.authStart, { provider, email }),
+  passwordAuth: (mode, email, password) => ipcRenderer.invoke(ipc.authPassword, { mode, email, password }),
   signOut: () => ipcRenderer.invoke(ipc.authSignOut),
   saveProviderSecret: (input) => ipcRenderer.invoke(ipc.settingsSaveSecret, input),
   onAgentEvent: (listener) => subscribe("agent:event", listener),
@@ -19,4 +20,3 @@ const api: PracticeApi = {
 };
 function subscribe<T>(channel: string, listener: (value: T) => void) { const handler = (_event: Electron.IpcRendererEvent, value: T) => listener(value); ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler); }
 contextBridge.exposeInMainWorld("practice", api);
-
