@@ -1,0 +1,440 @@
+/* Practice AI desktop theme.
+   The token layer follows the Aside/Synara desktop system already vendored into
+   Construct: a neutral oklch scale, squircle radii, hairline borders, and
+   translucent elevated surfaces that sit correctly on macOS window vibrancy. */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface: var(--surface-primary);
+  --color-surface-raised: var(--color-background-elevated-primary);
+  --color-surface-sunken: var(--color-background-surface-under);
+
+  --radius: 0.625rem;
+  --radius-sm: calc(0.25rem * var(--squircle-factor));
+  --radius-md: calc(0.375rem * var(--squircle-factor));
+  --radius-lg: calc(0.5rem * var(--squircle-factor));
+  --radius-xl: calc(0.75rem * var(--squircle-factor));
+  --radius-2xl: calc(1rem * var(--squircle-factor));
+
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  --font-mono: "SF Mono", "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-ui: 0.75rem;
+  --text-ui--line-height: 1.125rem;
+  --text-ui-sm: 0.6875rem;
+  --text-ui-sm--line-height: 1rem;
+  --text-content: 0.8125rem;
+  --text-content--line-height: 1.375rem;
+}
+
+:root {
+  color-scheme: light;
+  --squircle-factor: 1.4;
+  --hairline: 0.5px;
+
+  --background: oklch(100% 0 0);
+  --foreground: oklch(14.5% 0 0);
+
+  --surface-primary: oklch(100% 0 0);
+  --surface-secondary: oklch(100% 0 0 / 85%);
+  --surface-tertiary: oklch(100% 0 0 / 55%);
+
+  --card: var(--surface-primary);
+  --card-foreground: var(--foreground);
+  --popover: oklch(99% 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(14.5% 0 0 / 95%);
+  --primary-foreground: oklch(98.5% 0 0 / 95%);
+  --secondary: oklch(14.5% 0 0 / 6%);
+  --secondary-foreground: oklch(14.5% 0 0 / 78%);
+  --muted: oklch(14.5% 0 0 / 5%);
+  --muted-foreground: oklch(14.5% 0 0 / 55%);
+  --accent: oklch(14.5% 0 0 / 8%);
+  --accent-foreground: oklch(14.5% 0 0 / 85%);
+  --destructive: oklch(57.7% 0.245 27.325);
+  --success: oklch(52% 0.11 158);
+  --warning: oklch(62% 0.13 68);
+  --border: oklch(14.5% 0 0 / 10%);
+  --border-strong: oklch(14.5% 0 0 / 16%);
+  --input: oklch(14.5% 0 0 / 10%);
+  --ring: oklch(14.5% 0 0 / 22%);
+
+  --sidebar: transparent;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: oklch(14.5% 0 0 / 6%);
+  --sidebar-accent-active: oklch(14.5% 0 0 / 11%);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(14.5% 0 0 / 8%);
+  --sidebar-ring: var(--ring);
+
+  --color-background-surface: var(--background);
+  --color-background-surface-under: color-mix(in oklab, var(--foreground) 3%, var(--background));
+  --color-background-elevated-primary: var(--surface-secondary);
+  --color-background-elevated-secondary: var(--muted);
+  --color-background-editor: color-mix(in oklab, var(--foreground) 2%, var(--background));
+
+  --app-window-fill: oklch(97.6% 0 0);
+  --app-user-message-background: oklch(14.5% 0 0 / 6%);
+  --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 10%), 0 8px 10px -6px oklch(0% 0 0 / 10%);
+  --app-shadow-composer: 0 4px 18px -6px color-mix(in srgb, var(--foreground) 8%, transparent);
+  --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 4%);
+
+  --code-foreground: #33363b;
+  --code-comment: #727780;
+  --code-keyword: #ce2734;
+  --code-type: #7b4bd2;
+  --code-function: #1a6fc9;
+  --code-string: #185a96;
+  --code-number: #1660b5;
+  --code-punctuation: #6f747c;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: oklch(20.5% 0 0);
+  --foreground: oklch(98.5% 0 0);
+
+  --surface-primary: oklch(98.5% 0 0 / 8%);
+  --surface-secondary: oklch(98.5% 0 0 / 6%);
+  --surface-tertiary: oklch(98.5% 0 0 / 4%);
+
+  --card: color-mix(in oklab, var(--foreground) 6%, var(--background));
+  --card-foreground: var(--foreground);
+  --popover: oklch(26.9% 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(98.5% 0 0 / 90%);
+  --primary-foreground: oklch(14.5% 0 0 / 92%);
+  --secondary: oklch(98.5% 0 0 / 8%);
+  --secondary-foreground: oklch(98.5% 0 0 / 78%);
+  --muted: oklch(98.5% 0 0 / 10%);
+  --muted-foreground: oklch(98.5% 0 0 / 55%);
+  --accent: oklch(98.5% 0 0 / 10%);
+  --accent-foreground: oklch(98.5% 0 0 / 85%);
+  --destructive: oklch(70.4% 0.191 22.216);
+  --success: oklch(78% 0.14 158);
+  --warning: oklch(82% 0.14 78);
+  --border: oklch(98.5% 0 0 / 10%);
+  --border-strong: oklch(98.5% 0 0 / 16%);
+  --input: oklch(98.5% 0 0 / 12%);
+  --ring: oklch(98.5% 0 0 / 26%);
+
+  --sidebar: transparent;
+  --sidebar-accent: oklch(98.5% 0 0 / 7%);
+  --sidebar-accent-active: oklch(98.5% 0 0 / 13%);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: oklch(98.5% 0 0 / 9%);
+
+  --color-background-surface: var(--background);
+  --color-background-surface-under: color-mix(in oklab, black 22%, var(--background));
+  --color-background-elevated-primary: var(--surface-primary);
+  --color-background-elevated-secondary: var(--surface-secondary);
+  --color-background-editor: color-mix(in oklab, black 14%, var(--background));
+
+  --app-window-fill: oklch(20.5% 0 0);
+  --app-user-message-background: oklch(98.5% 0 0 / 8%);
+  --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 40%), 0 8px 10px -6px oklch(0% 0 0 / 40%);
+  --app-shadow-composer: 0 6px 24px -10px oklch(0% 0 0 / 45%);
+  --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 20%);
+
+  --code-foreground: #c9d1d9;
+  --code-comment: #8b949e;
+  --code-keyword: #ff8177;
+  --code-type: #d2a8ff;
+  --code-function: #66b8ff;
+  --code-string: #8bd891;
+  --code-number: #79c0ff;
+  --code-punctuation: #b3bac2;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: var(--border);
+    box-sizing: border-box;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-synthesis: none;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    /* Transparent so the native macOS vibrancy layer shows through the sidebar. */
+    background: transparent;
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-size: var(--text-ui);
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+    color: inherit;
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--foreground) 16%, transparent);
+  }
+}
+
+@layer components {
+  /* ---- macOS window chrome ---------------------------------------------- */
+
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  /* The vibrant sidebar is painted by the OS; everything to its right gets an
+     opaque fill so text stays legible over moving desktop content. */
+  .app-vibrant {
+    background: transparent;
+  }
+
+  .app-opaque {
+    background: var(--app-window-fill);
+  }
+
+  .hairline-r {
+    box-shadow: inset -1px 0 0 0 var(--sidebar-border);
+  }
+
+  .hairline-b {
+    box-shadow: inset 0 -1px 0 0 var(--border);
+  }
+
+  .hairline-t {
+    box-shadow: inset 0 1px 0 0 var(--border);
+  }
+
+  /* ---- Scrollbars ------------------------------------------------------- */
+
+  .app-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--foreground) 18%, transparent) transparent;
+  }
+
+  .app-scroll::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+
+  .app-scroll::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background-clip: content-box;
+    background-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+  }
+
+  .app-scroll::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in srgb, var(--foreground) 28%, transparent);
+  }
+
+  .app-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* ---- Agent transcript -------------------------------------------------- */
+
+  .agent-transcript {
+    --transcript-width: 46rem;
+  }
+
+  .transcript-column {
+    width: 100%;
+    max-width: var(--transcript-width);
+    margin-inline: auto;
+  }
+
+  /* Streaming assistant text keeps a caret at the live edge. */
+  .streaming-caret::after {
+    content: "";
+    display: inline-block;
+    width: 0.45em;
+    height: 1em;
+    margin-left: 0.15em;
+    vertical-align: text-bottom;
+    border-radius: 1px;
+    background: currentColor;
+    animation: agent-caret 1.1s steps(1, end) infinite;
+  }
+
+  /* Aside's "working" label sweeps a highlight across the text rather than
+     spinning, which reads quieter in a window that stays open for hours. */
+  .thinking-shimmer {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--foreground) 38%, transparent) 0%,
+      color-mix(in srgb, var(--foreground) 38%, transparent) 35%,
+      var(--foreground) 50%,
+      color-mix(in srgb, var(--foreground) 38%, transparent) 65%,
+      color-mix(in srgb, var(--foreground) 38%, transparent) 100%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: agent-shimmer 2.4s linear infinite;
+  }
+
+  /* ---- Composer ---------------------------------------------------------- */
+
+  .composer-shell {
+    border-radius: calc(1rem * var(--squircle-factor));
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--color-background-elevated-primary) 92%, var(--background));
+    box-shadow: var(--app-shadow-composer);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .composer-shell:focus-within {
+    border-color: var(--border-strong);
+  }
+
+  /* Fades transcript content into the composer instead of clipping it hard. */
+  .composer-fade {
+    background: linear-gradient(to bottom, transparent, var(--app-window-fill) 62%);
+  }
+
+  /* ---- Floating panels ---------------------------------------------------- */
+
+  /* The macOS material: a translucent fill over a blurred, slightly saturated
+     backdrop, with a hairline that keeps the edge legible on any content. */
+  .floating-surface {
+    border-radius: calc(0.75rem * var(--squircle-factor));
+    border: 1px solid var(--border-strong);
+    background: color-mix(in oklab, var(--popover) 78%, transparent);
+    box-shadow: var(--app-shadow-overlay);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    /* Keeps the blur from bleeding past the rounded corner in WebKit. */
+    isolation: isolate;
+  }
+
+  /* ---- Code -------------------------------------------------------------- */
+
+  .code-inline {
+    border-radius: 0.35rem;
+    border: 1px solid color-mix(in srgb, var(--border) 82%, var(--foreground) 8%);
+    background: color-mix(in srgb, var(--muted) 70%, transparent);
+    padding: 0.05em 0.32em;
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+  }
+
+  .code-block {
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--muted) 45%, transparent);
+    font-family: var(--font-mono);
+  }
+}
+
+@keyframes agent-caret {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes agent-shimmer {
+  from {
+    background-position: 140% 0;
+  }
+  to {
+    background-position: -40% 0;
+  }
+}
+
+@keyframes agent-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes agent-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-shimmer,
+  .streaming-caret::after {
+    animation: none;
+  }
+
+  .thinking-shimmer {
+    color: var(--muted-foreground);
+    -webkit-text-fill-color: currentColor;
+  }
+}
