@@ -38,7 +38,7 @@ function Group({ label, children, className }: { label: string; children: React.
   return (
     <section className={cn("mt-7", className)}>
       <h2 className="mb-2 px-0.5 text-ui font-medium text-muted-foreground">{label}</h2>
-      <div className="overflow-hidden rounded-[calc(0.875rem*var(--squircle-factor))] border border-border bg-card shadow-[var(--app-shadow-card)]">
+      <div className="overflow-hidden rounded-[var(--radius-2xl)] border border-border bg-card shadow-[var(--app-shadow-card)]">
         <div className="divide-y divide-border">{children}</div>
       </div>
     </section>
@@ -64,7 +64,7 @@ function ModelPicker({ provider, onSelect }: { provider: Provider; onSelect(mode
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="inline-flex h-7 max-w-[11.5rem] shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2 text-ui text-foreground transition-colors outline-none hover:bg-accent aria-expanded:bg-accent focus-visible:border-[var(--border-strong)] dark:bg-input/30 dark:hover:bg-input/50"
+        className="inline-flex h-7 max-w-[11.5rem] shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] border border-border bg-background px-2 text-ui text-foreground transition-colors outline-none hover:bg-accent aria-expanded:bg-accent focus-visible:border-[var(--border-strong)] dark:bg-input/30 dark:hover:bg-input/50"
         title={`${provider.name} model`}
       >
         <ProviderGlyph className="size-3.5 shrink-0 opacity-70" provider={provider.id} />
@@ -129,7 +129,7 @@ function ProviderRow({
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label={`${provider.name} options`}
-          className="grid size-7 shrink-0 place-items-center rounded-[min(var(--radius-md),12px)] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
+          className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
         >
           <Ellipsis className="size-4" />
         </DropdownMenuTrigger>

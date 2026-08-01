@@ -26,7 +26,7 @@ export function Segmented<T extends string>({
     <div
       aria-label={ariaLabel}
       className={cn(
-        "relative grid shrink-0 rounded-[calc(0.5rem*var(--squircle-factor))] bg-[var(--color-background-elevated-secondary)] p-0.5",
+        "relative grid shrink-0 rounded-[var(--radius-lg)] bg-[var(--color-background-elevated-secondary)] p-0.5",
         "inset-shadow-[0_1px_0_0_color-mix(in_srgb,var(--foreground)_5%,transparent)]",
         disabled && "pointer-events-none opacity-50",
         className,
@@ -36,7 +36,7 @@ export function Segmented<T extends string>({
     >
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0.5 rounded-[calc(0.375rem*var(--squircle-factor))] border border-[var(--border-strong)] bg-background shadow-[0_1px_2px_oklch(0%_0_0/8%)] transition-[left] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]"
+        className="pointer-events-none absolute inset-y-0.5 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-background shadow-[0_1px_2px_oklch(0%_0_0/8%)] transition-[left] duration-200 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]"
         style={{
           left: `calc(0.125rem + ${index} * ((100% - 0.25rem) / ${options.length}))`,
           width: `calc((100% - 0.25rem) / ${options.length})`,

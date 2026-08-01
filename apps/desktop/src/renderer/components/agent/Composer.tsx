@@ -161,7 +161,7 @@ export function ComposerPill({
   return (
     <Tag
       className={cn(
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2 text-ui transition-colors",
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-ui transition-colors",
         tone === "warning" ? "text-warning" : "text-muted-foreground",
         onClick && "hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground",
         active && "bg-[var(--color-background-elevated-secondary)] text-foreground",

@@ -64,7 +64,7 @@ function ThinkingLine({ parts }: { parts: RunPart[] }) {
 function LearnerMessage({ body }: { body: string }) {
   return (
     <div className="flex min-w-0 justify-end">
-      <div className="max-w-[85%] min-w-0 break-words rounded-[calc(0.8rem*var(--squircle-factor))] bg-[var(--app-user-message-background)] px-3 py-2 text-content leading-[1.55] whitespace-pre-wrap">
+      <div className="max-w-[85%] min-w-0 break-words rounded-[var(--radius-xl)] bg-[var(--app-user-message-background)] px-3 py-2 text-content leading-[1.55] whitespace-pre-wrap">
         {body}
       </div>
     </div>

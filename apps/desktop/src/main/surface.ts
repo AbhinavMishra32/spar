@@ -100,7 +100,9 @@ export async function applyNativeSurface(window: BrowserWindow, plan: SurfacePla
 
   try {
     const { default: liquidGlass } = await import("electron-liquid-glass");
-    const id = liquidGlass.addView(window.getNativeWindowHandle(), { cornerRadius: 12 });
+    // Matches the window corner macOS 26 draws, so the glass reaches the edge
+    // of the frame instead of stopping short of it inside a squarer rectangle.
+    const id = liquidGlass.addView(window.getNativeWindowHandle(), { cornerRadius: 16 });
     if (id < 0) throw new Error("NSGlassEffectView unavailable");
     return "liquid-glass";
   } catch (cause) {

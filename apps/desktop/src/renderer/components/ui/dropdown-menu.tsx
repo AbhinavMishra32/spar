@@ -58,7 +58,7 @@ function DropdownMenuLabel({
 }
 
 const itemClass =
-  "relative flex min-h-8 cursor-default select-none items-center gap-2.5 rounded-[min(var(--radius-md),10px)] px-2.5 py-1.5 text-content outline-none transition-colors data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+  "relative flex min-h-8 cursor-default select-none items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-content outline-none transition-colors data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 
 function DropdownMenuItem({
   className,

@@ -53,7 +53,7 @@ export function ModelPicker({
   return (
     <DropdownMenu onOpenChange={(open) => !open && setQuery("")}>
       <DropdownMenuTrigger
-        className="inline-flex h-7 max-w-[12rem] shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2 text-ui text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
+        className="inline-flex h-7 max-w-[12rem] shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-ui text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
         title="Model"
       >
         <ProviderGlyph className="size-4 shrink-0" provider={active.id} />
