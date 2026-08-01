@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextToolStage } from "./agentPolicy.js";
+import { nextToolStage, phaseExecutionKey } from "./agentPolicy.js";
 
 describe("Training Agent controller policy", () => {
   it("terminates ordinary learner chat without exposing tools", () => {
@@ -32,5 +32,11 @@ describe("Training Agent controller policy", () => {
     const rejected = { result: { status: "invalid", report: { checks: [{ name: "reference solution", passed: false, detail: "exit 1" }] } } };
     const outcomes = new Map<string, unknown[]>([["create_question", Array.from({ length: 15 }, () => rejected)]]);
     expect(() => nextToolStage("session-start", outcomes)).toThrow(/15 rejected.*reference solution: exit 1/);
+  });
+
+  it("allows only one question compiler invocation per phase, even when the provider changes the payload", () => {
+    expect(phaseExecutionKey("create_question", '{"title":"Count positives"}')).toBe("create_question");
+    expect(phaseExecutionKey("create_question", '{"title":"Count values above a threshold"}')).toBe("create_question");
+    expect(phaseExecutionKey("search_learner_model", '{"query":"arrays"}')).not.toBe(phaseExecutionKey("search_learner_model", '{"query":"loops"}'));
   });
 });

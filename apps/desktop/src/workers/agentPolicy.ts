@@ -2,6 +2,15 @@ export type AgentTurnKind = "cold-start" | "session-start" | "attempt-complete" 
 export type ToolStage = { activeTools: string[]; toolChoice: "required" | "auto" | "none" };
 
 /**
+ * A compiler attempt is a phase-level operation, not a free-form model tool.
+ * Providers can emit several differently-shaped create_question calls in one
+ * response; only the first candidate may mutate the session in that phase.
+ */
+export function phaseExecutionKey(name: string, inputSignature: string): string {
+  return name === "create_question" ? name : `${name}:${inputSignature}`;
+}
+
+/**
  * Deterministic controller policy. The model supplies arguments for the one
  * action exposed by a stage; it never chooses the stage sequence itself.
  */

@@ -5,7 +5,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { askUserQuestionInputSchema } from "@spar/domain";
 import { createPiMastraModel, type PiProviderInput } from "./piMastraModel.js";
-import { nextToolStage, type AgentTurnKind } from "./agentPolicy.js";
+import { nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
 
 const AGENT_MAX_STEPS = 96;
 const IDENTICAL_TOOL_CALL_LIMIT = 15;
@@ -46,7 +46,7 @@ function hostTool(
   phaseExecutions: Map<string, { phase: number; promise: Promise<unknown> }>,
 ) {
   return createTool({ id: name, description, inputSchema: schema, execute: (input) => {
-    const signature = `${name}:${stableJson(input)}`;
+    const signature = phaseExecutionKey(name, stableJson(input));
     const cached = phaseExecutions.get(signature);
     if (cached?.phase === currentPhase()) return cached.promise;
 
@@ -120,7 +120,7 @@ function describeToolResult(name: string, value: unknown): string {
       const item = check as Record<string, unknown>;
       return item.passed === false ? [`${String(item.name ?? "validation")}: ${String(item.detail ?? "failed")}`] : [];
     });
-    return [`status ${record.status}`, ...failures].join(" · ").slice(0, 1_200);
+    return [`status ${record.status}`, ...failures].join(" · ").slice(0, 320);
   }
   if (Array.isArray(value)) return `${value.length} result${value.length === 1 ? "" : "s"}`;
   if (typeof record.outcome === "string") return `outcome ${record.outcome}`;

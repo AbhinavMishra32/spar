@@ -26,6 +26,10 @@ export async function executeTrainingTool(
     return { pending: true, ...local.setPendingIntake(sessionId, value as AskUserQuestionInput) };
   }
   if (name === "create_question") {
+    const activeQuestion = local.readSession(sessionId)?.question;
+    if (activeQuestion) {
+      return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${activeQuestion.title}) is already active for this session. End this agent turn instead of publishing another challenge.` }] } };
+    }
     const proposedTitle = String(value.title ?? "").trim();
     const duplicateTitle = local.readSession(sessionId)?.summary.questionTitles.some((question) => question.title.trim().toLocaleLowerCase() === proposedTitle.toLocaleLowerCase());
     if (duplicateTitle) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `A prior question in this session is already titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
@@ -39,6 +43,10 @@ export async function executeTrainingTool(
       }
     });
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
+    const questionCreatedWhileCompiling = local.readSession(sessionId)?.question;
+    if (questionCreatedWhileCompiling) {
+      return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${questionCreatedWhileCompiling.title}) was published while this candidate compiled. This candidate was discarded.` }] } };
+    }
     await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     const question = local.createQuestion(sessionId, compiled.design, compiled.report);
     return { status: "playable", question, report: compiled.report };
