@@ -61,7 +61,11 @@ function hostTool(
       try {
         const value = await result;
         record(name, input, value);
-        parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: true, detail: describeToolResult(name, value), ...summary } });
+        // Compilation rejection is an expected tool result rather than an IPC
+        // error, but it must never be rendered as a successfully created
+        // challenge. Only a playable result reaches durable question storage.
+        const published = name !== "create_question" || isPlayableQuestion(value);
+        parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...summary } });
         return value;
       } catch (error) {
         parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...summary } });
@@ -125,6 +129,10 @@ function describeToolResult(name: string, value: unknown): string {
   if (Array.isArray(value)) return `${value.length} result${value.length === 1 ? "" : "s"}`;
   if (typeof record.outcome === "string") return `outcome ${record.outcome}`;
   return "";
+}
+
+function isPlayableQuestion(value: unknown): boolean {
+  return Boolean(value && typeof value === "object" && (value as { status?: unknown }).status === "playable");
 }
 
 function countLines(content: string): number {
@@ -211,10 +219,19 @@ async function run(request: Request) {
 }
 function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string) {
   const evidence = Object.fromEntries([...outcomes.entries()].map(([name, values]) => [name, values.at(-1)]));
+  const compilationFeedback = activeTools.includes("create_question") ? latestRejectedCompilationFeedback(outcomes) : "";
   const phaseInstruction=protocolFailure
     ? `Your previous response did not produce a schema-valid host tool call: ${protocolFailure}. Call exactly one tool from ${activeTools.join(", ")} now. Correct only the tool-call JSON shape; do not answer in prose.`
-    : activeTools.length?`Call the single best required next tool from this allowlist: ${activeTools.join(", ")}. Do not answer in prose.`:"All required durable operations succeeded. Give the learner a concise explanation of the current training target and why this question follows from their evidence.";
+    : activeTools.length?`${compilationFeedback ? `The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Revise the candidate to fix that exact failure. A known-incorrect implementation must pass every visible test and fail a hidden test; do not submit a placeholder or deliberately visible-failing implementation. ` : ""}Call the single best required next tool from this allowlist: ${activeTools.join(", ")}. Do not answer in prose.`:"All required durable operations succeeded. Give the learner a concise explanation of the current training target and why this question follows from their evidence.";
   return `${request.payload.context}\n\nLatest learner action:\n${request.payload.message}\n\nDurable results from earlier phases of this same Training Agent turn:\n${stableJson(evidence)}\n\nPhase ${step + 1}. ${phaseInstruction}`;
+}
+
+function latestRejectedCompilationFeedback(outcomes: Map<string, unknown[]>): string {
+  const latest = outcomes.get("create_question")?.at(-1);
+  if (!latest || typeof latest !== "object") return "";
+  const result = (latest as { result?: unknown }).result;
+  if (!result || typeof result !== "object" || (result as { status?: unknown }).status === "playable") return "";
+  return describeToolResult("create_question", result).slice(0, 500);
 }
 function sumUsage(values: unknown[]) {
   const totals: Record<string, number> = {};

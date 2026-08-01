@@ -123,7 +123,8 @@ const TOOL_VERBS: Record<string, string> = {
 };
 
 /** Present tense while a call is open, past tense once it settles. */
-export function toolVerb(tool: string, running: boolean): string {
+export function toolVerb(tool: string, running: boolean, rejected = false): string {
+  if (tool === "create_question" && rejected) return "Rejected challenge candidate";
   const settled = TOOL_VERBS[tool];
   if (!settled) {
     const spaced = tool.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim();

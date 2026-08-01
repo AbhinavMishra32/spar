@@ -35,6 +35,7 @@ function DiffStat({ added, removed }: { added: number; removed: number }) {
 export function ActivityRow({ part }: { part: ToolPart }) {
   const [open, setOpen] = useState(false);
   const running = part.phase === "running";
+  const rejectedCandidate = part.tool === "create_question" && part.phase === "error" && part.detail.startsWith("status invalid");
   const totals = diffTotals(part.files);
   const expandable = part.files.length > 0 || Boolean(part.detail);
 
@@ -60,7 +61,7 @@ export function ActivityRow({ part }: { part: ToolPart }) {
         </span>
 
         <span className={cn("shrink-0 text-ui", running ? "text-foreground" : "text-muted-foreground")}>
-          {toolVerb(part.tool, running)}
+          {toolVerb(part.tool, running, rejectedCandidate)}
         </span>
 
         {part.label && (
