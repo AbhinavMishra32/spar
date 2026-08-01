@@ -126,6 +126,7 @@
   --app-window-fill: oklch(97.6% 0 0);
   /* Only painted when the platform gives us no native material to sit on. */
   --app-sidebar-fill: oklch(95.5% 0 0);
+  --app-vibrant-tint: oklch(100% 0 0 / 30%);
   --app-user-message-background: oklch(14.5% 0 0 / 6%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 10%), 0 8px 10px -6px oklch(0% 0 0 / 10%);
   --app-shadow-menu: 0 16px 40px -12px oklch(0% 0 0 / 20%), 0 4px 10px -4px oklch(0% 0 0 / 8%);
@@ -153,7 +154,7 @@
 .dark {
   color-scheme: dark;
 
-  --background: oklch(20.5% 0 0);
+  --background: oklch(23.5% 0 0);
   --foreground: oklch(98.5% 0 0);
 
   --surface-primary: oklch(98.5% 0 0 / 8%);
@@ -162,7 +163,7 @@
 
   --card: color-mix(in oklab, var(--foreground) 6%, var(--background));
   --card-foreground: var(--foreground);
-  --popover: oklch(26.9% 0 0);
+  --popover: oklch(29% 0 0);
   --popover-foreground: var(--foreground);
   --primary: oklch(98.5% 0 0 / 90%);
   --primary-foreground: oklch(14.5% 0 0 / 92%);
@@ -192,8 +193,11 @@
   --color-background-elevated-secondary: var(--surface-secondary);
   --color-background-editor: color-mix(in oklab, black 14%, var(--background));
 
-  --app-window-fill: oklch(20.5% 0 0);
-  --app-sidebar-fill: oklch(17.5% 0 0);
+  --app-window-fill: oklch(23.5% 0 0);
+  /* Lighter than the pane, not darker: the sidebar is the surface the content
+     sits on, so it catches more light. Only painted with no native material. */
+  --app-sidebar-fill: oklch(28.5% 0 0);
+  --app-vibrant-tint: oklch(100% 0 0 / 6%);
   --app-user-message-background: oklch(98.5% 0 0 / 8%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 40%), 0 8px 10px -6px oklch(0% 0 0 / 40%);
   --app-shadow-menu: 0 16px 40px -10px oklch(0% 0 0 / 55%), 0 4px 12px -4px oklch(0% 0 0 / 40%);
@@ -299,7 +303,12 @@
      and we paint the fill ourselves, because a transparent hole would otherwise
      show the desktop straight through. */
   .app-vibrant {
-    background: transparent;
+    /* Not quite transparent: a tint over the native material. Glass alone takes
+       its value from whatever is behind the window, so on a dark desktop the
+       sidebar collapses to the same value as the content pane and the two stop
+       reading as separate surfaces. The wash keeps it reliably the lighter of
+       the pair however the wallpaper moves. */
+    background: var(--app-vibrant-tint);
   }
 
   :root[data-native-surface="none"] .app-vibrant {
