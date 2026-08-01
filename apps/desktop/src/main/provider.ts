@@ -217,8 +217,13 @@ export class ProviderService {
       }
     }
 
+    // The selected provider is authoritative. Silently switching a Training
+    // Agent turn to unrelated credentials changes model behavior and billing,
+    // and made a ChatGPT transport failure look like four separate failures.
+    if (values.length) return dedupe(values);
+
     values.push(...await readConstructProviders());
-    if (accessToken) values.push({ provider: "practice-gateway", model: "practice-training", api: "openai-completions", baseUrl: `${process.env.PRACTICE_API_ORIGIN ?? "http://localhost:4318"}/v1/ai`, apiKey: accessToken, source: "gateway" });
+    if (accessToken && process.env.PRACTICE_AI_GATEWAY_ENABLED === "true") values.push({ provider: "practice-gateway", model: "practice-training", api: "openai-completions", baseUrl: `${process.env.PRACTICE_API_ORIGIN ?? "http://localhost:4318"}/v1/ai`, apiKey: accessToken, source: "gateway" });
     return dedupe(values);
   }
 

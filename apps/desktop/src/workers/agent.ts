@@ -149,9 +149,10 @@ async function run(request: Request) {
         clearTimeout(phaseTimer);
       }
       if (stage.activeTools.length > 0 && callSignatures.length === callsBefore) {
+        if (streamError) throw new Error(`Provider ${request.payload.provider.provider} failed during ${stageKey}: ${streamError}`);
         const previous = protocolFailures.get(stageKey);
         const count = (previous?.count ?? 0) + 1;
-        const detail = streamError || `The provider ended without a valid call to one of: ${stage.activeTools.join(", ")}.`;
+        const detail = `The provider ended without a valid call to one of: ${stage.activeTools.join(", ")}.`;
         if (count > PROTOCOL_RETRY_LIMIT) throw new Error(`Training Agent could not produce a valid ${stageKey} tool call after ${count} attempts: ${detail}`);
         protocolFailures.set(stageKey, { count, detail });
         parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: `protocol-retry:${stageKey}:${count}` } });

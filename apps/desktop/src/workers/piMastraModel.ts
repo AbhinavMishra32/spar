@@ -110,13 +110,23 @@ export function createPiMastraModel(input: PiProviderInput): LanguageModelV2 {
 }
 
 function streamOptions(input: PiProviderInput, options: LanguageModelV2CallOptions) {
+  const transport = piTransportForApi(input.api);
   return {
     apiKey: input.apiKey,
+    // ChatGPT subscription inference currently exposes the Codex Responses
+    // route over SSE. Pi's automatic WebSocket probe can receive a terminal
+    // 404 before it gets a chance to fall back, so select the known-good
+    // transport explicitly for this API family.
+    ...(transport ? { transport } : {}),
     ...(options.abortSignal ? { signal: options.abortSignal } : {}),
     ...(options.maxOutputTokens ? { maxTokens: options.maxOutputTokens } : {}),
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
   };
+}
+
+export function piTransportForApi(api: string): "sse" | undefined {
+  return api === "openai-codex-responses" ? "sse" : undefined;
 }
 
 function toPiContext(options: LanguageModelV2CallOptions): Context {

@@ -26,6 +26,7 @@ describe("provider service", () => {
       expect(openrouter).toMatchObject({ state: "connected", selectedModel: "openrouter/free", baseUrl: "https://openrouter.ai/api/v1" });
       expect(JSON.stringify(inventory)).not.toContain("sk-or-secret");
       const resolved = await service.resolve("account", null);
+      expect(resolved).toHaveLength(1);
       expect(resolved[0]).toMatchObject({ provider: "openrouter", model: "openrouter/free", api: "openai-completions", apiKey: "sk-or-secret" });
     } finally { store.close(); }
   });
