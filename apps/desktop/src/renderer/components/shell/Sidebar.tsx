@@ -1,8 +1,9 @@
 import { Check, Command, History, LayoutGrid, Map, PanelLeftClose, Plus, Settings, Waypoints } from "lucide-react";
-import type { SessionSummary } from "@pracai/domain";
+import type { SessionSummary } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { initials, relativeTime } from "@/lib/format";
+import { SparWordmark } from "../common/SparWordmark";
 
 export type Page = "home" | "sessions" | "ability" | "history" | "settings" | "workspace";
 
@@ -53,9 +54,10 @@ export function Sidebar({
   return (
     <aside className="app-drag app-vibrant hairline-r flex h-full w-[228px] flex-col">
       {/* Clears the native traffic lights, and carries the collapse control. */}
-      <div className="flex h-[38px] shrink-0 items-center justify-end px-2.5">
+      <div className="flex h-[38px] shrink-0 items-center px-2.5">
+        <SparWordmark className="ml-[3.35rem] text-[0.98rem] text-foreground/90" />
         <button
-          className="app-no-drag grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-[var(--sidebar-accent)] hover:text-foreground"
+          className="app-no-drag ml-auto grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-[var(--sidebar-accent)] hover:text-foreground"
           onClick={onCollapse}
           title="Hide sidebar  ⌘B"
           type="button"

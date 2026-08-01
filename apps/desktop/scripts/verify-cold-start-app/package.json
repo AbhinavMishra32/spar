@@ -1,5 +1,5 @@
 {
-  "name": "practice-ai-cold-start-verification",
+  "name": "spar-cold-start-verification",
   "private": true,
   "type": "module",
   "main": "../../dist/verification/verify-cold-start.js"

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { cloudEnvironmentIsConfigured, ensureLocalEnvironment, loadLocalEnvironment, root, run } from "./lib.mjs";
 
-console.log("\nPractice AI setup\n");
+console.log("\nSpar setup\n");
 ensureLocalEnvironment();
 
 const turboBinary = resolve(root, "node_modules/.bin/turbo");
@@ -21,9 +21,9 @@ if (!cloudEnvironmentIsConfigured()) {
 }
 
 console.log("Applying committed migrations to cloud PostgreSQL…");
-run("corepack", ["pnpm", "--filter", "@pracai/database", "db:migrate"]);
+run("corepack", ["pnpm", "--filter", "@spar/database", "db:migrate"]);
 
 console.log("Ensuring the cloud artifact bucket exists…");
-run("corepack", ["pnpm", "--filter", "@pracai/api", "storage:provision"]);
+run("corepack", ["pnpm", "--filter", "@spar/api", "storage:provision"]);
 
-console.log("\nSetup complete. Run `corepack pnpm dev` to start Practice AI.\n");
+console.log("\nSetup complete. Run `corepack pnpm dev` to start Spar.\n");

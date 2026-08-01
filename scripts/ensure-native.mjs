@@ -15,7 +15,7 @@ const fingerprint = createHash("sha256")
   .update(process.arch)
   .digest("hex")
   .slice(0, 16);
-const markerDirectory = resolve(root, "node_modules/.cache/pracai");
+const markerDirectory = resolve(root, "node_modules/.cache/spar");
 const marker = resolve(markerDirectory, `electron-native-${fingerprint}`);
 
 if (existsSync(marker)) {

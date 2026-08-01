@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, History, Loader2, Map, Sparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { SessionDetail, SessionSummary } from "@pracai/domain";
-import type { AgentStreamEvent, BootstrapData, PracticeApi } from "../shared/api";
+import type { SessionDetail, SessionSummary } from "@spar/domain";
+import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
 import { clockTime, message } from "@/lib/format";
 import { Sidebar, type Page } from "./components/shell/Sidebar";
+import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
 import { CommandPalette } from "./components/common/CommandPalette";
 import { EmptyState } from "./components/common/EmptyState";
@@ -19,7 +20,7 @@ import { ChatView } from "./components/workspace/ChatView";
 import type { RuntimeLog } from "./components/agent/RuntimeConsole";
 import { reduceRun, type AgentRun } from "./components/agent/agentRun";
 
-const api: PracticeApi | undefined = window.practice;
+const api: SparApi | undefined = window.spar;
 
 const PAGE_TITLE: Record<Exclude<Page, "workspace">, string> = {
   home: "Home",
@@ -38,13 +39,13 @@ export function App() {
   const [logs, setLogs] = useState<RuntimeLog[]>([]);
   const [run, setRun] = useState<AgentRun | null>(null);
   const [palette, setPalette] = useState(false);
-  const [sidebar, setSidebar] = useState(() => localStorage.getItem("practice.sidebar") !== "hidden");
+  const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
   const detailRef = useRef<SessionDetail | null>(null);
   detailRef.current = detail;
 
   const refresh = useCallback(async () => {
-    if (!api) throw new Error("Practice AI must run inside its Electron desktop shell.");
+    if (!api) throw new Error("Spar must run inside its Electron desktop shell.");
     const next = await api.bootstrap();
     setData(next);
     return next;
@@ -67,17 +68,19 @@ export function App() {
     void refresh().catch((cause) => setError(message(cause)));
   }, [refresh]);
 
-  // Follows the system appearance; the window itself is vibrant, so the two must agree.
+  // A forced theme also updates Electron's nativeTheme in the main process so
+  // macOS vibrancy and renderer tokens resolve to the same appearance.
   useEffect(() => {
     const query = matchMedia("(prefers-color-scheme: dark)");
     const sync = () => {
-      setDark(query.matches);
-      document.documentElement.classList.toggle("dark", query.matches);
+      const resolvedDark = data?.theme === "dark" || (data?.theme !== "light" && query.matches);
+      setDark(resolvedDark);
+      document.documentElement.classList.toggle("dark", resolvedDark);
     };
     sync();
-    query.addEventListener("change", sync);
+    if (data?.theme === "system" || !data) query.addEventListener("change", sync);
     return () => query.removeEventListener("change", sync);
-  }, []);
+  }, [data?.theme]);
 
   useEffect(() => {
     if (!api) return;
@@ -133,7 +136,7 @@ export function App() {
       if (key === "b") {
         event.preventDefault();
         setSidebar((value) => {
-          localStorage.setItem("practice.sidebar", value ? "hidden" : "shown");
+          localStorage.setItem("spar.sidebar", value ? "hidden" : "shown");
           return !value;
         });
       }
@@ -202,10 +205,15 @@ export function App() {
 
   const toggleSidebar = () =>
     setSidebar((value) => {
-      localStorage.setItem("practice.sidebar", value ? "hidden" : "shown");
+      localStorage.setItem("spar.sidebar", value ? "hidden" : "shown");
       return !value;
     });
   const expandSidebar = sidebar ? undefined : toggleSidebar;
+  const changeTheme = async (theme: ThemePreference) => {
+    if (!api) return;
+    await api.setTheme(theme);
+    setData((current) => current ? { ...current, theme } : current);
+  };
 
   return (
     <div className="flex h-full">
@@ -266,14 +274,15 @@ export function App() {
               />
             </PagePad>
           )}
-          {page === "settings" && <SettingsPage api={api} />}
+          {page === "settings" && <SettingsPage api={api} onThemeChange={changeTheme} theme={data.theme} />}
           {page === "workspace" &&
             (detail ? (
-              /* Chat and challenge are different modes of the same session, so
-                 the surface cross-dissolves between them instead of swapping. */
+              /* Session identity and workspace mode both define the mounted
+                 surface. Including both keeps the same blur cross-dissolve for
+                 challenge-to-challenge session navigation as well as mode changes. */
               <AnimatePresence initial={false} mode="wait">
                 <motion.div
-                  key={sessionMode(detail)}
+                  key={`${detail.summary.id}:${sessionMode(detail)}`}
                   animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
                   className="h-full"
                   exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
@@ -361,7 +370,7 @@ function BootShell() {
         <span className="grid size-9 place-items-center rounded-[10px] bg-primary text-primary-foreground">
           <Sparkles className="size-4" />
         </span>
-        <span className="thinking-shimmer text-ui font-medium">Starting Practice AI…</span>
+        <span className="thinking-shimmer text-ui font-medium">Starting <SparWordmark className="text-ui" />…</span>
       </div>
     </div>
   );
@@ -384,7 +393,7 @@ function FatalError({ error }: { error: string }) {
       <div className="max-w-[32rem] rounded-xl border border-destructive/30 bg-card p-4 shadow-[var(--app-shadow-card)]">
         <p className="flex items-center gap-2 text-content font-semibold text-destructive">
           <AlertCircle className="size-4" />
-          Practice AI could not start
+          Spar could not start
         </p>
         <p className="mt-1.5 text-ui leading-[1.65] text-muted-foreground">{error}</p>
       </div>

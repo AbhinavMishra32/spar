@@ -8,6 +8,6 @@ coverage/
 .env
 .env.*
 !.env.example
-apps/desktop/.practice-ai/
+apps/desktop/.spar/
 apps/api/uploads/
 supabase/.temp/

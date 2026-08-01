@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { attemptEventSchema, sessionCheckpointSchema, sessionSummarySchema, type SessionDetail } from "@pracai/domain";
+import { attemptEventSchema, sessionCheckpointSchema, sessionSummarySchema, type SessionDetail } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
@@ -9,7 +9,7 @@ export const ipc = {
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
-  settingsOpenExternal: "settings:open-external",
+  settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme",
   attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge"
 } as const;
 
@@ -26,6 +26,8 @@ export const providerSettingsInput = z.object({
   baseUrl: z.string().url().refine((value) => value.startsWith("https://") || value.startsWith("http://localhost:") || value.startsWith("http://127.0.0.1:"), "Provider URL must use HTTPS unless it is local"),
   secret: z.string().max(20_000),
 });
+export const themePreferenceSchema = z.enum(["system", "light", "dark"]);
+export type ThemePreference = z.infer<typeof themePreferenceSchema>;
 
 export type ProviderId = "openai-codex" | "claude-code" | "github-copilot" | z.infer<typeof providerSettingsInput>["provider"];
 export type ProviderInventory = {
@@ -52,7 +54,7 @@ export type ProviderOAuthEvent = {
   allowEmpty?: boolean;
 };
 
-export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; sessions: z.infer<typeof sessionSummarySchema>[]; theme: "system" | "light" | "dark"; syncState: "offline" | "synced" | "pending" };
+export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; sessions: z.infer<typeof sessionSummarySchema>[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending" };
 /** One file a tool wrote, with the line counts the activity row reports. */
 export type AgentActivityFile = { path: string; added: number; removed: number };
 export type AgentStreamEvent = {
@@ -73,7 +75,7 @@ export type AgentStreamEvent = {
 export type MenuCommand = "settings" | "new-session" | "command-palette";
 export type SyncState = BootstrapData["syncState"];
 
-export interface PracticeApi {
+export interface SparApi {
   bootstrap(): Promise<BootstrapData>;
   createSession(input: z.infer<typeof createSessionInput>): Promise<{ sessionId: string }>;
   openSession(sessionId: string): Promise<SessionDetail | null>;
@@ -98,6 +100,7 @@ export interface PracticeApi {
   submitProviderOAuth(flowId: string, value: string): Promise<void>;
   cancelProviderOAuth(flowId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  setTheme(theme: ThemePreference): Promise<void>;
   onProviderOAuthEvent(listener: (event: ProviderOAuthEvent) => void): () => void;
   onAgentEvent(listener: (event: AgentStreamEvent) => void): () => void;
   onRunnerEvent(listener: (event: { id: string; stream: "stdout" | "stderr" | "exit"; data: string; exitCode?: number }) => void): () => void;

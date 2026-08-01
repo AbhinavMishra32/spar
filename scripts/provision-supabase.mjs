@@ -8,7 +8,7 @@ const databasePassword = randomBytes(32).toString("base64url");
 
 ensureLocalEnvironment();
 const result = spawnSync("corepack", [
-  "pnpm", "exec", "supabase", "projects", "create", "pracai",
+  "pnpm", "exec", "supabase", "projects", "create", "spar",
   "--org-id", organizationId,
   "--db-password", databasePassword,
   "--region", region,
@@ -31,8 +31,8 @@ updateLocalEnvironment({
   DATABASE_URL: `postgresql://postgres:${encodedPassword}@db.${projectRef}.supabase.co:5432/postgres?sslmode=require`,
   OBJECT_STORAGE_ENDPOINT: `https://${projectRef}.storage.supabase.co/storage/v1/s3`,
   OBJECT_STORAGE_REGION: region,
-  OBJECT_STORAGE_BUCKET: "pracai"
+  OBJECT_STORAGE_BUCKET: "spar"
 });
 
-console.log(`Created Supabase project pracai (${projectRef}) in ${region}.`);
+console.log(`Created Supabase project spar (${projectRef}) in ${region}.`);
 console.log("Its generated database credential was stored only in .env.local.");

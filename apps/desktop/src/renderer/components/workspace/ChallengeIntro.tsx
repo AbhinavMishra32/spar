@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ActiveQuestion } from "@pracai/domain";
+import type { ActiveQuestion } from "@spar/domain";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { DifficultyPill } from "./ProblemCard";
 

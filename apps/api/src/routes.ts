@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { and, desc, eq, sql } from "drizzle-orm";
-import { appendEventsRequestSchema, sessionCheckpointSchema } from "@pracai/domain";
-import { attemptEvents, attempts, sessionCheckpoints, sessions } from "@pracai/database";
-import type { Database } from "@pracai/database";
+import { appendEventsRequestSchema, sessionCheckpointSchema } from "@spar/domain";
+import { attemptEvents, attempts, sessionCheckpoints, sessions } from "@spar/database";
+import type { Database } from "@spar/database";
 import { requireUser } from "./auth.js";
 import type { ObjectStorage } from "./storage.js";
 

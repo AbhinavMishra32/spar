@@ -1,4 +1,4 @@
-import type { AttemptEvent } from "@pracai/domain";
+import type { AttemptEvent } from "@spar/domain";
 export function buildAttemptTrace(events: AttemptEvent[]): string {
   const ordered=[...events].sort((a,b)=>a.sequence-b.sequence); const lines=["# Attempt Trace","",`Generated from ${ordered.length} immutable events.`,""];
   for(const event of ordered){const time=new Date(event.occurredAt).toLocaleTimeString("en-US",{hour:"2-digit",minute:"2-digit"});lines.push(`## ${label(event.type)} · ${time}`,"",describe(event),"");}

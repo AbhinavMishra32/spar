@@ -1,5 +1,5 @@
 import { FileCode2, Flag, MessageSquare, Play, Sparkles, Terminal } from "lucide-react";
-import type { SessionDetail } from "@pracai/domain";
+import type { SessionDetail } from "@spar/domain";
 import { EmptyState } from "../common/EmptyState";
 
 type Event = SessionDetail["events"][number];

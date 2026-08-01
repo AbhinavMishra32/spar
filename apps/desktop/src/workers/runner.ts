@@ -91,7 +91,7 @@ function resolveStages(root: string, language: Request["payload"]["language"], c
     return [{ bin: process.execPath, args: [tsxCli, ...(command === "test" ? ["--test", ...tests("**/*.test.ts")] : [existsSync(path.join(root, "index.ts")) ? "index.ts" : "src/index.ts"])] }];
   }
 
-  const executable = path.join(root, ".practice-ai", "solution");
+  const executable = path.join(root, ".spar", "solution");
   mkdirSync(path.dirname(executable), { recursive: true });
   rmSync(executable, { force: true });
   const sources = command === "test"

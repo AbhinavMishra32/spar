@@ -1,6 +1,6 @@
 {
-  "name": "@pracai/domain",
-  "version": "0.1.0",
+  "name": "@spar/domain",
+  "version": "0.0.1",
   "type": "module",
   "exports": { ".": { "types": "./src/index.ts", "development": "./src/index.ts", "default": "./dist/index.js" } },
   "scripts": { "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput", "typecheck": "tsc --noEmit", "test": "vitest run", "lint": "tsc --noEmit", "build": "tsc -p tsconfig.build.json" },

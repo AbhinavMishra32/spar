@@ -1,6 +1,26 @@
 {
-  "name":"@pracai/provider","version":"0.1.0","type":"module","exports":{".":{"types":"./src/index.ts","development":"./src/index.ts","default":"./dist/index.js"}},
-  "scripts":{"dev":"tsc -p tsconfig.build.json --watch --preserveWatchOutput","typecheck":"tsc --noEmit","test":"vitest run","lint":"tsc --noEmit","build":"tsc -p tsconfig.build.json"},
-  "dependencies":{"zod":"^3.25.76"},
-  "devDependencies":{"typescript":"^5.8.3","vitest":"^3.2.4"}
+  "name": "@spar/provider",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
 }

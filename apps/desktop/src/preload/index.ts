@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { ipc, type AgentStreamEvent, type PracticeApi } from "../shared/api.js";
+import { ipc, type AgentStreamEvent, type SparApi } from "../shared/api.js";
 
-const api: PracticeApi = {
+const api: SparApi = {
   bootstrap: () => ipcRenderer.invoke(ipc.bootstrap),
   createSession: (input) => ipcRenderer.invoke(ipc.sessionsCreate, input),
   openSession: (sessionId) => ipcRenderer.invoke(ipc.sessionsOpen, sessionId),
@@ -24,6 +24,7 @@ const api: PracticeApi = {
   submitProviderOAuth: (flowId, value) => ipcRenderer.invoke(ipc.settingsProviderOauthSubmit, { flowId, value }),
   cancelProviderOAuth: (flowId) => ipcRenderer.invoke(ipc.settingsProviderOauthCancel, flowId),
   openExternal: (url) => ipcRenderer.invoke(ipc.settingsOpenExternal, url),
+  setTheme: (theme) => ipcRenderer.invoke(ipc.settingsTheme, theme),
   onProviderOAuthEvent: (listener) => subscribe("provider:oauth-event", listener),
   onAgentEvent: (listener) => subscribe("agent:event", listener),
   onRunnerEvent: (listener) => subscribe("runner:event", listener),
@@ -31,4 +32,4 @@ const api: PracticeApi = {
   onSyncState: (listener) => subscribe("sync:state", listener)
 };
 function subscribe<T>(channel: string, listener: (value: T) => void) { const handler = (_event: Electron.IpcRendererEvent, value: T) => listener(value); ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler); }
-contextBridge.exposeInMainWorld("practice", api);
+contextBridge.exposeInMainWorld("spar", api);

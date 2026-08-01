@@ -1,6 +1,6 @@
 {
-  "name": "@pracai/desktop",
-  "version": "0.1.0",
+  "name": "@spar/desktop",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
@@ -15,15 +15,16 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.0",
-    "@fontsource-variable/geist": "^5.3.0",
     "@ai-sdk/provider": "2.0.3",
-    "@mastra/core": "^1.49.0",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource/poppins": "^5.3.0",
     "@mariozechner/pi-ai": "^0.73.1",
+    "@mastra/core": "^1.49.0",
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.7",
-    "@pracai/domain": "workspace:*",
-    "@pracai/provider": "workspace:*",
-    "@pracai/training": "workspace:*",
+    "@spar/domain": "workspace:*",
+    "@spar/provider": "workspace:*",
+    "@spar/training": "workspace:*",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "better-sqlite3": "^12.2.0",
@@ -64,8 +65,8 @@
     "wait-on": "^8.0.3"
   },
   "build": {
-    "appId": "ai.practice.desktop",
-    "productName": "Practice AI",
+    "appId": "ai.spar.desktop",
+    "productName": "Spar",
     "asar": true,
     "mac": {
       "category": "public.app-category.developer-tools",
@@ -80,16 +81,16 @@
     },
     "protocols": [
       {
-        "name": "Practice AI Auth",
+        "name": "Spar Auth",
         "schemes": [
-          "practice-ai"
+          "spar"
         ]
       }
     ],
     "publish": {
       "provider": "github",
       "owner": "AbhinavMishra32",
-      "repo": "pracai"
+      "repo": "spar"
     },
     "files": [
       "dist/**/*",

@@ -1,4 +1,4 @@
-import type { AttemptEvaluation } from "@pracai/domain";
+import type { AttemptEvaluation } from "@spar/domain";
 export type EvidenceWindow={recentOutcomes:Array<AttemptEvaluation["outcome"]>;independentContexts:number;hintCount:number;daysSinceObserved:number;novelFailure:boolean};
 export function recommendAction(evidence:EvidenceWindow):AttemptEvaluation["nextAction"]{
   if(evidence.daysSinceObserved>=45)return"retain";

@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ChevronDown, ChevronUp, Sparkles } from "lucide-react";
-import type { SessionDetail } from "@pracai/domain";
-import type { PracticeApi } from "../../../shared/api";
+import type { SessionDetail } from "@spar/domain";
+import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
 import { Toolbar, ToolbarButton } from "../shell/Toolbar";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer } from "../agent/Composer";
 import { RuntimeConsole, type RuntimeLog } from "../agent/RuntimeConsole";
+import { AskUserQuestion } from "../agent/AskUserQuestion";
 import type { AgentRun } from "../agent/agentRun";
 
 const STAGES = ["History retrieval", "Target selection", "Challenge compilation", "Deterministic validation"];
@@ -25,7 +26,7 @@ export function PlanningView({
   onExpandSidebar,
 }: {
   detail: SessionDetail;
-  api: PracticeApi | undefined;
+  api: SparApi | undefined;
   logs: RuntimeLog[];
   run: AgentRun | null;
   onRefresh(): Promise<void>;
@@ -38,8 +39,8 @@ export function PlanningView({
   const [traceOpen, setTraceOpen] = useState(false);
   const pending = detail.pendingLearnerQuestion;
 
-  const send = async () => {
-    const body = draft.trim();
+  const send = async (answer?: string) => {
+    const body = (answer ?? draft).trim();
     if (!api || !body) return;
     setBusy(true);
     try {
@@ -54,6 +55,9 @@ export function PlanningView({
   };
 
   const streaming = run?.status === "streaming";
+  const transcriptMessages = pending
+    ? detail.messages.filter((item) => item.role !== "agent" || !pending.questions.some((question) => question.question === item.body))
+    : detail.messages;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -101,30 +105,23 @@ export function PlanningView({
                   </div>
                 </div>
               }
-              messages={detail.messages}
+              messages={transcriptMessages}
               run={run}
             />
 
             <div className="shrink-0 px-4 pb-4">
               <div className="transcript-column">
-                {pending && (
-                  <div className="mb-2 rounded-xl border border-border bg-[var(--color-background-elevated-secondary)] px-3 py-2.5">
-                    <p className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">PLACEMENT CHECK</p>
-                    <p className="mt-1 text-content leading-[1.6]">{pending}</p>
-                    <p className="mt-1.5 text-ui text-muted-foreground">
-                      Your goal says what you want to learn, not what you already know. This answer sets the first challenge&apos;s
-                      assumptions.
-                    </p>
-                  </div>
+                {pending ? (
+                  <AskUserQuestion busy={busy || streaming} onSubmit={(answer) => void send(answer)} request={pending} />
+                ) : (
+                  <Composer
+                    busy={busy || streaming}
+                    onChange={setDraft}
+                    onSubmit={() => void send()}
+                    placeholder="Send the agent a note…"
+                    value={draft}
+                  />
                 )}
-                <Composer
-                  autoFocus={Boolean(pending)}
-                  busy={busy || streaming}
-                  onChange={setDraft}
-                  onSubmit={() => void send()}
-                  placeholder={pending ? "Describe what you know, or just say “none yet”." : "Send the agent a note…"}
-                  value={draft}
-                />
               </div>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, Target } from "lucide-react";
-import type { ActiveQuestion } from "@pracai/domain";
+import type { ActiveQuestion } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { ProblemStatement } from "./ProblemStatement";

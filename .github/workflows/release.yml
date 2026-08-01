@@ -19,7 +19,7 @@ jobs:
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
           CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-        run: pnpm --filter @pracai/desktop exec electron-builder install-app-deps
+        run: pnpm --filter @spar/desktop exec electron-builder install-app-deps
       - name: Sign, notarize, and publish
         env:
           CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
@@ -28,5 +28,5 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm --filter @pracai/desktop package --publish always
+        run: pnpm --filter @spar/desktop package --publish always
 

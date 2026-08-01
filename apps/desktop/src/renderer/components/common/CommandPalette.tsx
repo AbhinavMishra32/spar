@@ -1,5 +1,5 @@
 import { History, LayoutGrid, Map, Plus, Settings, Waypoints } from "lucide-react";
-import type { SessionSummary } from "@pracai/domain";
+import type { SessionSummary } from "@spar/domain";
 import {
   CommandDialog,
   CommandEmpty,

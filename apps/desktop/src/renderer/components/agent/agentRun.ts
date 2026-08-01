@@ -112,7 +112,7 @@ const TOOL_VERBS: Record<string, string> = {
   read_attempt: "Read attempt trace",
   read_session: "Read session",
   read_concept_graph: "Read concept graph",
-  ask_learner: "Asked you a question",
+  ask_user_question: "Asked you a question",
   set_session_objective: "Set the session objective",
   set_training_target: "Set the training target",
   create_question: "Created challenge",

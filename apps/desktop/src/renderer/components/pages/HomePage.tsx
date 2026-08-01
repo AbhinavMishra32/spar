@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BrainCircuit, Clock3, Flame, Target } from "lucide-react";
-import type { SessionSummary } from "@pracai/domain";
+import type { SessionSummary } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { Composer, ComposerPill } from "../agent/Composer";
 import { SessionCard } from "../common/SessionCard";

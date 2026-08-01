@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { eq } from "drizzle-orm";
-import type { Database } from "@pracai/database";
-import { users } from "@pracai/database";
+import type { Database } from "@spar/database";
+import { users } from "@spar/database";
 import { hashPassword, verifyPassword } from "./password.js";
 
 export type AuthUser = { id: string; email: string; displayName: string };

@@ -1,6 +1,6 @@
 import keytar from "keytar";
 
-const service = "ai.practice.desktop";
+const service = "ai.spar.desktop";
 export class AuthService {
   constructor(private readonly apiOrigin: string) {}
   async account() { const raw = await keytar.getPassword(service, "account"); return raw ? JSON.parse(raw) as { id: string; displayName: string; email: string } : null; }

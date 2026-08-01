@@ -76,11 +76,24 @@ export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visi
 });
 export type ActiveQuestion = z.infer<typeof activeQuestionSchema>;
 
+export const askUserQuestionInputSchema = z.object({
+  questions: z.array(z.object({
+    header: z.string().trim().min(1).max(40),
+    question: z.string().trim().min(3).max(1000),
+    options: z.array(z.object({ label: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(300) })).min(2).max(3),
+    multiple: z.boolean().default(false),
+    custom: z.boolean().default(true),
+  })).min(1).max(3),
+});
+export const askUserQuestionRequestSchema = askUserQuestionInputSchema.extend({ id });
+export type AskUserQuestionInput = z.infer<typeof askUserQuestionInputSchema>;
+export type AskUserQuestionRequest = z.infer<typeof askUserQuestionRequestSchema>;
+
 export const sessionDetailSchema = z.object({
   summary: sessionSummarySchema,
   question: activeQuestionSchema.nullable(),
   checkpoint: z.unknown().nullable(),
-  pendingLearnerQuestion: z.string().nullable(),
+  pendingLearnerQuestion: askUserQuestionRequestSchema.nullable(),
   messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate })),
   events: z.array(z.object({ id, sequence: z.number().int(), type: z.string(), occurredAt: isoDate, payload: z.record(z.unknown()), source: z.string() }))
 });

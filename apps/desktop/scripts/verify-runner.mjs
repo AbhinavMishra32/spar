@@ -10,7 +10,7 @@ if (app.isReady()) void verify();
 else app.once("ready", () => void verify());
 
 async function verify() {
-const worker = utilityProcess.fork(path.resolve(import.meta.dirname, "../dist/workers/runner.js"), [], { serviceName: "Practice AI runner verification", stdio: "pipe" });
+const worker = utilityProcess.fork(path.resolve(import.meta.dirname, "../dist/workers/runner.js"), [], { serviceName: "Spar runner verification", stdio: "pipe" });
 console.log(`VERIFY_RUNNER_FORK pid=${worker.pid ?? "pending"}`);
 worker.stdout?.on("data", (chunk) => process.stdout.write(`[runner stdout] ${chunk}`));
 worker.stderr?.on("data", (chunk) => process.stderr.write(`[runner stderr] ${chunk}`));
@@ -30,7 +30,7 @@ worker.on("exit", (code) => {
 });
 await new Promise((resolve) => setTimeout(resolve, 250));
 
-const root = await mkdtemp(path.join(tmpdir(), "pracai-runner-e2e-"));
+const root = await mkdtemp(path.join(tmpdir(), "spar-runner-e2e-"));
 try {
   const javascript = path.join(root, "javascript");
   await files(javascript, {

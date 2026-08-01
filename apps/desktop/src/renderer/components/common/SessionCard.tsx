@@ -1,5 +1,5 @@
 import { ArrowRight, Clock3, Target } from "lucide-react";
-import type { SessionSummary } from "@pracai/domain";
+import type { SessionSummary } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { formatDuration, relativeTime } from "@/lib/format";
 import { StatusDot } from "../shell/Sidebar";

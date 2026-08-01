@@ -10,5 +10,5 @@ if(result.status!==0){process.stderr.write(result.stderr);process.exit(result.st
 const keys=JSON.parse(result.stdout);
 const secret=keys.find((key)=>key.type==="secret")?.api_key??keys.find((key)=>key.name==="service_role")?.api_key;
 if(!secret)throw new Error("Supabase did not return a server-side secret key.");
-updateLocalEnvironment({SUPABASE_URL:`https://${projectRef}.supabase.co`,SUPABASE_SECRET_KEY:secret,OBJECT_STORAGE_BUCKET:environment.OBJECT_STORAGE_BUCKET||"pracai"});
+updateLocalEnvironment({SUPABASE_URL:`https://${projectRef}.supabase.co`,SUPABASE_SECRET_KEY:secret,OBJECT_STORAGE_BUCKET:environment.OBJECT_STORAGE_BUCKET||"spar"});
 console.log("Configured the Supabase Storage server key in .env.local without exposing it to the renderer.");

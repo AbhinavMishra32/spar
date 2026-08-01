@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { compileQuestion } from "@pracai/training";
+import { compileQuestion } from "@spar/training";
+import type { AskUserQuestionInput } from "@spar/domain";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
@@ -21,9 +22,8 @@ export async function executeTrainingTool(
   if (name === "set_session_objective") return { committed: true, ...local.setObjective(sessionId, String(value.objective)) };
   if (name === "set_training_target") return { committed: true, ...local.setTrainingTarget(sessionId, value as { ability: string; specificGap: string; desiredEvidence: string; avoidTesting: string[] }) };
   if (name === "commit_session_decision") return { committed: true, ...local.commitDecision(sessionId, value as { action: string; reason: string }) };
-  if (name === "ask_learner") {
-    const message = local.addMessage(sessionId, "agent", String(value.question));
-    return { pending: true, ...local.setPendingIntake(sessionId, String(value.question)), message };
+  if (name === "ask_user_question") {
+    return { pending: true, ...local.setPendingIntake(sessionId, value as AskUserQuestionInput) };
   }
   if (name === "create_question") {
     const proposedTitle = String(value.title ?? "").trim();

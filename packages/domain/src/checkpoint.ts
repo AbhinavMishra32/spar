@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { id, isoDate, trainingTargetSchema } from "./model.js";
+import { askUserQuestionRequestSchema, id, isoDate, trainingTargetSchema } from "./model.js";
 
 export const workspaceFileSchema = z.object({
   path: z.string().min(1),
@@ -25,7 +25,7 @@ export const sessionCheckpointSchema = z.object({
   trainingTarget: trainingTargetSchema.nullable(),
   agent: z.object({
     lastDecision: z.string().nullable(),
-    pendingLearnerQuestion: z.string().nullable(),
+    pendingLearnerQuestion: askUserQuestionRequestSchema.nullable(),
     relevantAbilityIds: z.array(id),
     messageCursor: z.number().int().nonnegative(),
     traceId: z.string().nullable(),

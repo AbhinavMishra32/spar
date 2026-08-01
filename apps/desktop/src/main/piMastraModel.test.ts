@@ -11,10 +11,10 @@ describe("Pi to Mastra model adapter", () => {
   });
 
   it("preserves text, JSON tool calls, finish reason, and usage", async () => {
-    const provider = registerFauxProvider({ api: "practice-faux", provider: "practice-faux", models: [{ id: "training-faux" }] });
+    const provider = registerFauxProvider({ api: "spar-faux", provider: "spar-faux", models: [{ id: "training-faux" }] });
     provider.setResponses([fauxAssistantMessage([fauxText("Inspecting evidence."), fauxToolCall("read_ability", { abilityId: "ability-1" }, { id: "call-1" })], { stopReason: "toolUse" })]);
     try {
-      const model = createPiMastraModel({ provider: "practice-faux", model: "training-faux", api: "practice-faux", baseUrl: "http://localhost:0", apiKey: "test" });
+      const model = createPiMastraModel({ provider: "spar-faux", model: "training-faux", api: "spar-faux", baseUrl: "http://localhost:0", apiKey: "test" });
       const result = await model.doGenerate({
         prompt: [
           { role: "system", content: "Use evidence." },
@@ -32,8 +32,8 @@ describe("Pi to Mastra model adapter", () => {
     } finally { provider.unregister(); }
   });
 
-  it.runIf(process.env.PRACTICE_VERIFY_CHATGPT === "1")("calls a tool through the connected ChatGPT subscription", async () => {
-    const raw = await keytar.getPassword("ai.practice.desktop", "provider-oauth:openai-codex");
+  it.runIf(process.env.SPAR_VERIFY_CHATGPT === "1")("calls a tool through the connected ChatGPT subscription", async () => {
+    const raw = await keytar.getPassword("ai.spar.desktop", "provider-oauth:openai-codex");
     if (!raw) throw new Error("ChatGPT subscription credential is not connected");
     const credentials = JSON.parse(raw) as OAuthCredentials;
     const resolved = await getOAuthApiKey("openai-codex", { "openai-codex": credentials });

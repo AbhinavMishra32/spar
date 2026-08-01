@@ -12,7 +12,7 @@ const launch = () => void verify().catch((error) => { console.error(`COLD_START_
 if (app.isReady()) launch(); else app.once("ready", launch);
 
 async function verify() {
-  const root = await mkdtemp(path.join(tmpdir(), "pracai-cold-start-e2e-"));
+  const root = await mkdtemp(path.join(tmpdir(), "spar-cold-start-e2e-"));
   const store = new LocalStore(path.join(root, "state.sqlite3"));
   const workspaces = new WorkspaceService(path.join(root, "workspaces"));
   const runner = new UtilityClient("runner", () => {});
@@ -26,9 +26,9 @@ async function verify() {
     return executeTrainingTool(name, input, context.sessionId, store, workspaces, runner);
   });
   try {
-    const apiKey = await keytar.getPassword("ai.practice.desktop", "provider:openrouter");
-    if (!apiKey) throw new Error("OpenRouter credential is missing from Practice AI Keychain");
-    const provider = { provider: "openrouter", model: process.env.PRACTICE_VERIFY_MODEL?.trim() || "openrouter/free", baseUrl: "https://openrouter.ai/api/v1", apiKey };
+    const apiKey = await keytar.getPassword("ai.spar.desktop", "provider:openrouter");
+    if (!apiKey) throw new Error("OpenRouter credential is missing from Spar Keychain");
+    const provider = { provider: "openrouter", model: process.env.SPAR_VERIFY_MODEL?.trim() || "openrouter/free", baseUrl: "https://openrouter.ai/api/v1", apiKey };
     const goal = "Understand event loop scheduling in JavaScript";
     const { sessionId } = store.createSession(goal);
     if (store.hasLearnerEvidence()) throw new Error("Fresh account unexpectedly contains learner evidence");

@@ -16,7 +16,7 @@ The renderer is treated as untrusted presentation code. IPC handlers validate ev
 
 ## Provider reuse decision
 
-Construct's current TypeScript implementation was inspected before this layer was designed. Practice AI adapts its useful boundaries:
+Construct's current TypeScript implementation was inspected before this layer was designed. Spar adapts its useful boundaries:
 
 - host-owned provider settings injected into the utility process;
 - normalized streaming text, reasoning, tool-call, tool-result, finish, error, and usage events;

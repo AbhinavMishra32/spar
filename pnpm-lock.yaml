@@ -29,10 +29,10 @@ importers:
       '@fastify/jwt':
         specifier: ^10.0.0
         version: 10.2.1
-      '@pracai/database':
+      '@spar/database':
         specifier: workspace:*
         version: link:../../packages/database
-      '@pracai/domain':
+      '@spar/domain':
         specifier: workspace:*
         version: link:../../packages/domain
       '@supabase/supabase-js':
@@ -75,6 +75,9 @@ importers:
       '@fontsource-variable/geist':
         specifier: ^5.3.0
         version: 5.3.0
+      '@fontsource/poppins':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@mariozechner/pi-ai':
         specifier: ^0.73.1
         version: 0.73.1(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))(@opentelemetry/api@1.9.0)(ws@8.21.1)(zod@3.25.76)
@@ -87,13 +90,13 @@ importers:
       '@phosphor-icons/react':
         specifier: ^2.1.7
         version: 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      '@pracai/domain':
+      '@spar/domain':
         specifier: workspace:*
         version: link:../../packages/domain
-      '@pracai/provider':
+      '@spar/provider':
         specifier: workspace:*
         version: link:../../packages/provider
-      '@pracai/training':
+      '@spar/training':
         specifier: workspace:*
         version: link:../../packages/training
       '@xterm/addon-fit':
@@ -256,7 +259,7 @@ importers:
 
   packages/training:
     dependencies:
-      '@pracai/domain':
+      '@spar/domain':
         specifier: workspace:*
         version: link:../domain
     devDependencies:
@@ -1132,6 +1135,9 @@ packages:
 
   '@fontsource-variable/geist@5.3.0':
     resolution: {integrity: sha512-j0m+vLQuG5XAYoHtGCVu0spvlGreR3EzpECUVzkFmI1mTVnAO38l/NEPDCFgZ177JxzYJCLSmTQibIiYPilGrA==}
+
+  '@fontsource/poppins@5.3.0':
+    resolution: {integrity: sha512-cms1nM7U6SN8epIV1WMVOV8VsA645aSm3wHfzIQnkk188U341ThbJGSl2Sv54V29gnDbT2arMPfLzvVIIVCceQ==}
 
   '@google/genai@1.52.0':
     resolution: {integrity: sha512-gwSvbpiN/17O9TbsqSsE/OzZcpv5Fo4RQjdngGgogtuB9RsyJ8ZHhX5KjHj1bp5N9snN2eK8LDGXSaWW2hof8Q==}
@@ -6546,6 +6552,8 @@ snapshots:
   '@floating-ui/utils@0.2.12': {}
 
   '@fontsource-variable/geist@5.3.0': {}
+
+  '@fontsource/poppins@5.3.0': {}
 
   '@google/genai@1.52.0(@modelcontextprotocol/sdk@1.30.0(zod@3.25.76))':
     dependencies:

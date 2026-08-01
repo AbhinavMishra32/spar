@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
-import { createDatabase } from "@pracai/database";
+import { createDatabase } from "@spar/database";
 import { envSchema } from "./env.js";
 import { installAuth } from "./auth.js";
 import { installRoutes } from "./routes.js";

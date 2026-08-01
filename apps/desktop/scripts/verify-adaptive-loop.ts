@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { app } from "electron";
 import keytar from "keytar";
-import type { AttemptEvent, QuestionDesign } from "@pracai/domain";
+import type { AttemptEvent, QuestionDesign } from "@spar/domain";
 import { LocalStore } from "../src/main/store.js";
 import { executeTrainingTool } from "../src/main/trainingTools.js";
 import { UtilityClient } from "../src/main/utilityClient.js";
@@ -16,7 +16,7 @@ if (app.isReady()) launch();
 else app.once("ready", launch);
 
 async function verify() {
-  const root = await mkdtemp(path.join(tmpdir(), "pracai-adaptive-e2e-"));
+  const root = await mkdtemp(path.join(tmpdir(), "spar-adaptive-e2e-"));
   const store = new LocalStore(path.join(root, "state.sqlite3"));
   const workspaces = new WorkspaceService(path.join(root, "workspaces"));
   const runnerEvents: Array<Record<string, unknown>> = [];
@@ -40,9 +40,9 @@ async function verify() {
   });
 
   try {
-    const apiKey = await keytar.getPassword("ai.practice.desktop", "provider:openrouter");
-    if (!apiKey) throw new Error("OpenRouter credential is missing from Practice AI Keychain");
-    const provider = { provider: "openrouter", model: process.env.PRACTICE_VERIFY_MODEL?.trim() || "openrouter/free", baseUrl: "https://openrouter.ai/api/v1", apiKey };
+    const apiKey = await keytar.getPassword("ai.spar.desktop", "provider:openrouter");
+    if (!apiKey) throw new Error("OpenRouter credential is missing from Spar Keychain");
+    const provider = { provider: "openrouter", model: process.env.SPAR_VERIFY_MODEL?.trim() || "openrouter/free", baseUrl: "https://openrouter.ai/api/v1", apiKey };
 
     const historical = store.createSession("Earlier variable-size sliding-window practice");
     const historicalTarget = store.setTrainingTarget(historical.sessionId, {

@@ -1,7 +1,7 @@
-import { BrowserWindow, ipcMain, shell } from "electron";
+import { BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { randomUUID } from "node:crypto";
-import { sessionCheckpointSchema } from "@pracai/domain";
-import { attemptAppendInput, createSessionInput, ipc, providerSettingsInput, runInput, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
+import { sessionCheckpointSchema } from "@spar/domain";
+import { attemptAppendInput, createSessionInput, ipc, providerSettingsInput, runInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
@@ -11,18 +11,14 @@ import type { ProviderService } from "./provider.js";
 export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   const failedPlanningRuns = new Set<string>();
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), sessions: deps.store.listSessions(), theme: deps.store.getSetting("theme", "system"), syncState: "offline" }));
-  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); const created=deps.store.createSession(input.goal);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);if(coldStart){deps.store.addMessage(created.sessionId,"learner",`Start a new adaptive session for this learner goal: ${input.goal}`);const question=placementQuestion(input.goal);deps.store.addMessage(created.sessionId,"agent",question);deps.store.setPendingIntake(created.sessionId,question);return created;}await startAgentTurn(created.sessionId,`Start a new adaptive session for this learner goal: ${input.goal}`,"learner","session-start");return created; });
+  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), sessions: deps.store.listSessions(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline" }));
+  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); const created=deps.store.createSession(input.goal);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);await startAgentTurn(created.sessionId,`Start a new adaptive session for this learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
   ipcMain.handle(ipc.sessionsOpen, (_event, sessionId) => {
     const id=zUuid(sessionId);let detail=deps.store.readSession(id);
     if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id))return detail;
     if(deps.store.resetIncompletePlanning(id)){failedPlanningRuns.delete(id);detail=deps.store.readSession(id);}
     if(!detail)return null;
-    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)){
-      const question=placementQuestion(detail.summary.originalGoal);
-      deps.store.addMessage(id,"agent",question);deps.store.setPendingIntake(id,question);failedPlanningRuns.delete(id);
-      return deps.store.readSession(id);
-    }
+    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)){if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume placement for this learner goal: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
     if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
     return detail;
   });
@@ -55,7 +51,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
 
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
     const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
-    if(deps.store.pendingIntake(sessionId)){const run=await startAgentTurn(sessionId,`The learner answered the cold-start placement question: ${input.message.trim()}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`,"learner","session-start");deps.store.answerIntake(sessionId,input.message.trim());return run;}
+    if(deps.store.pendingIntake(sessionId)){deps.store.answerIntake(sessionId,input.message.trim());return startAgentTurn(sessionId,`The learner answered the cold-start placement question: ${input.message.trim()}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`,"learner","session-start");}
     return startAgentTurn(sessionId,input.message.trim(),"learner","learner-message");
   });
   ipcMain.handle(ipc.attemptSubmit,async(_event,value)=>{const input=value as {sessionId?:unknown;attemptId?:unknown};const sessionId=zUuid(input.sessionId);const attemptId=zUuid(input.attemptId);const bundle=deps.store.submissionBundle(attemptId);if(!bundle||bundle.session_id!==sessionId)throw new Error("Active attempt not found");const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,durationMs:result.durationMs},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");append("attempt_completed",{outcome},"system");deps.store.completeAttempt(attemptId,outcome);void startAgentTurn(sessionId,`The learner submitted attempt ${attemptId}. Deterministic visible and hidden tests produced outcome ${outcome} with exit code ${result.exitCode}. Inspect the attempt events and remarks, evaluate the evidence, update the relevant ability document, commit exactly one next pedagogical action, then create the next validated question from that decision. The new target and question must explicitly respond to this attempt without overreacting to it.`,"system","attempt-complete");return{outcome,exitCode:result.exitCode,summary:outcome==="passed"?"All visible and hidden tests passed.":"The submission failed one or more deterministic tests."};});
@@ -88,9 +84,13 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (url.protocol !== "https:") throw new Error("Only HTTPS links can be opened");
     await shell.openExternal(url.toString());
   });
+  ipcMain.handle(ipc.settingsTheme, (_event, value) => {
+    const theme = themePreferenceSchema.parse(value);
+    deps.store.setSetting("theme", theme);
+    nativeTheme.themeSource = theme;
+  });
 }
 function zUuid(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Invalid identifier"); return value; }
-function placementQuestion(goal:string){return `Before I choose your first challenge for “${goal}”, what programming experience do you already have, and which parts of this topic or its prerequisites feel unfamiliar? It is completely fine to say “none yet”.`;}
 function providerId(value: unknown): ProviderId {
   if (typeof value !== "string" || !["openai-codex","claude-code","github-copilot","openai","anthropic","google","xai","openrouter","opencode","opencode-go","deepseek","minimax","moonshotai","kimi-coding","zai","vercel-ai-gateway","cloudflare-ai-gateway","ollama","lm-studio","custom"].includes(value)) throw new Error("Unknown provider");
   return value as ProviderId;

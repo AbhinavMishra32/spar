@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { FileCode2, FileText, FlaskConical, FolderOpen, Lock } from "lucide-react";
-import type { ActiveQuestion } from "@pracai/domain";
+import type { ActiveQuestion } from "@spar/domain";
 import { cn } from "@/lib/utils";
 
 type Entry = ActiveQuestion["files"][number];

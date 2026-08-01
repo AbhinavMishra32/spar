@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { AttemptEvent, QuestionDesign, SessionCheckpoint, SessionDetail, SessionSummary, TrainingTarget } from "@pracai/domain";
+import { askUserQuestionRequestSchema, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type QuestionDesign, type SessionCheckpoint, type SessionDetail, type SessionSummary, type TrainingTarget } from "@spar/domain";
 
 type SessionRow = { id:string; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string };
 type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:"javascript"|"typescript"|"cpp"; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; created_at:string };
@@ -27,6 +27,11 @@ export class LocalStore {
     `);
     // Remove the exact prototype fixture; it was never learner data.
     this.db.prepare("DELETE FROM sessions WHERE title = ? AND original_goal = ? AND objective = ?").run("Deep JavaScript Runtime", "Understand JavaScript runtime behavior deeply", "Build reliable reasoning about reference ownership and asynchronous state.");
+    // Earlier builds stored a pending question as plain text. Upgrade it once so
+    // the suspension has a stable identity and does not reset the answer UI.
+    const legacyIntakes=this.db.prepare("SELECT session_id,question FROM session_intake WHERE status='pending'").all() as Array<{session_id:string;question:string}>;
+    const updateIntake=this.db.prepare("UPDATE session_intake SET question=? WHERE session_id=?");
+    this.db.transaction(()=>{for(const row of legacyIntakes){try{askUserQuestionRequestSchema.parse(JSON.parse(row.question));}catch{updateIntake.run(JSON.stringify(legacyQuestionRequest(row.question)),row.session_id);}}})();
   }
 
   listSessions(): SessionSummary[] { return (this.db.prepare("SELECT id,title,original_goal,objective,status,total_seconds,updated_at FROM sessions ORDER BY updated_at DESC").all() as SessionRow[]).map(row => this.toSession(row)); }
@@ -40,7 +45,7 @@ export class LocalStore {
     // what returns the app to general chat until the learner asks for another.
     if(question&&question.status!=="abandoned"){const target=this.db.prepare("SELECT * FROM training_targets WHERE id=?").get(question.training_target_id) as Record<string,unknown>;const attempt=this.db.prepare("SELECT * FROM attempts WHERE question_id=? ORDER BY started_at DESC LIMIT 1").get(question.id) as {id:string;latest_event_sequence:number}|undefined;const design=JSON.parse(question.design) as QuestionDesign;if(attempt)events=(this.db.prepare("SELECT id,sequence,type,occurred_at,payload,source FROM attempt_events WHERE attempt_id=? ORDER BY sequence").all(attempt.id) as Array<{id:string;sequence:number;type:string;occurred_at:string;payload:string;source:string}>).map(e=>({...e,occurredAt:e.occurred_at,payload:JSON.parse(e.payload)}));if(attempt)active={id:question.id,sessionId:id,trainingTargetId:question.training_target_id,ordinal:question.ordinal,title:question.title,statement:question.statement,language:question.language,kind:question.kind,status:question.status,difficulty:question.difficulty,createdAt:question.created_at,abilityId:String(target.ability_id),abilityTitle:String(target.ability_title),specificGap:String(target.specific_gap),desiredEvidence:String(target.desired_evidence),avoidTesting:JSON.parse(String(target.avoid_testing)) as string[],files:Object.keys({...design.starterFiles,...design.visibleTests}).sort().map(path=>({path,language:languageFor(path),readOnly:path.startsWith("tests/")})),visibleTestFiles:Object.keys(design.visibleTests),attemptId:attempt.id,latestEventSequence:attempt.latest_event_sequence};}
     const messages=(this.db.prepare("SELECT id,role,body,created_at FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string}>).map(m=>({id:m.id,role:m.role,body:m.body,createdAt:m.created_at}));
-    return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)?.question??null,messages,events};
+    return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
 
   setObjective(sessionId:string,objective:string){this.db.prepare("UPDATE sessions SET objective=?,updated_at=? WHERE id=?").run(objective,new Date().toISOString(),sessionId);return{objective};}
@@ -62,8 +67,8 @@ export class LocalStore {
   addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string){const value={id:randomUUID(),role,body,createdAt:new Date().toISOString()};this.db.prepare("INSERT INTO agent_messages VALUES (?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt);return value;}
   hasLearnerEvidence(){const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents").get() as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts WHERE status='completed'").get() as {count:number}).count;return abilities>0||completed>0;}
   hasRelevantLearnerEvidence(goal:string){return this.searchLearner(goal,1).length>0||this.searchAttempts(goal,1).length>0;}
-  setPendingIntake(sessionId:string,question:string){const now=new Date().toISOString();this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,question,now);return{question,status:"pending" as const};}
-  pendingIntake(sessionId:string){return this.db.prepare("SELECT question FROM session_intake WHERE session_id=? AND status='pending'").get(sessionId) as {question:string}|undefined;}
+  setPendingIntake(sessionId:string,input:AskUserQuestionInput){const now=new Date().toISOString();const request=askUserQuestionRequestSchema.parse({id:randomUUID(),...input});this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,JSON.stringify(request),now);return{request,status:"pending" as const};}
+  pendingIntake(sessionId:string):AskUserQuestionRequest|undefined{const row=this.db.prepare("SELECT question FROM session_intake WHERE session_id=? AND status='pending'").get(sessionId) as {question:string}|undefined;if(!row)return undefined;try{return askUserQuestionRequestSchema.parse(JSON.parse(row.question));}catch{return legacyQuestionRequest(row.question);}}
   answerIntake(sessionId:string,answer:string){const result=this.db.prepare("UPDATE session_intake SET status='answered',answer=?,answered_at=? WHERE session_id=? AND status='pending'").run(answer,new Date().toISOString(),sessionId);if(result.changes!==1)throw new Error("No pending placement question exists for this session");return{answered:true};}
   resetIncompletePlanning(sessionId:string){
     return this.db.transaction(()=>{
@@ -112,3 +117,4 @@ function tokens(value:string){return value.toLowerCase().replace(/[^a-z0-9+#-]+/
 function searchTerms(query:string){return [...new Set(tokens(query).filter(term=>!SEARCH_STOP_WORDS.has(term)&&(term.length>2||["ai","js","c#","c++"].includes(term))))].slice(0,12);}
 function relevance(text:string,terms:string[]){const haystack=new Set(tokens(text));return terms.reduce((score,term)=>score+(haystack.has(term)?1:0),0);}
 function normalizeTarget(row:Record<string,unknown>){return{id:String(row.id),sessionId:String(row.session_id),abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),specificGap:String(row.specific_gap),desiredEvidence:String(row.desired_evidence),avoidTesting:JSON.parse(String(row.avoid_testing)) as string[],action:String(row.action),createdAt:String(row.created_at)};}
+function legacyQuestionRequest(question:string):AskUserQuestionRequest{return{id:randomUUID(),questions:[{header:"Placement",question,options:[{label:"New to this",description:"Start with prerequisites and establish the vocabulary."},{label:"Some experience",description:"Calibrate with an accessible applied question."},{label:"Comfortable",description:"Use an interview-style diagnostic without assuming mastery."}],multiple:false,custom:true}]};}

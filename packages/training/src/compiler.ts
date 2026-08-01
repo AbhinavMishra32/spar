@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { questionDesignSchema, type QuestionDesign } from "@pracai/domain";
+import { questionDesignSchema, type QuestionDesign } from "@spar/domain";
 
 export type ValidationRun = { exitCode: number; stdout: string; stderr: string; durationMs: number };
 export type ValidationRunner = (files: Record<string,string>, command: string, limits: { timeoutMs: number; memoryMb: number }) => Promise<ValidationRun>;
@@ -66,12 +66,12 @@ async function materializeJavascriptOracles(design: QuestionDesign, run: Validat
     const entries = await Promise.all(Object.entries(tests).map(async ([file, source]) => {
       const calls = findAssertionCalls(source);
       if (!calls.length) return [file, source] as const;
-      const instrumented = rewriteAssertions(source, calls, calls.map((call, index) => `globalThis.__pracaiOracle(${index}, (${call.arguments[0]}))`));
-      const oracleSource = `globalThis.__pracaiOracle = (index, actual) => console.log("__PRACAI_ORACLE__" + JSON.stringify({ index, actual }));\n${instrumented}`;
+      const instrumented = rewriteAssertions(source, calls, calls.map((call, index) => `globalThis.__sparOracle(${index}, (${call.arguments[0]}))`));
+      const oracleSource = `globalThis.__sparOracle = (index, actual) => console.log("__SPAR_ORACLE__" + JSON.stringify({ index, actual }));\n${instrumented}`;
       const result = await run({ ...design.starterFiles, ...design.referenceFiles, [file]: oracleSource }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
       if (result.exitCode !== 0) return [file, source] as const;
       const actualByIndex = new Map<number, unknown>();
-      for (const match of result.stdout.matchAll(/__PRACAI_ORACLE__(\{[^\r\n]*\})/g)) {
+      for (const match of result.stdout.matchAll(/__SPAR_ORACLE__(\{[^\r\n]*\})/g)) {
         try {
           const value = JSON.parse(match[1] ?? "") as { index?: unknown; actual?: unknown };
           if (typeof value.index === "number") actualByIndex.set(value.index, value.actual);
@@ -167,9 +167,9 @@ async function materializeDifferentialHiddenTests(design: QuestionDesign, run: V
     if (!seedArguments.length) continue;
     const directory = implementationPath.includes("/") ? implementationPath.slice(0, implementationPath.lastIndexOf("/")) : "";
     const basename = implementationPath.slice(implementationPath.lastIndexOf("/") + 1);
-    const incorrectName = `.pracai-incorrect-${index + 1}-${basename}`;
+    const incorrectName = `.spar-incorrect-${index + 1}-${basename}`;
     const incorrectPath = directory ? `${directory}/${incorrectName}` : incorrectName;
-    const harnessPath = directory ? `${directory}/.pracai-differential-${index + 1}.test.js` : `.pracai-differential-${index + 1}.test.js`;
+    const harnessPath = directory ? `${directory}/.spar-differential-${index + 1}.test.js` : `.spar-differential-${index + 1}.test.js`;
     const referenceImport = `./${basename}`;
     const incorrectImport = `./${incorrectName}`;
     const harness = differentialHarness(exportName, referenceImport, incorrectImport, seedArguments, moduleStyle);
@@ -179,7 +179,7 @@ async function materializeDifferentialHiddenTests(design: QuestionDesign, run: V
       if (visible.exitCode !== 0) continue;
       const discovery = await run({ ...design.starterFiles, ...design.referenceFiles, [incorrectPath]: candidateSource, [harnessPath]: harness }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
       if (discovery.exitCode !== 0) continue;
-      const marker = discovery.stdout.match(/__PRACAI_COUNTEREXAMPLE__(\{[^\r\n]*\})/)?.[1];
+      const marker = discovery.stdout.match(/__SPAR_COUNTEREXAMPLE__(\{[^\r\n]*\})/)?.[1];
       if (!marker) continue;
       try {
         const counterexample = JSON.parse(marker) as { args?: unknown[]; expected?: unknown };
@@ -188,7 +188,7 @@ async function materializeDifferentialHiddenTests(design: QuestionDesign, run: V
         const expected = JSON.stringify(counterexample.expected);
         if (expected === undefined) continue;
         knownIncorrectFiles[index] = { ...incorrect, [implementationPath]: candidateSource };
-        const hiddenPath = directory ? `${directory}/.pracai-generated-${index + 1}.hidden.test.js` : `.pracai-generated-${index + 1}.hidden.test.js`;
+        const hiddenPath = directory ? `${directory}/.spar-generated-${index + 1}.hidden.test.js` : `.spar-generated-${index + 1}.hidden.test.js`;
         hiddenTests[hiddenPath] = moduleStyle === "esm"
           ? `import test from "node:test";\nimport assert from "node:assert/strict";\nimport { ${exportName} } from ${JSON.stringify(referenceImport)};\n\ntest("generated counterexample for targeted misconception ${index + 1}", () => {\n  assert.deepStrictEqual(${exportName}(${args}), ${expected});\n});\n`
           : `const test = require("node:test");\nconst assert = require("node:assert/strict");\nconst { ${exportName} } = require(${JSON.stringify(referenceImport)});\n\ntest("generated counterexample for targeted misconception ${index + 1}", () => {\n  assert.deepStrictEqual(${exportName}(${args}), ${expected});\n});\n`;
@@ -274,7 +274,7 @@ test("bounded differential counterexample discovery", async () => {
       const expected = await reference(...args);
       const actual = await misconception(...args);
       if (!isDeepStrictEqual(expected, actual) && expected !== undefined) {
-        console.log("__PRACAI_COUNTEREXAMPLE__" + JSON.stringify({ args, expected, actual }));
+        console.log("__SPAR_COUNTEREXAMPLE__" + JSON.stringify({ args, expected, actual }));
         return;
       }
     } catch {}

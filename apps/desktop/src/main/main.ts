@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, nativeTheme } from "electron";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { AuthService } from "./auth.js";
@@ -12,6 +12,7 @@ import { executeTrainingTool } from "./trainingTools.js";
 import { ProviderService } from "./provider.js";
 import { createMainWindow } from "./window.js";
 import { WorkspaceService } from "./workspaces.js";
+import { themePreferenceSchema } from "../shared/api.js";
 
 let mainWindow: BrowserWindow | null = null;
 let store: LocalStore;
@@ -19,8 +20,8 @@ let store: LocalStore;
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   void app.whenReady().then(async () => {
-    const root = path.join(app.getPath("userData"), "practice-ai"); await mkdir(path.join(root, "workspaces"), { recursive: true });
-    store = new LocalStore(path.join(root, "state.sqlite3")); const apiOrigin=process.env.PRACTICE_API_ORIGIN ?? "http://localhost:4318"; const auth = new AuthService(apiOrigin); const workspaces = new WorkspaceService(path.join(root, "workspaces"));
+    const root = path.join(app.getPath("userData"), "spar"); await mkdir(path.join(root, "workspaces"), { recursive: true });
+    store = new LocalStore(path.join(root, "state.sqlite3")); nativeTheme.themeSource = themePreferenceSchema.catch("system").parse(store.getSetting("theme", "system")); const apiOrigin=process.env.SPAR_API_ORIGIN ?? "http://localhost:4318"; const auth = new AuthService(apiOrigin); const workspaces = new WorkspaceService(path.join(root, "workspaces"));
     const providers = new ProviderService(auth, store, (event) => mainWindow?.webContents.send("provider:oauth-event", event));
     const runner = new UtilityClient("runner", (event) => mainWindow?.webContents.send("runner:event", { id: event.requestId, stream: event.stream, data: event.data, exitCode: event.exitCode }));
     const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; mainWindow?.webContents.send("agent:event", { runId: event.requestId, ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner));

@@ -19,7 +19,7 @@ export class UtilityClient {
   private ensure() {
     if (this.child) return this.child;
     const dirname = path.dirname(fileURLToPath(import.meta.url));
-    const child = utilityProcess.fork(path.join(dirname, `../workers/${this.workerFile}.js`), [], { serviceName: `Practice AI ${this.workerFile}` });
+    const child = utilityProcess.fork(path.join(dirname, `../workers/${this.workerFile}.js`), [], { serviceName: `Spar ${this.workerFile}` });
     child.on("message", (message: unknown) => void this.handle(message as Record<string, unknown>));
     child.on("exit", (code) => { for (const item of this.pending.values()) item.reject(new Error(`${this.workerFile} exited (${code})`)); this.pending.clear(); this.child = null; });
     this.child = child; return child;

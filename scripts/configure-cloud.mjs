@@ -34,7 +34,7 @@ const values = {
   DATABASE_URL: await ask("PostgreSQL connection URL", current.DATABASE_URL),
   OBJECT_STORAGE_ENDPOINT: await ask("S3 endpoint URL", current.OBJECT_STORAGE_ENDPOINT),
   OBJECT_STORAGE_REGION: await ask("S3 region", current.OBJECT_STORAGE_REGION || "auto"),
-  OBJECT_STORAGE_BUCKET: await ask("S3 bucket name", current.OBJECT_STORAGE_BUCKET || "pracai"),
+  OBJECT_STORAGE_BUCKET: await ask("S3 bucket name", current.OBJECT_STORAGE_BUCKET || "spar"),
   OBJECT_STORAGE_ACCESS_KEY: await ask("S3 access key ID", current.OBJECT_STORAGE_ACCESS_KEY),
   OBJECT_STORAGE_SECRET_KEY: await askSecret("S3 secret access key", current.OBJECT_STORAGE_SECRET_KEY)
 };

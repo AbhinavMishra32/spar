@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowDown } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
-import type { SessionDetail } from "@pracai/domain";
+import type { SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { ActivityRow } from "./ActivityRow";

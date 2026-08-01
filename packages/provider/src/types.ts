@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 export const providerSettingsSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("gateway"), provider: z.literal("practice-ai"), model: z.string().min(1), gatewayUrl: z.string().url(), accessToken: z.string().min(1) }),
+  z.object({ mode: z.literal("gateway"), provider: z.literal("spar"), model: z.string().min(1), gatewayUrl: z.string().url(), accessToken: z.string().min(1) }),
   z.object({ mode: z.literal("byok"), provider: z.enum(["openai", "openrouter", "opencode-go", "opencode-zen", "litellm"]), model: z.string().min(1), baseUrl: z.string().url(), keychainAccount: z.string().min(1) })
 ]);
 export type ProviderSettings = z.infer<typeof providerSettingsSchema>;

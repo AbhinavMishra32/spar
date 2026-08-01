@@ -6,7 +6,7 @@ const env=envSchema.parse(process.env);
 if(!env.SUPABASE_URL||!env.SUPABASE_SECRET_KEY)throw new Error("Supabase REST credentials are required for the managed-storage round trip.");
 const client=createClient(env.SUPABASE_URL,env.SUPABASE_SECRET_KEY,{auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false}});
 const key=`_health/${randomUUID()}.txt`;
-const expected=`practice-ai-storage-check:${randomUUID()}`;
+const expected=`spar-storage-check:${randomUUID()}`;
 try{
   const uploaded=await client.storage.from(env.OBJECT_STORAGE_BUCKET).upload(key,expected,{contentType:"text/plain",upsert:false});
   if(uploaded.error)throw uploaded.error;

@@ -59,8 +59,8 @@ const DARK: Palette = {
   punctuation: "#b3bac2",
 };
 
-export const EDITOR_THEME_LIGHT = "practice-light";
-export const EDITOR_THEME_DARK = "practice-dark";
+export const EDITOR_THEME_LIGHT = "spar-light";
+export const EDITOR_THEME_DARK = "spar-dark";
 
 /** Monaco token rules want bare hex without the leading `#`. */
 const bare = (value: string) => value.replace("#", "");

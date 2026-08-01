@@ -22,7 +22,7 @@ export type ResolvedProvider = {
   baseUrl: string;
   apiKey: string;
   headers?: Record<string, string>;
-  source: "practice-keychain" | "practice-oauth" | "construct-import" | "gateway";
+  source: "spar-keychain" | "spar-oauth" | "construct-import" | "gateway";
 };
 
 type Descriptor = {
@@ -198,12 +198,12 @@ export class ProviderService {
             const provider = getOAuthProvider(runtimeId);
             const available = provider?.modifyModels?.(modelsFor(runtimeId), result.newCredentials) ?? modelsFor(runtimeId);
             const model = available.find((item) => item.id === modelId) ?? available[0];
-            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "practice-oauth" });
+            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "spar-oauth" });
           } else {
             this.store.setSetting(`provider-auth-expired:${selected}`, true);
           }
         } catch {
-          // A stale subscription must not prevent Construct-import or Practice gateway fallback.
+          // A stale subscription must not prevent Construct-import or Spar gateway fallback.
           this.store.setSetting(`provider-auth-expired:${selected}`, true);
         }
       }
@@ -213,7 +213,7 @@ export class ProviderService {
         const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
         const model = modelsFor(selectedDescriptor.runtimeId).find((item) => item.id === modelId);
         const baseUrl = this.store.getSetting(`provider-base-url:${selected}`, selectedDescriptor.defaultBaseUrl ?? model?.baseUrl ?? "");
-        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "practice-keychain" });
+        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain" });
       }
     }
 
@@ -223,7 +223,7 @@ export class ProviderService {
     if (values.length) return dedupe(values);
 
     values.push(...await readConstructProviders());
-    if (accessToken && process.env.PRACTICE_AI_GATEWAY_ENABLED === "true") values.push({ provider: "practice-gateway", model: "practice-training", api: "openai-completions", baseUrl: `${process.env.PRACTICE_API_ORIGIN ?? "http://localhost:4318"}/v1/ai`, apiKey: accessToken, source: "gateway" });
+    if (accessToken && process.env.SPAR_AI_GATEWAY_ENABLED === "true") values.push({ provider: "spar-gateway", model: "spar-training", api: "openai-completions", baseUrl: `${process.env.SPAR_API_ORIGIN ?? "http://localhost:4318"}/v1/ai`, apiKey: accessToken, source: "gateway" });
     return dedupe(values);
   }
 

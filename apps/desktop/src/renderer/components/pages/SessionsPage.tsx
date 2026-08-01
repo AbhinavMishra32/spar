@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { LayoutGrid, Search } from "lucide-react";
-import type { SessionSummary } from "@pracai/domain";
+import type { SessionSummary } from "@spar/domain";
 import { EmptyState } from "../common/EmptyState";
 import { SessionCard } from "../common/SessionCard";
 import { cn } from "@/lib/utils";

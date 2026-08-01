@@ -1,3 +1,3 @@
-import type { PracticeApi } from "../shared/api";
-declare global { interface Window { practice: PracticeApi; MonacoEnvironment: { getWorker(moduleId:string,label:string):Worker } } }
+import type { SparApi } from "../shared/api";
+declare global { interface Window { spar: SparApi; MonacoEnvironment: { getWorker(moduleId:string,label:string):Worker } } }
 export {};

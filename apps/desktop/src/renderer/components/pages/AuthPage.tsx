@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { AlertCircle, ArrowRight, Sparkles } from "lucide-react";
-import type { PracticeApi } from "../../../shared/api";
+import type { SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { message } from "@/lib/format";
+import { SparWordmark } from "../common/SparWordmark";
 
 const PRINCIPLES = [
   ["Evidence first", "The agent reads what you have actually done before it decides what to test."],
@@ -10,7 +11,7 @@ const PRINCIPLES = [
   ["Nothing is guessed", "Attempts, runs, and outcomes are recorded as an immutable trace."],
 ];
 
-export function AuthPage({ api, error, onError }: { api: PracticeApi | undefined; error: string | null; onError(value: string): void }) {
+export function AuthPage({ api, error, onError }: { api: SparApi | undefined; error: string | null; onError(value: string): void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -28,9 +29,12 @@ export function AuthPage({ api, error, onError }: { api: PracticeApi | undefined
   return (
     <div className="app-drag app-opaque grid h-full grid-cols-[minmax(0,26rem)_1fr]">
       <div className="app-no-drag flex flex-col justify-center border-r border-border px-10">
-        <span className="grid size-8 place-items-center rounded-[10px] bg-primary text-primary-foreground">
-          <Sparkles className="size-4" />
-        </span>
+        <div className="flex items-center gap-2.5">
+          <span className="grid size-8 place-items-center rounded-[10px] bg-primary text-primary-foreground">
+            <Sparkles className="size-4" />
+          </span>
+          <SparWordmark className="text-[1.3rem]" />
+        </div>
         <h1 className="mt-5 text-[1.6rem] font-semibold tracking-[-0.03em]">Train how you think.</h1>
         <p className="mt-1.5 text-content leading-[1.6] text-muted-foreground">
           Your sessions, attempts, and ability evidence stay attached to your account.

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { ActiveQuestion } from "@pracai/domain";
+import type { ActiveQuestion } from "@spar/domain";
 import { cn } from "@/lib/utils";
 
 /**

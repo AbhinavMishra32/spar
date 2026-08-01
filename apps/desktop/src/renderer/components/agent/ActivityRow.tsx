@@ -13,7 +13,7 @@ function orbFor(tool: string): OrbState {
   if (tool.startsWith("read_") || tool.startsWith("inspect_")) return "searching";
   if (tool === "create_question") return "shaping";
   if (tool === "evaluate_attempt") return "solving";
-  if (tool === "ask_learner") return "listening";
+  if (tool === "ask_user_question") return "listening";
   if (tool.startsWith("set_") || tool.startsWith("propose_") || tool.startsWith("commit_")) return "composing";
   return "working";
 }

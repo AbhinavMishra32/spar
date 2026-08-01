@@ -10,7 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { ActiveQuestion, SessionDetail } from "@pracai/domain";
+import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/format";
 import { declaredCases } from "@/lib/testCases";

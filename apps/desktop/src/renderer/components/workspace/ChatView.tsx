@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Flag, Sparkles } from "lucide-react";
-import type { SessionDetail } from "@pracai/domain";
-import type { PracticeApi } from "../../../shared/api";
+import type { SessionDetail } from "@spar/domain";
+import type { SparApi } from "../../../shared/api";
 import { message } from "@/lib/format";
 import { Toolbar } from "../shell/Toolbar";
 import { AgentThread } from "../agent/AgentThread";
@@ -23,7 +23,7 @@ export function ChatView({
   onExpandSidebar,
 }: {
   detail: SessionDetail;
-  api: PracticeApi | undefined;
+  api: SparApi | undefined;
   run: AgentRun | null;
   onRefresh(): Promise<void>;
   onError(value: string): void;

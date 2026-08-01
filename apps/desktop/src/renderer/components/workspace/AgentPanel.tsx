@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { NotebookPen } from "lucide-react";
-import type { ActiveQuestion, SessionDetail } from "@pracai/domain";
+import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";

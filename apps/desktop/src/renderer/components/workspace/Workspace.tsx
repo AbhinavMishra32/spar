@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
 import { FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
-import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@pracai/domain";
-import type { PracticeApi } from "../../../shared/api";
+import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@spar/domain";
+import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { fileName, languageFor, message } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
@@ -42,7 +42,7 @@ export function Workspace({
 }: {
   detail: SessionDetail;
   question: ActiveQuestion;
-  api: PracticeApi | undefined;
+  api: SparApi | undefined;
   logs: RuntimeLog[];
   run: AgentRun | null;
   dark: boolean;
@@ -325,7 +325,7 @@ export function Workspace({
         title={`Challenge ${question.ordinal}`}
       />
 
-      <PanelGroup autoSaveId="practice-problem" className="min-h-0 flex-1" direction="horizontal">
+      <PanelGroup autoSaveId="spar-problem" className="min-h-0 flex-1" direction="horizontal">
         {/* Left: the challenge and the agent that set it, as one live stream. */}
         <Panel defaultSize={46} minSize={32} order={1}>
           <AgentPanel
