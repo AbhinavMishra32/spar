@@ -16,7 +16,9 @@ const api: PracticeApi = {
   signOut: () => ipcRenderer.invoke(ipc.authSignOut),
   saveProviderSecret: (input) => ipcRenderer.invoke(ipc.settingsSaveSecret, input),
   onAgentEvent: (listener) => subscribe("agent:event", listener),
-  onRunnerEvent: (listener) => subscribe("runner:event", listener)
+  onRunnerEvent: (listener) => subscribe("runner:event", listener),
+  onMenuCommand: (listener) => subscribe("menu:command", listener),
+  onSyncState: (listener) => subscribe("sync:state", listener)
 };
 function subscribe<T>(channel: string, listener: (value: T) => void) { const handler = (_event: Electron.IpcRendererEvent, value: T) => listener(value); ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler); }
 contextBridge.exposeInMainWorld("practice", api);

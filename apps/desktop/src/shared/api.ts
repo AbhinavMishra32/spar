@@ -24,6 +24,9 @@ export const providerSettingsInput = z.object({
 
 export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; sessions: z.infer<typeof sessionSummarySchema>[]; theme: "system" | "light" | "dark"; syncState: "offline" | "synced" | "pending" };
 export type AgentStreamEvent = { runId: string; type: "text" | "tool" | "status" | "error" | "done"; text?: string; tool?: string; detail?: string };
+/** Native menu items are routed to the renderer so the macOS menu bar drives the same UI as the in-app controls. */
+export type MenuCommand = "settings" | "new-session" | "command-palette";
+export type SyncState = BootstrapData["syncState"];
 
 export interface PracticeApi {
   bootstrap(): Promise<BootstrapData>;
@@ -41,4 +44,6 @@ export interface PracticeApi {
   saveProviderSecret(input: z.infer<typeof providerSettingsInput>): Promise<void>;
   onAgentEvent(listener: (event: AgentStreamEvent) => void): () => void;
   onRunnerEvent(listener: (event: { id: string; stream: "stdout" | "stderr" | "exit"; data: string; exitCode?: number }) => void): () => void;
+  onMenuCommand(listener: (command: MenuCommand) => void): () => void;
+  onSyncState(listener: (state: SyncState) => void): () => void;
 }
