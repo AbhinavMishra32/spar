@@ -27,6 +27,12 @@ export const providerSettingsInput = z.object({
   secret: z.string().max(20_000),
 });
 export const themePreferenceSchema = z.enum(["system", "light", "dark"]);
+/** The translucent material the OS paints behind the window, if any. */
+export type NativeSurface = "liquid-glass" | "vibrancy" | "mica" | "none";
+/** Which edge must reserve room for the OS window buttons; "none" = native frame. */
+export type WindowControls = "left" | "right" | "none";
+/** `process.platform`, narrowed to what the renderer branches on. */
+export type HostPlatform = "darwin" | "win32" | "linux" | (string & {});
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;
 
 export type ProviderId = "openai-codex" | "claude-code" | "github-copilot" | z.infer<typeof providerSettingsInput>["provider"];
@@ -105,5 +111,8 @@ export interface SparApi {
   onAgentEvent(listener: (event: AgentStreamEvent) => void): () => void;
   onRunnerEvent(listener: (event: { id: string; stream: "stdout" | "stderr" | "exit"; data: string; exitCode?: number }) => void): () => void;
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
+  /** Chrome the OS owns: the material behind us, and where its buttons sit. */
+  chrome: { platform: HostPlatform; surface: NativeSurface; controls: WindowControls };
+  onNativeSurface(listener: (surface: NativeSurface) => void): () => void;
   onSyncState(listener: (state: SyncState) => void): () => void;
 }

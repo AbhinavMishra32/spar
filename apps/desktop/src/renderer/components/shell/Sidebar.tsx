@@ -52,10 +52,12 @@ export function Sidebar({
   const recent = sessions.slice(0, 8);
 
   return (
-    <aside className="app-drag app-vibrant hairline-r flex h-full w-[228px] flex-col">
-      {/* Clears the native traffic lights, and carries the collapse control. */}
-      <div className="flex h-[38px] shrink-0 items-center px-2.5">
-        <SparWordmark className="ml-[3.35rem] text-[0.98rem] text-foreground/90" />
+    <aside className="app-drag app-vibrant flex h-full w-[228px] flex-col">
+      {/* Clears the native traffic lights, and carries the collapse control. The leading
+          inset is the shared chrome token rather than a hand-measured margin, so the
+          wordmark keeps its clearance if the button metrics ever move. */}
+      <div className="flex h-[var(--titlebar-height)] shrink-0 items-center pl-[max(0.625rem,var(--window-controls-leading))] pr-2.5">
+        <SparWordmark className="text-[0.98rem] text-foreground/90" />
         <button
           className="app-no-drag ml-auto grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-[var(--sidebar-accent)] hover:text-foreground"
           onClick={onCollapse}

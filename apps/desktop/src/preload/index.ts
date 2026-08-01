@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import { ipc, type AgentStreamEvent, type SparApi } from "../shared/api.js";
+import { ipc, type AgentStreamEvent, type NativeSurface, type SparApi, type WindowControls } from "../shared/api.js";
+
+/** Injected by the main process via webPreferences.additionalArguments. */
+function launchFlag(name: string, fallback: string) {
+  return process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3) ?? fallback;
+}
 
 const api: SparApi = {
   bootstrap: () => ipcRenderer.invoke(ipc.bootstrap),
@@ -29,6 +34,12 @@ const api: SparApi = {
   onAgentEvent: (listener) => subscribe("agent:event", listener),
   onRunnerEvent: (listener) => subscribe("runner:event", listener),
   onMenuCommand: (listener) => subscribe("menu:command", listener),
+  chrome: {
+    platform: process.platform,
+    surface: launchFlag("spar-surface", "none") as NativeSurface,
+    controls: launchFlag("spar-controls", process.platform === "darwin" ? "left" : "right") as WindowControls,
+  },
+  onNativeSurface: (listener) => subscribe("window:surface", listener),
   onSyncState: (listener) => subscribe("sync:state", listener)
 };
 function subscribe<T>(channel: string, listener: (value: T) => void) { const handler = (_event: Electron.IpcRendererEvent, value: T) => listener(value); ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler); }

@@ -1,7 +1,7 @@
 import { ChevronLeft, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-/** Inset macOS toolbar: 38pt tall, hairline base, draggable everywhere but the controls. */
+/** Inset macOS toolbar: one title-bar row tall, hairline base, draggable but for the controls. */
 export function Toolbar({
   title,
   subtitle,
@@ -21,9 +21,12 @@ export function Toolbar({
   return (
     <header
       className={cn(
-        "app-drag hairline-b flex h-[38px] shrink-0 items-center gap-2 px-2.5",
-        // With the sidebar hidden the native traffic lights sit over this bar.
-        onExpandSidebar && "pl-[78px]",
+        "app-drag hairline-b flex h-[var(--titlebar-height)] shrink-0 items-center gap-2 px-2.5",
+        // The OS draws its window buttons over this row: on Windows they are
+        // always on the trailing edge, and on macOS they land here only once the
+        // sidebar (which normally hosts them) is hidden.
+        "pr-[max(0.625rem,var(--window-controls-trailing))]",
+        onExpandSidebar && "pl-[max(0.625rem,var(--window-controls-leading))]",
         className,
       )}
     >

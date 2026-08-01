@@ -67,6 +67,19 @@
   --squircle-factor: 1.4;
   --hairline: 0.5px;
 
+  /* Window chrome. The OS draws its own buttons over our first row, so these
+     tokens reserve the room they occupy — on the leading edge for macOS traffic
+     lights, on the trailing edge for the Windows caption buttons. `main/surface.ts`
+     stamps data-window-controls on <html> and the override below picks a side.
+
+     macOS: measured on 26, the buttons are 16x16 (up from 12x12 on earlier
+     releases) and run x=18..80; 6rem clears that with a 16px gap, and the row
+     height centres them against trafficLightPosition. Keep the two in step.
+     Windows: the minimise/maximise/close overlay is a fixed 138px at 100% scale. */
+  --titlebar-height: 2.75rem;
+  --window-controls-leading: 6rem;
+  --window-controls-trailing: 0rem;
+
   --background: oklch(100% 0 0);
   --foreground: oklch(14.5% 0 0);
 
@@ -111,10 +124,21 @@
   --color-background-editor: color-mix(in oklab, var(--foreground) 2%, var(--background));
 
   --app-window-fill: oklch(97.6% 0 0);
+  /* Only painted when the platform gives us no native material to sit on. */
+  --app-sidebar-fill: oklch(95.5% 0 0);
   --app-user-message-background: oklch(14.5% 0 0 / 6%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 10%), 0 8px 10px -6px oklch(0% 0 0 / 10%);
+  --app-shadow-menu: 0 16px 40px -12px oklch(0% 0 0 / 20%), 0 4px 10px -4px oklch(0% 0 0 / 8%);
   --app-shadow-composer: 0 4px 18px -6px color-mix(in srgb, var(--foreground) 8%, transparent);
   --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 4%);
+
+  /* Glass. In light the rim is a near-white specular edge; the sheen brightens
+     just the top line, where a curved surface would actually catch the light. */
+  --glass-fill: 82%;
+  --glass-fill-solid: 94%;
+  --glass-rim: oklch(100% 0 0 / 80%);
+  --glass-sheen: oklch(100% 0 0 / 90%);
+  --glass-hairline: color-mix(in oklab, var(--foreground) 18%, transparent);
 
   --code-foreground: #33363b;
   --code-comment: #727780;
@@ -169,10 +193,21 @@
   --color-background-editor: color-mix(in oklab, black 14%, var(--background));
 
   --app-window-fill: oklch(20.5% 0 0);
+  --app-sidebar-fill: oklch(17.5% 0 0);
   --app-user-message-background: oklch(98.5% 0 0 / 8%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 40%), 0 8px 10px -6px oklch(0% 0 0 / 40%);
+  --app-shadow-menu: 0 16px 40px -10px oklch(0% 0 0 / 55%), 0 4px 12px -4px oklch(0% 0 0 / 40%);
   --app-shadow-composer: 0 6px 24px -10px oklch(0% 0 0 / 45%);
   --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 20%);
+
+  /* Dark glass keeps the same anatomy, but a white rim at 80% would read as a
+     drawn outline rather than a lit edge — so the rim drops to a faint sheen
+     and the hairline carries the shape instead. */
+  --glass-fill: 78%;
+  --glass-fill-solid: 92%;
+  --glass-rim: oklch(100% 0 0 / 8%);
+  --glass-sheen: oklch(100% 0 0 / 12%);
+  --glass-hairline: oklch(0% 0 0 / 55%);
 
   --code-foreground: #c9d1d9;
   --code-comment: #8b949e;
@@ -236,6 +271,19 @@
 @layer components {
   /* ---- macOS window chrome ---------------------------------------------- */
 
+  /* Windows puts its caption buttons on the trailing edge, so the reservation
+     moves with them: nothing to clear on the left, 138px to clear on the right. */
+  :root[data-window-controls="right"] {
+    --window-controls-leading: 0rem;
+    --window-controls-trailing: 8.625rem;
+  }
+
+  /* A native frame keeps its buttons outside our content: reserve nothing. */
+  :root[data-window-controls="none"] {
+    --window-controls-leading: 0rem;
+    --window-controls-trailing: 0rem;
+  }
+
   .app-drag {
     -webkit-app-region: drag;
   }
@@ -244,14 +292,34 @@
     -webkit-app-region: no-drag;
   }
 
-  /* The vibrant sidebar is painted by the OS; everything to its right gets an
-     opaque fill so text stays legible over moving desktop content. */
+  /* The sidebar is a hole in the window: the OS paints the material behind it
+     (Liquid Glass on macOS 26, vibrancy below that, Mica on Windows 11), so the
+     element itself must stay fully transparent. When the platform has no such
+     material — Windows 10, Linux — the main process sets data-native-surface="none"
+     and we paint the fill ourselves, because a transparent hole would otherwise
+     show the desktop straight through. */
   .app-vibrant {
     background: transparent;
   }
 
+  :root[data-native-surface="none"] .app-vibrant {
+    background: var(--app-sidebar-fill);
+  }
+
   .app-opaque {
     background: var(--app-window-fill);
+  }
+
+  /* The content pane as an inset sheet on the sidebar's material: rounded on the
+     leading edge, top and bottom, so the glass appears to continue behind it. The
+     hairline is drawn as an inset ring rather than a border so it follows the
+     curve, and overflow is clipped so toolbars and editors cannot square the
+     corners off from the inside. */
+  .app-content-pane {
+    border-start-start-radius: calc(0.625rem * var(--squircle-factor));
+    border-end-start-radius: calc(0.625rem * var(--squircle-factor));
+    box-shadow: inset 0 0 0 0.5px var(--sidebar-border);
+    overflow: hidden;
   }
 
   .hairline-r {
@@ -339,23 +407,56 @@
     animation: agent-shimmer 2.4s linear infinite;
   }
 
+  /* ---- Glass -------------------------------------------------------------- */
+
+  /* Liquid Glass proper is a native material — on macOS 26 it is the window's
+     own NSGlassEffectView, which the main process installs behind the web
+     contents (see main/surface.ts). It cannot be reached from CSS, so DOM
+     surfaces reproduce its *read* instead, which is three things and not the
+     heavy blur everyone reaches for first:
+       1. a lightly frosted, mostly-opaque fill — glass tints, it does not fog;
+       2. a bright 1px inset rim, the specular edge of a curved surface, which
+          is what actually says "glass" rather than "translucent rectangle";
+       3. a 0.5px outer hairline so the shape stays legible on any backdrop.
+     The blur is deliberately small (8px). Past ~12px small text behind the
+     surface turns to mush and the material reads as frosted plastic. */
+  .glass {
+    background: color-mix(in oklab, var(--popover) var(--glass-fill), transparent);
+    box-shadow:
+      inset 0 0 0 1px var(--glass-rim),
+      inset 0 1px 0 0 var(--glass-sheen),
+      0 0 0 0.5px var(--glass-hairline),
+      var(--glass-shadow);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    /* Keeps the blur from bleeding past the rounded corner in WebKit. */
+    isolation: isolate;
+  }
+
   /* ---- Composer ---------------------------------------------------------- */
 
   .composer-shell {
     border-radius: calc(1.125rem * var(--squircle-factor));
-    border: 1px solid var(--border);
-    background: color-mix(in oklab, var(--color-background-elevated-primary) 92%, var(--background));
-    box-shadow: var(--app-shadow-composer);
-    backdrop-filter: blur(18px) saturate(150%);
-    -webkit-backdrop-filter: blur(18px) saturate(150%);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    background: color-mix(in oklab, var(--popover) var(--glass-fill), transparent);
+    box-shadow:
+      inset 0 0 0 1px var(--glass-rim),
+      inset 0 1px 0 0 var(--glass-sheen),
+      0 0 0 0.5px var(--glass-hairline),
+      var(--app-shadow-composer);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    isolation: isolate;
+    transition: box-shadow 0.15s ease;
   }
 
   /* Focus reads as the surface lifting, not as a coloured outline — the same
      move macOS makes when a text field takes the caret. */
   .composer-shell:focus-within {
-    border-color: var(--border-strong);
-    box-shadow: var(--app-shadow-composer), 0 0 0 3px color-mix(in srgb, var(--foreground) 5%, transparent);
+    box-shadow:
+      inset 0 0 0 1px var(--glass-rim),
+      inset 0 1px 0 0 var(--glass-sheen),
+      0 0 0 0.5px color-mix(in oklab, var(--foreground) 32%, transparent),
+      var(--app-shadow-composer);
   }
 
   /* Fades transcript content into the composer instead of clipping it hard. */
@@ -365,16 +466,32 @@
 
   /* ---- Floating panels ---------------------------------------------------- */
 
-  /* The macOS material: a translucent fill over a blurred, slightly saturated
-     backdrop, with a hairline that keeps the edge legible on any content. */
   .floating-surface {
     border-radius: calc(0.75rem * var(--squircle-factor));
-    border: 1px solid var(--border-strong);
-    background: color-mix(in oklab, var(--popover) 78%, transparent);
-    box-shadow: var(--app-shadow-overlay);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    /* Keeps the blur from bleeding past the rounded corner in WebKit. */
+    box-shadow:
+      inset 0 0 0 1px var(--glass-rim),
+      inset 0 1px 0 0 var(--glass-sheen),
+      0 0 0 0.5px var(--glass-hairline),
+      var(--app-shadow-overlay);
+    background: color-mix(in oklab, var(--popover) var(--glass-fill), transparent);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    isolation: isolate;
+  }
+
+  /* Menus sit closer to opaque than panels do: they are almost entirely small
+     text, and every point of transparency costs contrast against whatever
+     happens to be behind them. */
+  .menu-surface {
+    border-radius: calc(0.875rem * var(--squircle-factor));
+    background: color-mix(in oklab, var(--popover) var(--glass-fill-solid), transparent);
+    box-shadow:
+      inset 0 0 0 1px var(--glass-rim),
+      inset 0 1px 0 0 var(--glass-sheen),
+      0 0 0 0.5px var(--glass-hairline),
+      var(--app-shadow-menu);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
     isolation: isolate;
   }
 

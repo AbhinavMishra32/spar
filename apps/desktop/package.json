@@ -11,7 +11,8 @@
     "test": "vitest run --passWithNoTests && ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run --config vitest.main.config.ts",
     "lint": "tsc --noEmit -p tsconfig.json",
     "build": "vite build && tsc -p tsconfig.main.json",
-    "package": "electron-builder --mac"
+    "package": "electron-builder --mac",
+    "package:win": "electron-builder --win"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.0",
@@ -55,8 +56,8 @@
     "@types/react-dom": "^19.1.5",
     "@vitejs/plugin-react": "^4.5.2",
     "concurrently": "^9.2.0",
-    "electron": "^37.2.3",
-    "electron-builder": "^26.0.12",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.12",
     "tailwindcss": "^4.1.11",
     "typescript": "^5.8.3",
@@ -95,6 +96,18 @@
     "files": [
       "dist/**/*",
       "package.json"
-    ]
+    ],
+    "asarUnpack": [
+      "**/node_modules/electron-liquid-glass/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  },
+  "optionalDependencies": {
+    "electron-liquid-glass": "^1.1.1"
   }
 }

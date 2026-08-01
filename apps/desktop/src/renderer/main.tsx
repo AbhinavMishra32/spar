@@ -23,6 +23,18 @@ window.MonacoEnvironment = {
 };
 
 document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches);
+
+// Chrome the OS owns. Both land before first paint — the sidebar is a
+// transparent hole over the native material, and it has to know on frame one
+// whether there is a material back there and which edge the buttons occupy.
+// The main process re-sends the surface once it knows whether Liquid Glass
+// actually attached, since that can still fall back to plain vibrancy.
+const chrome = window.spar?.chrome;
+document.documentElement.dataset.nativeSurface = chrome?.surface ?? "none";
+document.documentElement.dataset.windowControls = chrome?.controls ?? "left";
+window.spar?.onNativeSurface((surface) => {
+  document.documentElement.dataset.nativeSurface = surface;
+});
 // The themes read resolved CSS variables, so they are defined after the stylesheet applies.
 defineEditorThemes(monaco);
 loader.config({ monaco });

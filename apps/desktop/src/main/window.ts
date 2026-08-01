@@ -1,33 +1,47 @@
 import { BrowserWindow, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { applyNativeSurface, planSurface, syncWindowControls } from "./surface.js";
 
 export function createMainWindow() {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
-  const mac = process.platform === "darwin";
-  // Vibrancy is macOS-only; on other platforms the key must be absent, not undefined.
-  const translucency = mac ? { transparent: true, vibrancy: "sidebar" as const } : {};
+  // Which translucent material the OS can give us, and the window options and
+  // window-button placement that follow from it. See main/surface.ts.
+  const plan = planSurface();
+
   const window = new BrowserWindow({
-    ...translucency,
     width: 1480,
     height: 940,
     minWidth: 1_020,
     minHeight: 660,
     show: false,
-    titleBarStyle: "hiddenInset",
-    // Sits the traffic lights on the sidebar's own top inset rather than a title bar.
-    trafficLightPosition: { x: 14, y: 13 },
-    // The sidebar is translucent, so the window itself must be too; the content
-    // pane paints its own opaque fill on top.
-    backgroundColor: mac ? "#00000000" : nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#f9f9f8",
-    visualEffectState: "followWindow",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#f9f9f8",
+    // Spread last: the plan owns transparency, title-bar style and background,
+    // and on a translucent platform it must override the opaque fill above.
+    ...plan.options,
     webPreferences: {
       preload: path.join(dirname, "../preload/index.cjs"),
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
       webSecurity: true,
+      // Read by the preload before first paint, so the renderer can reserve the
+      // right edge for the window buttons without an IPC round trip.
+      additionalArguments: [`--spar-controls=${plan.controls}`, `--spar-surface=${plan.surface}`],
     },
+  });
+
+  syncWindowControls(window, nativeTheme.shouldUseDarkColors);
+  nativeTheme.on("updated", () => {
+    if (!window.isDestroyed()) syncWindowControls(window, nativeTheme.shouldUseDarkColors);
+  });
+
+  // The glass view attaches to live web contents, and the renderer only learns
+  // the real answer once any fallback has happened.
+  window.webContents.once("did-finish-load", () => {
+    void applyNativeSurface(window, plan).then((surface) => {
+      if (!window.isDestroyed()) window.webContents.send("window:surface", surface);
+    });
   });
 
   window.once("ready-to-show", () => window.show());
