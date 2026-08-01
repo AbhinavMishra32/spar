@@ -10,4 +10,4 @@ coverage/
 !.env.example
 apps/desktop/.practice-ai/
 apps/api/uploads/
-
+supabase/.temp/

@@ -6,7 +6,7 @@ export const sessionStatus = pgEnum("session_status", ["planning", "active", "pa
 export const questionStatus = pgEnum("question_status", ["generating", "validating", "playable", "active", "completed", "invalid"]);
 export const attemptStatus = pgEnum("attempt_status", ["active", "paused", "completed"]);
 
-export const users = pgTable("users", { id: uuid("id").primaryKey().defaultRandom(), email: text("email").notNull(), displayName: text("display_name"), avatarUrl: text("avatar_url"), ...timestamps }, (t) => [uniqueIndex("users_email_idx").on(t.email)]);
+export const users = pgTable("users", { id: uuid("id").primaryKey().defaultRandom(), email: text("email").notNull(), passwordHash: text("password_hash"), displayName: text("display_name"), avatarUrl: text("avatar_url"), ...timestamps }, (t) => [uniqueIndex("users_email_idx").on(t.email)]);
 export const authAccounts = pgTable("auth_accounts", { userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), provider: text("provider").notNull(), providerAccountId: text("provider_account_id").notNull(), ...timestamps }, (t) => [primaryKey({ columns: [t.provider, t.providerAccountId] }), index("auth_accounts_user_idx").on(t.userId)]);
 export const userSettings = pgTable("user_settings", { userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }), settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}), ...timestamps });
 
@@ -31,4 +31,3 @@ export const workspaceSnapshots = pgTable("workspace_snapshots", { id: uuid("id"
 export const agentRuns = pgTable("agent_runs", { id: uuid("id").primaryKey(), userId: uuid("user_id").notNull().references(() => users.id), sessionId: uuid("session_id").notNull().references(() => sessions.id), attemptId: uuid("attempt_id").references(() => attempts.id), provider: text("provider").notNull(), model: text("model").notNull(), contextReferences: jsonb("context_references").$type<string[]>().notNull().default([]), toolTrace: jsonb("tool_trace").$type<unknown[]>().notNull().default([]), promptTokens: integer("prompt_tokens"), completionTokens: integer("completion_tokens"), estimatedCostMicros: bigint("estimated_cost_micros", { mode: "number" }), latencyMs: integer("latency_ms"), finalAction: text("final_action"), error: text("error"), startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(), completedAt: timestamp("completed_at", { withTimezone: true }) });
 
 export const schemaHealth = pgTable("schema_health", { singleton: boolean("singleton").primaryKey().default(true), migrationVersion: integer("migration_version").notNull(), checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().default(sql`now()`) });
-

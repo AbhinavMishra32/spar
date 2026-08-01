@@ -4,14 +4,27 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.13.1",
   "scripts": {
-    "dev": "pnpm --filter @pracai/desktop dev",
-    "dev:api": "pnpm --filter @pracai/api dev",
-    "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
-    "build": "pnpm -r build"
+    "postinstall": "node scripts/ensure-native.mjs",
+    "bootstrap": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:apps": "turbo run dev --filter=@pracai/domain --filter=@pracai/database --filter=@pracai/provider --filter=@pracai/training --filter=@pracai/api --filter=@pracai/desktop --parallel --ui=stream",
+    "dev:api": "node scripts/run-with-env.mjs pnpm --filter @pracai/api dev",
+    "dev:desktop": "node scripts/run-with-env.mjs pnpm --filter @pracai/desktop dev",
+    "cloud:configure": "node scripts/configure-cloud.mjs",
+    "cloud:create": "node scripts/provision-supabase.mjs",
+    "cloud:supabase-keys": "node scripts/configure-supabase-storage.mjs",
+    "cloud:verify": "node scripts/verify-cloud.mjs",
+    "db:generate": "pnpm --filter @pracai/database db:generate",
+    "db:migrate": "node scripts/run-with-env.mjs pnpm --filter @pracai/database db:migrate",
+    "db:studio": "node scripts/run-with-env.mjs pnpm --filter @pracai/database db:studio",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "build": "turbo run build"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
@@ -20,5 +33,9 @@
       "esbuild",
       "keytar"
     ]
+  },
+  "devDependencies": {
+    "supabase": "2.111.0",
+    "turbo": "^2.5.5"
   }
 }
