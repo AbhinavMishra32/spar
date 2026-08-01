@@ -10,12 +10,15 @@ import type { ProviderService } from "./provider.js";
 
 export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
+  // Reservation is set before credential/provider awaits. Without it, the
+  // renderer's planning poll can launch several turns for one session.
+  const startingAgentRuns = new Map<string, Promise<{ runId: string }>>();
   const failedPlanningRuns = new Set<string>();
   ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), sessions: deps.store.listSessions(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline" }));
   ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); const created=deps.store.createSession(input.goal);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);await startAgentTurn(created.sessionId,`Start a new adaptive session for this learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
   ipcMain.handle(ipc.sessionsOpen, (_event, sessionId) => {
     const id=zUuid(sessionId);let detail=deps.store.readSession(id);
-    if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id))return detail;
+    if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return detail;
     if(deps.store.resetIncompletePlanning(id)){failedPlanningRuns.delete(id);detail=deps.store.readSession(id);}
     if(!detail)return null;
     if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)){if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume placement for this learner goal: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
@@ -28,8 +31,23 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.workspaceWrite, (_event, value) => { const input = workspaceWriteInput.parse(value); return deps.workspaces.write(input.sessionId, input.path, input.content); });
   ipcMain.handle(ipc.runnerRun, (_event, value) => { const input = runInput.parse(value); const request = deps.runner.request("run", { ...input, root: deps.workspaces.sessionRoot(input.sessionId) }); void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) })); return { id: request.id }; });
   const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:"cold-start"|"session-start"|"attempt-complete"|"learner-message"="learner-message")=>{
-    const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);const account=await deps.auth.account();const token=await deps.auth.accessToken();if(!account)throw new Error("Sign in before starting the Training Agent");const providers=await deps.providers.resolve(account.id,token);if(!providers.length)throw new Error("Connect a model provider in Settings before starting the Training Agent");
-    const session=deps.store.readSession(sessionId);if(!session)throw new Error("Session not found");const target=deps.store.latestTarget(sessionId);const defaultObjective="Investigating your prior evidence and defining the first training target.";const payload={sessionId,message,turnKind,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id})};const first=deps.agent.request("turn",{...payload,provider:providers[0]});activeAgentRuns.set(sessionId,first.id);const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());activeAgentRuns.delete(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"done"});}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});activeAgentRuns.set(sessionId,retry.id);return attempt(retry,index+1);}activeAgentRuns.delete(sessionId);if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,type:"error",text:error instanceof Error?error.message:String(error)});}};void attempt(first,0);return{runId:first.id};
+    const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};
+    const starting=startingAgentRuns.get(sessionId);if(starting)return starting;
+    const launch=(async()=>{
+      failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);
+      const account=await deps.auth.account();const token=await deps.auth.accessToken();
+      if(!account)throw new Error("Sign in before starting the Training Agent");
+      const providers=await deps.providers.resolve(account.id,token);
+      if(!providers.length)throw new Error("Connect a model provider in Settings before starting the Training Agent");
+      const session=deps.store.readSession(sessionId);if(!session)throw new Error("Session not found");
+      const target=deps.store.latestTarget(sessionId);const defaultObjective="Investigating your prior evidence and defining the first training target.";
+      const payload={sessionId,message,turnKind,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id})};
+      const first=deps.agent.request("turn",{...payload,provider:providers[0]});activeAgentRuns.set(sessionId,first.id);
+      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());activeAgentRuns.delete(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"done"});}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});activeAgentRuns.set(sessionId,retry.id);return attempt(retry,index+1);}activeAgentRuns.delete(sessionId);if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,type:"error",text:error instanceof Error?error.message:String(error)});}};
+      void attempt(first,0);return{runId:first.id};
+    })();
+    startingAgentRuns.set(sessionId,launch);
+    try{return await launch;}finally{startingAgentRuns.delete(sessionId);}
   };
   // Giving up is durable and evidence-bearing: the abandonment is recorded on the
   // attempt, and the agent is told so its next target answers the walk-away
