@@ -9,6 +9,7 @@ import { CloudSyncService } from "./sync.js";
 import { UtilityClient } from "./utilityClient.js";
 import { startUpdates } from "./updates.js";
 import { executeTrainingTool } from "./trainingTools.js";
+import { ProviderService } from "./provider.js";
 import { createMainWindow } from "./window.js";
 import { WorkspaceService } from "./workspaces.js";
 
@@ -20,10 +21,11 @@ else {
   void app.whenReady().then(async () => {
     const root = path.join(app.getPath("userData"), "practice-ai"); await mkdir(path.join(root, "workspaces"), { recursive: true });
     store = new LocalStore(path.join(root, "state.sqlite3")); const apiOrigin=process.env.PRACTICE_API_ORIGIN ?? "http://localhost:4318"; const auth = new AuthService(apiOrigin); const workspaces = new WorkspaceService(path.join(root, "workspaces"));
+    const providers = new ProviderService(auth, store, (event) => mainWindow?.webContents.send("provider:oauth-event", event));
     const runner = new UtilityClient("runner", (event) => mainWindow?.webContents.send("runner:event", { id: event.requestId, stream: event.stream, data: event.data, exitCode: event.exitCode }));
     const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; mainWindow?.webContents.send("agent:event", { runId: event.requestId, ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner));
     const sync=new CloudSyncService(store,auth,apiOrigin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
-    installIpc({ store, workspaces, auth, runner, agent, window: () => mainWindow }); installMenu(() => mainWindow); mainWindow = createMainWindow(); startUpdates(mainWindow);
+    installIpc({ store, workspaces, auth, providers, runner, agent, window: () => mainWindow }); installMenu(() => mainWindow); mainWindow = createMainWindow(); startUpdates(mainWindow);
     app.on("before-quit", () => { sync.stop(); runner.stop(); agent.stop(); store.close(); });
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(); });
   });

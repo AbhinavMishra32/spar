@@ -2,16 +2,16 @@ import { randomUUID } from "node:crypto";
 import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { createTool } from "@mastra/core/tools";
-import { toMastraProviderModel } from "@pracai/provider";
 import { z } from "zod";
+import { createPiMastraModel, type PiProviderInput } from "./piMastraModel.js";
+import { nextToolStage, type AgentTurnKind } from "./agentPolicy.js";
 
-type TurnKind = "cold-start" | "session-start" | "attempt-complete" | "learner-message";
 const AGENT_MAX_STEPS = 96;
 const IDENTICAL_TOOL_CALL_LIMIT = 2;
 const AGENT_PHASE_TIMEOUT_MS = 180_000;
 const CHALLENGE_COMPILATION_LIMIT = 2;
 const PROTOCOL_RETRY_LIMIT = 1;
-type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: TurnKind; resumeState?: { objective?: unknown; target?: unknown }; provider: { provider: string; model: string; baseUrl: string; apiKey: string } } };
+type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; resumeState?: { objective?: unknown; target?: unknown }; provider: PiProviderInput } };
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error("Training Agent must run inside an Electron utility process");
 const pendingTools = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -113,7 +113,7 @@ async function run(request: Request) {
     assertNoExtremeToolLoop(callSignatures);
   };
   const tools = Object.fromEntries(Object.entries(toolDefinitions).filter(([name]) => allowed.has(name)).map(([name, [description, schema]]) => [name, hostTool(request.id,request.payload.sessionId,name, description, schema, record)]));
-  const model = toMastraProviderModel(request.payload.provider);
+  const model = createPiMastraModel(request.payload.provider);
   const agent = new Agent({ id: "practice-training-agent", name: "Practice Training Agent", model, instructions: instructions(), tools, maxRetries: 1 });
   new Mastra({ agents: { training: agent }, logger: false });
   try {
@@ -121,7 +121,7 @@ async function run(request: Request) {
     let finalText = "";
     let finishReason = "stop";
     for (let step = 0; step < AGENT_MAX_STEPS; step += 1) {
-      const stage = nextToolStage(request.payload.turnKind, outcomes);
+      const stage = nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT);
       if (request.payload.turnKind === "cold-start" && stage.activeTools.length === 0) {
         parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text: "", usage: sumUsage(usage), finishReason: "tool-calls-complete", phaseSteps: step } });
         return;
@@ -182,31 +182,6 @@ function sumUsage(values: unknown[]) {
   for (const value of values) for (const [key, amount] of Object.entries((value && typeof value === "object" ? value : {}) as Record<string, unknown>)) if (typeof amount === "number") totals[key] = (totals[key] ?? 0) + amount;
   return totals;
 }
-function nextToolStage(turnKind: TurnKind, outcomes: Map<string, unknown[]>) {
-  const completed = (name: string) => (outcomes.get(name)?.length ?? 0) > 0;
-  const playableQuestion = (outcomes.get("create_question") ?? []).some((value) => value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "playable");
-  if ((outcomes.get("create_question")?.length ?? 0) >= CHALLENGE_COMPILATION_LIMIT && !playableQuestion) throw new Error(`Training Agent stopped after ${CHALLENGE_COMPILATION_LIMIT} rejected challenge compilations; automatic regeneration is intentionally disabled.`);
-  if (turnKind === "learner-message") return { activeTools: [...allowedTools(turnKind)], toolChoice: "auto" as const };
-  if (turnKind === "cold-start") {
-    const retrieval = ["search_learner_model", "search_attempt_history"].filter((name) => !completed(name));
-    if (retrieval.length) return { activeTools: retrieval, toolChoice: "required" as const };
-    if (!completed("ask_learner")) return { activeTools: ["ask_learner"], toolChoice: "required" as const };
-    return { activeTools: [] as string[], toolChoice: "none" as const };
-  }
-  if (playableQuestion) return { activeTools: [] as string[], toolChoice: "none" as const };
-  if (turnKind === "session-start") {
-    const retrieval = ["search_learner_model", "search_attempt_history"].filter((name) => !completed(name));
-    if (retrieval.length) return { activeTools: retrieval, toolChoice: "required" as const };
-    if (!completed("set_session_objective")) return { activeTools: completed("read_ability") ? ["set_session_objective"] : ["read_ability", "set_session_objective"], toolChoice: "required" as const };
-    if (!completed("set_training_target")) return { activeTools: ["set_training_target"], toolChoice: "required" as const };
-    return { activeTools: ["create_question"], toolChoice: "required" as const };
-  }
-  for (const stage of [["inspect_current_attempt", "evaluate_attempt"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["set_training_target"]]) {
-    const remaining = stage.filter((name) => !completed(name));
-    if (remaining.length) return { activeTools: remaining, toolChoice: "required" as const };
-  }
-  return { activeTools: ["create_question"], toolChoice: "required" as const };
-}
 function assertNoExtremeToolLoop(signatures: string[]) {
   const latest = signatures.at(-1);
   if (!latest) return;
@@ -219,7 +194,7 @@ function stableJson(value: unknown): string {
   if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`).join(",")}}`;
   return JSON.stringify(value) ?? "undefined";
 }
-function allowedTools(turnKind: TurnKind) {
+function allowedTools(turnKind: AgentTurnKind) {
   if (turnKind === "cold-start") return new Set(["search_learner_model", "search_attempt_history", "ask_learner"]);
   if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "read_ability", "read_concept_graph", "ask_learner", "set_session_objective", "set_training_target", "create_question"]);
   if (turnKind === "attempt-complete") return new Set(["inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "read_concept_graph", "set_training_target", "create_question"]);

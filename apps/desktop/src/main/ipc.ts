@@ -1,14 +1,14 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, ipcMain, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { sessionCheckpointSchema } from "@pracai/domain";
-import { attemptAppendInput, createSessionInput, ipc, providerSettingsInput, runInput, workspacePathInput, workspaceWriteInput } from "../shared/api.js";
+import { attemptAppendInput, createSessionInput, ipc, providerSettingsInput, runInput, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
-import { resolveProviders } from "./provider.js";
+import type { ProviderService } from "./provider.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; runner: UtilityClient; agent: UtilityClient; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   const failedPlanningRuns = new Set<string>();
   ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), sessions: deps.store.listSessions(), theme: deps.store.getSetting("theme", "system"), syncState: "offline" }));
@@ -20,7 +20,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.workspaceWrite, (_event, value) => { const input = workspaceWriteInput.parse(value); return deps.workspaces.write(input.sessionId, input.path, input.content); });
   ipcMain.handle(ipc.runnerRun, (_event, value) => { const input = runInput.parse(value); const request = deps.runner.request("run", { ...input, root: deps.workspaces.sessionRoot(input.sessionId) }); void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) })); return { id: request.id }; });
   const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:"cold-start"|"session-start"|"attempt-complete"|"learner-message"="learner-message")=>{
-    const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);const account=await deps.auth.account();const token=await deps.auth.accessToken();if(!account)throw new Error("Sign in before starting the Training Agent");const providers=await resolveProviders(deps.auth,deps.store,account.id,token);if(!providers.length)throw new Error("Configure a provider key in Settings or Construct before starting the Training Agent");
+    const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);const account=await deps.auth.account();const token=await deps.auth.accessToken();if(!account)throw new Error("Sign in before starting the Training Agent");const providers=await deps.providers.resolve(account.id,token);if(!providers.length)throw new Error("Connect a model provider in Settings before starting the Training Agent");
     const session=deps.store.readSession(sessionId);if(!session)throw new Error("Session not found");const target=deps.store.latestTarget(sessionId);const defaultObjective="Investigating your prior evidence and defining the first training target.";const payload={sessionId,message,turnKind,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,relevantAbilitySummary:deps.store.searchLearner(inputQuery(session.summary.originalGoal),4),accountId:account.id})};const first=deps.agent.request("turn",{...payload,provider:providers[0]});activeAgentRuns.set(sessionId,first.id);const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());activeAgentRuns.delete(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"done"});}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});activeAgentRuns.set(sessionId,retry.id);return attempt(retry,index+1);}activeAgentRuns.delete(sessionId);if(turnKind==="session-start")failedPlanningRuns.add(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"error",text:error instanceof Error?error.message:String(error)});}};void attempt(first,0);return{runId:first.id};
   };
   // Giving up is durable and evidence-bearing: the abandonment is recorded on the
@@ -51,11 +51,35 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.authSignOut, () => deps.auth.signOut());
   ipcMain.handle(ipc.settingsSaveSecret, async (_event, value) => {
     const input = providerSettingsInput.parse(value);
-    await deps.auth.saveSecret(input.provider, input.secret);
-    deps.store.setSetting("provider-id", input.provider);
-    deps.store.setSetting("provider-model", input.model);
-    deps.store.setSetting("provider-base-url", input.baseUrl.replace(/\/$/, ""));
+    await deps.providers.saveCredential(input);
+  });
+  ipcMain.handle(ipc.settingsProviders, () => deps.providers.inventory());
+  ipcMain.handle(ipc.settingsProviderDisconnect, (_event, value) => deps.providers.disconnect(providerId(value)));
+  ipcMain.handle(ipc.settingsProviderDefault, (_event, value) => {
+    const input = value as { provider?: unknown; model?: unknown };
+    if (typeof input.model !== "string" || !input.model.trim()) throw new Error("Model is required");
+    deps.providers.setDefault(providerId(input.provider), input.model.trim());
+  });
+  ipcMain.handle(ipc.settingsProviderOauthStart, (_event, value) => deps.providers.startOAuth(providerId(value)));
+  ipcMain.handle(ipc.settingsProviderOauthSubmit, (_event, value) => {
+    const input = value as { flowId?: unknown; value?: unknown };
+    if (typeof input.flowId !== "string" || typeof input.value !== "string") throw new Error("OAuth flow and value are required");
+    deps.providers.submitOAuth(input.flowId, input.value);
+  });
+  ipcMain.handle(ipc.settingsProviderOauthCancel, (_event, value) => {
+    if (typeof value !== "string") throw new Error("OAuth flow is required");
+    deps.providers.cancelOAuth(value);
+  });
+  ipcMain.handle(ipc.settingsOpenExternal, async (_event, value) => {
+    if (typeof value !== "string") throw new Error("URL is required");
+    const url = new URL(value);
+    if (url.protocol !== "https:") throw new Error("Only HTTPS links can be opened");
+    await shell.openExternal(url.toString());
   });
 }
 function zUuid(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Invalid identifier"); return value; }
 function inputQuery(goal:string){return goal.toLowerCase().replace(/[^a-z0-9+# ]/g," ").split(/\s+/).filter(Boolean).slice(0,5).join(" ");}
+function providerId(value: unknown): ProviderId {
+  if (typeof value !== "string" || !["openai-codex","claude-code","github-copilot","openai","anthropic","google","xai","openrouter","opencode","opencode-go","deepseek","minimax","moonshotai","kimi-coding","zai","vercel-ai-gateway","cloudflare-ai-gateway","ollama","lm-studio","custom"].includes(value)) throw new Error("Unknown provider");
+  return value as ProviderId;
+}

@@ -6,6 +6,10 @@ export const ipc = {
   checkpointSave: "checkpoint:save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
   authPassword: "auth:password", authSignOut: "auth:sign-out", settingsSaveSecret: "settings:save-secret",
+  settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
+  settingsProviderDefault: "settings:provider-default", settingsProviderOauthStart: "settings:provider-oauth-start",
+  settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
+  settingsOpenExternal: "settings:open-external",
   attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge"
 } as const;
 
@@ -17,11 +21,36 @@ export const runInput = z.object({ sessionId: z.string().uuid(), language: z.enu
 // supply event identity and content, but never a guessed stream sequence.
 export const attemptAppendInput = attemptEventSchema.omit({ sequence: true });
 export const providerSettingsInput = z.object({
-  provider: z.enum(["openai", "openrouter", "opencode-go", "opencode-zen", "litellm"]),
+  provider: z.enum(["openai", "anthropic", "google", "xai", "openrouter", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom"]),
   model: z.string().trim().min(1).max(200),
-  baseUrl: z.string().url().refine((value) => value.startsWith("https://"), "Provider URL must use HTTPS"),
-  secret: z.string().trim().min(8).max(20_000),
+  baseUrl: z.string().url().refine((value) => value.startsWith("https://") || value.startsWith("http://localhost:") || value.startsWith("http://127.0.0.1:"), "Provider URL must use HTTPS unless it is local"),
+  secret: z.string().max(20_000),
 });
+
+export type ProviderId = "openai-codex" | "claude-code" | "github-copilot" | z.infer<typeof providerSettingsInput>["provider"];
+export type ProviderInventory = {
+  providers: Array<{
+    id: ProviderId;
+    name: string;
+    description: string;
+    kind: "subscription" | "api-key" | "local" | "custom";
+    state: "connected" | "disconnected" | "auth-expired";
+    selectedModel: string;
+    baseUrl: string;
+    keyUrl?: string;
+    models: Array<{ id: string; name: string; reasoning: boolean }>;
+  }>;
+  defaultModel: { provider: ProviderId; model: string };
+};
+export type ProviderOAuthEvent = {
+  flowId: string;
+  provider: ProviderId;
+  status: "starting" | "waiting" | "prompt" | "connected" | "cancelled" | "error";
+  message: string;
+  url?: string;
+  placeholder?: string;
+  allowEmpty?: boolean;
+};
 
 export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; sessions: z.infer<typeof sessionSummarySchema>[]; theme: "system" | "light" | "dark"; syncState: "offline" | "synced" | "pending" };
 /** One file a tool wrote, with the line counts the activity row reports. */
@@ -62,6 +91,14 @@ export interface PracticeApi {
   passwordAuth(mode: "sign-in" | "sign-up", email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   saveProviderSecret(input: z.infer<typeof providerSettingsInput>): Promise<void>;
+  listProviders(): Promise<ProviderInventory>;
+  disconnectProvider(provider: ProviderId): Promise<void>;
+  setDefaultProvider(provider: ProviderId, model: string): Promise<void>;
+  startProviderOAuth(provider: Extract<ProviderId, "openai-codex" | "claude-code" | "github-copilot">): Promise<{ flowId: string }>;
+  submitProviderOAuth(flowId: string, value: string): Promise<void>;
+  cancelProviderOAuth(flowId: string): Promise<void>;
+  openExternal(url: string): Promise<void>;
+  onProviderOAuthEvent(listener: (event: ProviderOAuthEvent) => void): () => void;
   onAgentEvent(listener: (event: AgentStreamEvent) => void): () => void;
   onRunnerEvent(listener: (event: { id: string; stream: "stdout" | "stderr" | "exit"; data: string; exitCode?: number }) => void): () => void;
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;

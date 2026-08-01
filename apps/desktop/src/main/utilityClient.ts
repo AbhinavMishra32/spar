@@ -29,17 +29,12 @@ export class UtilityClient {
     if (message.kind === "tool-call" && this.onTool) {
       const requestId = String(message.requestId ?? "");
       const name = String(message.name);
-      const started = Date.now();
-      this.onEvent({ kind: "event", requestId, event: { type: "tool", tool: name, detail: "start" } });
       try {
         const value = await this.onTool(name, message.input, { requestId, ...(typeof message.sessionId === "string" ? {sessionId:message.sessionId}: {}) });
-        const status = value && typeof value === "object" && "status" in value ? String((value as {status?:unknown}).status) : "ok";
-        this.onEvent({ kind: "event", requestId, event: { type: "tool", tool: name, detail: `done:${status}:${Date.now()-started}ms` } });
         this.child?.postMessage({ kind: "tool-result", id: message.id, ok: true, value });
       }
       catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
-        this.onEvent({ kind: "event", requestId, event: { type: "tool", tool: name, detail: `error:${detail}` } });
         this.child?.postMessage({ kind: "tool-result", id: message.id, ok: false, error: detail });
       }
       return;

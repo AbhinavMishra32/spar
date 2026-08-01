@@ -66,7 +66,7 @@ const modelsFor = (provider: string) => {
 };
 
 export class ProviderService {
-  private readonly flows = new Map<string, { providerId: ProviderId; controller: AbortController; prompt?: { resolve(value: string): void; reject(error: Error): void } }>();
+  private readonly flows = new Map<string, { providerId: ProviderId; controller: AbortController; prompt: { resolve(value: string): void; reject(error: Error): void } | undefined }>();
 
   constructor(
     private readonly auth: AuthService,
@@ -81,6 +81,8 @@ export class ProviderService {
       const connected = descriptor.kind === "subscription"
         ? !!await this.auth.readProviderOAuth(descriptor.id)
         : !!await this.auth.readSecret(descriptor.id);
+      const authExpired = descriptor.kind === "subscription"
+        && this.store.getSetting<boolean>(`provider-auth-expired:${descriptor.id}`, false);
       const storedModel = this.store.getSetting<string>(`provider-model:${descriptor.id}`, descriptor.defaultModel);
       const storedBaseUrl = this.store.getSetting<string>(`provider-base-url:${descriptor.id}`, descriptor.defaultBaseUrl ?? "");
       const catalog = modelsFor(descriptor.runtimeId);
@@ -89,10 +91,10 @@ export class ProviderService {
         name: descriptor.name,
         description: descriptor.description,
         kind: descriptor.kind,
-        state: connected ? "connected" as const : "disconnected" as const,
+        state: connected ? (authExpired ? "auth-expired" as const : "connected" as const) : "disconnected" as const,
         selectedModel: storedModel,
         baseUrl: storedBaseUrl || catalog.find((model) => model.id === storedModel)?.baseUrl || catalog[0]?.baseUrl || "",
-        keyUrl: descriptor.keyUrl,
+        ...(descriptor.keyUrl ? { keyUrl: descriptor.keyUrl } : {}),
         models: catalog.map((model) => ({ id: model.id, name: model.name, reasoning: model.reasoning })),
       };
     }));
@@ -103,15 +105,19 @@ export class ProviderService {
     const descriptor = descriptorById.get(input.provider);
     if (!descriptor || descriptor.kind === "subscription") throw new Error("This provider uses subscription sign-in");
     const secret = input.secret?.trim() ?? "";
-    if (descriptor.kind === "api-key" && secret.length < 1) throw new Error("API key is required");
+    if (descriptor.kind === "api-key" && secret.length < 1 && !await this.auth.readSecret(input.provider)) throw new Error("API key is required");
     if (secret) await this.auth.saveSecret(input.provider, secret);
+    this.store.setSetting(`provider-auth-expired:${input.provider}`, false);
     this.select(input.provider, input.model, input.baseUrl);
   }
 
   async disconnect(providerId: ProviderId) {
     await Promise.all([this.auth.deleteSecret(providerId), this.auth.deleteProviderOAuth(providerId)]);
+    this.store.setSetting(`provider-auth-expired:${providerId}`, false);
     if (this.store.getSetting<ProviderId>("provider-id", "openrouter") === providerId) {
-      const fallback = descriptors.find((item) => item.id !== providerId);
+      const inventory = await this.inventory();
+      const connectedId = inventory.providers.find((item) => item.state === "connected")?.id;
+      const fallback = descriptorById.get(connectedId ?? "openrouter");
       if (fallback) this.select(fallback.id, fallback.defaultModel, fallback.defaultBaseUrl);
     }
   }
@@ -130,7 +136,7 @@ export class ProviderService {
     if (!provider || descriptorById.get(providerId)?.kind !== "subscription") throw new Error("Subscription sign-in is not available for this provider");
     const flowId = randomUUID();
     const controller = new AbortController();
-    this.flows.set(flowId, { providerId, controller });
+    this.flows.set(flowId, { providerId, controller, prompt: undefined });
     this.emit({ flowId, provider: providerId, status: "starting", message: `Starting ${provider.name} sign-in…` });
     void provider.login({
       signal: controller.signal,
@@ -143,11 +149,12 @@ export class ProviderService {
         const flow = this.flows.get(flowId);
         if (!flow) return reject(new Error("OAuth flow was cancelled"));
         flow.prompt = { resolve, reject };
-        this.emit({ flowId, provider: providerId, status: "prompt", message: prompt.message, placeholder: prompt.placeholder, allowEmpty: prompt.allowEmpty });
+        this.emit({ flowId, provider: providerId, status: "prompt", message: prompt.message, ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}), ...(prompt.allowEmpty !== undefined ? { allowEmpty: prompt.allowEmpty } : {}) });
       }),
     }).then(async (credentials) => {
       if (controller.signal.aborted) return;
       await this.auth.saveProviderOAuth(providerId, credentials);
+      this.store.setSetting(`provider-auth-expired:${providerId}`, false);
       const descriptor = descriptorById.get(providerId)!;
       this.select(providerId, descriptor.defaultModel);
       this.emit({ flowId, provider: providerId, status: "connected", message: `${descriptor.name} connected` });
@@ -174,22 +181,30 @@ export class ProviderService {
     this.emit({ flowId, provider: flow.providerId, status: "cancelled", message: "Sign-in cancelled" });
   }
 
-  async resolve(accountId: string, accessToken: string | null): Promise<ResolvedProvider[]> {
+  async resolve(_accountId: string, accessToken: string | null): Promise<ResolvedProvider[]> {
     const values: ResolvedProvider[] = [];
     const selected = this.store.getSetting<ProviderId>("provider-id", "openrouter");
     const selectedDescriptor = descriptorById.get(selected);
     if (selectedDescriptor?.kind === "subscription") {
       const credentials = await this.auth.readProviderOAuth<OAuthCredentials>(selected);
       if (credentials) {
-        const runtimeId = oauthRuntimeId(selected);
-        const result = await getOAuthApiKey(runtimeId, { [runtimeId]: credentials });
-        if (result) {
-          if (JSON.stringify(result.newCredentials) !== JSON.stringify(credentials)) await this.auth.saveProviderOAuth(selected, result.newCredentials);
-          const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
-          const provider = getOAuthProvider(runtimeId);
-          const available = provider?.modifyModels?.(modelsFor(runtimeId), result.newCredentials) ?? modelsFor(runtimeId);
-          const model = available.find((item) => item.id === modelId) ?? available[0];
-          if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "practice-oauth" });
+        try {
+          const runtimeId = oauthRuntimeId(selected);
+          const result = await getOAuthApiKey(runtimeId, { [runtimeId]: credentials });
+          if (result) {
+            if (JSON.stringify(result.newCredentials) !== JSON.stringify(credentials)) await this.auth.saveProviderOAuth(selected, result.newCredentials);
+            this.store.setSetting(`provider-auth-expired:${selected}`, false);
+            const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
+            const provider = getOAuthProvider(runtimeId);
+            const available = provider?.modifyModels?.(modelsFor(runtimeId), result.newCredentials) ?? modelsFor(runtimeId);
+            const model = available.find((item) => item.id === modelId) ?? available[0];
+            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "practice-oauth" });
+          } else {
+            this.store.setSetting(`provider-auth-expired:${selected}`, true);
+          }
+        } catch {
+          // A stale subscription must not prevent Construct-import or Practice gateway fallback.
+          this.store.setSetting(`provider-auth-expired:${selected}`, true);
         }
       }
     } else if (selectedDescriptor) {
