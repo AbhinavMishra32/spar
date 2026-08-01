@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
 import { message } from "@/lib/format";
+import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { ProviderGlyph } from "../common/ProviderGlyph";
 import { SparWordmark } from "../common/SparWordmark";
@@ -79,7 +80,6 @@ function ModelPicker({ provider, onSelect }: { provider: Provider; onSelect(mode
             onSelect={() => onSelect(model.id)}
           >
             <span className="min-w-0 flex-1 truncate">{model.name}</span>
-            {model.reasoning && <span className="shrink-0 text-ui-sm text-muted-foreground">reasoning</span>}
           </DropdownMenuCheckItem>
         ))}
       </DropdownMenuContent>
@@ -303,7 +303,7 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
     <div className="app-scroll h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[42rem] px-6 pb-20 pt-9">
         <h1 className="text-[1.55rem] font-semibold tracking-[-0.035em]">Settings</h1>
-        <p className="mt-1 text-content text-muted-foreground">Appearance and model runtime for this Mac.</p>
+        <p className="mt-1 text-content text-muted-foreground">{`Appearance and model runtime for this ${deviceNoun}.`}</p>
 
         {error && !selected && (
           <p className="mt-5 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui text-destructive">{error}</p>
@@ -370,7 +370,7 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
         <Group label="Runtime boundary">
           <Boundary
             badge={<><Lock className="size-3" />Main process only</>}
-            detail="API keys and refresh tokens are stored in macOS Keychain and resolved by the main process immediately before a run."
+            detail={`API keys and refresh tokens are stored in ${credentialStore} and resolved by the main process immediately before a run.`}
             title="Credential isolation"
           />
           <Boundary
@@ -390,9 +390,11 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
                 <Mark provider={selected.id} />
                 <DialogTitle>{selected.state === "connected" ? `Update ${selected.name}` : `Connect ${selected.name}`}</DialogTitle>
               </div>
-              <DialogDescription className="flex items-center gap-1.5">
-                <SparWordmark className="text-[0.82rem] text-foreground" />
-                <span>{selected.kind === "subscription" ? `will use your subscription to reach ${selected.name} models. Sign in to connect the account.` : selected.description}</span>
+              {/* Inline flow, not flex: the wordmark opens the sentence, so it has to sit on the
+                  first line's baseline rather than centre itself against the wrapped block. */}
+              <DialogDescription>
+                <SparWordmark className="text-foreground" />{" "}
+                {selected.kind === "subscription" ? `will use your subscription to reach ${selected.name} models. Sign in to connect the account.` : selected.description}
               </DialogDescription>
             </DialogHeader>
 
@@ -422,7 +424,7 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
                 <label className="block space-y-1.5 text-ui font-medium">Model<Input list={`models-${selected.id}`} onChange={(event) => setModelId(event.target.value)} value={modelId} /></label>
                 <datalist id={`models-${selected.id}`}>{selected.models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
                 <label className="block space-y-1.5 text-ui font-medium">Base URL<Input onChange={(event) => setBaseUrl(event.target.value)} value={baseUrl} /></label>
-                {selected.kind !== "local" && <label className="block space-y-1.5 text-ui font-medium">API Key<Input autoComplete="off" onChange={(event) => setSecret(event.target.value)} placeholder={selected.state === "connected" ? "Leave blank to keep the current key" : "Stored only in macOS Keychain"} type="password" value={secret} /></label>}
+                {selected.kind !== "local" && <label className="block space-y-1.5 text-ui font-medium">API Key<Input autoComplete="off" onChange={(event) => setSecret(event.target.value)} placeholder={selected.state === "connected" ? "Leave blank to keep the current key" : `Stored only in ${credentialStore}`} type="password" value={secret} /></label>}
               </div>
             )}
 

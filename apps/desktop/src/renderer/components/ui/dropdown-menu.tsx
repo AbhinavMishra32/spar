@@ -1,6 +1,6 @@
 import * as React from "react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
-import { Check } from "lucide-react"
+import { Check, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -31,7 +31,7 @@ function DropdownMenuContent({
         className={cn(
           // The macOS material lives in .floating-surface so menus, popovers and
           // the file tree all read as the same pane of glass.
-          "floating-surface app-scroll z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[11rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-y-auto p-1",
+          "menu-surface app-scroll z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[12rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-y-auto p-1.5",
           "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
@@ -49,7 +49,7 @@ function DropdownMenuLabel({
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-label"
       className={cn(
-        "px-2 pb-1 pt-1.5 text-ui-sm font-medium tracking-[0.04em] text-muted-foreground/80 uppercase",
+        "px-2.5 pb-1 pt-1 text-ui-sm font-medium tracking-[0.05em] text-muted-foreground/75 uppercase",
         className
       )}
       {...props}
@@ -58,7 +58,7 @@ function DropdownMenuLabel({
 }
 
 const itemClass =
-  "relative flex cursor-default select-none items-center gap-2 rounded-[min(var(--radius-md),9px)] px-2 py-1.5 text-ui outline-none transition-colors data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
+  "relative flex min-h-8 cursor-default select-none items-center gap-2.5 rounded-[min(var(--radius-md),10px)] px-2.5 py-1.5 text-content outline-none transition-colors data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 
 function DropdownMenuItem({
   className,
@@ -81,7 +81,11 @@ function DropdownMenuItem({
   )
 }
 
-/** Selectable row that keeps its checkmark gutter reserved, so labels stay aligned. */
+/**
+ * Selectable row. The mark trails the label rather than sitting in a reserved
+ * gutter — a gutter indents every row to make room for something only one row
+ * ever shows, which reads as a stray left margin.
+ */
 function DropdownMenuCheckItem({
   checked,
   children,
@@ -93,14 +97,56 @@ function DropdownMenuCheckItem({
   return (
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-check-item"
-      className={cn(itemClass, "pl-1.5", className)}
+      className={cn(itemClass, className)}
       {...props}
     >
-      <span className="grid size-3.5 shrink-0 place-items-center">
-        {checked && <Check className="size-3.5" />}
-      </span>
       {children}
+      {checked && <Check className="ml-auto opacity-70" />}
     </DropdownMenuPrimitive.Item>
+  )
+}
+
+function DropdownMenuSub({
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Sub>) {
+  return <DropdownMenuPrimitive.Sub data-slot="dropdown-menu-sub" {...props} />
+}
+
+function DropdownMenuSubTrigger({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubTrigger>) {
+  return (
+    <DropdownMenuPrimitive.SubTrigger
+      data-slot="dropdown-menu-sub-trigger"
+      className={cn(itemClass, "data-[state=open]:bg-accent", className)}
+      {...props}
+    >
+      {children}
+      <ChevronRight className="ml-auto opacity-50" />
+    </DropdownMenuPrimitive.SubTrigger>
+  )
+}
+
+function DropdownMenuSubContent({
+  className,
+  sideOffset = 4,
+  ...props
+}: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.SubContent
+        data-slot="dropdown-menu-sub-content"
+        sideOffset={sideOffset}
+        className={cn(
+          "menu-surface app-scroll z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[12rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-y-auto p-1.5",
+          "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          className
+        )}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
   )
 }
 
@@ -111,7 +157,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("-mx-1 my-1 h-px bg-border", className)}
+      className={cn("-mx-1.5 my-1.5 h-px bg-border", className)}
       {...props}
     />
   )
@@ -124,5 +170,8 @@ export {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 }
