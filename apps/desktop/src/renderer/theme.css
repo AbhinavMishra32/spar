@@ -10,6 +10,14 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Registered so the rim sweep can interpolate; an unregistered custom property
+   animates discretely and the light would jump instead of travel. */
+@property --shimmer-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -133,6 +141,7 @@
   /* Only painted when the platform gives us no native material to sit on. */
   --app-sidebar-fill: oklch(95.5% 0 0);
   --app-vibrant-tint: oklch(100% 0 0 / 30%);
+  --app-glass-fill: 88%;
   --app-user-message-background: oklch(14.5% 0 0 / 6%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 10%), 0 8px 10px -6px oklch(0% 0 0 / 10%);
   --app-shadow-menu: 0 16px 40px -12px oklch(0% 0 0 / 20%), 0 4px 10px -4px oklch(0% 0 0 / 8%);
@@ -146,6 +155,7 @@
   --glass-rim: oklch(100% 0 0 / 80%);
   --glass-sheen: oklch(100% 0 0 / 90%);
   --glass-hairline: color-mix(in oklab, var(--foreground) 18%, transparent);
+  --shimmer-tint: oklch(14.5% 0 0 / 45%);
 
   --code-foreground: #33363b;
   --code-comment: #727780;
@@ -204,6 +214,7 @@
      sits on, so it catches more light. Only painted with no native material. */
   --app-sidebar-fill: oklch(28.5% 0 0);
   --app-vibrant-tint: oklch(100% 0 0 / 6%);
+  --app-glass-fill: 86%;
   --app-user-message-background: oklch(98.5% 0 0 / 8%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 40%), 0 8px 10px -6px oklch(0% 0 0 / 40%);
   --app-shadow-menu: 0 16px 40px -10px oklch(0% 0 0 / 55%), 0 4px 12px -4px oklch(0% 0 0 / 40%);
@@ -218,6 +229,7 @@
   --glass-rim: oklch(100% 0 0 / 8%);
   --glass-sheen: oklch(100% 0 0 / 12%);
   --glass-hairline: oklch(0% 0 0 / 55%);
+  --shimmer-tint: oklch(100% 0 0 / 70%);
 
   --code-foreground: #c9d1d9;
   --code-comment: #8b949e;
@@ -350,8 +362,13 @@
     background: var(--app-sidebar-fill);
   }
 
-  .app-opaque {
-    background: var(--app-window-fill);
+  /* Named for what it is rather than how it is built: this is the fill every
+     page sits on. It is a heavy tint over the native material rather than a
+     solid, so the window's glass carries through the whole app — kept close to
+     opaque because text on it has to hold contrast against an arbitrary
+     desktop. `--app-glass-fill` is the dial. */
+  .app-pane {
+    background: color-mix(in oklab, var(--app-window-fill) var(--app-glass-fill), transparent);
   }
 
   /* The content pane as an inset sheet on the sidebar's material: rounded on the
@@ -507,7 +524,7 @@
 
   /* Fades transcript content into the composer instead of clipping it hard. */
   .composer-fade {
-    background: linear-gradient(to bottom, transparent, var(--app-window-fill) 62%);
+    background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--app-window-fill) var(--app-glass-fill), transparent) 62%);
   }
 
   /* ---- Floating panels ---------------------------------------------------- */
@@ -541,6 +558,89 @@
     isolation: isolate;
   }
 
+  /* ---- Work blobs --------------------------------------------------------- */
+
+  /* The workspace is laid out the way a browser window is: one continuous
+     surface — here the conversation rather than tab-strip chrome — with the
+     working panes inset into it as rounded sheets. The gutter between them is
+     what carries the relationship; the sheets themselves stay quiet so the
+     result still reads as a workspace and not as a chat with widgets in it. */
+  .work-canvas {
+    /* Deliberately paints nothing: the conversation's surface *is* the pane's
+       glass, and the working sheets are what sits on top of it. */
+    background: transparent;
+  }
+
+  .work-blob {
+    position: relative;
+    border-radius: var(--radius-2xl);
+    box-shadow:
+      inset 0 0 0 1px var(--glass-rim),
+      0 0 0 0.5px var(--glass-hairline),
+      var(--app-shadow-card);
+    overflow: hidden;
+    /* Contains the rounded clip against a child that paints its own background
+       (Monaco does) and gives the shimmer ring something to stack against. */
+    isolation: isolate;
+  }
+
+  /* A light travelling around the rim while a pane is doing something. The ring
+     is the conic gradient masked down to the border box, so it reads as the edge
+     catching light rather than as a spinner bolted to a corner. */
+  .work-blob[data-busy="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    padding: 1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--shimmer-angle),
+      transparent 0turn,
+      color-mix(in oklab, var(--shimmer-tint) 85%, transparent) 0.06turn,
+      transparent 0.14turn
+    );
+    /* Border-only: punch the content box out of the mask so just the 1px
+       padding ring survives. */
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: blob-shimmer 1.6s linear infinite;
+    pointer-events: none;
+  }
+
+  /* One sweep on settle, so finishing is felt without becoming a second
+     permanent animation competing with the running state. */
+  .work-blob[data-settled="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    padding: 1px;
+    border-radius: inherit;
+    background: conic-gradient(
+      from var(--shimmer-angle),
+      transparent 0turn,
+      color-mix(in oklab, var(--shimmer-tint) 90%, transparent) 0.07turn,
+      transparent 0.16turn
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: blob-shimmer 0.9s cubic-bezier(0.22, 0.61, 0.36, 1) 1 forwards;
+    pointer-events: none;
+  }
+
   /* ---- Code -------------------------------------------------------------- */
 
   .code-inline {
@@ -565,6 +665,12 @@
     border: 1px solid var(--border);
     background: color-mix(in srgb, var(--muted) 45%, transparent);
     font-family: var(--font-mono);
+  }
+}
+
+@keyframes blob-shimmer {
+  to {
+    --shimmer-angle: 360deg;
   }
 }
 
@@ -614,7 +720,9 @@
 
 @media (prefers-reduced-motion: reduce) {
   .thinking-shimmer,
-  .streaming-caret::after {
+  .streaming-caret::after,
+  .work-blob[data-busy="true"]::after,
+  .work-blob[data-settled="true"]::after {
     animation: none;
   }
 

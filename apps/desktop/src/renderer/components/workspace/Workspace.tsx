@@ -16,14 +16,29 @@ import { FloatingFileTree } from "./FloatingFileTree";
 import { ChallengeIntro } from "./ChallengeIntro";
 import { ResultPanel, type ResultTab, type RunOutcome } from "./ResultPanel";
 
+/**
+ * Sits in the gutter between two blobs rather than drawn as a rule on their
+ * edge. Nothing shows until the pointer is on it: the gap is already the
+ * boundary, and a permanent line through it would undo the inset.
+ */
 function Handle({ direction = "horizontal" }: { direction?: "horizontal" | "vertical" }) {
   return (
     <PanelResizeHandle
       className={cn(
-        "shrink-0 bg-border transition-colors data-[resize-handle-state=drag]:bg-[var(--border-strong)] hover:bg-[var(--border-strong)]",
-        direction === "horizontal" ? "w-px cursor-col-resize" : "h-px cursor-row-resize",
+        "group/handle relative shrink-0",
+        direction === "horizontal" ? "w-2 cursor-col-resize" : "h-2 cursor-row-resize",
       )}
-    />
+    >
+      <span
+        className={cn(
+          "absolute rounded-full bg-transparent transition-colors",
+          "group-hover/handle:bg-[var(--border-strong)] group-data-[resize-handle-state=drag]/handle:bg-[var(--border-strong)]",
+          direction === "horizontal"
+            ? "inset-y-3 left-1/2 w-[3px] -translate-x-1/2"
+            : "inset-x-3 top-1/2 h-[3px] -translate-y-1/2",
+        )}
+      />
+    </PanelResizeHandle>
   );
 }
 
@@ -69,6 +84,9 @@ export function Workspace({
   const [testFiles, setTestFiles] = useState<Record<string, string>>({});
   const [terminal, setTerminal] = useState("");
   const [running, setRunning] = useState(false);
+  // One rim sweep when a run lands, so finishing is felt without leaving a
+  // second animation running against the busy state forever.
+  const [settled, setSettled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [outcome, setOutcome] = useState<RunOutcome>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("testcase");
@@ -237,10 +255,22 @@ export function Workspace({
     return () => removeEventListener("keydown", listener);
   });
 
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (wasRunning.current && !running) {
+      setSettled(true);
+      const timer = setTimeout(() => setSettled(false), 900);
+      wasRunning.current = running;
+      return () => clearTimeout(timer);
+    }
+    wasRunning.current = running;
+    return undefined;
+  }, [running]);
+
   const mount: OnMount = (editor) => editor.updateOptions({ fontLigatures: true });
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="work-canvas relative flex h-full min-h-0 flex-col">
       <ChallengeIntro onDone={() => setIntroFor(null)} question={introFor === question.attemptId ? question : null} />
 
       {giveUpOpen && (
@@ -327,9 +357,11 @@ export function Workspace({
         title={`Challenge ${question.ordinal}`}
       />
 
+      {/* The conversation is the surface; the working panes are sheets inset into
+          it, the way a browser window insets content into its own chrome. The
+          gutter is what says so — the panes carry no outer border of their own. */}
       <PanelGroup autoSaveId="spar-problem" className="min-h-0 flex-1" direction="horizontal">
-        {/* Left: the challenge and the agent that set it, as one live stream. */}
-        <Panel defaultSize={46} minSize={32} order={1}>
+        <Panel defaultSize={44} minSize={32} order={1}>
           <AgentPanel
             detail={detail}
             draft={draft}
@@ -349,9 +381,13 @@ export function Workspace({
 
         {/* Right: write the solution, then run it against the cases. */}
         <Panel minSize={30} order={2}>
-          <PanelGroup direction="vertical">
+          <PanelGroup className="py-2 pr-2" direction="vertical">
             <Panel minSize={20} order={1}>
-              <div className="flex h-full min-h-0 bg-[var(--color-background-editor)]">
+              <div
+                className="work-blob flex h-full min-h-0 bg-[var(--color-background-editor)]"
+                data-busy={running || undefined}
+                data-settled={settled || undefined}
+              >
                 {showTree && (
                   <div className="hairline-r flex w-44 shrink-0 flex-col bg-[var(--color-background-surface-under)]">
                     <div className="flex h-8 shrink-0 items-center gap-1.5 px-2.5 text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/70">
@@ -468,19 +504,21 @@ export function Workspace({
             <Handle direction="vertical" />
 
             <Panel ref={dock} collapsible collapsedSize={0} defaultSize={34} minSize={14} order={2}>
-              <ResultPanel
-                events={detail.events}
-                logs={logs}
-                onClearTerminal={() => setTerminal("")}
-                onCollapse={() => dock.current?.collapse()}
-                onTab={setResultTab}
-                outcome={outcome}
-                question={question}
-                running={running}
-                tab={resultTab}
-                terminal={terminal}
-                testFiles={testFiles}
-              />
+              <div className="work-blob h-full" data-busy={running || undefined} data-settled={settled || undefined}>
+                <ResultPanel
+                  events={detail.events}
+                  logs={logs}
+                  onClearTerminal={() => setTerminal("")}
+                  onCollapse={() => dock.current?.collapse()}
+                  onTab={setResultTab}
+                  outcome={outcome}
+                  question={question}
+                  running={running}
+                  tab={resultTab}
+                  terminal={terminal}
+                  testFiles={testFiles}
+                />
+              </div>
             </Panel>
           </PanelGroup>
         </Panel>

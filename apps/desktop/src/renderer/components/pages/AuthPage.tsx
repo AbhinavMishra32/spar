@@ -27,7 +27,7 @@ export function AuthPage({ api, error, onError }: { api: SparApi | undefined; er
   };
 
   return (
-    <div className="app-drag app-opaque grid h-full grid-cols-[minmax(0,26rem)_1fr]">
+    <div className="app-drag app-pane grid h-full grid-cols-[minmax(0,26rem)_1fr]">
       <div className="app-no-drag flex flex-col justify-center border-r border-border px-10">
         <div className="flex items-center gap-2.5">
           <span className="grid size-8 place-items-center rounded-[10px] bg-primary text-primary-foreground">

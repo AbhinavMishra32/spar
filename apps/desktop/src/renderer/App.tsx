@@ -266,7 +266,7 @@ export function App() {
         />
       )}
 
-      <main className={cn("app-opaque relative flex min-w-0 flex-1 flex-col", sidebar && "app-content-pane")}>
+      <main className={cn("app-pane relative flex min-w-0 flex-1 flex-col", sidebar && "app-content-pane")}>
         {page !== "workspace" && (
           <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace">]} />
         )}
@@ -395,7 +395,7 @@ function PagePad({ children }: { children: React.ReactNode }) {
 
 function BootShell() {
   return (
-    <div className="app-drag app-opaque grid h-full place-items-center">
+    <div className="app-drag app-pane grid h-full place-items-center">
       <div className="flex flex-col items-center gap-3">
         <span className="grid size-9 place-items-center rounded-[10px] bg-primary text-primary-foreground">
           <Sparkles className="size-4" />
@@ -419,7 +419,7 @@ function WorkspaceSkeleton() {
 
 function FatalError({ error }: { error: string }) {
   return (
-    <div className="app-drag app-opaque grid h-full place-items-center px-8">
+    <div className="app-drag app-pane grid h-full place-items-center px-8">
       <div className="max-w-[32rem] rounded-xl border border-destructive/30 bg-card p-4 shadow-[var(--app-shadow-card)]">
         <p className="flex items-center gap-2 text-content font-semibold text-destructive">
           <AlertCircle className="size-4" />

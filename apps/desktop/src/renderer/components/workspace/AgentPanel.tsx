@@ -55,10 +55,10 @@ export function AgentPanel({
   previous.current = view;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--color-background-surface)]">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Identity stays put while the body swaps: which problem you are on is
           not a property of the view you happen to be reading it in. */}
-      <div className="hairline-b flex h-10 shrink-0 items-center gap-2 px-2.5">
+      <div className="flex h-10 shrink-0 items-center gap-2 px-3">
         <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/70">#{question.ordinal}</span>
         <span className="min-w-0 flex-1 truncate text-ui font-medium">{question.title}</span>
         <DifficultyPill difficulty={question.difficulty} />
