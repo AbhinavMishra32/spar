@@ -50,7 +50,7 @@ export function Workspace({
   onError(value: string): void;
   onBack(): void;
   onExpandSidebar?: (() => void) | undefined;
-  onAbandon(): Promise<void>;
+  onAbandon(reason: string): Promise<void>;
 }) {
   // Editable files are what the learner switches between; read-only test files
   // belong in the Testcase panel rather than competing for editor tabs.
@@ -198,7 +198,7 @@ export function Workspace({
   const giveUp = async () => {
     setGivingUp(true);
     try {
-      await onAbandon();
+      await onAbandon(giveUpReason.trim());
     } catch (error) {
       onError(message(error));
     } finally {

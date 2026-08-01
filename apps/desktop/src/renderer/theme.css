@@ -297,9 +297,12 @@
     --transcript-width: 46rem;
   }
 
+  /* The fallback matters: composers and banners sit outside .agent-transcript,
+     where --transcript-width is not in scope. Without it the custom property
+     resolves to nothing, max-width is dropped, and those rows go full-bleed. */
   .transcript-column {
     width: 100%;
-    max-width: var(--transcript-width);
+    max-width: var(--transcript-width, 46rem);
     margin-inline: auto;
   }
 

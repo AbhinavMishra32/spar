@@ -175,12 +175,12 @@ export function App() {
 
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
 
-  const abandon = async () => {
+  const abandon = async (reason: string) => {
     if (!api || !detail?.question) return;
     await api.abandonAttempt({
       sessionId: detail.summary.id,
       attemptId: detail.question.attemptId,
-      reason: "",
+      reason,
     });
     setRun(null);
     await openSession(detail.summary.id);

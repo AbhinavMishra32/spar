@@ -83,6 +83,31 @@ export function ChatView({
       />
 
       <AgentThread
+        header={
+          <div className="rounded-xl border border-border bg-card px-3 py-2.5 shadow-[var(--app-shadow-card)]">
+            <div className="flex items-center gap-2">
+              <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--color-background-elevated-secondary)] text-muted-foreground">
+                <Flag className="size-3" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">BETWEEN CHALLENGES</span>
+                <span className="block truncate text-ui font-medium">{detail.summary.objective || detail.summary.originalGoal}</span>
+              </span>
+              <button
+                className="shrink-0 rounded-md border border-border px-2 py-1 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
+                disabled={busy || streaming}
+                onClick={() => void nextChallenge()}
+                type="button"
+              >
+                Start the next one
+              </button>
+            </div>
+            <p className="mt-2 text-ui leading-[1.6] text-muted-foreground">
+              Nothing is being graded right now. The agent still has your full history — ask it why an approach failed,
+              what to read, or what it plans to test next.
+            </p>
+          </div>
+        }
         empty={
           <div className="flex flex-col items-center px-6 text-center">
             <span className="mb-3 grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground">
@@ -100,12 +125,6 @@ export function ChatView({
 
       <div className="shrink-0 px-4 pb-4">
         <div className="transcript-column">
-          {detail.messages.some((item) => item.body.startsWith("The learner gave up")) && (
-            <div className="mb-2 flex items-center gap-2 px-1.5 text-ui-sm text-muted-foreground">
-              <Flag className="size-3 shrink-0" />
-              That challenge was set aside. The agent keeps it as evidence when choosing the next one.
-            </div>
-          )}
           <Composer
             busy={busy || streaming}
             onChange={setDraft}
