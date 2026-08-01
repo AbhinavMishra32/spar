@@ -409,6 +409,12 @@
   }
 }
 
+@keyframes emblem-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes agent-orbit {
   to {
     transform: rotate(360deg);

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { ChevronDown, Sparkles, Target } from "lucide-react";
+import { ChevronDown, Target } from "lucide-react";
 import type { ActiveQuestion } from "@pracai/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "../agent/Markdown";
+import { ChallengeEmblem } from "./ChallengeEmblem";
 
 const DIFFICULTY_TONE: Record<ActiveQuestion["difficulty"], string> = {
   foundation: "text-[var(--success)] bg-[var(--success)]/12",
@@ -37,14 +38,15 @@ export function ProblemCard({ question }: { question: ActiveQuestion }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--app-shadow-card)]">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <span className="grid size-5 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
-          <Sparkles className="size-3" />
+      <div className="flex items-center gap-2.5 px-3 py-2.5">
+        <ChallengeEmblem className="shrink-0" question={question} size={34} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">CHALLENGE SET FOR YOU</span>
+          <span className="block truncate text-ui font-medium">{question.abilityTitle}</span>
         </span>
-        <span className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">CHALLENGE SET FOR YOU</span>
         {/* Title and difficulty live in the always-visible header above this card. */}
         <button
-          className="ml-auto grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onClick={() => setOpen((value) => !value)}
           title={open ? "Collapse the statement" : "Expand the statement"}
           type="button"

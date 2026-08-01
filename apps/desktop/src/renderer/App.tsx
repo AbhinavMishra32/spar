@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, History, Loader2, Map, Sparkles, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import type { SessionDetail, SessionSummary } from "@pracai/domain";
 import type { AgentStreamEvent, BootstrapData, PracticeApi } from "../shared/api";
 import { cn } from "@/lib/utils";
@@ -14,6 +15,7 @@ import { SettingsPage } from "./components/pages/SettingsPage";
 import { AuthPage } from "./components/pages/AuthPage";
 import { Workspace } from "./components/workspace/Workspace";
 import { PlanningView } from "./components/workspace/PlanningView";
+import { ChatView } from "./components/workspace/ChatView";
 import type { RuntimeLog } from "./components/agent/RuntimeConsole";
 import { reduceRun, type AgentRun } from "./components/agent/agentRun";
 
@@ -173,6 +175,18 @@ export function App() {
 
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
 
+  const abandon = async () => {
+    if (!api || !detail?.question) return;
+    await api.abandonAttempt({
+      sessionId: detail.summary.id,
+      attemptId: detail.question.attemptId,
+      reason: "",
+    });
+    setRun(null);
+    await openSession(detail.summary.id);
+    await refresh();
+  };
+
   const start = async (goal: string) => {
     if (!api) return;
     setError(null);
@@ -255,31 +269,55 @@ export function App() {
           {page === "settings" && <SettingsPage api={api} />}
           {page === "workspace" &&
             (detail ? (
-              detail.question ? (
-                <Workspace
-                  api={api}
-                  dark={dark}
-                  detail={detail}
-                  logs={logs}
-                  onBack={() => navigate("home")}
-                  onError={setError}
-                  onExpandSidebar={expandSidebar}
-                  onRefresh={() => openSession(detail.summary.id)}
-                  question={detail.question}
-                  run={run}
-                />
-              ) : (
-                <PlanningView
-                  api={api}
-                  detail={detail}
-                  logs={logs}
-                  onBack={() => navigate("home")}
-                  onError={setError}
-                  onExpandSidebar={expandSidebar}
-                  onRefresh={() => openSession(detail.summary.id)}
-                  run={run}
-                />
-              )
+              /* Chat and challenge are different modes of the same session, so
+                 the surface cross-dissolves between them instead of swapping. */
+              <AnimatePresence initial={false} mode="wait">
+                <motion.div
+                  key={sessionMode(detail)}
+                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                  className="h-full"
+                  exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
+                  initial={{ opacity: 0, scale: 1.01, filter: "blur(8px)" }}
+                  transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
+                >
+                  {detail.question ? (
+                    <Workspace
+                      api={api}
+                      dark={dark}
+                      detail={detail}
+                      logs={logs}
+                      onAbandon={abandon}
+                      onBack={() => navigate("home")}
+                      onError={setError}
+                      onExpandSidebar={expandSidebar}
+                      onRefresh={() => openSession(detail.summary.id)}
+                      question={detail.question}
+                      run={run}
+                    />
+                  ) : sessionMode(detail) === "chat" ? (
+                    <ChatView
+                      api={api}
+                      detail={detail}
+                      onBack={() => navigate("home")}
+                      onError={setError}
+                      onExpandSidebar={expandSidebar}
+                      onRefresh={() => openSession(detail.summary.id)}
+                      run={run}
+                    />
+                  ) : (
+                    <PlanningView
+                      api={api}
+                      detail={detail}
+                      logs={logs}
+                      onBack={() => navigate("home")}
+                      onError={setError}
+                      onExpandSidebar={expandSidebar}
+                      onRefresh={() => openSession(detail.summary.id)}
+                      run={run}
+                    />
+                  )}
+                </motion.div>
+              </AnimatePresence>
             ) : (
               <WorkspaceSkeleton />
             ))}
@@ -296,6 +334,16 @@ export function App() {
       />
     </div>
   );
+}
+
+/**
+ * Which mode the session is in. A paused session with no live question is one
+ * the learner walked away from, which is general chat rather than planning.
+ */
+function sessionMode(detail: SessionDetail): "challenge" | "chat" | "planning" {
+  if (detail.question) return "challenge";
+  if (detail.summary.status === "paused" || detail.summary.status === "completed") return "chat";
+  return "planning";
 }
 
 function PagePad({ children }: { children: React.ReactNode }) {

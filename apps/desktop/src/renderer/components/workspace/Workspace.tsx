@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
-import { FileCode2, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
+import { FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
 import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@pracai/domain";
 import type { PracticeApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import type { AgentRun } from "../agent/agentRun";
 import { AgentPanel } from "./AgentPanel";
 import { FileTree } from "./FileTree";
 import { FloatingFileTree } from "./FloatingFileTree";
+import { ChallengeIntro } from "./ChallengeIntro";
 import { ResultPanel, type ResultTab, type RunOutcome } from "./ResultPanel";
 
 function Handle({ direction = "horizontal" }: { direction?: "horizontal" | "vertical" }) {
@@ -37,6 +38,7 @@ export function Workspace({
   onError,
   onBack,
   onExpandSidebar,
+  onAbandon,
 }: {
   detail: SessionDetail;
   question: ActiveQuestion;
@@ -48,6 +50,7 @@ export function Workspace({
   onError(value: string): void;
   onBack(): void;
   onExpandSidebar?: (() => void) | undefined;
+  onAbandon(): Promise<void>;
 }) {
   // Editable files are what the learner switches between; read-only test files
   // belong in the Testcase panel rather than competing for editor tabs.
@@ -70,6 +73,11 @@ export function Workspace({
   const [draft, setDraft] = useState("");
   const [remark, setRemark] = useState("");
   const [treeOpen, setTreeOpen] = useState(false);
+  const [givingUp, setGivingUp] = useState(false);
+  const [giveUpOpen, setGiveUpOpen] = useState(false);
+  const [giveUpReason, setGiveUpReason] = useState("");
+  // A challenge announces itself once, when its attempt is first seen.
+  const [introFor, setIntroFor] = useState<string | null>(question.attemptId);
 
   const dock = useRef<ImperativePanelHandle>(null);
   const readOnly = Boolean(question.files.find((file) => file.path === activeFile)?.readOnly);
@@ -87,6 +95,9 @@ export function Workspace({
 
   useEffect(() => {
     void load(solutionFiles[0]?.path ?? "").catch((error) => onError(message(error)));
+    setIntroFor(question.attemptId);
+    setOutcome(null);
+    setTerminal("");
     // Reloading on a new question keeps the editor from showing the previous challenge.
   }, [question.attemptId]);
 
@@ -184,6 +195,18 @@ export function Workspace({
     }
   };
 
+  const giveUp = async () => {
+    setGivingUp(true);
+    try {
+      await onAbandon();
+    } catch (error) {
+      onError(message(error));
+    } finally {
+      setGivingUp(false);
+      setGiveUpOpen(false);
+    }
+  };
+
   const attachRemark = async () => {
     const body = remark.trim();
     if (!body) return;
@@ -215,7 +238,47 @@ export function Workspace({
   const mount: OnMount = (editor) => editor.updateOptions({ fontLigatures: true });
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <ChallengeIntro onDone={() => setIntroFor(null)} question={introFor === question.attemptId ? question : null} />
+
+      {giveUpOpen && (
+        <div className="absolute inset-0 z-40 grid place-items-center bg-[var(--app-window-fill)]/70 backdrop-blur-sm">
+          <div className="floating-surface w-[24rem] p-4">
+            <p className="text-content font-semibold">Give up on this challenge?</p>
+            <p className="mt-1 text-ui leading-[1.6] text-muted-foreground">
+              It ends here and the session returns to chat. What you tried is kept as evidence, so the agent can pick
+              something better next.
+            </p>
+            <textarea
+              autoFocus
+              className="app-scroll mt-3 block h-16 w-full resize-none rounded-lg border border-border bg-background px-2 py-1.5 text-ui outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-[var(--border-strong)]"
+              onChange={(event) => setGiveUpReason(event.target.value)}
+              placeholder="Optional — what made you stop?"
+              value={giveUpReason}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                className="h-7 rounded-md px-2.5 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                disabled={givingUp}
+                onClick={() => setGiveUpOpen(false)}
+                type="button"
+              >
+                Keep going
+              </button>
+              <button
+                className="inline-flex h-7 items-center gap-1.5 rounded-md bg-destructive/15 px-2.5 text-ui font-medium text-destructive transition-colors hover:bg-destructive/25 disabled:pointer-events-none disabled:opacity-45"
+                disabled={givingUp}
+                onClick={() => void giveUp()}
+                type="button"
+              >
+                {givingUp ? <Loader2 className="size-3 animate-spin" /> : <Flag className="size-3" />}
+                Give up
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Toolbar
         actions={
           <>
@@ -225,6 +288,16 @@ export function Workspace({
                 Agent working
               </span>
             )}
+            <button
+              className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
+              disabled={running || submitting || givingUp}
+              onClick={() => setGiveUpOpen(true)}
+              title="End this challenge and go back to chat"
+              type="button"
+            >
+              <Flag className="size-3" />
+              Give up
+            </button>
             <button
               className="inline-flex h-6 items-center gap-1.5 rounded-md border border-border px-2 text-ui transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
               disabled={running || submitting}
