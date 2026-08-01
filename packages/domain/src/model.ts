@@ -54,6 +54,35 @@ export const sessionSummarySchema = z.object({
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 
+export const workspaceFileEntrySchema = z.object({
+  path: z.string().min(1),
+  language: z.string().min(1),
+  readOnly: z.boolean().default(false)
+});
+
+export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visibleTests: true }).extend({
+  abilityId: id,
+  abilityTitle: z.string().min(1),
+  specificGap: z.string().min(1),
+  desiredEvidence: z.string().min(1),
+  avoidTesting: z.array(z.string()),
+  files: z.array(workspaceFileEntrySchema),
+  visibleTestFiles: z.array(z.string()),
+  attemptId: id,
+  latestEventSequence: z.number().int().min(-1)
+});
+export type ActiveQuestion = z.infer<typeof activeQuestionSchema>;
+
+export const sessionDetailSchema = z.object({
+  summary: sessionSummarySchema,
+  question: activeQuestionSchema.nullable(),
+  checkpoint: z.unknown().nullable(),
+  pendingLearnerQuestion: z.string().nullable(),
+  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate })),
+  events: z.array(z.object({ id, sequence: z.number().int(), type: z.string(), occurredAt: isoDate, payload: z.record(z.unknown()), source: z.string() }))
+});
+export type SessionDetail = z.infer<typeof sessionDetailSchema>;
+
 export const abilityDocumentSchema = z.object({
   id,
   conceptId: id,
@@ -76,4 +105,3 @@ export const conceptNodeSchema = z.object({
   failureSignatures: z.array(z.string())
 });
 export type ConceptNode = z.infer<typeof conceptNodeSchema>;
-

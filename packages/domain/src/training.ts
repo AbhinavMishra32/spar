@@ -5,6 +5,7 @@ export const questionDesignSchema = z.object({
   title: z.string().min(3),
   language: languageSchema,
   kind: z.enum(["function", "module", "repair", "extension", "repository"]),
+  difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]).optional(),
   statement: z.string().min(30),
   starterFiles: z.record(z.string()),
   referenceFiles: z.record(z.string()),
