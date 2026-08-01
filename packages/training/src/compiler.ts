@@ -46,7 +46,14 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
   const contentHash = createHash("sha256").update(stableJson(design)).digest("hex");
   return { design, report: { id: randomUUID(), valid: checks.every((check) => check.passed), contentHash, checks, validatedAt: new Date().toISOString() } };
 }
-function summarize(run: ValidationRun) { const output = `${run.stdout}\n${run.stderr}`.trim().slice(0,2_000); return `${run.exitCode === 0 ? "Passed" : `Exited ${run.exitCode}`} in ${run.durationMs}ms${output ? `: ${output}` : ""}`; }
+function summarize(run: ValidationRun) {
+  if (run.exitCode === 0) return `Passed in ${run.durationMs}ms`;
+  const output = `${run.stdout}\n${run.stderr}`;
+  const subtest = output.match(/^# Subtest:\s*(.+)$/m)?.[1]?.trim();
+  const assertion = output.match(/^\s*(?:error|name):\s*(?:\|-\s*)?(.+)$/m)?.[1]?.trim();
+  const reason = subtest || assertion || "test command failed";
+  return `Exited ${run.exitCode} in ${run.durationMs}ms: ${reason.slice(0, 180)}`;
+}
 function stableJson(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`; return JSON.stringify(value); }
 
 function normalizeFileDescriptors(design: QuestionDesign): QuestionDesign {
@@ -174,9 +181,19 @@ async function materializeDifferentialHiddenTests(design: QuestionDesign, run: V
     const incorrectImport = `./${incorrectName}`;
     const harness = differentialHarness(exportName, referenceImport, incorrectImport, seedArguments, moduleStyle);
     let foundCounterexample = false;
-    for (const candidateSource of [incorrectSource, ...synthesizeTargetedMutants(referenceSource)]) {
+    const candidateSources = [incorrectSource];
+    for (let candidateIndex = 0; candidateIndex < candidateSources.length; candidateIndex += 1) {
+      const candidateSource = candidateSources[candidateIndex];
+      if (!candidateSource) continue;
       const visible = await run({ ...design.starterFiles, [implementationPath]: candidateSource, ...design.visibleTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+      if (candidateIndex === 0) candidateSources.push(...synthesizeTargetedMutants(referenceSource, visible.exitCode !== 0));
       if (visible.exitCode !== 0) continue;
+      const existingHidden = await run({ ...design.starterFiles, [implementationPath]: candidateSource, ...design.visibleTests, ...hiddenTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+      if (existingHidden.exitCode !== 0) {
+        knownIncorrectFiles[index] = { ...incorrect, [implementationPath]: candidateSource };
+        foundCounterexample = true;
+        break;
+      }
       const discovery = await run({ ...design.starterFiles, ...design.referenceFiles, [incorrectPath]: candidateSource, [harnessPath]: harness }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
       if (discovery.exitCode !== 0) continue;
       const marker = discovery.stdout.match(/__SPAR_COUNTEREXAMPLE__(\{[^\r\n]*\})/)?.[1];
@@ -201,15 +218,49 @@ async function materializeDifferentialHiddenTests(design: QuestionDesign, run: V
   return { design: { ...design, hiddenTests, knownIncorrectFiles }, diagnostics };
 }
 
-function synthesizeTargetedMutants(referenceSource: string): string[] {
-  const candidates = [
+function synthesizeTargetedMutants(referenceSource: string, repairVisibleFailure = false): string[] {
+  const candidates = new Set([
     referenceSource.replace(/\bwhile\s*\(/, "if ("),
     referenceSource.replace(/return\s+([A-Za-z_$][\w$]*)\.slice\([^;]+\)/, "return $1"),
     referenceSource.replace(/Math\.max\s*\(/, "Math.min("),
     referenceSource.replace(/>=/, ">"),
     referenceSource.replace(/<=/, "<"),
-  ];
-  return [...new Set(candidates)].filter((candidate) => candidate !== referenceSource);
+  ]);
+
+  if (repairVisibleFailure) {
+    // Neutralize one ordinary assignment at a time. This catches common
+    // interview misconceptions such as updating only one branch while keeping
+    // the candidate syntactically valid and lets the runner decide whether that
+    // mutant is visible-safe and hidden-distinguishable.
+    for (const match of referenceSource.matchAll(/\b([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?)\s*=\s*([^;{}]+);/g)) {
+      if (match.index === undefined || !match[0] || !match[1]) continue;
+      candidates.add(replaceSpan(referenceSource, match.index, match.index + match[0].length, `${match[1]} = ${match[1]};`));
+    }
+
+    // Generate single-site operator mutations rather than mutating only the
+    // first occurrence. Bounded differential execution remains the authority;
+    // these strings are merely candidates and are never trusted directly.
+    for (const [pattern, replacement] of [
+      [/\bwhile\s*\(/g, "if ("],
+      [/>=/g, ">"],
+      [/<=/g, "<"],
+      [/===/g, "!=="],
+      [/!==/g, "==="],
+      [/\+\+/g, "--"],
+      [/--/g, "++"],
+    ] as const) {
+      for (const match of referenceSource.matchAll(pattern)) {
+        if (match.index === undefined || !match[0]) continue;
+        candidates.add(replaceSpan(referenceSource, match.index, match.index + match[0].length, replacement));
+      }
+    }
+  }
+
+  return [...candidates].filter((candidate) => candidate !== referenceSource).slice(0, 24);
+}
+
+function replaceSpan(source: string, start: number, end: number, replacement: string): string {
+  return `${source.slice(0, start)}${replacement}${source.slice(end)}`;
 }
 
 function extractCallArguments(tests: Record<string, string>, functionName: string): string[][] {

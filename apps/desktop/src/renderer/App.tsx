@@ -90,7 +90,9 @@ export function App() {
     const offAgent = api.onAgentEvent((event) => {
       append(agentLog(event));
       setRun((current) => reduceRun(current, event));
-      if (event.type === "error") setError(event.text ?? "The Training Agent failed.");
+      // Agent failures are already rendered at the exact point in the live
+      // transcript. Duplicating them as a global toast obscures the trace and
+      // makes one failure look like two independent problems.
       if (event.type === "done") {
         const id = detailRef.current?.summary.id;
         if (id) void openSession(id).catch((cause) => setError(message(cause)));

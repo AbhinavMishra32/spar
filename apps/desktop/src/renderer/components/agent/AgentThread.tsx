@@ -52,7 +52,10 @@ function ThinkingLine({ parts }: { parts: RunPart[] }) {
   const label = lastTool ? `${toolVerb(lastTool.tool, false)} — deciding what is next` : "Thinking";
   return (
     <div className="flex items-center gap-2 px-1.5 py-0.5">
-      <ThinkingOrb aria-label="Thinking" size={20} state="working" style={{ width: 16, height: 16 }} />
+      <span className="relative grid size-5 place-items-center">
+        <span className="absolute inset-0 rounded-full bg-[var(--accent)]/10 blur-sm" />
+        <ThinkingOrb aria-label="Thinking" size={20} state="working" style={{ width: 18, height: 18 }} />
+      </span>
       <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">{label}</span>
     </div>
   );

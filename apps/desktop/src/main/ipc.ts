@@ -21,7 +21,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return detail;
     if(deps.store.resetIncompletePlanning(id)){failedPlanningRuns.delete(id);detail=deps.store.readSession(id);}
     if(!detail)return null;
-    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)){if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume placement for this learner goal: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
+    const placementAnswer=deps.store.answeredIntake(id);
+    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)&&!placementAnswer){if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume placement for this learner goal: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
+    if(placementAnswer){if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Commit one accessible target and create a validated question.`,"system","session-start");return detail;}
     if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
     return detail;
   });

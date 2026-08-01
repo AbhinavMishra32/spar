@@ -52,7 +52,10 @@ export function ActivityRow({ part }: { part: ToolPart }) {
       >
         <span className="grid size-4 shrink-0 place-items-center">
           {running ? (
-            <ThinkingOrb aria-label="Working" size={20} state={orbFor(part.tool)} style={{ width: 16, height: 16 }} />
+            <span className="relative grid size-5 place-items-center">
+              <span className="absolute inset-0 rounded-full bg-[var(--accent)]/10 blur-sm" />
+              <ThinkingOrb aria-label="Working" size={20} state={orbFor(part.tool)} style={{ width: 18, height: 18 }} />
+            </span>
           ) : part.phase === "error" ? (
             <X className="size-3 text-destructive" />
           ) : (
