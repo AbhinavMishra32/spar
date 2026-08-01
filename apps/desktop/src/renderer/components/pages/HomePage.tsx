@@ -3,6 +3,7 @@ import { BrainCircuit, Clock3, Flame, Target } from "lucide-react";
 import type { SessionSummary } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { Composer, ComposerPill } from "../agent/Composer";
+import { ComposerModelPicker } from "../agent/ModelPicker";
 import { SessionCard } from "../common/SessionCard";
 import { formatDuration } from "@/lib/format";
 
@@ -33,11 +34,13 @@ export function HomePage({
   busy,
   onStart,
   onOpen,
+  onOpenSettings,
 }: {
   data: BootstrapData;
   busy: boolean;
   onStart(goal: string): void;
   onOpen(session: SessionSummary): void;
+  onOpenSettings?(): void;
 }) {
   const [goal, setGoal] = useState("");
   const firstName = data.account?.displayName.split(" ")[0] ?? "there";
@@ -72,6 +75,7 @@ export function HomePage({
             onStart(value);
           }}
           placeholder="I want to understand graph algorithms deeply…"
+          trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
           value={goal}
         />
 

@@ -6,6 +6,7 @@ import { message } from "@/lib/format";
 import { Toolbar } from "../shell/Toolbar";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer } from "../agent/Composer";
+import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
 
 /**
@@ -21,6 +22,7 @@ export function ChatView({
   onError,
   onBack,
   onExpandSidebar,
+  onOpenSettings,
 }: {
   detail: SessionDetail;
   api: SparApi | undefined;
@@ -29,6 +31,7 @@ export function ChatView({
   onError(value: string): void;
   onBack(): void;
   onExpandSidebar?: (() => void) | undefined;
+  onOpenSettings?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -130,6 +133,7 @@ export function ChatView({
             onChange={setDraft}
             onSubmit={() => void send()}
             placeholder="Ask the agent anything…"
+            trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}
           />
         </div>

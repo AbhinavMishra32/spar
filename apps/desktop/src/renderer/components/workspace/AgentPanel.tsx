@@ -4,6 +4,7 @@ import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";
+import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
 import { DifficultyPill, ProblemCard } from "./ProblemCard";
 
@@ -22,6 +23,7 @@ export function AgentPanel({
   remark,
   onRemark,
   onAttachRemark,
+  onOpenSettings,
 }: {
   detail: SessionDetail;
   question: ActiveQuestion;
@@ -32,6 +34,7 @@ export function AgentPanel({
   remark: string;
   onRemark(value: string): void;
   onAttachRemark(): void;
+  onOpenSettings?: (() => void) | undefined;
 }) {
   const [remarkOpen, setRemarkOpen] = useState(false);
   const busy = run?.status === "streaming";
@@ -99,6 +102,7 @@ export function AgentPanel({
             onChange={onDraft}
             onSubmit={onSend}
             placeholder="Ask for a hint, or explain your approach…"
+            trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}
           />
         </div>

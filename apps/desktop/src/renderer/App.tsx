@@ -240,7 +240,11 @@ export function App() {
         />
       </div>
 
-      <main className="app-opaque relative flex min-w-0 flex-1 flex-col">
+      {/* The pane's leading corners round away from the sidebar so the translucent
+          material wraps around it and the two read as one continuous surface —
+          but only while the sidebar is there to wrap it. Collapsed, the pane owns
+          the window edge and has to meet it square. */}
+      <main className={cn("app-opaque relative flex min-w-0 flex-1 flex-col", sidebar && "app-content-pane")}>
         {page !== "workspace" && (
           <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace">]} />
         )}
@@ -256,7 +260,7 @@ export function App() {
         )}
 
         <div className="min-h-0 flex-1">
-          {page === "home" && <HomePage busy={opening} data={data} onOpen={open} onStart={(goal) => void start(goal)} />}
+          {page === "home" && <HomePage busy={opening} data={data} onOpen={open} onOpenSettings={() => navigate("settings")} onStart={(goal) => void start(goal)} />}
           {page === "sessions" && <SessionsPage onOpen={open} sessions={data.sessions} />}
           {page === "ability" && (
             <PagePad>
@@ -301,6 +305,7 @@ export function App() {
                       onBack={() => navigate("home")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
+                      onOpenSettings={() => navigate("settings")}
                       onRefresh={() => openSession(detail.summary.id)}
                       question={detail.question}
                       run={run}
@@ -312,6 +317,7 @@ export function App() {
                       onBack={() => navigate("home")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
+                      onOpenSettings={() => navigate("settings")}
                       onRefresh={() => openSession(detail.summary.id)}
                       run={run}
                     />
@@ -372,7 +378,7 @@ function BootShell() {
         <span className="grid size-9 place-items-center rounded-[10px] bg-primary text-primary-foreground">
           <Sparkles className="size-4" />
         </span>
-        <span className="thinking-shimmer text-ui font-medium">Starting <SparWordmark className="text-ui" />…</span>
+        <span className="thinking-shimmer text-ui font-medium">Starting <SparWordmark />…</span>
       </div>
     </div>
   );

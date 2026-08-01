@@ -38,6 +38,7 @@ export function Workspace({
   onError,
   onBack,
   onExpandSidebar,
+  onOpenSettings,
   onAbandon,
 }: {
   detail: SessionDetail;
@@ -50,6 +51,7 @@ export function Workspace({
   onError(value: string): void;
   onBack(): void;
   onExpandSidebar?: (() => void) | undefined;
+  onOpenSettings?: (() => void) | undefined;
   onAbandon(reason: string): Promise<void>;
 }) {
   // Editable files are what the learner switches between; read-only test files
@@ -333,6 +335,7 @@ export function Workspace({
             draft={draft}
             onAttachRemark={() => void attachRemark()}
             onDraft={setDraft}
+            onOpenSettings={onOpenSettings}
             onRemark={setRemark}
             onSend={() => void send()}
             question={question}

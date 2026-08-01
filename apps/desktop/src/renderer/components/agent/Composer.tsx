@@ -4,6 +4,11 @@ import { cn } from "@/lib/utils";
 
 const MAX_ROWS_HEIGHT = 176;
 
+/**
+ * The draft surface: a rounded field, with its toolbar on the row beneath rather
+ * than inside the box. Keeping the controls out of the field is what lets the
+ * field itself stay one uninterrupted piece of paper as the draft grows.
+ */
 export function Composer({
   value,
   onChange,
@@ -67,13 +72,13 @@ export function Composer({
   };
 
   return (
-    <div className={cn("app-no-drag composer-shell", className)}>
-      <div className="flex items-start gap-1 pl-1.5 pr-2 pt-1.5">
+    <div className={cn("app-no-drag", className)}>
+      <div className="composer-shell flex items-start gap-1.5 p-2" onClick={() => field.current?.focus()}>
         {onAttach && (
           <button
             aria-label="Attach context"
-            className="mt-px grid size-7 shrink-0 place-items-center rounded-full border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={onAttach}
+            className="grid size-7 shrink-0 place-items-center rounded-full bg-[var(--color-background-elevated-secondary)] text-muted-foreground transition-colors hover:text-foreground"
+            onClick={(event) => { event.stopPropagation(); onAttach(); }}
             title="Attach context"
             type="button"
           >
@@ -83,7 +88,9 @@ export function Composer({
         <textarea
           ref={field}
           autoFocus={autoFocus}
-          className="app-scroll block w-full resize-none bg-transparent px-1.5 pb-1 pt-[0.3125rem] text-content leading-[1.55] outline-none placeholder:text-muted-foreground/65"
+          // Vertical padding matches the 28px control height, so the first line
+          // sits on the same centre line as the attach button beside it.
+          className="app-scroll block w-full resize-none bg-transparent px-1.5 py-1 text-content leading-[1.55] outline-none placeholder:text-muted-foreground/65"
           onBlur={() => setFocused(false)}
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setFocused(true)}
@@ -94,9 +101,9 @@ export function Composer({
         />
       </div>
 
-      <div className="flex items-center gap-1 px-2 pb-1.5 pt-0.5">
+      <div className="mt-1.5 flex items-center gap-1 px-0.5">
         {leading}
-        <div className="min-w-0 flex-1 truncate px-1 text-ui-sm text-muted-foreground/70">
+        <div className="min-w-0 flex-1 truncate px-1 text-ui text-muted-foreground/65">
           {hint ?? (focused && !value ? "Return to send · Shift + Return for a new line" : null)}
         </div>
         {trailing}
@@ -132,7 +139,7 @@ export function Composer({
   );
 }
 
-/** Small pill used in the composer footer for model/effort style metadata. */
+/** Small pill used in the composer toolbar for model/effort style metadata. */
 export function ComposerPill({
   icon: Icon,
   children,
@@ -140,6 +147,7 @@ export function ComposerPill({
   title,
   active = false,
   chevron = false,
+  tone = "default",
 }: {
   icon?: React.ComponentType<{ className?: string }>;
   children: React.ReactNode;
@@ -147,12 +155,14 @@ export function ComposerPill({
   title?: string;
   active?: boolean;
   chevron?: boolean;
+  tone?: "default" | "warning";
 }) {
   const Tag = onClick ? "button" : "span";
   return (
     <Tag
       className={cn(
-        "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),11px)] px-1.5 text-ui-sm text-muted-foreground transition-colors",
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[min(var(--radius-md),12px)] px-2 text-ui transition-colors",
+        tone === "warning" ? "text-warning" : "text-muted-foreground",
         onClick && "hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground",
         active && "bg-[var(--color-background-elevated-secondary)] text-foreground",
       )}
@@ -162,7 +172,7 @@ export function ComposerPill({
     >
       {Icon && <Icon className="size-3.5" />}
       <span className="truncate">{children}</span>
-      {chevron && <ChevronDown className="size-3 opacity-50" />}
+      {chevron && <ChevronDown className="size-3.5 opacity-50" />}
     </Tag>
   );
 }
