@@ -9,6 +9,8 @@ import { MotionConfig } from "motion/react";
 import { App } from "./App";
 import "./shadcn.css";
 import "./styles.css";
+import "./runtime.css";
+import "./aside-theme.css";
 import "./qa-fixes.css";
 window.MonacoEnvironment = { getWorker(_moduleId, label) { return label === "typescript" || label === "javascript" ? new TypeScriptWorker() : new EditorWorker(); } };
 document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches);
