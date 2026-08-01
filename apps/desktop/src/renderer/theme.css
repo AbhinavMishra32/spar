@@ -224,6 +224,38 @@
 }
 
 @layer base {
+  /* Real squircles, not merely bigger circles. `border-radius` always draws a
+     circular arc; `corner-shape` replaces that arc with a superellipse — the
+     curve macOS actually uses, whose curvature is continuous, so a straight edge
+     flows into its corner instead of meeting it at a visible seam.
+     superellipse(2) is the Apple constant.
+
+     Guarded because the property is Chromium 139+ (the bundled Electron clears
+     it comfortably): without support every corner keeps the arc it already had,
+     which is exactly the old appearance. */
+  @supports (corner-shape: superellipse(2)) {
+    *,
+    *::before,
+    *::after {
+      corner-shape: superellipse(2);
+    }
+
+    /* Circles must stay circles. A superellipse at a pill radius squares off an
+       avatar or a send button into a blob. */
+    [class~="rounded-full"],
+    [class*="rounded-full"],
+    .app-round {
+      corner-shape: round;
+    }
+
+    /* A superellipse fills more of its corner box than an arc of the same
+       radius, so radii tuned against arcs now read too round. Pulling the
+       multiplier back keeps the visual weight and gains the better curve. */
+    :root {
+      --squircle-factor: 1.15;
+    }
+  }
+
   *,
   *::before,
   *::after {
@@ -357,6 +389,8 @@
 
   .app-scroll::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
+    /* A pill, not a squircle — the universal rule above would square its ends. */
+    corner-shape: round;
     border-radius: 9999px;
     background-clip: content-box;
     background-color: color-mix(in srgb, var(--foreground) 16%, transparent);
