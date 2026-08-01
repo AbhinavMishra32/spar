@@ -504,7 +504,11 @@ export function Workspace({
             <Handle direction="vertical" />
 
             <Panel ref={dock} collapsible collapsedSize={0} defaultSize={34} minSize={14} order={2}>
-              <div className="work-blob h-full" data-busy={running || undefined} data-settled={settled || undefined}>
+              <div
+                className="work-blob h-full [--shimmer-phase:-1.7s]"
+                data-busy={running || undefined}
+                data-settled={settled || undefined}
+              >
                 <ResultPanel
                   events={detail.events}
                   logs={logs}

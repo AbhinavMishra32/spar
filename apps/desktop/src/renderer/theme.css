@@ -155,7 +155,7 @@
   --glass-rim: oklch(100% 0 0 / 80%);
   --glass-sheen: oklch(100% 0 0 / 90%);
   --glass-hairline: color-mix(in oklab, var(--foreground) 18%, transparent);
-  --shimmer-tint: oklch(14.5% 0 0 / 45%);
+  --shimmer-tint: oklch(14.5% 0 0 / 28%);
 
   --code-foreground: #33363b;
   --code-comment: #727780;
@@ -229,7 +229,7 @@
   --glass-rim: oklch(100% 0 0 / 8%);
   --glass-sheen: oklch(100% 0 0 / 12%);
   --glass-hairline: oklch(0% 0 0 / 55%);
-  --shimmer-tint: oklch(100% 0 0 / 70%);
+  --shimmer-tint: oklch(100% 0 0 / 40%);
 
   --code-foreground: #c9d1d9;
   --code-comment: #8b949e;
@@ -584,9 +584,12 @@
     isolation: isolate;
   }
 
-  /* A light travelling around the rim while a pane is doing something. The ring
-     is the conic gradient masked down to the border box, so it reads as the edge
-     catching light rather than as a spinner bolted to a corner. */
+  /* Working state: the rim breathes rather than a light going round it.
+     A constant-speed arc on a loop is a machine — it reads as a progress
+     spinner disguised as an edge, and it never stops, so it competes with the
+     content for the rest of the run. Brightening the whole rim in and out is
+     the same information with none of that: ambient, ignorable, and it has no
+     "position" that the eye starts tracking. */
   .work-blob[data-busy="true"]::after {
     content: "";
     position: absolute;
@@ -594,12 +597,7 @@
     z-index: 2;
     padding: 1px;
     border-radius: inherit;
-    background: conic-gradient(
-      from var(--shimmer-angle),
-      transparent 0turn,
-      color-mix(in oklab, var(--shimmer-tint) 85%, transparent) 0.06turn,
-      transparent 0.14turn
-    );
+    background: var(--shimmer-tint);
     /* Border-only: punch the content box out of the mask so just the 1px
        padding ring survives. */
     -webkit-mask:
@@ -610,12 +608,16 @@
       linear-gradient(#000 0 0) content-box,
       linear-gradient(#000 0 0);
     mask-composite: exclude;
-    animation: blob-shimmer 1.6s linear infinite;
+    /* The phase offset is per-blob. Two panes breathing in lockstep is what
+       makes a pair of them look driven by one clock. */
+    animation: blob-breathe 3.4s cubic-bezier(0.4, 0, 0.6, 1) var(--shimmer-phase, 0s) infinite alternate;
     pointer-events: none;
   }
 
-  /* One sweep on settle, so finishing is felt without becoming a second
-     permanent animation competing with the running state. */
+  /* Settling is the one moment a direction is meaningful — something finished,
+     and the light running once around says so and then leaves. Slow, and the
+     arc is wide and soft so it reads as a highlight sliding over the edge
+     rather than a marker travelling along it. */
   .work-blob[data-settled="true"]::after {
     content: "";
     position: absolute;
@@ -626,8 +628,10 @@
     background: conic-gradient(
       from var(--shimmer-angle),
       transparent 0turn,
-      color-mix(in oklab, var(--shimmer-tint) 90%, transparent) 0.07turn,
-      transparent 0.16turn
+      color-mix(in oklab, var(--shimmer-tint) 55%, transparent) 0.14turn,
+      color-mix(in oklab, var(--shimmer-tint) 90%, transparent) 0.25turn,
+      color-mix(in oklab, var(--shimmer-tint) 55%, transparent) 0.36turn,
+      transparent 0.5turn
     );
     -webkit-mask:
       linear-gradient(#000 0 0) content-box,
@@ -637,7 +641,7 @@
       linear-gradient(#000 0 0) content-box,
       linear-gradient(#000 0 0);
     mask-composite: exclude;
-    animation: blob-shimmer 0.9s cubic-bezier(0.22, 0.61, 0.36, 1) 1 forwards;
+    animation: blob-sweep 1.5s cubic-bezier(0.32, 0.72, 0, 1) 1 forwards;
     pointer-events: none;
   }
 
@@ -668,9 +672,26 @@
   }
 }
 
-@keyframes blob-shimmer {
+@keyframes blob-breathe {
+  from {
+    opacity: 0.25;
+  }
   to {
-    --shimmer-angle: 360deg;
+    opacity: 1;
+  }
+}
+
+@keyframes blob-sweep {
+  from {
+    --shimmer-angle: -90deg;
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  to {
+    --shimmer-angle: 270deg;
+    opacity: 0;
   }
 }
 
@@ -724,6 +745,7 @@
   .work-blob[data-busy="true"]::after,
   .work-blob[data-settled="true"]::after {
     animation: none;
+    opacity: 0.55;
   }
 
   .thinking-shimmer {
