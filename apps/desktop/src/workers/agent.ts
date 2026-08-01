@@ -34,7 +34,71 @@ const toolDefinitions = {
   commit_session_decision: ["Commit exactly one next pedagogical action.", z.object({ action: z.enum(["diagnose", "teach", "practise", "transfer", "advance", "retain"]), reason: z.string() })]
 } as const;
 
-function hostTool(runId:string,sessionId:string,name: string, description: string, schema: z.ZodTypeAny, record: (name: string, input: unknown, value: unknown) => void) { return createTool({ id: name, description, inputSchema: schema, execute: async (input) => { const id = randomUUID(); const result = new Promise((resolve, reject) => pendingTools.set(id, { resolve, reject })); parentPort.postMessage({ kind: "tool-call", id, requestId:runId, sessionId, name, input }); const value = await result; record(name, input, value); return value; } }); }
+function hostTool(runId:string,sessionId:string,name: string, description: string, schema: z.ZodTypeAny, record: (name: string, input: unknown, value: unknown) => void) {
+  return createTool({ id: name, description, inputSchema: schema, execute: async (input) => {
+    const id = randomUUID();
+    const result = new Promise((resolve, reject) => pendingTools.set(id, { resolve, reject }));
+    // The host tool call is the real unit of agent work, so the renderer is told
+    // about it directly rather than inferring rows from provider stream parts.
+    const summary = summarizeToolInput(name, input);
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "start", callId: id, ...summary } });
+    parentPort.postMessage({ kind: "tool-call", id, requestId:runId, sessionId, name, input });
+    try {
+      const value = await result;
+      record(name, input, value);
+      parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: true, detail: describeToolResult(name, value), ...summary } });
+      return value;
+    } catch (error) {
+      parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...summary } });
+      throw error;
+    }
+  } });
+}
+
+/** Files a tool writes, counted so the renderer can show real `+N -N` stats. */
+function summarizeToolInput(name: string, input: unknown): { label?: string; files?: Array<{ path: string; added: number; removed: number }> } {
+  const record = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const text = (key: string) => (typeof record[key] === "string" ? (record[key] as string) : undefined);
+
+  if (name === "create_question") {
+    const files: Array<{ path: string; added: number; removed: number }> = [];
+    for (const group of ["starterFiles", "referenceFiles", "visibleTests", "hiddenTests"]) {
+      const entries = record[group];
+      if (!entries || typeof entries !== "object") continue;
+      for (const [path, content] of Object.entries(entries as Record<string, unknown>)) {
+        if (typeof content !== "string") continue;
+        files.push({ path, added: countLines(content), removed: 0 });
+      }
+    }
+    const label = text("title");
+    return { ...(label ? { label } : {}), ...(files.length ? { files } : {}) };
+  }
+
+  const label =
+    text("query") ??
+    text("ability") ??
+    text("objective") ??
+    text("action") ??
+    text("question") ??
+    text("abilityId") ??
+    text("attemptId");
+  return label ? { label } : {};
+}
+
+function describeToolResult(name: string, value: unknown): string {
+  const record = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  if (name === "create_question" && typeof record.status === "string") return `status ${record.status}`;
+  if (Array.isArray(value)) return `${value.length} result${value.length === 1 ? "" : "s"}`;
+  if (typeof record.outcome === "string") return `outcome ${record.outcome}`;
+  return "";
+}
+
+function countLines(content: string): number {
+  if (!content) return 0;
+  const lines = content.split("\n");
+  // A trailing newline terminates the last line rather than starting a new one.
+  return lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+}
 
 async function run(request: Request) {
   const allowed = allowedTools(request.payload.turnKind);
@@ -162,7 +226,9 @@ function allowedTools(turnKind: TurnKind) {
   return new Set(["read_session", "inspect_current_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "read_concept_graph", "ask_learner"]);
 }
 function settle(message: Record<string, unknown>) { const pending = pendingTools.get(String(message.id)); if (!pending) return; pendingTools.delete(String(message.id)); if (message.ok) pending.resolve(message.value); else pending.reject(new Error(String(message.error))); }
-function normalize(part: Record<string, unknown>): {type:"text"|"tool"|"status"|"error";text:string;tool?:string;detail?:string} { const type = String(part.type); if (type === "text-delta") return { type: "text", text: String(part.textDelta ?? part.payload ?? "") }; if (type === "error") return {type:"error",text:errorText(part.error ?? part)};if (type.includes("tool")) return { type: "tool", text:"",tool: String(part.toolName ?? "tool"), detail: type }; return { type: "status", text:"",detail: type }; }
+function normalize(part: Record<string, unknown>): {type:"text"|"tool"|"status"|"error";text:string;tool?:string;detail?:string} { const type = String(part.type); if (type === "text-delta") return { type: "text", text: String(part.textDelta ?? part.payload ?? "") }; if (type === "error") return {type:"error",text:errorText(part.error ?? part)};// Provider stream parts describe protocol mechanics, not work. Host tool calls
+// already report the real activity, so these stay in the trace as status only.
+if (type.includes("tool")) return { type: "status", text:"", detail: `${type}:${String(part.toolName ?? "tool")}` }; return { type: "status", text:"",detail: type }; }
 function errorText(value: unknown): string {
   const find = (candidate: unknown, depth = 0): string | null => {
     if (depth > 8 || candidate == null) return null;

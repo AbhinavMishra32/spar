@@ -23,7 +23,22 @@ export const providerSettingsInput = z.object({
 });
 
 export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; sessions: z.infer<typeof sessionSummarySchema>[]; theme: "system" | "light" | "dark"; syncState: "offline" | "synced" | "pending" };
-export type AgentStreamEvent = { runId: string; type: "text" | "tool" | "status" | "error" | "done"; text?: string; tool?: string; detail?: string };
+/** One file a tool wrote, with the line counts the activity row reports. */
+export type AgentActivityFile = { path: string; added: number; removed: number };
+export type AgentStreamEvent = {
+  runId: string;
+  type: "text" | "tool" | "status" | "error" | "done";
+  text?: string;
+  tool?: string;
+  detail?: string;
+  /** Correlates a tool's start and end events so a row updates in place. */
+  callId?: string;
+  phase?: "start" | "end";
+  ok?: boolean;
+  /** Short human summary of the tool's input, e.g. the search query or title. */
+  label?: string;
+  files?: AgentActivityFile[];
+};
 /** Native menu items are routed to the renderer so the macOS menu bar drives the same UI as the in-app controls. */
 export type MenuCommand = "settings" | "new-session" | "command-palette";
 export type SyncState = BootstrapData["syncState"];
