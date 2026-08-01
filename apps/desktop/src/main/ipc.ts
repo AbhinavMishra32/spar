@@ -23,6 +23,24 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);const account=await deps.auth.account();const token=await deps.auth.accessToken();if(!account)throw new Error("Sign in before starting the Training Agent");const providers=await resolveProviders(deps.auth,deps.store,account.id,token);if(!providers.length)throw new Error("Configure a provider key in Settings or Construct before starting the Training Agent");
     const session=deps.store.readSession(sessionId);if(!session)throw new Error("Session not found");const target=deps.store.latestTarget(sessionId);const defaultObjective="Investigating your prior evidence and defining the first training target.";const payload={sessionId,message,turnKind,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,relevantAbilitySummary:deps.store.searchLearner(inputQuery(session.summary.originalGoal),4),accountId:account.id})};const first=deps.agent.request("turn",{...payload,provider:providers[0]});activeAgentRuns.set(sessionId,first.id);const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());activeAgentRuns.delete(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"done"});}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});activeAgentRuns.set(sessionId,retry.id);return attempt(retry,index+1);}activeAgentRuns.delete(sessionId);if(turnKind==="session-start")failedPlanningRuns.add(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"error",text:error instanceof Error?error.message:String(error)});}};void attempt(first,0);return{runId:first.id};
   };
+  // Giving up is durable and evidence-bearing: the abandonment is recorded on the
+  // attempt, and the agent is told so its next target answers the walk-away
+  // rather than silently repeating the same challenge.
+  ipcMain.handle(ipc.attemptAbandon, async (_event, value) => {
+    const input = value as { sessionId?: unknown; attemptId?: unknown; reason?: unknown };
+    const sessionId = zUuid(input.sessionId); const attemptId = zUuid(input.attemptId);
+    const reason = typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "";
+    const result = deps.store.abandonAttempt(attemptId, reason);
+    if (result.sessionId !== sessionId) throw new Error("Attempt does not belong to this session");
+    deps.store.addMessage(sessionId, "system", `The learner gave up on this challenge${reason ? `: ${reason}` : "."}`);
+  });
+
+  ipcMain.handle(ipc.sessionNextChallenge, async (_event, value) => {
+    const sessionId = zUuid((value as { sessionId?: unknown }).sessionId);
+    deps.store.setSessionStatus(sessionId, "planning");
+    return startAgentTurn(sessionId, "The learner asked for the next challenge. Use the existing evidence, including any challenge they gave up on, to choose one training target and create the next validated question.", "learner", "session-start");
+  });
+
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
     const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
     if(deps.store.pendingIntake(sessionId)){const run=await startAgentTurn(sessionId,`The learner answered the cold-start placement question: ${input.message.trim()}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`,"learner","session-start");deps.store.answerIntake(sessionId,input.message.trim());return run;}

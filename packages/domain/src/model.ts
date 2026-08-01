@@ -6,7 +6,10 @@ export const languageSchema = z.enum(["javascript", "typescript", "cpp"]);
 export type Language = z.infer<typeof languageSchema>;
 
 export const sessionStatusSchema = z.enum(["planning", "active", "paused", "completed"]);
-export const questionStatusSchema = z.enum(["generating", "validating", "playable", "active", "completed", "invalid"]);
+// "abandoned" is a learner decision, kept distinct from "invalid" (failed
+// validation) and "completed" (evaluated) so evidence stays honest about why a
+// challenge ended.
+export const questionStatusSchema = z.enum(["generating", "validating", "playable", "active", "completed", "invalid", "abandoned"]);
 export const pedagogicalActionSchema = z.enum(["diagnose", "teach", "practise", "transfer", "advance", "retain"]);
 
 export const trainingTargetSchema = z.object({

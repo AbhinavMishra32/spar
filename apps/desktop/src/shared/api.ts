@@ -5,7 +5,8 @@ export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
   checkpointSave: "checkpoint:save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
-  authPassword: "auth:password", authSignOut: "auth:sign-out", settingsSaveSecret: "settings:save-secret"
+  authPassword: "auth:password", authSignOut: "auth:sign-out", settingsSaveSecret: "settings:save-secret",
+  attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge"
 } as const;
 
 export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000) });
@@ -54,6 +55,10 @@ export interface PracticeApi {
   run(input: z.infer<typeof runInput>): Promise<{ id: string }>;
   submitAttempt(input:{sessionId:string;attemptId:string}):Promise<{outcome:"passed"|"failed";exitCode:number;summary:string}>;
   sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
+  /** Give up on the active challenge; the session returns to general chat. */
+  abandonAttempt(input: { sessionId: string; attemptId: string; reason: string }): Promise<void>;
+  /** Ask the agent to choose and compile the next challenge for this session. */
+  requestNextChallenge(input: { sessionId: string }): Promise<{ runId: string }>;
   passwordAuth(mode: "sign-in" | "sign-up", email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   saveProviderSecret(input: z.infer<typeof providerSettingsInput>): Promise<void>;
