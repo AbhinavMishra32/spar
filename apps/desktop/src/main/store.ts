@@ -44,14 +44,41 @@ export class LocalStore {
   }
 
   setObjective(sessionId:string,objective:string){this.db.prepare("UPDATE sessions SET objective=?,updated_at=? WHERE id=?").run(objective,new Date().toISOString(),sessionId);return{objective};}
-  setTrainingTarget(sessionId:string,input:{ability:string;specificGap:string;desiredEvidence:string;avoidTesting:string[];action?:TrainingTarget["action"]}){const id=randomUUID();const existing=this.db.prepare("SELECT id FROM ability_documents WHERE lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(input.ability) as {id:string}|undefined;const abilityId=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO training_targets VALUES (?,?,?,?,?,?,?,?,?)").run(id,sessionId,abilityId,input.ability,input.specificGap,input.desiredEvidence,JSON.stringify(input.avoidTesting),input.action??"practise",now);this.db.prepare("UPDATE sessions SET current_focus=?,updated_at=? WHERE id=?").run(JSON.stringify([input.ability]),now,sessionId);return{id,sessionId,abilityId,abilityTitle:input.ability,specificGap:input.specificGap,desiredEvidence:input.desiredEvidence,avoidTesting:input.avoidTesting,action:input.action??"practise",createdAt:now};}
+  setTrainingTarget(sessionId:string,input:{ability:string;specificGap:string;desiredEvidence:string;avoidTesting:string[];action?:TrainingTarget["action"]}){
+    const action=input.action??"practise";
+    const avoidTesting=JSON.stringify(input.avoidTesting);
+    const duplicate=this.db.prepare(`
+      SELECT t.* FROM training_targets t
+      LEFT JOIN questions q ON q.training_target_id=t.id
+      WHERE t.session_id=? AND q.id IS NULL AND lower(t.ability_title)=lower(?)
+        AND t.specific_gap=? AND t.desired_evidence=? AND t.avoid_testing=? AND t.action=?
+      ORDER BY t.created_at DESC LIMIT 1
+    `).get(sessionId,input.ability,input.specificGap,input.desiredEvidence,avoidTesting,action) as Record<string,unknown>|undefined;
+    if(duplicate)return normalizeTarget(duplicate);
+    const id=randomUUID();const existing=this.db.prepare("SELECT id FROM ability_documents WHERE lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(input.ability) as {id:string}|undefined;const abilityId=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO training_targets VALUES (?,?,?,?,?,?,?,?,?)").run(id,sessionId,abilityId,input.ability,input.specificGap,input.desiredEvidence,avoidTesting,action,now);this.db.prepare("UPDATE sessions SET current_focus=?,updated_at=? WHERE id=?").run(JSON.stringify([input.ability]),now,sessionId);return{id,sessionId,abilityId,abilityTitle:input.ability,specificGap:input.specificGap,desiredEvidence:input.desiredEvidence,avoidTesting:input.avoidTesting,action,createdAt:now};
+  }
   latestTarget(sessionId:string){return this.db.prepare("SELECT * FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string,unknown>|undefined;}
   createQuestion(sessionId:string,design:QuestionDesign,report:unknown){const target=this.latestTarget(sessionId);if(!target)throw new Error("A persisted training target is required before question creation");const id=randomUUID();const attemptId=randomUUID();const now=new Date().toISOString();const ordinal=(this.db.prepare("SELECT COALESCE(MAX(ordinal),0)+1 value FROM questions WHERE session_id=?").get(sessionId) as {value:number}).value;this.db.transaction(()=>{this.db.prepare("INSERT INTO questions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id,sessionId,String(target.id),ordinal,design.title,design.statement,design.language,design.kind,"active",design.difficulty??"developing",JSON.stringify(design),JSON.stringify(report),now);this.db.prepare("INSERT INTO attempts VALUES (?,?,?,?,?,?,NULL)").run(attemptId,id,sessionId,"active",0,now);const event={id:randomUUID(),attemptId,sequence:0,type:"attempt_started",occurredAt:now,payload:{questionId:id},source:"system",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);this.db.prepare("UPDATE sessions SET status='active',updated_at=? WHERE id=?").run(now,sessionId);this.enqueue("question-create",{sessionId,questionId:id,attemptId,design,report});})();return{id,attemptId,ordinal};}
   addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string){const value={id:randomUUID(),role,body,createdAt:new Date().toISOString()};this.db.prepare("INSERT INTO agent_messages VALUES (?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt);return value;}
   hasLearnerEvidence(){const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents").get() as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts WHERE status='completed'").get() as {count:number}).count;return abilities>0||completed>0;}
+  hasRelevantLearnerEvidence(goal:string){return this.searchLearner(goal,1).length>0||this.searchAttempts(goal,1).length>0;}
   setPendingIntake(sessionId:string,question:string){const now=new Date().toISOString();this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,question,now);return{question,status:"pending" as const};}
   pendingIntake(sessionId:string){return this.db.prepare("SELECT question FROM session_intake WHERE session_id=? AND status='pending'").get(sessionId) as {question:string}|undefined;}
   answerIntake(sessionId:string,answer:string){const result=this.db.prepare("UPDATE session_intake SET status='answered',answer=?,answered_at=? WHERE session_id=? AND status='pending'").run(answer,new Date().toISOString(),sessionId);if(result.changes!==1)throw new Error("No pending placement question exists for this session");return{answered:true};}
+  resetIncompletePlanning(sessionId:string){
+    return this.db.transaction(()=>{
+      const session=this.db.prepare("SELECT status FROM sessions WHERE id=?").get(sessionId) as {status:string}|undefined;
+      if(!session||session.status!=="planning")return false;
+      const questions=(this.db.prepare("SELECT COUNT(*) count FROM questions WHERE session_id=?").get(sessionId) as {count:number}).count;
+      if(questions>0)return false;
+      const targets=(this.db.prepare("SELECT COUNT(*) count FROM training_targets WHERE session_id=?").get(sessionId) as {count:number}).count;
+      if(targets===0)return false;
+      this.db.prepare("DELETE FROM session_decisions WHERE session_id=?").run(sessionId);
+      this.db.prepare("DELETE FROM training_targets WHERE session_id=?").run(sessionId);
+      this.db.prepare("UPDATE sessions SET objective=?,current_focus='[]',updated_at=? WHERE id=?").run("Investigating your prior evidence and defining the first training target.",new Date().toISOString(),sessionId);
+      return true;
+    })();
+  }
   commitDecision(sessionId:string,input:{action:string;reason:string}){const value={id:randomUUID(),...input,createdAt:new Date().toISOString()};this.db.prepare("INSERT INTO session_decisions VALUES (?,?,?,?,?)").run(value.id,sessionId,value.action,value.reason,value.createdAt);return value;}
   searchLearner(query:string,limit:number){const terms=searchTerms(query);if(!terms.length)return[];const rows=this.db.prepare("SELECT id,title,markdown,version,status,updated_at FROM ability_documents ORDER BY updated_at DESC LIMIT 200").all() as Array<{id:string;title:string;markdown:string;version:number;status:string;updated_at:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.markdown}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updated_at.localeCompare(a.row.updated_at)).slice(0,limit).map(item=>item.row);}
   readAbility(id:string){return this.db.prepare("SELECT * FROM ability_documents WHERE id=?").get(id)??null;}
@@ -80,5 +107,8 @@ export class LocalStore {
 }
 
 function languageFor(path:string){if(path.endsWith(".ts")||path.endsWith(".tsx"))return"typescript";if(path.endsWith(".js")||path.endsWith(".mjs")||path.endsWith(".cjs"))return"javascript";if(/\.(cpp|cc|hpp|h)$/.test(path))return"cpp";if(path.endsWith(".md"))return"markdown";return"plaintext";}
-function searchTerms(query:string){return [...new Set(query.toLowerCase().replace(/[^a-z0-9+#-]+/g," ").split(/\s+/).filter(term=>term.length>1))].slice(0,12);}
-function relevance(text:string,terms:string[]){const haystack=text.toLowerCase();return terms.reduce((score,term)=>score+(haystack.includes(term)?1:0),0);}
+const SEARCH_STOP_WORDS=new Set(["a","an","and","day","days","for","from","have","i","in","interview","learn","me","my","of","on","prepare","the","to","want","with"]);
+function tokens(value:string){return value.toLowerCase().replace(/[^a-z0-9+#-]+/g," ").split(/\s+/).filter(Boolean);}
+function searchTerms(query:string){return [...new Set(tokens(query).filter(term=>!SEARCH_STOP_WORDS.has(term)&&(term.length>2||["ai","js","c#","c++"].includes(term))))].slice(0,12);}
+function relevance(text:string,terms:string[]){const haystack=new Set(tokens(text));return terms.reduce((score,term)=>score+(haystack.has(term)?1:0),0);}
+function normalizeTarget(row:Record<string,unknown>){return{id:String(row.id),sessionId:String(row.session_id),abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),specificGap:String(row.specific_gap),desiredEvidence:String(row.desired_evidence),avoidTesting:JSON.parse(String(row.avoid_testing)) as string[],action:String(row.action),createdAt:String(row.created_at)};}
