@@ -164,7 +164,13 @@ export const Markdown = memo(function Markdown({ source, className }: { source: 
   const blocks = useMemo(() => parse(source), [source]);
 
   return (
-    <div className={cn("text-content leading-[1.62] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0", className)}>
+    <div
+      className={cn(
+        // A bare UUID or long path must wrap rather than widen the column.
+        "min-w-0 text-content leading-[1.62] [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+        className,
+      )}
+    >
       {blocks.map((block, index) => {
         switch (block.kind) {
           case "code":
