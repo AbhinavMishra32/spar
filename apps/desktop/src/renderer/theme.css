@@ -328,21 +328,24 @@
     -webkit-app-region: no-drag;
   }
 
-  /* The sidebar is a hole in the window: the OS paints the material behind it
-     (Liquid Glass on macOS 26, vibrancy below that, Mica on Windows 11), so the
-     element itself must stay fully transparent. When the platform has no such
-     material — Windows 10, Linux — the main process sets data-native-surface="none"
-     and we paint the fill ourselves, because a transparent hole would otherwise
-     show the desktop straight through. */
+  /* The window is a hole the OS paints its material into — Liquid Glass on
+     macOS 26, vibrancy below that, Mica on Windows 11. This goes on the whole
+     shell, not just the sidebar: the content pane's rounded corner exposes
+     whatever sits behind the pane, and if the material stops at the sidebar's
+     edge then what it exposes is bare window. That is the dark notch under the
+     curve. Spanning the shell means the corner reveals the same surface the
+     sidebar shows, and the two read as one continuous sheet. */
   .app-vibrant {
     /* Not quite transparent: a tint over the native material. Glass alone takes
-       its value from whatever is behind the window, so on a dark desktop the
-       sidebar collapses to the same value as the content pane and the two stop
-       reading as separate surfaces. The wash keeps it reliably the lighter of
-       the pair however the wallpaper moves. */
+       its value from whatever is behind the window, so on a dark desktop it
+       collapses to the same value as the content pane and the two stop reading
+       as separate surfaces. The wash keeps it reliably the lighter of the pair
+       however the wallpaper moves. */
     background: var(--app-vibrant-tint);
   }
 
+  /* No native material to sit on — Windows 10, Linux — so paint it outright,
+     or the hole shows the desktop straight through. */
   :root[data-native-surface="none"] .app-vibrant {
     background: var(--app-sidebar-fill);
   }

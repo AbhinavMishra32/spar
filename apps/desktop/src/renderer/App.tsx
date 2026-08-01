@@ -220,7 +220,7 @@ export function App() {
   };
 
   return (
-    <div className="relative flex h-full">
+    <div className="app-vibrant relative flex h-full">
       {/* Width, not display, so the vibrant layer never repaints while animating.
           The transition is dropped mid-drag, or the edge lags the cursor. */}
       <div
