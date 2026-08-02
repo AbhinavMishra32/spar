@@ -13,6 +13,19 @@ export class AuthService {
     return payload.account;
   }
   async signOut() { await keytar.deletePassword(service, "access-token"); await keytar.deletePassword(service, "account"); }
+  async deleteAccount() {
+    const token = await this.accessToken();
+    if (!token) throw new Error("Sign in before deleting your account");
+    const response = await fetch(`${this.apiOrigin}/v1/account`, { method: "DELETE", headers: { authorization: `Bearer ${token}` } });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({})) as { error?: string };
+      throw new Error(payload.error ?? `Account deletion failed (${response.status})`);
+    }
+    await this.signOut();
+    await Promise.all([
+      "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai", "openrouter", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom",
+    ].flatMap((provider) => [this.deleteSecret(provider), this.deleteProviderOAuth(provider)]));
+  }
   saveSecret(account: string, secret: string) { return keytar.setPassword(service, `provider:${account}`, secret).then(() => undefined); }
   readSecret(account: string) { return keytar.getPassword(service, `provider:${account}`); }
   deleteSecret(account: string) { return keytar.deletePassword(service, `provider:${account}`).then(() => undefined); }

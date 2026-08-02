@@ -26,7 +26,7 @@ else {
     const runner = new UtilityClient("runner", (event) => mainWindow?.webContents.send("runner:event", { id: event.requestId, stream: event.stream, data: event.data, exitCode: event.exitCode }));
     const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; mainWindow?.webContents.send("agent:event", { runId: event.requestId, ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner));
     const sync=new CloudSyncService(store,auth,apiOrigin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
-    installIpc({ store, workspaces, auth, providers, runner, agent, window: () => mainWindow }); installMenu(() => mainWindow); mainWindow = createMainWindow(); startUpdates(mainWindow);
+    installIpc({ store, workspaces, auth, providers, runner, agent, sync, window: () => mainWindow }); installMenu(() => mainWindow); mainWindow = createMainWindow(); startUpdates(mainWindow);
     app.on("before-quit", () => { sync.stop(); runner.stop(); agent.stop(); store.close(); });
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(); });
   });
