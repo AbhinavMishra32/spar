@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ActiveQuestion } from "@spar/domain";
+import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { DifficultyPill } from "./Difficulty";
 
@@ -83,8 +84,11 @@ export function ChallengeIntro({
               transition={{ delay: 0.56, duration: 0.4 }}
             >
               <DifficultyPill difficulty={question.difficulty} />
-              <span className="rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground">
-                {question.language}
+              <span
+                className="grid size-6 place-items-center rounded-md bg-[var(--color-background-elevated-secondary)] text-foreground/70"
+                title={LANGUAGE_LABEL[question.language]}
+              >
+                <LanguageGlyph className="size-3.5" language={question.language} />
               </span>
             </motion.div>
 

@@ -41,7 +41,7 @@ export function CommandPalette({
         <CommandGroup heading="Actions">
           <CommandItem onSelect={() => run(onNewSession)} value="new session create start">
             <Plus />
-            New session
+            Start a session
             <CommandShortcut>⌘N</CommandShortcut>
           </CommandItem>
         </CommandGroup>
@@ -73,11 +73,11 @@ export function CommandPalette({
           </CommandItem>
           <CommandItem onSelect={() => run(() => onPage("ability"))} value="ability map concepts">
             <Map />
-            Ability map
+            Abilities
           </CommandItem>
-          <CommandItem onSelect={() => run(() => onPage("history"))} value="history attempts">
+          <CommandItem onSelect={() => run(() => onPage("challenges"))} value="challenges history attempts tests">
             <History />
-            History
+            Challenges
           </CommandItem>
           <CommandItem onSelect={() => run(() => onPage("settings"))} value="settings provider preferences">
             <Settings />

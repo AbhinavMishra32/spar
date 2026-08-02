@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { fileName, languageFor, message } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { Toolbar } from "../shell/Toolbar";
-import type { RuntimeLog } from "../agent/RuntimeConsole";
+import { FileGlyph } from "../common/LanguageGlyph";
 import type { AgentRun } from "../agent/agentRun";
 import { AgentPanel } from "./AgentPanel";
 import { FileTree } from "./FileTree";
@@ -46,7 +46,6 @@ export function Workspace({
   detail,
   question,
   api,
-  logs,
   run,
   dark,
   onRefresh,
@@ -59,7 +58,6 @@ export function Workspace({
   detail: SessionDetail;
   question: ActiveQuestion;
   api: SparApi | undefined;
-  logs: RuntimeLog[];
   run: AgentRun | null;
   dark: boolean;
   onRefresh(): Promise<void>;
@@ -88,10 +86,10 @@ export function Workspace({
   // second animation running against the busy state forever.
   const [settled, setSettled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [sending, setSending] = useState(false);
   const [outcome, setOutcome] = useState<RunOutcome>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("testcase");
   const [draft, setDraft] = useState("");
-  const [remark, setRemark] = useState("");
   const [treeOpen, setTreeOpen] = useState(false);
   const [givingUp, setGivingUp] = useState(false);
   const [giveUpOpen, setGiveUpOpen] = useState(false);
@@ -100,8 +98,11 @@ export function Workspace({
   const [introFor, setIntroFor] = useState<string | null>(question.attemptId);
 
   const dock = useRef<ImperativePanelHandle>(null);
+  const sendingRef = useRef(false);
+  const visibleRunId = useRef<string | null>(null);
+  const terminalRef = useRef("");
   const readOnly = Boolean(question.files.find((file) => file.path === activeFile)?.readOnly);
-  const agentBusy = run?.status === "streaming";
+  const agentBusy = sending || run?.status === "streaming";
 
   const load = useCallback(
     async (path: string) => {
@@ -118,6 +119,8 @@ export function Workspace({
     setIntroFor(question.attemptId);
     setOutcome(null);
     setTerminal("");
+    terminalRef.current="";
+    visibleRunId.current=null;
     // Reloading on a new question keeps the editor from showing the previous challenge.
   }, [question.attemptId]);
 
@@ -142,10 +145,16 @@ export function Workspace({
   useEffect(() => {
     if (!api) return;
     return api.onRunnerEvent((event) => {
-      setTerminal((value) => value + event.data);
-      if (event.stream === "exit") setRunning(false);
+      if (event.id !== visibleRunId.current) return;
+      terminalRef.current += event.data;
+      setTerminal(terminalRef.current);
+      if (event.stream === "exit") {
+        setRunning(false);
+        visibleRunId.current=null;
+        void api.appendAttemptEvent({id:crypto.randomUUID(),attemptId:question.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",exitCode:event.exitCode??-1,passed:event.exitCode===0,summary:terminalRef.current.trim().slice(-12000)},source:"runner",schemaVersion:1}).then(()=>onRefresh()).catch((error)=>onError(message(error)));
+      }
     });
-  }, [api]);
+  }, [api,onError,onRefresh,question.attemptId]);
 
   const append = async (type: AttemptEvent["type"], payload: Record<string, unknown>) => {
     if (!api) return;
@@ -174,12 +183,15 @@ export function Workspace({
       setOutcome(null);
       setResultTab("result");
       dock.current?.expand();
-      setTerminal("$ run visible tests\n");
+      terminalRef.current="$ run visible tests\n";
+      setTerminal(terminalRef.current);
       await save();
       await append("command_executed", { command: "test", language: question.language });
-      await api.run({ sessionId: detail.summary.id, language: question.language, command: "test", timeoutMs: 8_000 });
+      const request=await api.run({ sessionId: detail.summary.id, language: question.language, command: "test", timeoutMs: 8_000 });
+      visibleRunId.current=request.id;
     } catch (error) {
       setRunning(false);
+      visibleRunId.current=null;
       onError(message(error));
     }
   };
@@ -191,9 +203,9 @@ export function Workspace({
       setResultTab("result");
       dock.current?.expand();
       await save();
-      setTerminal((value) => `${value}\n$ submit visible + hidden tests\n`);
+      setTerminal((value) => {const next=`${value}\n$ submit visible + hidden tests\n`;terminalRef.current=next;return next;});
       const result = await api.submitAttempt({ sessionId: detail.summary.id, attemptId: question.attemptId });
-      setTerminal((value) => `${value}\n${result.summary}\n`);
+      setTerminal((value) => {const next=`${value}\n${result.summary}\n`;terminalRef.current=next;return next;});
       setOutcome({ kind: result.outcome, summary: result.summary });
       await onRefresh();
     } catch (error) {
@@ -205,13 +217,18 @@ export function Workspace({
 
   const send = async () => {
     const body = draft.trim();
-    if (!body || !api) return;
+    if (!body || !api || sendingRef.current || run?.status === "streaming") return;
+    sendingRef.current=true;
+    setSending(true);
     setDraft("");
     try {
       await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
       await onRefresh();
     } catch (error) {
       onError(message(error));
+    } finally {
+      sendingRef.current=false;
+      setSending(false);
     }
   };
 
@@ -224,18 +241,6 @@ export function Workspace({
     } finally {
       setGivingUp(false);
       setGiveUpOpen(false);
-    }
-  };
-
-  const attachRemark = async () => {
-    const body = remark.trim();
-    if (!body) return;
-    try {
-      await append("learner_remark", { body });
-      setRemark("");
-      await onRefresh();
-    } catch (error) {
-      onError(message(error));
     }
   };
 
@@ -314,12 +319,6 @@ export function Workspace({
       <Toolbar
         actions={
           <>
-            {agentBusy && (
-              <span className="mr-1 inline-flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-                <Loader2 className="size-3 animate-spin" />
-                Agent working
-              </span>
-            )}
             <button
               className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
               disabled={running || submitting || givingUp}
@@ -365,13 +364,10 @@ export function Workspace({
           <AgentPanel
             detail={detail}
             draft={draft}
-            onAttachRemark={() => void attachRemark()}
             onDraft={setDraft}
             onOpenSettings={onOpenSettings}
-            onRemark={setRemark}
             onSend={() => void send()}
             question={question}
-            remark={remark}
             run={run}
             testFiles={testFiles}
           />
@@ -439,13 +435,14 @@ export function Workspace({
                           title={file.path}
                           type="button"
                         >
+                          <FileGlyph className="shrink-0 opacity-80" fallback={FileCode2} path={file.path} />
                           {fileName(file.path)}
                           {activeFile === file.path && dirty && <span className="size-1.5 rounded-full bg-foreground/50" />}
                         </button>
                       ))
                     ) : (
                       <span className="inline-flex h-6 items-center gap-1.5 rounded-md bg-accent px-2 text-ui">
-                        <FileCode2 className="size-3.5 text-muted-foreground" />
+                        <FileGlyph className="text-muted-foreground" fallback={FileCode2} path={activeFile} />
                         {fileName(activeFile) || "No file"}
                         {dirty && <span className="size-1.5 rounded-full bg-foreground/50" />}
                       </span>
@@ -511,8 +508,7 @@ export function Workspace({
               >
                 <ResultPanel
                   events={detail.events}
-                  logs={logs}
-                  onClearTerminal={() => setTerminal("")}
+                  onClearTerminal={() => {terminalRef.current="";setTerminal("");}}
                   onCollapse={() => dock.current?.collapse()}
                   onTab={setResultTab}
                   outcome={outcome}

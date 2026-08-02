@@ -1,4 +1,4 @@
-import { FileCode2, Flag, MessageSquare, Play, Sparkles, Terminal } from "lucide-react";
+import { FileCode2, Flag, Play, Sparkles, Terminal } from "lucide-react";
 import type { SessionDetail } from "@spar/domain";
 import { EmptyState } from "../common/EmptyState";
 
@@ -8,7 +8,6 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   attempt_started: Flag,
   file_changed: FileCode2,
   command_executed: Play,
-  learner_remark: MessageSquare,
   agent_message: Sparkles,
 };
 
@@ -17,7 +16,6 @@ function describe(event: Event): string {
   const payload = event.payload as Record<string, unknown>;
   if (event.type === "file_changed") return `${String(payload.path ?? "file")} · ${String(payload.bytes ?? 0)} bytes`;
   if (event.type === "command_executed") return `${String(payload.command ?? "run")} · ${String(payload.language ?? "")}`.trim();
-  if (event.type === "learner_remark") return String(payload.body ?? "");
   const rest = JSON.stringify(payload);
   return rest === "{}" ? "" : rest;
 }
@@ -32,7 +30,7 @@ export function AttemptsPanel({ events }: { events: Event[] }) {
       <div className="app-scroll h-full overflow-y-auto p-5">
         <EmptyState
           compact
-          description="Editing a file, running the tests, or attaching a remark all append to this attempt's trace."
+          description="Editing a file, running tests, and submitting all append durable evidence to this attempt."
           icon={Terminal}
           title="Nothing recorded yet"
         />

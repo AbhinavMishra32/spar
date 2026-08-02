@@ -15,10 +15,9 @@ import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/format";
 import { declaredCases } from "@/lib/testCases";
 import { EMPTY_REPORT, headline, parseTestOutput, type CaseStatus, type TestCaseResult } from "@/lib/testReport";
-import { RuntimeConsole, type RuntimeLog } from "../agent/RuntimeConsole";
 import { AttemptsPanel } from "./AttemptsPanel";
 
-export type ResultTab = "testcase" | "result" | "trace" | "attempts";
+export type ResultTab = "testcase" | "result" | "attempts";
 export type RunOutcome = { kind: "passed" | "failed"; summary: string } | null;
 
 function Tab({ active, label, badge, onClick }: { active: boolean; label: string; badge?: React.ReactNode; onClick(): void }) {
@@ -117,7 +116,6 @@ export function ResultPanel({
   terminal,
   running,
   outcome,
-  logs,
   events,
   onClearTerminal,
   onCollapse,
@@ -129,7 +127,6 @@ export function ResultPanel({
   terminal: string;
   running: boolean;
   outcome: RunOutcome;
-  logs: RuntimeLog[];
   events: SessionDetail["events"];
   onClearTerminal(): void;
   onCollapse(): void;
@@ -184,12 +181,6 @@ export function ResultPanel({
           }
           label="Test Result"
           onClick={() => onTab("result")}
-        />
-        <Tab
-          active={tab === "trace"}
-          badge={logs.length > 0 ? <Count>{logs.length}</Count> : undefined}
-          label="Agent trace"
-          onClick={() => onTab("trace")}
         />
         <Tab
           active={tab === "attempts"}
@@ -342,8 +333,6 @@ export function ResultPanel({
           )}
         </div>
       )}
-
-      {tab === "trace" && <RuntimeConsole className="flex-1" logs={logs} />}
 
       {tab === "attempts" && (
         <div className="min-h-0 flex-1">
