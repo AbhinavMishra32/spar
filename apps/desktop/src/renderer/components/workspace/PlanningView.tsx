@@ -1,15 +1,11 @@
 import { useState } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
-import { ChevronDown, ChevronUp } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import type { SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
-import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
-import { Toolbar, ToolbarButton } from "../shell/Toolbar";
+import { Toolbar } from "../shell/Toolbar";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer } from "../agent/Composer";
-import { RuntimeConsole, type RuntimeLog } from "../agent/RuntimeConsole";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
 import type { AgentRun } from "../agent/agentRun";
 
@@ -19,7 +15,7 @@ function planningOrbState(run: AgentRun | null): OrbState {
   const tool = [...(run?.parts ?? [])].reverse().find((part) => part.kind === "tool" && part.phase === "running");
   if (!tool || tool.kind !== "tool") return "working";
   if (tool.tool.startsWith("search_") || tool.tool.startsWith("read_")) return "searching";
-  if (tool.tool === "create_question") return "shaping";
+  if (tool.tool === "create_question" || tool.tool === "replace_current_question") return "shaping";
   if (tool.tool === "ask_user_question") return "listening";
   return "composing";
 }
@@ -28,7 +24,7 @@ function PlanningPresence({ run }: { run: AgentRun }) {
   const state = planningOrbState(run);
   const active = [...run.parts].reverse().find((part) => part.kind === "tool" && part.phase === "running");
   const label = active?.kind === "tool"
-    ? active.tool === "create_question" ? "Compiling and testing a challenge" : "Working through your learning evidence"
+    ? active.tool === "create_question" || active.tool === "replace_current_question" ? "Compiling and testing a challenge" : "Working through your learning evidence"
     : "Deciding the next verified step";
   return (
     <div className="relative mb-3 overflow-hidden rounded-xl border border-border/80 bg-card/75 px-3.5 py-3 shadow-[var(--app-shadow-soft)] backdrop-blur-xl">
@@ -54,25 +50,24 @@ function PlanningPresence({ run }: { run: AgentRun }) {
 export function PlanningView({
   detail,
   api,
-  logs,
   run,
   onRefresh,
   onError,
   onBack,
   onExpandSidebar,
+  onOpenSettings,
 }: {
   detail: SessionDetail;
   api: SparApi | undefined;
-  logs: RuntimeLog[];
   run: AgentRun | null;
   onRefresh(): Promise<void>;
   onError(value: string): void;
   onBack(): void;
   onExpandSidebar?: (() => void) | undefined;
+  onOpenSettings?: (() => void) | undefined;
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
-  const [traceOpen, setTraceOpen] = useState(false);
   const pending = detail.pendingLearnerQuestion;
 
   const send = async (answer?: string) => {
@@ -98,23 +93,13 @@ export function PlanningView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Toolbar
-        actions={
-          <ToolbarButton
-            active={traceOpen}
-            icon={traceOpen ? ChevronDown : ChevronUp}
-            label="Trace"
-            onClick={() => setTraceOpen((value) => !value)}
-          />
-        }
         onBack={onBack}
         onExpandSidebar={onExpandSidebar}
         subtitle={detail.summary.status}
         title={detail.summary.title}
       />
 
-      <PanelGroup className="min-h-0 flex-1" direction="vertical">
-        <Panel minSize={30} order={1}>
-          <div className="flex h-full min-h-0 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col">
             <AgentThread
               header={streaming && run ? <PlanningPresence run={run} /> : undefined}
               empty={
@@ -156,6 +141,7 @@ export function PlanningView({
                   <Composer
                     busy={busy || streaming}
                     onChange={setDraft}
+                    {...(onOpenSettings ? { onOpenSettings } : {})}
                     onSubmit={() => void send()}
                     placeholder="Send the agent a note…"
                     value={draft}
@@ -163,28 +149,7 @@ export function PlanningView({
                 )}
               </div>
             </div>
-          </div>
-        </Panel>
-
-        {traceOpen && (
-          <>
-            <PanelResizeHandle className="h-px shrink-0 cursor-row-resize bg-border transition-colors hover:bg-[var(--border-strong)]" />
-            <Panel defaultSize={28} maxSize={60} minSize={12} order={2}>
-              <div className="flex h-full flex-col bg-[var(--color-background-surface-under)]">
-                <div className="hairline-b flex h-7 shrink-0 items-center justify-between px-3">
-                  <span className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/70">
-                    UTILITY PROCESS TRACE
-                  </span>
-                  <span className={cn("text-ui-sm tabular-nums", streaming ? "text-[var(--success)]" : "text-muted-foreground/60")}>
-                    {logs.length} lines
-                  </span>
-                </div>
-                <RuntimeConsole className="flex-1" logs={logs} />
-              </div>
-            </Panel>
-          </>
-        )}
-      </PanelGroup>
+      </div>
     </div>
   );
 }

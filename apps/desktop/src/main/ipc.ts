@@ -1,21 +1,28 @@
 import { BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { randomUUID } from "node:crypto";
-import { sessionCheckpointSchema } from "@spar/domain";
-import { attemptAppendInput, createSessionInput, ipc, providerSettingsInput, runInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
+import { z } from "zod";
+import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { attemptAppendInput, createSessionInput, ipc, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { ProviderService } from "./provider.js";
+import type { CloudSyncService } from "./sync.js";
+import { requestsChallengeRevision } from "./agentIntent.js";
+import type { AgentTurnKind } from "../workers/agentPolicy.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; sync: CloudSyncService; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
   const startingAgentRuns = new Map<string, Promise<{ runId: string }>>();
   const failedPlanningRuns = new Set<string>();
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), sessions: deps.store.listSessions(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline" }));
-  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); const created=deps.store.createSession(input.goal);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);await startAgentTurn(created.sessionId,`Start a new adaptive session for this learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
+  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline" }));
+  /* Checked before the session row exists, not after: a session created for a
+     turn that can never run is a dead entry in the sidebar that the learner has
+     to clean up to make the error go away. */
+  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); if(!await deps.providers.available())throw new Error(NO_PROVIDER); const created=deps.store.createSession(input.goal);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);await startAgentTurn(created.sessionId,`Start a new adaptive session for this learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
   ipcMain.handle(ipc.sessionsOpen, (_event, sessionId) => {
     const id=zUuid(sessionId);let detail=deps.store.readSession(id);
     if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return detail;
@@ -32,18 +39,27 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.workspaceRead, (_event, value) => { const input = workspacePathInput.parse(value); return deps.workspaces.read(input.sessionId, input.path); });
   ipcMain.handle(ipc.workspaceWrite, (_event, value) => { const input = workspaceWriteInput.parse(value); return deps.workspaces.write(input.sessionId, input.path, input.content); });
   ipcMain.handle(ipc.runnerRun, (_event, value) => { const input = runInput.parse(value); const request = deps.runner.request("run", { ...input, root: deps.workspaces.sessionRoot(input.sessionId) }); void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) })); return { id: request.id }; });
-  const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:"cold-start"|"session-start"|"attempt-complete"|"learner-message"="learner-message")=>{
+  const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:AgentTurnKind="learner-message")=>{
     const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};
     const starting=startingAgentRuns.get(sessionId);if(starting)return starting;
     const launch=(async()=>{
-      failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);
+      /* Credentials are resolved before the message is recorded. A turn with no
+         provider behind it must leave the transcript exactly as it found it —
+         otherwise the learner is looking at their own question sitting in the
+         thread with nothing that will ever answer it. */
       const account=await deps.auth.account();const token=await deps.auth.accessToken();
-      if(!account)throw new Error("Sign in before starting the Training Agent");
+      if(!account)throw new Error("Sign in before starting Spar");
       const providers=await deps.providers.resolve(account.id,token);
-      if(!providers.length)throw new Error("Connect a model provider in Settings before starting the Training Agent");
+      if(!providers.length)throw new Error(NO_PROVIDER);
+      failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);
       const session=deps.store.readSession(sessionId);if(!session)throw new Error("Session not found");
       const target=deps.store.latestTarget(sessionId);const defaultObjective="Investigating your prior evidence and defining the first training target.";
-      const payload={sessionId,message,turnKind,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id})};
+      /* Onboarding is evidence like any other: what the learner said about their
+         experience and where they feel weak calibrates the first target, before
+         any attempt exists to calibrate it from. `preferredLanguage` is the
+         default the instructions read — a stated language in the goal still wins. */
+      const profile=deps.store.getProfile();
+      const payload={sessionId,message,turnKind,activeQuestion:session.question?{id:session.question.id,attemptId:session.question.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
       const first=deps.agent.request("turn",{...payload,provider:providers[0]});activeAgentRuns.set(sessionId,first.id);
       const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());activeAgentRuns.delete(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"done"});}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});activeAgentRuns.set(sessionId,retry.id);return attempt(retry,index+1);}activeAgentRuns.delete(sessionId);if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,type:"error",text:error instanceof Error?error.message:String(error)});}};
       void attempt(first,0);return{runId:first.id};
@@ -69,14 +85,70 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return startAgentTurn(sessionId, "The learner asked for the next challenge. Use the existing evidence, including any challenge they gave up on, to choose one training target and create the next validated question.", "learner", "session-start");
   });
 
+  ipcMain.handle(ipc.sessionsRename, (_event, value) => { const input = sessionRenameInput.parse(value); return deps.store.renameSession(input.sessionId, input.title); });
+  ipcMain.handle(ipc.sessionsPin, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionPinned(input.sessionId, input.value); });
+  ipcMain.handle(ipc.sessionsArchive, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionArchived(input.sessionId, input.value); });
+  /* Calling a session finished is the learner's judgement, but only while nothing
+     is live: a session with a challenge open on screen is described by that
+     challenge, and a status behind it would contradict what they are looking at. */
+  ipcMain.handle(ipc.sessionsStatus, (_event, value) => {
+    const input = sessionStatusInput.parse(value);
+    if (deps.store.readSession(input.sessionId)?.summary.activeQuestion) throw new Error("Finish or give up on the open challenge first");
+    deps.store.setSessionStatus(input.sessionId, input.status);
+  });
+  /* A turn already in flight is dropped rather than waited for: the learner has
+     said the session is going away, and the worker's result has nowhere to land
+     once the row is gone. Anything the turn still writes is a no-op after this. */
+  ipcMain.handle(ipc.sessionsDelete, async (_event, value) => {
+    const sessionId = zUuid(value);
+    activeAgentRuns.delete(sessionId);
+    failedPlanningRuns.delete(sessionId);
+    if (!deps.store.deleteSession(sessionId)) return;
+    await deps.workspaces.remove(sessionId);
+  });
+
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
     const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
     if(deps.store.pendingIntake(sessionId)){deps.store.answerIntake(sessionId,input.message.trim());return startAgentTurn(sessionId,`The learner answered the cold-start placement question: ${input.message.trim()}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`,"learner","session-start");}
-    return startAgentTurn(sessionId,input.message.trim(),"learner","learner-message");
+    const session=deps.store.readSession(sessionId);
+    const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
+    return startAgentTurn(sessionId,input.message.trim(),"learner",turnKind);
   });
-  ipcMain.handle(ipc.attemptSubmit,async(_event,value)=>{const input=value as {sessionId?:unknown;attemptId?:unknown};const sessionId=zUuid(input.sessionId);const attemptId=zUuid(input.attemptId);const bundle=deps.store.submissionBundle(attemptId);if(!bundle||bundle.session_id!==sessionId)throw new Error("Active attempt not found");const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,durationMs:result.durationMs},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");append("attempt_completed",{outcome},"system");deps.store.completeAttempt(attemptId,outcome);void startAgentTurn(sessionId,`The learner submitted attempt ${attemptId}. Deterministic visible and hidden tests produced outcome ${outcome} with exit code ${result.exitCode}. Inspect the attempt events and remarks, evaluate the evidence, update the relevant ability document, commit exactly one next pedagogical action, then create the next validated question from that decision. The new target and question must explicitly respond to this attempt without overreacting to it.`,"system","attempt-complete");return{outcome,exitCode:result.exitCode,summary:outcome==="passed"?"All visible and hidden tests passed.":"The submission failed one or more deterministic tests."};});
+  ipcMain.handle(ipc.attemptSubmit,async(_event,value)=>{const input=value as {sessionId?:unknown;attemptId?:unknown};const sessionId=zUuid(input.sessionId);const attemptId=zUuid(input.attemptId);const bundle=deps.store.submissionBundle(attemptId);if(!bundle||bundle.session_id!==sessionId)throw new Error("Active attempt not found");const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,summary:`${result.stdout}\n${result.stderr}`.trim().slice(-12000)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");append("attempt_completed",{outcome},"system");deps.store.completeAttempt(attemptId,outcome);void startAgentTurn(sessionId,`The learner submitted attempt ${attemptId}. Deterministic visible and hidden tests produced outcome ${outcome} with exit code ${result.exitCode}. Inspect the attempt events and test evidence, update the relevant ability document, commit exactly one next pedagogical action, then create the next validated question from that decision. The new target and question must explicitly respond to this attempt without overreacting to it.`,"system","attempt-complete");return{outcome,exitCode:result.exitCode,summary:outcome==="passed"?"All visible and hidden tests passed.":"The submission failed one or more deterministic tests."};});
   ipcMain.handle(ipc.authPassword, async (_event, value) => { const input = value as { mode: "sign-in" | "sign-up"; email?: unknown; password?: unknown }; if ((input.mode !== "sign-in" && input.mode !== "sign-up") || typeof input.email !== "string" || typeof input.password !== "string") throw new Error("Email and password are required"); return deps.auth.password(input.mode, input.email, input.password); });
-  ipcMain.handle(ipc.authSignOut, () => deps.auth.signOut());
+  /* Suggestions are drafted, never stored: until the learner opens one it is not
+     evidence about them, and the intake it came from is already on disk. */
+  ipcMain.handle(ipc.sessionsSuggest, async () => {
+    const profile = deps.store.getProfile();
+    if (!profile) throw new Error("Finish the intake before Spar drafts sessions");
+    const account = await deps.auth.account();
+    const token = account ? await deps.auth.accessToken() : null;
+    const providers = account ? await deps.providers.resolve(account.id, token) : [];
+    if (!providers.length) return { source: "starter" as const, suggestions: starterSuggestions(profile) };
+    try {
+      const value = await deps.agent.request("suggest", { profile, count: SUGGESTION_COUNT, provider: providers[0] }).promise as { text?: string };
+      const drafted = parseSuggestions(value.text ?? "");
+      return drafted.length ? { source: "agent" as const, suggestions: drafted } : { source: "starter" as const, suggestions: starterSuggestions(profile) };
+    } catch {
+      // A provider that is down is not a reason to strand someone at the end of
+      // their intake; they get the starter set and the UI says which it is.
+      return { source: "starter" as const, suggestions: starterSuggestions(profile) };
+    }
+  });
+  ipcMain.handle(ipc.profileSave, (_event, value) => { const input = profileInput.parse(value); const profile = { ...input, completedAt: new Date().toISOString() }; deps.store.saveProfile(profile); return profile; });
+  ipcMain.handle(ipc.profileLanguage, (_event, value) => { deps.store.setPreferredLanguage(languageSchema.parse(value)); });
+  /* Signing out empties the device, not just the keychain. The local store has no
+     account column — every read is device-wide — so anything left behind would be
+     served straight to whoever signs in next. The outbox is flushed first, while
+     the token still authenticates: after the wipe there is no pull path, so work
+     that never reached the cloud is gone for good. */
+  ipcMain.handle(ipc.authSignOut, async () => {
+    await deps.sync.flush().catch(() => undefined);
+    await deps.auth.signOut();
+    deps.store.clearAccountData();
+    await deps.workspaces.clear();
+  });
+  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); deps.store.clearAccountData(); await deps.workspaces.clear(); });
   ipcMain.handle(ipc.settingsSaveSecret, async (_event, value) => {
     const input = providerSettingsInput.parse(value);
     await deps.providers.saveCredential(input);
@@ -88,6 +160,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (typeof input.model !== "string" || !input.model.trim()) throw new Error("Model is required");
     deps.providers.setDefault(providerId(input.provider), input.model.trim());
   });
+  ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
   ipcMain.handle(ipc.settingsProviderOauthStart, (_event, value) => deps.providers.startOAuth(providerId(value)));
   ipcMain.handle(ipc.settingsProviderOauthSubmit, (_event, value) => {
     const input = value as { flowId?: unknown; value?: unknown };
@@ -110,6 +183,42 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     nativeTheme.themeSource = theme;
   });
 }
+const SUGGESTION_COUNT = 3;
+/** One sentence for every refusal to run a turn, so the renderer can recognise
+ *  it and the learner reads the same instruction wherever they hit it. */
+const NO_PROVIDER = "Connect a model provider in Settings before starting Spar";
+
+/** Models fence JSON however they like. Take the outermost array and let the
+ *  schema throw the rest away; a malformed draft falls back to the starter set. */
+function parseSuggestions(text: string): SessionSuggestion[] {
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start < 0 || end <= start) return [];
+  try {
+    const parsed = z.array(sessionSuggestionSchema).safeParse(JSON.parse(text.slice(start, end + 1)));
+    return parsed.success ? parsed.data.slice(0, SUGGESTION_COUNT) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** No provider, or one that failed: the intake still says enough to open a door.
+ *  Written from the learner's own answers rather than a canned list, but the
+ *  renderer labels these as starting points, not as drafted for them. */
+function starterSuggestions(profile: LearnerProfile): SessionSuggestion[] {
+  const depth = profile.experience === "new" ? "I want to build the basics of" : profile.experience === "senior" ? "I want to pressure-test how I reason about" : "I want to get reliably good at";
+  const areas = profile.focus.length ? profile.focus : ["Debugging", "Data structures", "Testing"];
+  const seeds = areas.slice(0, profile.weakness.trim() ? SUGGESTION_COUNT - 1 : SUGGESTION_COUNT).map((area) => ({
+    title: area,
+    goal: `${depth} ${area.toLowerCase()}.`,
+    why: "From the focus you picked during intake.",
+  }));
+  const weakness = profile.weakness.trim();
+  return weakness
+    ? [{ title: "Your stated weak spot", goal: weakness, why: "Straight from what you told Spar you get stuck on." }, ...seeds]
+    : seeds;
+}
+
 function zUuid(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Invalid identifier"); return value; }
 function providerId(value: unknown): ProviderId {
   if (typeof value !== "string" || !["openai-codex","claude-code","github-copilot","openai","anthropic","google","xai","openrouter","opencode","opencode-go","deepseek","minimax","moonshotai","kimi-coding","zai","vercel-ai-gateway","cloudflare-ai-gateway","ollama","lm-studio","custom"].includes(value)) throw new Error("Unknown provider");

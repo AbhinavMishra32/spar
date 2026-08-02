@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { MessageSquare, NotebookPen, SquareCode } from "lucide-react";
+import { MessageSquare, SquareCode } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { ViewSwitch } from "@/components/ui/view-switch";
@@ -7,6 +7,7 @@ import { AgentThread } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
+import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { DifficultyPill } from "./Difficulty";
 import { ProblemView } from "./ProblemView";
 
@@ -26,9 +27,6 @@ export function AgentPanel({
   draft,
   onDraft,
   onSend,
-  remark,
-  onRemark,
-  onAttachRemark,
   onOpenSettings,
   testFiles,
 }: {
@@ -38,13 +36,9 @@ export function AgentPanel({
   draft: string;
   onDraft(value: string): void;
   onSend(): void;
-  remark: string;
-  onRemark(value: string): void;
-  onAttachRemark(): void;
   onOpenSettings?: (() => void) | undefined;
   testFiles: Record<string, string>;
 }) {
-  const [remarkOpen, setRemarkOpen] = useState(false);
   const [view, setView] = useState<View>("problem");
   const busy = run?.status === "streaming";
 
@@ -110,50 +104,17 @@ export function AgentPanel({
         </AnimatePresence>
       </div>
 
-      {remarkOpen && (
-        <div className="shrink-0 border-t border-border px-4 py-2">
-          <div className="mx-auto w-full max-w-[46rem]">
-            <label className="mb-1.5 block text-ui-sm font-medium text-muted-foreground" htmlFor="learner-remark">
-              Learner remark — recorded on the attempt, not sent to the agent
-            </label>
-            <textarea
-              className="app-scroll block h-16 w-full resize-none rounded-[var(--radius-lg)] border border-border bg-background px-2 py-1.5 text-ui outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-[var(--border-strong)]"
-              id="learner-remark"
-              onChange={(event) => onRemark(event.target.value)}
-              placeholder="What are you thinking or uncertain about?"
-              value={remark}
-            />
-            <button
-              className="mt-1.5 h-6 rounded-[var(--radius-md)] px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
-              disabled={!remark.trim()}
-              onClick={onAttachRemark}
-              type="button"
-            >
-              Attach to attempt
-            </button>
-          </div>
-        </div>
-      )}
-
       <div className="shrink-0 px-4 pb-3 pt-1">
         <div className="mx-auto w-full max-w-[46rem]">
           <Composer
             busy={busy}
-            hint={busy ? "The agent is working…" : undefined}
             leading={
-              <>
-                <ComposerPill>{question.language}</ComposerPill>
-                <ComposerPill
-                  active={remarkOpen}
-                  icon={NotebookPen}
-                  onClick={() => setRemarkOpen((value) => !value)}
-                  title="Attach a private remark to this attempt"
-                >
-                  Remark
-                </ComposerPill>
-              </>
+              <ComposerPill title={LANGUAGE_LABEL[question.language]}>
+                <LanguageGlyph className="size-3.5" language={question.language} />
+              </ComposerPill>
             }
             onChange={onDraft}
+            {...(onOpenSettings ? { onOpenSettings } : {})}
             // Answering lands in the transcript, so go where the answer will be.
             onSubmit={() => {
               setView("chat");

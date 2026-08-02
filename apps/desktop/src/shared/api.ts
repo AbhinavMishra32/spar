@@ -1,19 +1,29 @@
 import { z } from "zod";
-import { attemptEventSchema, sessionCheckpointSchema, sessionSummarySchema, type SessionDetail } from "@spar/domain";
+import { attemptEventSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityHistorySummary, type ChallengeHistorySummary, type Language, type LearnerProfile, type SessionDetail, type SessionSuggestion } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
   checkpointSave: "checkpoint:save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
-  authPassword: "auth:password", authSignOut: "auth:sign-out", settingsSaveSecret: "settings:save-secret",
+  authPassword: "auth:password", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
-  settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme",
-  attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge"
+  settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
+  attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge",
+  profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
+  sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
+  sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete"
 } as const;
 
 export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000) });
+/* Sidebar housekeeping. Titles are capped where the generated one is capped, so a
+   renamed session cannot outgrow the row it has to fit in. */
+export const sessionRenameInput = z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(80) });
+export const sessionFlagInput = z.object({ sessionId: z.string().uuid(), value: z.boolean() });
+/* Only the two the learner can mean by hand. `planning` and `active` are the
+   agent's to set — they promise a turn or a live challenge behind them. */
+export const sessionStatusInput = z.object({ sessionId: z.string().uuid(), status: z.enum(["completed", "paused"]) });
 export const workspacePathInput = z.object({ sessionId: z.string().uuid(), path: z.string().min(1).max(500) });
 export const workspaceWriteInput = workspacePathInput.extend({ content: z.string().max(2_000_000) });
 export const runInput = z.object({ sessionId: z.string().uuid(), language: z.enum(["javascript", "typescript", "cpp"]), command: z.enum(["test", "run"]), timeoutMs: z.number().int().min(100).max(20_000).default(8_000) });
@@ -26,7 +36,13 @@ export const providerSettingsInput = z.object({
   baseUrl: z.string().url().refine((value) => value.startsWith("https://") || value.startsWith("http://localhost:") || value.startsWith("http://127.0.0.1:"), "Provider URL must use HTTPS unless it is local"),
   secret: z.string().max(20_000),
 });
+/** What onboarding sends back. `completedAt` is stamped in the main process so a
+ *  renderer clock can never decide whether onboarding happened. */
+export const profileInput = learnerProfileSchema.omit({ completedAt: true });
 export const themePreferenceSchema = z.enum(["system", "light", "dark"]);
+/** Mirrors pi-ai's `ModelThinkingLevel`: "off" sends no reasoning directive at all, so it reproduces today's behavior exactly. */
+export const reasoningEffortSchema = z.enum(["off", "low", "medium", "high", "xhigh"]);
+export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 /** The translucent material the OS paints behind the window, if any. */
 export type NativeSurface = "liquid-glass" | "vibrancy" | "mica" | "none";
 /** Which edge must reserve room for the OS window buttons; "none" = native frame. */
@@ -48,7 +64,11 @@ export type ProviderInventory = {
     keyUrl?: string;
     models: Array<{ id: string; name: string; reasoning: boolean }>;
   }>;
-  defaultModel: { provider: ProviderId; model: string };
+  /** Whether a turn can run right now. The main process decides it the same way
+   *  it resolves credentials, so the composer never has to infer runnability
+   *  from `defaultModel` — which names a provider even before one is connected. */
+  ready: boolean;
+  defaultModel: { provider: ProviderId; model: string; reasoningEffort: ReasoningEffort };
 };
 export type ProviderOAuthEvent = {
   flowId: string;
@@ -60,7 +80,7 @@ export type ProviderOAuthEvent = {
   allowEmpty?: boolean;
 };
 
-export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; sessions: z.infer<typeof sessionSummarySchema>[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending" };
+export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending" };
 /** One file a tool wrote, with the line counts the activity row reports. */
 export type AgentActivityFile = { path: string; added: number; removed: number };
 export type AgentStreamEvent = {
@@ -96,12 +116,30 @@ export interface SparApi {
   abandonAttempt(input: { sessionId: string; attemptId: string; reason: string }): Promise<void>;
   /** Ask the agent to choose and compile the next challenge for this session. */
   requestNextChallenge(input: { sessionId: string }): Promise<{ runId: string }>;
+  /** Sidebar housekeeping. Each resolves once the local store is authoritative;
+   *  the caller re-reads the bootstrap rather than patching its own copy. */
+  renameSession(input: z.infer<typeof sessionRenameInput>): Promise<{ title: string }>;
+  setSessionPinned(input: z.infer<typeof sessionFlagInput>): Promise<void>;
+  setSessionArchived(input: z.infer<typeof sessionFlagInput>): Promise<void>;
+  setSessionStatus(input: z.infer<typeof sessionStatusInput>): Promise<void>;
+  /** Permanent: the session, its challenges, its attempt evidence and its workspace. */
+  deleteSession(sessionId: string): Promise<void>;
   passwordAuth(mode: "sign-in" | "sign-up", email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
+  /** Finish onboarding; resolves with the stored profile. */
+  saveProfile(input: z.infer<typeof profileInput>): Promise<LearnerProfile>;
+  /** Change the language new sessions start in, without touching the rest of the profile. */
+  setPreferredLanguage(language: Language): Promise<void>;
+  /** Sparring sessions drafted from the intake. `source` is "starter" when no
+   *  provider answered, so the caller can say so rather than imply a reading. */
+  suggestSessions(): Promise<{ source: "agent" | "starter"; suggestions: SessionSuggestion[] }>;
+  /** Permanently removes the authenticated account and all cloud-backed learner data. */
+  deleteAccount(): Promise<void>;
   saveProviderSecret(input: z.infer<typeof providerSettingsInput>): Promise<void>;
   listProviders(): Promise<ProviderInventory>;
   disconnectProvider(provider: ProviderId): Promise<void>;
   setDefaultProvider(provider: ProviderId, model: string): Promise<void>;
+  setReasoningEffort(effort: ReasoningEffort): Promise<void>;
   startProviderOAuth(provider: Extract<ProviderId, "openai-codex" | "claude-code" | "github-copilot">): Promise<{ flowId: string }>;
   submitProviderOAuth(flowId: string, value: string): Promise<void>;
   cancelProviderOAuth(flowId: string): Promise<void>;

@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, ChevronDown, Search } from "lucide-react";
-import type { ProviderInventory } from "../../../shared/api";
+import { useCallback, useMemo, useState } from "react";
+import { ArrowUpRight, ChevronDown, Search, Unplug } from "lucide-react";
+import type { ProviderInventory, ReasoningEffort } from "../../../shared/api";
+import { patchProviders, refreshProviders, useProviders } from "../../hooks/use-providers";
+import { ComposerPill } from "./Composer";
 import {
   DropdownMenu,
   DropdownMenuCheckItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -15,6 +18,14 @@ import {
 import { ProviderGlyph } from "../common/ProviderGlyph";
 
 type Provider = ProviderInventory["providers"][number];
+
+const REASONING_EFFORTS: Array<{ id: ReasoningEffort; label: string }> = [
+  { id: "off", label: "Off" },
+  { id: "low", label: "Low" },
+  { id: "medium", label: "Medium" },
+  { id: "high", label: "High" },
+  { id: "xhigh", label: "Extra High" },
+];
 
 /**
  * The composer's model control. Providers are submenus rather than one long
@@ -133,37 +144,102 @@ export function ModelPicker({
 }
 
 /**
+ * Composer's reasoning-effort control. Only the active model's own `reasoning`
+ * flag decides whether it renders — offering an effort dial for a model that
+ * cannot think is a control with nothing to control.
+ */
+export function ReasoningPicker({
+  effort,
+  onSelect,
+}: {
+  effort: ReasoningEffort;
+  onSelect(effort: ReasoningEffort): void;
+}) {
+  const current = REASONING_EFFORTS.find((item) => item.id === effort) ?? REASONING_EFFORTS[0]!;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-ui text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
+        title="Reasoning effort"
+      >
+        <span className="truncate">{current.label}</span>
+        <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent align="end" className="min-w-[10.5rem]" side="top">
+        <DropdownMenuLabel>Reasoning</DropdownMenuLabel>
+        {REASONING_EFFORTS.map((item) => (
+          <DropdownMenuCheckItem checked={item.id === effort} key={item.id} onSelect={() => onSelect(item.id)}>
+            <span className="flex-1 truncate">{item.label}</span>
+          </DropdownMenuCheckItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
  * Drop-in footer control. It talks to the bridge itself rather than having the
  * inventory threaded through every composer's parent — the model in force is a
  * property of the runtime, not of the screen you happen to be on.
  */
 export function ComposerModelPicker({ onOpenSettings }: { onOpenSettings?(): void }) {
-  const [inventory, setInventory] = useState<ProviderInventory | null>(null);
+  const { inventory } = useProviders();
 
-  const reload = useCallback(async () => {
-    const api = window.spar;
-    if (!api) return;
-    try { setInventory(await api.listProviders()); } catch { /* reported on the settings page */ }
-  }, []);
-
-  useEffect(() => { void reload(); }, [reload]);
+  const reload = useCallback(() => void refreshProviders().catch(() => undefined), []);
 
   const select = useCallback(
     async (provider: Provider, model: string) => {
       const api = window.spar;
       if (!api) return;
       // Paint the choice immediately; the reload reconciles with the store.
-      setInventory((current) => (current ? { ...current, defaultModel: { provider: provider.id, model } } : current));
-      try { await api.setDefaultProvider(provider.id, model); } finally { void reload(); }
+      patchProviders((current) => ({ ...current, defaultModel: { ...current.defaultModel, provider: provider.id, model } }));
+      try { await api.setDefaultProvider(provider.id, model); } finally { reload(); }
     },
     [reload],
   );
 
+  const setEffort = useCallback(
+    async (effort: ReasoningEffort) => {
+      const api = window.spar;
+      if (!api) return;
+      patchProviders((current) => ({ ...current, defaultModel: { ...current.defaultModel, reasoningEffort: effort } }));
+      try { await api.setReasoningEffort(effort); } finally { reload(); }
+    },
+    [reload],
+  );
+
+  const active = inventory?.providers.find((provider) => provider.id === inventory.defaultModel.provider);
+  const reasons = !!active?.models.find((model) => model.id === inventory?.defaultModel.model)?.reasoning;
+
+  /* An unrunnable runtime still gets a control, in the place the model name
+     would be. The old picker simply vanished, which left the toolbar looking
+     complete while the one thing it reports was missing. */
+  if (inventory && !inventory.ready) {
+    const expired = active?.state === "auth-expired";
+    return (
+      <ComposerPill
+        icon={Unplug}
+        tone="warning"
+        {...(onOpenSettings ? { onClick: onOpenSettings } : {})}
+        title={expired ? `${active?.name} needs signing in again` : "No model provider is connected"}
+      >
+        {expired ? `Reconnect ${active?.name}` : "No model"}
+      </ComposerPill>
+    );
+  }
+
   return (
-    <ModelPicker
-      inventory={inventory}
-      onSelect={(provider, model) => void select(provider, model)}
-      {...(onOpenSettings ? { onOpenSettings } : {})}
-    />
+    <>
+      <ModelPicker
+        inventory={inventory}
+        onSelect={(provider, model) => void select(provider, model)}
+        {...(onOpenSettings ? { onOpenSettings } : {})}
+      />
+      {reasons && inventory && (
+        <ReasoningPicker effort={inventory.defaultModel.reasoningEffort} onSelect={(effort) => void setEffort(effort)} />
+      )}
+    </>
   );
 }

@@ -118,7 +118,7 @@ export function ChatView({
             </span>
             <p className="text-content font-medium">No challenge running</p>
             <p className="mt-1 max-w-[28rem] text-ui leading-[1.6] text-muted-foreground">
-              Ask the agent anything about what you have been practising, or start the next challenge when you are ready.
+              Ask the agent anything about what you have been practising, or start your next challenge when you are ready.
             </p>
           </div>
         }
@@ -131,6 +131,7 @@ export function ChatView({
           <Composer
             busy={busy || streaming}
             onChange={setDraft}
+            {...(onOpenSettings ? { onOpenSettings } : {})}
             onSubmit={() => void send()}
             placeholder="Ask the agent anything…"
             trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}

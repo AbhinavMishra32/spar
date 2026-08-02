@@ -1,23 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, History, Loader2, Map, Sparkles, X } from "lucide-react";
+import { AlertCircle, Loader2, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { SessionDetail, SessionSummary } from "@spar/domain";
-import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
+import type { BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
-import { clockTime, message } from "@/lib/format";
-import { Sidebar, type Page } from "./components/shell/Sidebar";
+import { message } from "@/lib/format";
+import { Sidebar, type Page, type SessionActions } from "./components/shell/Sidebar";
 import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
 import { CommandPalette } from "./components/common/CommandPalette";
-import { EmptyState } from "./components/common/EmptyState";
 import { HomePage } from "./components/pages/HomePage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
+import { AbilityPage } from "./components/pages/AbilityPage";
+import { ChallengesPage } from "./components/pages/ChallengesPage";
 import { AuthPage } from "./components/pages/AuthPage";
+import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { Workspace } from "./components/workspace/Workspace";
 import { PlanningView } from "./components/workspace/PlanningView";
 import { ChatView } from "./components/workspace/ChatView";
-import type { RuntimeLog } from "./components/agent/RuntimeConsole";
 import { reduceRun, type AgentRun } from "./components/agent/agentRun";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
 
@@ -26,8 +27,8 @@ const api: SparApi | undefined = window.spar;
 const PAGE_TITLE: Record<Exclude<Page, "workspace">, string> = {
   home: "Home",
   sessions: "Sessions",
-  ability: "Ability map",
-  history: "History",
+  ability: "Abilities",
+  challenges: "Challenges",
   settings: "Settings",
 };
 
@@ -37,7 +38,6 @@ export function App() {
   const [page, setPage] = useState<Page>("home");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [opening, setOpening] = useState(false);
-  const [logs, setLogs] = useState<RuntimeLog[]>([]);
   const [run, setRun] = useState<AgentRun | null>(null);
   const [palette, setPalette] = useState(false);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
@@ -53,6 +53,20 @@ export function App() {
     return next;
   }, []);
 
+  /* Sidebar housekeeping. The main process is authoritative for all of it, so each
+     one writes and then re-reads the bootstrap rather than patching the copy the
+     sidebar is rendering from — pinning reorders the list, and archiving and
+     deleting remove rows from it. */
+  const mutateSession = useCallback(async (work: (sdk: SparApi) => Promise<unknown>) => {
+    if (!api) return;
+    try {
+      await work(api);
+      await refresh();
+    } catch (cause) {
+      setError(message(cause));
+    }
+  }, [refresh]);
+
   const openSession = useCallback(async (id: string) => {
     if (!api) return;
     setPage("workspace");
@@ -65,6 +79,32 @@ export function App() {
       setOpening(false);
     }
   }, []);
+
+  /* Starting a session is reachable before the shell exists: the last step of
+     onboarding opens the sparring session the learner picked, so this has to be
+     declared above the early returns rather than beside the other page actions. */
+  const start = useCallback(async (goal: string) => {
+    if (!api) return;
+    setError(null);
+    setRun(null);
+    try {
+      const result = await api.createSession({ goal });
+      await refresh();
+      await openSession(result.sessionId);
+    } catch (cause) {
+      setError(message(cause));
+    }
+  }, [openSession, refresh]);
+
+  /* The main process writes the token and the account into the keychain, but the
+     renderer's copy of the bootstrap is what decides which page is mounted — so
+     authenticating has to re-read it, exactly as signing out does. Declared up
+     here because the sign-in page is returned long before `signedOut` is. */
+  const signedIn = useCallback(async () => {
+    setError(null);
+    setPage("home");
+    await refresh();
+  }, [refresh]);
 
   useEffect(() => {
     void refresh().catch((cause) => setError(message(cause)));
@@ -86,33 +126,19 @@ export function App() {
 
   useEffect(() => {
     if (!api) return;
-    const append = (entry: Omit<RuntimeLog, "id" | "at">) =>
-      setLogs((current) => [...current, { ...entry, id: crypto.randomUUID(), at: clockTime() }].slice(-400));
-
     const offAgent = api.onAgentEvent((event) => {
-      append(agentLog(event));
-      setRun((current) => reduceRun(current, event));
-      // Agent failures are already rendered at the exact point in the live
-      // transcript. Duplicating them as a global toast obscures the trace and
-      // makes one failure look like two independent problems.
       if (event.type === "done") {
         const id = detailRef.current?.summary.id;
-        if (id) void openSession(id).catch((cause) => setError(message(cause)));
+        if (id) void openSession(id).catch((cause) => setError(message(cause))).finally(() => setRun((current) => current?.runId === event.runId ? null : current));
+        else setRun((current) => current?.runId === event.runId ? null : current);
         void refresh().catch(() => undefined);
+        return;
       }
+      setRun((current) => reduceRun(current, event));
     });
-
-    const offRunner = api.onRunnerEvent((event) =>
-      append({
-        prefix: event.id.includes("validation") ? "VALIDATOR" : "RUNNER",
-        message: `${event.stream} ${event.data.trim() || `exit ${event.exitCode ?? ""}`}`,
-        tone: event.stream === "stderr" ? "error" : event.stream === "exit" && event.exitCode === 0 ? "success" : "muted",
-      }),
-    );
 
     return () => {
       offAgent();
-      offRunner();
     };
   }, [openSession, refresh]);
 
@@ -173,7 +199,20 @@ export function App() {
 
   if (error && !data) return <FatalError error={error} />;
   if (!data) return <BootShell />;
-  if (!data.account) return <AuthPage api={api} error={error} onError={setError} />;
+  if (!data.account) return <AuthPage api={api} error={error} onAuthenticated={signedIn} onError={setError} />;
+  /* Onboarding is a gate, not a page: until the profile exists the agent has no
+     language, no stated weakness, and probably no provider, so there is nothing
+     useful behind it. */
+  if (!data.profile) {
+    return (
+      <OnboardingPage
+        api={api}
+        displayName={data.account.displayName}
+        onDone={async (profile) => { setData((current) => (current ? { ...current, profile } : current)); await refresh(); }}
+        onStartSession={start}
+      />
+    );
+  }
 
   const navigate = (next: Page) => {
     setPage(next);
@@ -181,6 +220,28 @@ export function App() {
   };
 
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
+
+  const sessionActions: SessionActions = {
+    rename: (session, title) => void mutateSession((sdk) => sdk.renameSession({ sessionId: session.id, title })),
+    setPinned: (session, pinned) => void mutateSession((sdk) => sdk.setSessionPinned({ sessionId: session.id, value: pinned })),
+    setArchived: (session, archived) => void mutateSession((sdk) => sdk.setSessionArchived({ sessionId: session.id, value: archived })),
+    setFinished: (session, finished) => void mutateSession(async (sdk) => {
+      await sdk.setSessionStatus({ sessionId: session.id, status: finished ? "completed" : "paused" });
+      // The open session's own view is drawn from the detail, not the summary.
+      if (detailRef.current?.summary.id === session.id) await openSession(session.id);
+    }),
+    /* The workspace is closed before the delete lands: the planning poll and the
+       agent's own refresh both re-open the session by id, and either one would
+       come back to a row that is no longer there. */
+    remove: (session) => void mutateSession(async (sdk) => {
+      if (detailRef.current?.summary.id === session.id) {
+        setDetail(null);
+        setRun(null);
+        setPage("home");
+      }
+      await sdk.deleteSession(session.id);
+    }),
+  };
 
   const abandon = async (reason: string) => {
     if (!api || !detail?.question) return;
@@ -194,19 +255,6 @@ export function App() {
     await refresh();
   };
 
-  const start = async (goal: string) => {
-    if (!api) return;
-    setError(null);
-    setRun(null);
-    try {
-      const result = await api.createSession({ goal });
-      await refresh();
-      await openSession(result.sessionId);
-    } catch (cause) {
-      setError(message(cause));
-    }
-  };
-
   const toggleSidebar = () =>
     setSidebar((value) => {
       localStorage.setItem("spar.sidebar", value ? "hidden" : "shown");
@@ -218,6 +266,13 @@ export function App() {
     await api.setTheme(theme);
     setData((current) => current ? { ...current, theme } : current);
   };
+  const signedOut = async () => {
+    setRun(null);
+    setDetail(null);
+    setPage("home");
+    setError(null);
+    await refresh();
+  };
 
   return (
     <div className="app-vibrant relative flex h-full">
@@ -228,7 +283,8 @@ export function App() {
         style={{ width: sidebar ? sidebarWidth : 0 }}
       >
         <Sidebar
-          account={data.account}
+          // The name the learner gave onboarding, not the one derived from their email.
+          account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
           activeSessionId={detail?.summary.id}
           onCollapse={toggleSidebar}
           onCommandPalette={() => setPalette(true)}
@@ -236,6 +292,7 @@ export function App() {
           onOpenSession={open}
           onPage={navigate}
           page={page}
+          sessionActions={sessionActions}
           sessions={data.sessions}
           syncState={data.syncState}
         />
@@ -282,27 +339,20 @@ export function App() {
         )}
 
         <div className="min-h-0 flex-1">
-          {page === "home" && <HomePage busy={opening} data={data} onOpen={open} onOpenSettings={() => navigate("settings")} onStart={(goal) => void start(goal)} />}
+          {page === "home" && <HomePage busy={opening} data={data} onOpen={open} onOpenSettings={() => navigate("settings")} onStart={(goal) => void start(goal)} onViewAll={() => navigate("sessions")} />}
           {page === "sessions" && <SessionsPage onOpen={open} sessions={data.sessions} />}
-          {page === "ability" && (
-            <PagePad>
-              <EmptyState
-                description="Ability documents appear here only after evaluated attempts produce evidence. Nothing is inferred from a goal alone."
-                icon={Map}
-                title="No ability evidence yet"
-              />
-            </PagePad>
+          {page === "ability" && <AbilityPage abilities={data.abilities} />}
+          {page === "challenges" && <ChallengesPage challenges={data.challenges} onOpen={open} sessions={data.sessions} />}
+          {page === "settings" && (
+            <SettingsPage
+              api={api}
+              language={data.profile.language}
+              onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
+              onSignedOut={signedOut}
+              onThemeChange={changeTheme}
+              theme={data.theme}
+            />
           )}
-          {page === "history" && (
-            <PagePad>
-              <EmptyState
-                description="Completed and paused attempts appear here with their immutable event trace."
-                icon={History}
-                title="No evaluated attempts yet"
-              />
-            </PagePad>
-          )}
-          {page === "settings" && <SettingsPage api={api} onThemeChange={changeTheme} theme={data.theme} />}
           {page === "workspace" &&
             (detail ? (
               /* Session identity and workspace mode both define the mounted
@@ -322,7 +372,6 @@ export function App() {
                       api={api}
                       dark={dark}
                       detail={detail}
-                      logs={logs}
                       onAbandon={abandon}
                       onBack={() => navigate("home")}
                       onError={setError}
@@ -347,10 +396,10 @@ export function App() {
                     <PlanningView
                       api={api}
                       detail={detail}
-                      logs={logs}
                       onBack={() => navigate("home")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
+                      onOpenSettings={() => navigate("settings")}
                       onRefresh={() => openSession(detail.summary.id)}
                       run={run}
                     />
@@ -385,23 +434,10 @@ function sessionMode(detail: SessionDetail): "challenge" | "chat" | "planning" {
   return "planning";
 }
 
-function PagePad({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="app-scroll h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-[52rem] px-6 py-10">{children}</div>
-    </div>
-  );
-}
-
 function BootShell() {
   return (
-    <div className="app-drag app-pane grid h-full place-items-center">
-      <div className="flex flex-col items-center gap-3">
-        <span className="grid size-9 place-items-center rounded-[10px] bg-primary text-primary-foreground">
-          <Sparkles className="size-4" />
-        </span>
-        <span className="thinking-shimmer text-ui font-medium">Starting <SparWordmark />…</span>
-      </div>
+    <div aria-busy="true" className="app-drag app-pane grid h-full place-items-center" role="status">
+      <SparWordmark className="boot-wordmark text-[3.5rem] leading-none" />
     </div>
   );
 }
@@ -429,18 +465,4 @@ function FatalError({ error }: { error: string }) {
       </div>
     </div>
   );
-}
-
-function agentLog(event: AgentStreamEvent): Omit<RuntimeLog, "id" | "at"> {
-  if (event.type === "tool") {
-    return {
-      prefix: "TOOL",
-      message: `${event.tool ?? "unknown"} ${event.detail ?? ""}`.trim(),
-      tone: event.detail?.startsWith("error") ? "error" : event.detail?.startsWith("done") ? "success" : "muted",
-    };
-  }
-  if (event.type === "error") return { prefix: "TRAINING", message: event.text ?? "Agent turn failed", tone: "error" };
-  if (event.type === "done") return { prefix: "TRAINING", message: "turn completed; durable state committed", tone: "success" };
-  if (event.type === "text") return { prefix: "TRAINING", message: event.text?.trim() || "streaming response", tone: "muted" };
-  return { prefix: "TRAINING", message: event.detail ?? "working", tone: "muted" };
 }

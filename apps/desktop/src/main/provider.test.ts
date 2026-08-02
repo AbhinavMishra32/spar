@@ -42,6 +42,47 @@ describe("provider service", () => {
     } finally { store.close(); }
   });
 
+  /* The whole point of the readiness flag: with nothing connected there is no
+     credential anywhere on the machine that Spar is willing to run a turn on,
+     and the inventory says so rather than naming its default provider. */
+  it("reports no runtime, and resolves nothing, until a provider is connected", async () => {
+    const store = new LocalStore(":memory:");
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    try {
+      expect(await service.available()).toBe(false);
+      expect((await service.inventory()).ready).toBe(false);
+      expect(await service.resolve("account", "access-token")).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  it("stops being ready once the connected provider is disconnected", async () => {
+    const store = new LocalStore(":memory:");
+    const credentials = new MemoryCredentials();
+    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined);
+    try {
+      await service.saveCredential({ provider: "openrouter", model: "openrouter/free", baseUrl: "https://openrouter.ai/api/v1", secret: "sk-or-secret" });
+      expect((await service.inventory()).ready).toBe(true);
+      await service.disconnect("openrouter");
+      expect((await service.inventory()).ready).toBe(false);
+      expect(await service.resolve("account", null)).toEqual([]);
+    } finally { store.close(); }
+  });
+
+  /* A local runtime holds no secret, so nothing in the keychain can report it.
+     Adding it is the connection, and inventory and `resolve` have to agree. */
+  it("treats an added local runtime as connected without a key", async () => {
+    const store = new LocalStore(":memory:");
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    try {
+      expect((await service.inventory()).providers.find((provider) => provider.id === "ollama")?.state).toBe("disconnected");
+      await service.saveCredential({ provider: "ollama", model: "qwen3", baseUrl: "http://localhost:11434/v1" });
+      const inventory = await service.inventory();
+      expect(inventory.providers.find((provider) => provider.id === "ollama")?.state).toBe("connected");
+      expect(inventory.ready).toBe(true);
+      expect(await service.resolve("account", null)).toHaveLength(1);
+    } finally { store.close(); }
+  });
+
   it("surfaces an expired subscription without exposing or deleting its credentials", async () => {
     const store = new LocalStore(":memory:");
     const credentials = new MemoryCredentials();

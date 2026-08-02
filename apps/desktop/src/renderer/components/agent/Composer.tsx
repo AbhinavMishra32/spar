@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowUp, ChevronDown, Loader2, Paperclip, Plus, Square } from "lucide-react";
+import { ArrowUp, ChevronDown, Loader2, Paperclip, Plus, Square, Unplug } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useProviders } from "../../hooks/use-providers";
 
 const MAX_ROWS_HEIGHT = 176;
 
@@ -8,6 +9,11 @@ const MAX_ROWS_HEIGHT = 176;
  * The draft surface: a rounded field, with its toolbar on the row beneath rather
  * than inside the box. Keeping the controls out of the field is what lets the
  * field itself stay one uninterrupted piece of paper as the draft grows.
+ *
+ * Every composer in the app sends to the agent, so every one of them asks the
+ * runtime whether there is a model to send to. Without one the send is refused
+ * here rather than round-tripped into a red error: the answer is already known,
+ * and the fix is a connection, not a retry.
  */
 export function Composer({
   value,
@@ -15,8 +21,9 @@ export function Composer({
   onSubmit,
   onStop,
   onAttach,
+  onOpenSettings,
   busy = false,
-  placeholder = "Ask the Training Agent…",
+  placeholder = "Ask Spar anything…",
   autoFocus = false,
   hint,
   leading,
@@ -28,6 +35,7 @@ export function Composer({
   onSubmit(): void;
   onStop?(): void;
   onAttach?(): void;
+  onOpenSettings?(): void;
   busy?: boolean;
   placeholder?: string;
   autoFocus?: boolean;
@@ -38,6 +46,7 @@ export function Composer({
 }) {
   const field = useRef<HTMLTextAreaElement>(null);
   const [focused, setFocused] = useState(false);
+  const { ready } = useProviders();
 
   // Grows with the draft up to a ceiling, then scrolls — same behaviour as the
   // Aside composer, which never lets the input eat the transcript.
@@ -62,7 +71,7 @@ export function Composer({
     };
   }, [resize]);
 
-  const canSend = value.trim().length > 0 && !busy;
+  const canSend = value.trim().length > 0 && !busy && ready;
 
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -73,7 +82,28 @@ export function Composer({
 
   return (
     <div className={cn("app-no-drag", className)}>
-      <div className="composer-shell flex items-start gap-1.5 p-2" onClick={() => field.current?.focus()}>
+      <div className="composer-shell overflow-hidden">
+        {/* Inside the shell rather than floated above it: this is a condition of
+            the input, not a passing alert, and it stays until it is fixed. */}
+        {!ready && (
+          <div className="flex items-center gap-2 border-b border-[var(--glass-hairline)] px-3 py-2 text-ui">
+            <Unplug className="size-3.5 shrink-0 text-warning" />
+            <span className="min-w-0 flex-1 leading-[1.5] text-muted-foreground">
+              <span className="font-medium text-foreground/90">No model provider connected.</span>{" "}
+              Spar has nothing to answer with until you connect one.
+            </span>
+            {onOpenSettings && (
+              <button
+                className="shrink-0 rounded-md border border-[var(--border-strong)] px-2 py-0.5 text-ui font-medium text-foreground transition-colors hover:bg-accent"
+                onClick={onOpenSettings}
+                type="button"
+              >
+                Connect
+              </button>
+            )}
+          </div>
+        )}
+        <div className="flex items-start gap-1.5 p-2" onClick={() => field.current?.focus()}>
         {onAttach && (
           <button
             aria-label="Attach context"
@@ -99,12 +129,15 @@ export function Composer({
           rows={1}
           value={value}
         />
+        </div>
       </div>
 
       <div className="mt-1.5 flex items-center gap-1 px-0.5">
         {leading}
         <div className="min-w-0 flex-1 truncate px-1 text-ui text-muted-foreground/65">
-          {hint ?? (focused && !value ? "Return to send · Shift + Return for a new line" : null)}
+          {/* The notice above already says why nothing can be sent; a second
+              line about Return would be instructions for a key that does nothing. */}
+          {ready ? hint ?? (focused && !value ? "Return to send · Shift + Return for a new line" : null) : null}
         </div>
         {trailing}
         {busy && onStop ? (

@@ -1,13 +1,10 @@
-import { readFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { shell } from "electron";
 import { getModels, type Api, type Model, type OAuthCredentials } from "@mariozechner/pi-ai";
 import { getOAuthApiKey, getOAuthProvider } from "@mariozechner/pi-ai/oauth";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
-import type { ProviderInventory, ProviderOAuthEvent } from "../shared/api.js";
+import type { ProviderInventory, ProviderOAuthEvent, ReasoningEffort } from "../shared/api.js";
 
 export const providerIds = [
   "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai",
@@ -22,7 +19,8 @@ export type ResolvedProvider = {
   baseUrl: string;
   apiKey: string;
   headers?: Record<string, string>;
-  source: "spar-keychain" | "spar-oauth" | "construct-import" | "gateway";
+  source: "spar-keychain" | "spar-oauth" | "gateway";
+  reasoningEffort: ReasoningEffort;
 };
 
 type Descriptor = {
@@ -61,6 +59,9 @@ const descriptors: Descriptor[] = [
 
 const descriptorById = new Map(descriptors.map((item) => [item.id, item]));
 const oauthRuntimeId = (id: ProviderId) => id === "claude-code" ? "anthropic" : id;
+/** Spar's own gateway is the only credential the learner does not hold; it is
+ *  off unless the build enables it, so it is never a silent stand-in. */
+const gatewayEnabled = () => process.env.SPAR_AI_GATEWAY_ENABLED === "true";
 const modelsFor = (provider: string) => {
   try { return (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { return []; }
 };
@@ -78,9 +79,7 @@ export class ProviderService {
     const selectedProvider = this.store.getSetting<ProviderId>("provider-id", "openrouter");
     const selectedModel = this.store.getSetting("provider-model", descriptorById.get(selectedProvider)?.defaultModel ?? "openrouter/free");
     const providers = await Promise.all(descriptors.map(async (descriptor) => {
-      const connected = descriptor.kind === "subscription"
-        ? !!await this.auth.readProviderOAuth(descriptor.id)
-        : !!await this.auth.readSecret(descriptor.id);
+      const connected = await this.hasCredential(descriptor);
       const authExpired = descriptor.kind === "subscription"
         && this.store.getSetting<boolean>(`provider-auth-expired:${descriptor.id}`, false);
       const storedModel = this.store.getSetting<string>(`provider-model:${descriptor.id}`, descriptor.defaultModel);
@@ -98,7 +97,38 @@ export class ProviderService {
         models: catalog.map((model) => ({ id: model.id, name: model.name, reasoning: model.reasoning })),
       };
     }));
-    return { providers, defaultModel: { provider: selectedProvider, model: selectedModel } };
+    return { providers, ready: await this.available(), defaultModel: { provider: selectedProvider, model: selectedModel, reasoningEffort: this.reasoningEffort() } };
+  }
+
+  /** Whether a turn can run right now. Decided from credential presence only —
+   *  the composer asks this on every mount, so it must not refresh an OAuth
+   *  token — but from the same selected provider `resolve` will actually use.
+   *  Nothing else answers: a provider the learner never connected must never be
+   *  quietly borrowed to make a turn look like it worked. */
+  async available(): Promise<boolean> {
+    if (gatewayEnabled()) return true;
+    const selected = this.store.getSetting<ProviderId>("provider-id", "openrouter");
+    const descriptor = descriptorById.get(selected);
+    if (!descriptor) return false;
+    if (descriptor.kind === "subscription" && this.store.getSetting<boolean>(`provider-auth-expired:${selected}`, false)) return false;
+    return this.hasCredential(descriptor);
+  }
+
+  /** A local runtime holds no secret, so "connected" is the learner having added
+   *  it rather than a key existing — otherwise Ollama reads as disconnected in
+   *  Settings while `resolve` happily runs turns through it. */
+  private async hasCredential(descriptor: Descriptor): Promise<boolean> {
+    if (descriptor.kind === "subscription") return !!await this.auth.readProviderOAuth(descriptor.id);
+    if (descriptor.kind === "local") return this.store.getSetting<boolean>(`provider-connected:${descriptor.id}`, false);
+    return !!await this.auth.readSecret(descriptor.id);
+  }
+
+  reasoningEffort(): ReasoningEffort {
+    return this.store.getSetting<ReasoningEffort>("reasoning-effort", "off");
+  }
+
+  setReasoningEffort(effort: ReasoningEffort) {
+    this.store.setSetting("reasoning-effort", effort);
   }
 
   async saveCredential(input: { provider: ProviderId; model: string; baseUrl?: string; secret?: string }) {
@@ -108,12 +138,14 @@ export class ProviderService {
     if (descriptor.kind === "api-key" && secret.length < 1 && !await this.auth.readSecret(input.provider)) throw new Error("API key is required");
     if (secret) await this.auth.saveSecret(input.provider, secret);
     this.store.setSetting(`provider-auth-expired:${input.provider}`, false);
+    if (descriptor.kind === "local") this.store.setSetting(`provider-connected:${input.provider}`, true);
     this.select(input.provider, input.model, input.baseUrl);
   }
 
   async disconnect(providerId: ProviderId) {
     await Promise.all([this.auth.deleteSecret(providerId), this.auth.deleteProviderOAuth(providerId)]);
     this.store.setSetting(`provider-auth-expired:${providerId}`, false);
+    this.store.setSetting(`provider-connected:${providerId}`, false);
     if (this.store.getSetting<ProviderId>("provider-id", "openrouter") === providerId) {
       const inventory = await this.inventory();
       const connectedId = inventory.providers.find((item) => item.state === "connected")?.id;
@@ -198,7 +230,7 @@ export class ProviderService {
             const provider = getOAuthProvider(runtimeId);
             const available = provider?.modifyModels?.(modelsFor(runtimeId), result.newCredentials) ?? modelsFor(runtimeId);
             const model = available.find((item) => item.id === modelId) ?? available[0];
-            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "spar-oauth" });
+            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort() });
           } else {
             this.store.setSetting(`provider-auth-expired:${selected}`, true);
           }
@@ -209,11 +241,11 @@ export class ProviderService {
       }
     } else if (selectedDescriptor) {
       const secret = await this.auth.readSecret(selected);
-      if (secret || selectedDescriptor.kind === "local") {
+      if (secret || await this.hasCredential(selectedDescriptor)) {
         const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
         const model = modelsFor(selectedDescriptor.runtimeId).find((item) => item.id === modelId);
         const baseUrl = this.store.getSetting(`provider-base-url:${selected}`, selectedDescriptor.defaultBaseUrl ?? model?.baseUrl ?? "");
-        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain" });
+        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain", reasoningEffort: this.reasoningEffort() });
       }
     }
 
@@ -222,8 +254,11 @@ export class ProviderService {
     // and made a ChatGPT transport failure look like four separate failures.
     if (values.length) return dedupe(values);
 
-    values.push(...await readConstructProviders());
-    if (accessToken && process.env.SPAR_AI_GATEWAY_ENABLED === "true") values.push({ provider: "spar-gateway", model: "spar-training", api: "openai-completions", baseUrl: `${process.env.SPAR_API_ORIGIN ?? "http://localhost:4318"}/v1/ai`, apiKey: accessToken, source: "gateway" });
+    // Nothing the learner connected can serve this turn. The only remaining
+    // credential is Spar's own gateway, and it is off unless the build turns it
+    // on — an unconnected Spar resolves to nothing at all, and says so, rather
+    // than reaching for a key it found lying around on the machine.
+    if (accessToken && gatewayEnabled()) values.push({ provider: "spar-gateway", model: "spar-training", api: "openai-completions", baseUrl: `${process.env.SPAR_API_ORIGIN ?? "http://localhost:4318"}/v1/ai`, apiKey: accessToken, source: "gateway", reasoningEffort: this.reasoningEffort() });
     return dedupe(values);
   }
 
@@ -233,30 +268,6 @@ export class ProviderService {
     this.store.setSetting(`provider-model:${providerId}`, model);
     if (baseUrl?.trim()) this.store.setSetting(`provider-base-url:${providerId}`, baseUrl.replace(/\/$/, ""));
   }
-}
-
-async function readConstructProviders(): Promise<ResolvedProvider[]> {
-  try {
-    const raw = await readFile(path.join(homedir(), "Library", "Application Support", "Construct", "construct.config.json"), "utf8");
-    const ai = (JSON.parse(raw) as { ai?: Record<string, unknown> }).ai ?? {};
-    if (ai.source !== "byok") return [];
-    const selected = String(ai.provider ?? "");
-    const configs: Record<string, { runtime: string; key: string; model: string; baseUrl: string }> = {
-      openai: { runtime: "openai", key: "openAiApiKey", model: "openAiModel", baseUrl: "openAiBaseUrl" },
-      openrouter: { runtime: "openrouter", key: "openRouterApiKey", model: "openRouterModel", baseUrl: "openRouterBaseUrl" },
-      "opencode-zen": { runtime: "opencode", key: "opencodeZenApiKey", model: "opencodeZenModel", baseUrl: "opencodeZenBaseUrl" },
-      litellm: { runtime: "litellm", key: "liteLlmApiKey", model: "liteLlmModel", baseUrl: "liteLlmBaseUrl" },
-    };
-    return [selected, ...Object.keys(configs).filter((name) => name !== selected)].flatMap((provider) => {
-      const config = configs[provider];
-      if (!config) return [];
-      const apiKey = String(ai[config.key] ?? "").trim();
-      const modelId = String(ai[config.model] ?? "").trim();
-      const baseUrl = String(ai[config.baseUrl] ?? "").trim();
-      const model = modelsFor(config.runtime).find((item) => item.id === modelId);
-      return apiKey && modelId && baseUrl ? [{ provider: config.runtime, model: modelId, api: model?.api ?? "openai-completions", baseUrl, apiKey, source: "construct-import" as const }] : [];
-    });
-  } catch { return []; }
 }
 
 function dedupe(values: ResolvedProvider[]) {

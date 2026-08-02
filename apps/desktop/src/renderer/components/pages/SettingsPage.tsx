@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Ellipsis, Laptop, Loader2, Lock, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
-import type { SparApi, ProviderId, ProviderInventory, ProviderOAuthEvent, ThemePreference } from "../../../shared/api";
+import { Check, ChevronDown, ExternalLink, Ellipsis, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
+import type { Language } from "@spar/domain";
+import type { SparApi, ProviderId, ProviderInventory, ThemePreference } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -17,10 +18,15 @@ import { Segmented } from "@/components/ui/segmented";
 import { message } from "@/lib/format";
 import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { refreshProviders } from "../../hooks/use-providers";
+import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
 import { SparWordmark } from "../common/SparWordmark";
+import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 
 type Provider = ProviderInventory["providers"][number];
+
+const LANGUAGES: Language[] = ["javascript", "typescript", "cpp"];
 
 const KIND_LABEL: Record<Provider["kind"], string> = {
   subscription: "Subscription",
@@ -213,35 +219,38 @@ function Boundary({ title, detail, badge, tone = "muted" }: { title: string; det
   );
 }
 
-export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | undefined; onThemeChange(theme: ThemePreference): Promise<void>; theme: ThemePreference }) {
+export function SettingsPage({
+  api,
+  language,
+  onLanguageChange,
+  onSignedOut,
+  onThemeChange,
+  theme,
+}: {
+  api: SparApi | undefined;
+  language: Language;
+  onLanguageChange(language: Language): void;
+  onSignedOut(): Promise<void>;
+  onThemeChange(theme: ThemePreference): Promise<void>;
+  theme: ThemePreference;
+}) {
   const [inventory, setInventory] = useState<ProviderInventory | null>(null);
   const [selected, setSelected] = useState<Provider | null>(null);
-  const [secret, setSecret] = useState("");
-  const [modelId, setModelId] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [oauth, setOauth] = useState<ProviderOAuthEvent | null>(null);
-  const [manualCode, setManualCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [themeBusy, setThemeBusy] = useState(false);
+  const [languageBusy, setLanguageBusy] = useState(false);
+  const [accountAction, setAccountAction] = useState<"sign-out" | "delete" | null>(null);
 
+  /* Through the shared store, not the bridge directly: connecting here has to
+     retire the "no model provider" notice on the composer waiting behind this
+     page, not only the rows on it. */
   const refresh = useCallback(async () => {
     if (!api) return;
-    setInventory(await api.listProviders());
+    setInventory(await refreshProviders());
   }, [api]);
 
   useEffect(() => { void refresh().catch((cause) => setError(message(cause))); }, [refresh]);
-  useEffect(() => {
-    if (!api) return;
-    return api.onProviderOAuthEvent((event) => {
-      setOauth((current) => current?.flowId === event.flowId || !current ? event : current);
-      if (event.status === "connected") {
-        void refresh();
-        setBusy(false);
-      }
-      if (event.status === "error" || event.status === "cancelled") setBusy(false);
-    });
-  }, [api, refresh]);
 
   const connected = useMemo(() => inventory?.providers.filter((provider) => provider.state !== "disconnected") ?? [], [inventory]);
   const available = useMemo(() => inventory?.providers.filter((provider) => provider.state === "disconnected") ?? [], [inventory]);
@@ -252,11 +261,6 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
 
   const open = (provider: Provider) => {
     setSelected(provider);
-    setSecret("");
-    setModelId(provider.selectedModel || provider.models[0]?.id || "");
-    setBaseUrl(provider.baseUrl);
-    setOauth(null);
-    setManualCode("");
     setError("");
   };
 
@@ -267,25 +271,6 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
     catch (cause) { setError(message(cause)); }
   };
 
-  const save = async () => {
-    if (!api || !selected || selected.kind === "subscription") return;
-    setBusy(true); setError("");
-    try {
-      await api.saveProviderSecret({ provider: selected.id as Exclude<ProviderId, "openai-codex" | "claude-code" | "github-copilot">, model: modelId.trim(), baseUrl: baseUrl.trim(), secret });
-      await refresh(); setSelected(null);
-    } catch (cause) { setError(message(cause)); }
-    finally { setBusy(false); }
-  };
-
-  const startOAuth = async () => {
-    if (!api || !selected || selected.kind !== "subscription") return;
-    setBusy(true); setError("");
-    try {
-      const value = await api.startProviderOAuth(selected.id as "openai-codex" | "claude-code" | "github-copilot");
-      setOauth((current) => current?.flowId === value.flowId ? current : { flowId: value.flowId, provider: selected.id, status: "starting", message: "Opening sign-in…" });
-    } catch (cause) { setBusy(false); setError(message(cause)); }
-  };
-
   const disconnect = async (provider: Provider) => {
     if (!api) return;
     setError("");
@@ -293,10 +278,23 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
     catch (cause) { setError(message(cause)); }
   };
 
-  const close = (next: boolean) => {
-    if (next) return;
-    if (api && oauth && !["connected", "cancelled", "error"].includes(oauth.status)) void api.cancelProviderOAuth(oauth.flowId);
-    setSelected(null); setOauth(null); setBusy(false); setError("");
+  const changeLanguage = (next: Language) => {
+    if (!api) return;
+    setLanguageBusy(true);
+    setError("");
+    void api.setPreferredLanguage(next).then(() => onLanguageChange(next)).catch((cause) => setError(message(cause))).finally(() => setLanguageBusy(false));
+  };
+
+  const finishAccountAction = async () => {
+    if (!api || !accountAction) return;
+    setBusy(true); setError("");
+    try {
+      if (accountAction === "delete") await api.deleteAccount();
+      else await api.signOut();
+      await onSignedOut();
+      setAccountAction(null);
+    } catch (cause) { setError(message(cause)); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -333,6 +331,39 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
           </Row>
         </Group>
 
+        <Group label="Training">
+          <Row className="gap-4 py-2.5">
+            <div className="min-w-0 flex-1">
+              <p className="text-content font-medium">Language for new sessions</p>
+              <p className="mt-0.5 text-ui text-muted-foreground">The default every session starts in. Asking for another language inside a session still wins.</p>
+            </div>
+            {/* Marks, not names: three of them side by side is exactly where a logo
+                beats a word, and the name still reaches the pointer and the reader. */}
+            <div className="flex shrink-0 gap-1" role="radiogroup" aria-label="Language for new sessions">
+              {LANGUAGES.map((option) => (
+                <button
+                  aria-checked={language === option}
+                  aria-label={LANGUAGE_LABEL[option]}
+                  className={cn(
+                    "grid size-9 place-items-center rounded-[var(--radius-lg)] transition-all duration-150",
+                    languageBusy && "pointer-events-none opacity-60",
+                    language === option
+                      ? "bg-accent text-foreground shadow-[inset_0_0_0_1px_var(--border-strong)]"
+                      : "text-muted-foreground/60 hover:bg-accent/50 hover:text-foreground",
+                  )}
+                  key={option}
+                  onClick={() => language !== option && changeLanguage(option)}
+                  role="radio"
+                  title={LANGUAGE_LABEL[option]}
+                  type="button"
+                >
+                  <LanguageGlyph className="size-[1.15rem]" language={option} />
+                </button>
+              ))}
+            </div>
+          </Row>
+        </Group>
+
         <Group label="Providers">
           {!inventory && (
             <Row>
@@ -356,7 +387,7 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
         </Group>
 
         {defaultProvider && (
-          <Group label="Training Agent">
+          <Group label="Agent">
             <Row className="gap-4">
               <div className="min-w-0 flex-1">
                 <p className="text-content font-medium">Default model</p>
@@ -375,71 +406,49 @@ export function SettingsPage({ api, onThemeChange, theme }: { api: SparApi | und
           />
           <Boundary
             badge={<><ShieldCheck className="size-3" />Enforced</>}
-            detail="Every provider protocol feeds the same Mastra Training Agent inside its utility process."
-            title="Training Agent isolation"
+            detail="Every provider protocol feeds the same Spar agent inside its isolated utility process."
+            title="Agent isolation"
             tone="success"
           />
         </Group>
+
+        <Group label="Account">
+          <Row>
+            <div className="min-w-0 flex-1">
+              <p className="text-content font-medium">Sign out</p>
+              <p className="mt-0.5 text-ui text-muted-foreground">Remove this account and clear its sessions from this {deviceNoun}. Anything already synced stays in your cloud history.</p>
+            </div>
+            <Button onClick={() => setAccountAction("sign-out")} size="sm" variant="secondary"><LogOut />Sign out</Button>
+          </Row>
+          <Row>
+            <div className="min-w-0 flex-1">
+              <p className="text-content font-medium">Delete account</p>
+              <p className="mt-0.5 text-ui text-muted-foreground">Permanently remove your account and cloud-backed learning history. This cannot be undone.</p>
+            </div>
+            <Button onClick={() => setAccountAction("delete")} size="sm" variant="destructive"><Trash2 />Delete account</Button>
+          </Row>
+        </Group>
       </div>
 
-      <Dialog onOpenChange={close} open={!!selected}>
-        {selected && (
-          <DialogContent className="sm:max-w-[30rem]">
-            <DialogHeader>
-              <div className="flex items-center gap-2.5">
-                <Mark provider={selected.id} />
-                <DialogTitle>{selected.state === "connected" ? `Update ${selected.name}` : `Connect ${selected.name}`}</DialogTitle>
-              </div>
-              {/* Inline flow, not flex: the wordmark opens the sentence, so it has to sit on the
-                  first line's baseline rather than centre itself against the wrapped block. */}
-              <DialogDescription>
-                <SparWordmark className="text-foreground" />{" "}
-                {selected.kind === "subscription" ? `will use your subscription to reach ${selected.name} models. Sign in to connect the account.` : selected.description}
-              </DialogDescription>
-            </DialogHeader>
+      <ProviderConnectDialog api={api} onClose={() => setSelected(null)} onConnected={refresh} provider={selected} />
 
-            {selected.kind === "subscription" ? (
-              <div className="space-y-3">
-                {oauth && (
-                  <div className="rounded-xl border border-border bg-[var(--color-background-elevated-secondary)] p-3 text-ui">
-                    <p className="flex items-center gap-1.5 font-medium">
-                      {!["connected", "error", "cancelled"].includes(oauth.status) && <Loader2 className="size-3 animate-spin" />}
-                      {oauth.status === "connected" ? "Connected" : oauth.status === "error" ? "Sign-in failed" : "Waiting for sign-in"}
-                    </p>
-                    <p className="mt-1 text-muted-foreground">{oauth.message}</p>
-                  </div>
-                )}
-                {oauth?.status === "prompt" && (
-                  <div className="space-y-2 rounded-xl border border-border p-3">
-                    <label className="text-ui font-medium" htmlFor="provider-oauth-code">Authorization code</label>
-                    <Input autoFocus id="provider-oauth-code" onChange={(event) => setManualCode(event.target.value)} placeholder={oauth.placeholder ?? "Paste code or redirect URL"} value={manualCode} />
-                    <Button disabled={busy || (!manualCode.trim() && !oauth.allowEmpty)} onClick={() => { if (api) void api.submitProviderOAuth(oauth.flowId, manualCode); }} size="sm">Continue</Button>
-                  </div>
-                )}
-                {oauth?.status === "connected" && <p className="inline-flex items-center gap-1 text-ui text-success"><Check className="size-3.5" />Your subscription is ready for the Training Agent.</p>}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {selected.keyUrl && <p className="text-ui text-muted-foreground">Get a key from <button className="underline underline-offset-2 hover:text-foreground" onClick={() => void api?.openExternal(selected.keyUrl!)} type="button">{selected.name}</button>.</p>}
-                <label className="block space-y-1.5 text-ui font-medium">Model<Input list={`models-${selected.id}`} onChange={(event) => setModelId(event.target.value)} value={modelId} /></label>
-                <datalist id={`models-${selected.id}`}>{selected.models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
-                <label className="block space-y-1.5 text-ui font-medium">Base URL<Input onChange={(event) => setBaseUrl(event.target.value)} value={baseUrl} /></label>
-                {selected.kind !== "local" && <label className="block space-y-1.5 text-ui font-medium">API Key<Input autoComplete="off" onChange={(event) => setSecret(event.target.value)} placeholder={selected.state === "connected" ? "Leave blank to keep the current key" : `Stored only in ${credentialStore}`} type="password" value={secret} /></label>}
-              </div>
-            )}
-
-            {error && <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui text-destructive">{error}</p>}
-            <DialogFooter className="justify-between sm:justify-between">
-              <div>{selected.state === "connected" && <Button disabled={busy} onClick={() => void disconnect(selected)} variant="destructive"><Trash2 />Disconnect</Button>}</div>
-              <div className="flex gap-2">
-                <Button onClick={() => close(false)} variant="secondary">Cancel</Button>
-                {selected.kind === "subscription"
-                  ? <Button disabled={busy || (!!oauth && !["error", "cancelled"].includes(oauth.status))} onClick={() => void startOAuth()}>{busy && <Loader2 className="animate-spin" />}Connect</Button>
-                  : <Button disabled={busy || !modelId.trim() || !baseUrl.trim() || (selected.kind === "api-key" && selected.state !== "connected" && !secret.trim())} onClick={() => void save()}>{busy && <Loader2 className="animate-spin" />}{selected.state === "connected" ? "Update" : "Connect"}</Button>}
-              </div>
-            </DialogFooter>
-          </DialogContent>
-        )}
+      <Dialog onOpenChange={(next) => { if (!next && !busy) setAccountAction(null); }} open={!!accountAction}>
+        <DialogContent className="sm:max-w-[28rem]">
+          <DialogHeader>
+            <DialogTitle>{accountAction === "delete" ? "Delete your account?" : "Sign out of Spar?"}</DialogTitle>
+            <DialogDescription>
+              {accountAction === "delete"
+                ? "This permanently deletes your account, synced sessions, attempts, ability evidence, and local workspaces."
+                : `This clears your sessions, challenges, and workspaces from this ${deviceNoun}. Spar pushes anything still pending first, and signing back in restores nothing that never reached the cloud.`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button disabled={busy} onClick={() => setAccountAction(null)} variant="secondary">Cancel</Button>
+            <Button disabled={busy} onClick={() => void finishAccountAction()} variant={accountAction === "delete" ? "destructive" : "default"}>
+              {busy && <Loader2 className="animate-spin" />}{accountAction === "delete" ? "Delete permanently" : "Sign out"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );
