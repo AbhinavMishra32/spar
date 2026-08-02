@@ -147,6 +147,16 @@
   --app-shadow-menu: 0 16px 40px -12px oklch(0% 0 0 / 20%), 0 4px 10px -4px oklch(0% 0 0 / 8%);
   --app-shadow-composer: 0 4px 18px -6px color-mix(in srgb, var(--foreground) 8%, transparent);
   --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 4%);
+  /* Working sheets sit on a canvas that is nearly their own colour, so the
+     contact shadow alone cannot separate them. A wider, softer ambient pass
+     underneath does the lifting; the edge below draws the shape. Two passes and
+     not three: shadows sum where two edges meet, so a mid pass on top of the
+     ambient one pools in the corners and the curve reads as a smudge rather
+     than a corner. */
+  --app-shadow-sheet:
+    0 1px 2px oklch(0% 0 0 / 4%),
+    0 8px 20px -12px oklch(0% 0 0 / 13%);
+  --sheet-edge: color-mix(in oklab, var(--foreground) 16%, transparent);
 
   /* Glass. In light the rim is a near-white specular edge; the sheen brightens
      just the top line, where a curved surface would actually catch the light. */
@@ -220,6 +230,14 @@
   --app-shadow-menu: 0 16px 40px -10px oklch(0% 0 0 / 55%), 0 4px 12px -4px oklch(0% 0 0 / 40%);
   --app-shadow-composer: 0 6px 24px -10px oklch(0% 0 0 / 45%);
   --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 20%);
+  --app-shadow-sheet:
+    0 1px 2px oklch(0% 0 0 / 26%),
+    0 10px 26px -14px oklch(0% 0 0 / 55%);
+  /* No edge in dark. The sheet is already darker than the canvas it sits in, so
+     the value step does the separating and a ring on top of it only reads as a
+     drawn outline. Light mode needs the line because the two are nearly the
+     same value there. */
+  --sheet-edge: transparent;
 
   /* Dark glass keeps the same anatomy, but a white rim at 80% would read as a
      drawn outline rather than a lit edge — so the rim drops to a faint sheen
@@ -334,6 +352,17 @@
 
   .app-drag {
     -webkit-app-region: drag;
+  }
+
+  /* AppKit shows the arrow over a source list, never the hand — the pointer
+     cursor is a web affordance, and on a sidebar of rows it is the single
+     clearest tell that a desktop app was built in a browser. Scoped here so
+     ordinary buttons elsewhere keep it. The resize handle overrides this itself
+     from the utilities layer. */
+  .app-sidebar button:not(:disabled),
+  .app-sidebar [role="button"]:not(:disabled),
+  .app-sidebar a[href] {
+    cursor: default;
   }
 
   .app-no-drag {
@@ -470,6 +499,28 @@
     animation: agent-shimmer 2.4s linear infinite;
   }
 
+  /* Launch is the wordmark and nothing else. It fades up once and a highlight
+     travels across it — slower and over a wider gradient than the working
+     shimmer, because at this size a 2.4s sweep reads as a loading bar. Whatever
+     the app is doing before its first paint is not the learner's business. */
+  .boot-wordmark {
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--foreground) 30%, transparent) 0%,
+      color-mix(in srgb, var(--foreground) 30%, transparent) 40%,
+      var(--foreground) 50%,
+      color-mix(in srgb, var(--foreground) 30%, transparent) 60%,
+      color-mix(in srgb, var(--foreground) 30%, transparent) 100%
+    );
+    background-size: 300% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation:
+      boot-wordmark-in 0.45s ease-out both,
+      agent-shimmer 3.4s linear infinite;
+  }
+
   /* ---- Glass -------------------------------------------------------------- */
 
   /* Liquid Glass proper is a native material — on macOS 26 it is the window's
@@ -571,17 +622,35 @@
     background: transparent;
   }
 
+  /* A sheet is inset into a canvas of almost its own value, so the 0.5px
+     hairline the glass surfaces use disappears and the panes read as one
+     undivided field. A full 1px edge plus a wider ambient shadow is what makes
+     the inset legible as an inset. */
   .work-blob {
     position: relative;
     border-radius: var(--radius-2xl);
-    box-shadow:
-      inset 0 0 0 1px var(--glass-rim),
-      0 0 0 0.5px var(--glass-hairline),
-      var(--app-shadow-card);
+    box-shadow: var(--app-shadow-sheet);
     overflow: hidden;
     /* Contains the rounded clip against a child that paints its own background
-       (Monaco does) and gives the shimmer ring something to stack against. */
+       (Monaco does) and gives the rings something to stack against. */
     isolation: isolate;
+  }
+
+  /* The edge is drawn over the content, not under it. As an inset shadow on the
+     element it is covered by any child that paints its own background — which is
+     every pane here — so it survived only where the clip curves away from the
+     child's own antialiased corner. That is why the corners were the one place
+     the rim showed, and why they read as lumpy: outer ring, stray rim and the
+     child's clipped edge all landing on the same arc. One ring on top is the
+     same line the whole way round. */
+  .work-blob::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px var(--sheet-edge);
+    pointer-events: none;
   }
 
   /* Working state: the rim breathes rather than a light going round it.
@@ -594,7 +663,7 @@
     content: "";
     position: absolute;
     inset: 0;
-    z-index: 2;
+    z-index: 3;
     padding: 1px;
     border-radius: inherit;
     background: var(--shimmer-tint);
@@ -622,7 +691,7 @@
     content: "";
     position: absolute;
     inset: 0;
-    z-index: 2;
+    z-index: 3;
     padding: 1px;
     border-radius: inherit;
     background: conic-gradient(
@@ -715,6 +784,15 @@
   }
 }
 
+@keyframes boot-wordmark-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes emblem-spin {
   to {
     transform: rotate(360deg);
@@ -741,6 +819,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .thinking-shimmer,
+  .boot-wordmark,
   .streaming-caret::after,
   .work-blob[data-busy="true"]::after,
   .work-blob[data-settled="true"]::after {
@@ -748,8 +827,14 @@
     opacity: 0.55;
   }
 
-  .thinking-shimmer {
+  .thinking-shimmer,
+  .boot-wordmark {
     color: var(--muted-foreground);
     -webkit-text-fill-color: currentColor;
+  }
+
+  .boot-wordmark {
+    opacity: 1;
+    color: var(--foreground);
   }
 }

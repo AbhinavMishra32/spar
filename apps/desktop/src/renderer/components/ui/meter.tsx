@@ -16,21 +16,28 @@ export function Meter({
   className,
   height = "0.5rem",
   total: given,
+  animate = true,
 }: {
   bands: MeterBand[];
   className?: string;
   height?: string;
   /** Denominator when the bands are a fraction of a known whole. */
   total?: number;
+  /**
+   * Off when the meter is one of many. A single bar growing is a measurement
+   * settling; a list of them growing together is a page that shudders on mount.
+   */
+  animate?: boolean;
 }) {
   const sum = bands.reduce((acc, band) => acc + band.value, 0);
   const total = Math.max(given ?? sum, sum);
-  const [grown, setGrown] = useState(false);
+  const [grown, setGrown] = useState(!animate);
 
   useEffect(() => {
+    if (!animate) return;
     const frame = requestAnimationFrame(() => setGrown(true));
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [animate]);
 
   return (
     <div

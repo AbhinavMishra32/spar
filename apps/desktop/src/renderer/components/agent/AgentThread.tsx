@@ -4,16 +4,24 @@ import { ThinkingOrb } from "thinking-orbs";
 import type { SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { ActivityRow } from "./ActivityRow";
+import { ActivityGroup } from "./ActivityRow";
 import { SystemEvent } from "./SystemEvent";
-import { toolVerb, type AgentRun, type RunPart } from "./agentRun";
+import { type AgentRun, type RunPart } from "./agentRun";
 
 type Message = SessionDetail["messages"][number];
 
 function LiveRun({ run }: { run: AgentRun }) {
+  type NonToolPart = Exclude<RunPart, { kind: "tool" }>;
+  const grouped: Array<NonToolPart | { kind: "activity-group"; id: string; parts: Array<Extract<RunPart, { kind: "tool" }>> }> = [];
+  for (const part of run.parts) {
+    const previous = grouped.at(-1);
+    if (part.kind === "tool" && previous?.kind === "activity-group") previous.parts.push(part);
+    else if (part.kind === "tool") grouped.push({ kind: "activity-group", id: `group-${part.id}`, parts: [part] });
+    else grouped.push(part);
+  }
   return (
     <div className="min-w-0 space-y-1.5">
-      {run.parts.map((part) => {
+      {grouped.map((part) => {
         if (part.kind === "text") {
           return (
             <div key={part.id} className="min-w-0 px-1.5 text-foreground">
@@ -21,7 +29,7 @@ function LiveRun({ run }: { run: AgentRun }) {
             </div>
           );
         }
-        if (part.kind === "tool") return <ActivityRow key={part.id} part={part} />;
+        if (part.kind === "activity-group") return <ActivityGroup key={part.id} parts={part.parts} />;
         if (part.kind === "error") {
           return (
             <div
@@ -48,15 +56,13 @@ function ThinkingLine({ parts }: { parts: RunPart[] }) {
   const open = [...parts].reverse().find((part) => part.kind === "tool" && part.phase === "running");
   // While a tool is open its own row already animates; this line covers the gaps.
   if (open) return null;
-  const lastTool = [...parts].reverse().find((part): part is Extract<RunPart, { kind: "tool" }> => part.kind === "tool");
-  const label = lastTool ? `${toolVerb(lastTool.tool, false)} — deciding what is next` : "Thinking";
   return (
     <div className="flex items-center gap-2 px-1.5 py-0.5">
       <span className="relative grid size-5 place-items-center">
         <span className="absolute inset-0 rounded-full bg-[var(--accent)]/10 blur-sm" />
         <ThinkingOrb aria-label="Thinking" size={20} state="working" style={{ width: 18, height: 18 }} />
       </span>
-      <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">{label}</span>
+      <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">Thinking</span>
     </div>
   );
 }
@@ -86,6 +92,12 @@ export function AgentThread({
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
+  // Completion persists the final streamed text before the refreshed session
+  // reaches the renderer. Reconcile by content during that narrow hand-off so
+  // the durable message and its live precursor can never render twice.
+  const streamedText=run?.parts.filter((part)=>part.kind==="text").map((part)=>part.body).join("").trim()??"";
+  const lastAgentMessage=[...messages].reverse().find((item)=>item.role==="agent");
+  const visibleRun=run&&streamedText&&lastAgentMessage?.body.trim()===streamedText?null:run;
 
   // Auto-follow only while the learner is already at the live edge, so scrolling
   // back to re-read an earlier explanation is not yanked away mid-stream.
@@ -106,7 +118,7 @@ export function AgentThread({
     return () => node.removeEventListener("scroll", onScroll);
   }, []);
 
-  const isEmpty = messages.length === 0 && !run;
+  const isEmpty = messages.length === 0 && !visibleRun;
 
   return (
     <div className={cn("agent-transcript relative min-h-0 min-w-0 flex-1", className)}>
@@ -135,7 +147,7 @@ export function AgentThread({
                     </div>
                   ),
                 )}
-                {run && <LiveRun run={run} />}
+                {visibleRun && <LiveRun run={visibleRun} />}
               </>
             )}
         </div>

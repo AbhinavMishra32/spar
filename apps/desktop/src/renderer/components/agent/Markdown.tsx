@@ -1,6 +1,7 @@
 import { Fragment, memo, useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 
 /** Blocks the renderer understands. Anything unrecognised falls through as a paragraph. */
 type Block =
@@ -133,6 +134,9 @@ function Inline({ text }: { text: string }) {
 
 function CodeBlock({ language, body }: { language: string; body: string }) {
   const [copied, setCopied] = useState(false);
+  // A fence can say anything — `bash`, `json`, `text`. Only the three Spar trains
+  // in have a mark; the rest keep the tag they were written with.
+  const marked = languageOf(language);
   const copy = () => {
     void navigator.clipboard.writeText(body).then(() => {
       setCopied(true);
@@ -143,7 +147,9 @@ function CodeBlock({ language, body }: { language: string; body: string }) {
   return (
     <div className="code-block group/code my-2 overflow-hidden">
       <div className="flex h-7 items-center justify-between border-b border-border/70 px-2.5">
-        <span className="font-mono text-ui-sm text-muted-foreground">{language}</span>
+        {marked
+          ? <LanguageGlyph className="size-3 text-muted-foreground" language={marked} />
+          : <span className="font-mono text-ui-sm text-muted-foreground">{language}</span>}
         <button
           className="grid size-5 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover/code:opacity-100 hover:bg-accent hover:text-foreground"
           onClick={copy}

@@ -21,6 +21,24 @@ export function relativeTime(value: string): string {
   return new Date(value).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+/**
+ * {@link relativeTime} with the words removed: "now", "12m", "3h", "4d", "Mar 4".
+ *
+ * A metadata column only reads as a column if every value fits it, and "just now"
+ * is three times the width of "3h ago". Six characters is the ceiling here, so the
+ * timestamps line up on their right edge instead of fraying.
+ */
+export function shortTime(value: string): string {
+  const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return new Date(value).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 export function clockTime(date = new Date()): string {
   return date.toLocaleTimeString([], { hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
