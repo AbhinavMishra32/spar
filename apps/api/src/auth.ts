@@ -34,6 +34,12 @@ export function installAuth(app: FastifyInstance, db: Database) {
     return issueToken(reply, user);
   });
 
+  app.delete("/v1/account", async (request, reply) => {
+    const user = await requireUser(request);
+    await db.delete(users).where(eq(users.id, user.id));
+    return reply.code(204).send();
+  });
+
 }
 
 export async function requireUser(request: FastifyRequest): Promise<AuthUser> { await request.jwtVerify(); return { id: request.user.sub, email: request.user.email, displayName: request.user.name }; }
