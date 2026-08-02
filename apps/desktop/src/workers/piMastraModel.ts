@@ -7,9 +7,9 @@ import type {
   LanguageModelV2Usage,
 } from "@ai-sdk/provider";
 import {
-  complete as piComplete,
+  completeSimple as piComplete,
   getModels,
-  stream as piStream,
+  streamSimple as piStream,
   type Api,
   type AssistantMessage,
   type Context,
@@ -22,6 +22,7 @@ import {
   type ToolCall,
   type Usage,
 } from "@mariozechner/pi-ai";
+import type { ReasoningEffort } from "../shared/api.js";
 
 export type PiProviderInput = {
   provider: string;
@@ -30,6 +31,7 @@ export type PiProviderInput = {
   baseUrl: string;
   apiKey: string;
   headers?: Record<string, string>;
+  reasoningEffort?: ReasoningEffort;
 };
 
 const lookupModels = (provider: string) => {
@@ -122,6 +124,10 @@ function streamOptions(input: PiProviderInput, options: LanguageModelV2CallOptio
     ...(options.maxOutputTokens ? { maxTokens: options.maxOutputTokens } : {}),
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
+    // "off" (the default) sends no reasoning directive at all — each pi-ai provider
+    // already falls back to today's behavior in that case, so this never changes
+    // existing runs unless the composer's reasoning picker was actually touched.
+    ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
   };
 }
 

@@ -2,8 +2,28 @@ import { describe, expect, it } from "vitest";
 import { nextToolStage, phaseExecutionKey } from "./agentPolicy.js";
 
 describe("Training Agent controller policy", () => {
-  it("terminates ordinary learner chat without exposing tools", () => {
-    expect(nextToolStage("learner-message", new Map())).toEqual({ activeTools: [], toolChoice: "none" });
+  it("lets the single agent choose tools or prose for learner chat", () => {
+    const stage=nextToolStage("learner-message",new Map(),15,{hasActiveQuestion:true});
+    expect(stage.toolChoice).toBe("auto");
+    expect(stage.activeTools).toContain("replace_current_question");
+    expect(stage.activeTools).toContain("upsert_ability");
+    expect(stage.activeTools).not.toContain("create_question");
+  });
+
+  it("ends tool selection after a replacement is durably playable",()=>{
+    const outcomes=new Map<string,unknown[]>([["replace_current_question",[{result:{status:"playable"}}]]]);
+    expect(nextToolStage("learner-message",outcomes,15,{hasActiveQuestion:true})).toEqual({activeTools:[],toolChoice:"none"});
+  });
+
+  it("requires the complete revision transaction for explicit change requests", () => {
+    const outcomes = new Map<string, unknown[]>();
+    expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: ["inspect_current_attempt"], toolChoice: "required" });
+    outcomes.set("inspect_current_attempt", [{ result: { status: "active" } }]);
+    expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: ["set_training_target"], toolChoice: "required" });
+    outcomes.set("set_training_target", [{ result: { committed: true } }]);
+    expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: ["replace_current_question"], toolChoice: "required" });
+    outcomes.set("replace_current_question", [{ result: { status: "playable" } }]);
+    expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: [], toolChoice: "none" });
   });
 
   it("exposes one deterministic action at a time", () => {
