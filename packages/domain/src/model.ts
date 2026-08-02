@@ -5,6 +5,29 @@ export const isoDate = z.string().datetime();
 export const languageSchema = z.enum(["javascript", "typescript", "cpp"]);
 export type Language = z.infer<typeof languageSchema>;
 
+/** What the learner told Spar about themselves at onboarding.
+ *  `language` is the default every new session starts in — a default, not a
+ *  constraint: naming another language in a goal still wins. */
+export const learnerProfileSchema = z.object({
+  name: z.string().min(1).max(60),
+  experience: z.enum(["new", "working", "senior"]),
+  focus: z.array(z.string().min(1)).max(12).default([]),
+  weakness: z.string().max(600).default(""),
+  language: languageSchema,
+  completedAt: isoDate,
+});
+export type LearnerProfile = z.infer<typeof learnerProfileSchema>;
+
+/** A sparring session Spar offers before the learner has written a goal of their
+ *  own. `goal` is what actually starts the session, so it has to read like
+ *  something the learner said; `why` names the intake answer it came from. */
+export const sessionSuggestionSchema = z.object({
+  title: z.string().min(3).max(70),
+  goal: z.string().min(10).max(400),
+  why: z.string().min(3).max(160),
+});
+export type SessionSuggestion = z.infer<typeof sessionSuggestionSchema>;
+
 export const sessionStatusSchema = z.enum(["planning", "active", "paused", "completed"]);
 // "abandoned" is a learner decision, kept distinct from "invalid" (failed
 // validation) and "completed" (evaluated) so evidence stays honest about why a
@@ -53,7 +76,11 @@ export const sessionSummarySchema = z.object({
   activeQuestion: z.object({ id, title: z.string(), ordinal: z.number().int() }).nullable(),
   questionTitles: z.array(z.object({ id, title: z.string(), status: questionStatusSchema })),
   totalSeconds: z.number().int().nonnegative(),
-  updatedAt: isoDate
+  updatedAt: isoDate,
+  /** How the learner filed this session. Both are shelf position rather than
+   *  learning state, so neither is evidence and neither touches `updatedAt`. */
+  pinnedAt: isoDate.nullable(),
+  archivedAt: isoDate.nullable()
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 
@@ -64,6 +91,7 @@ export const workspaceFileEntrySchema = z.object({
 });
 
 export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visibleTests: true }).extend({
+  replacesQuestionId: id.nullable(),
   abilityId: id,
   abilityTitle: z.string().min(1),
   specificGap: z.string().min(1),
@@ -75,6 +103,38 @@ export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visi
   latestEventSequence: z.number().int().min(-1)
 });
 export type ActiveQuestion = z.infer<typeof activeQuestionSchema>;
+
+export const challengeHistorySummarySchema = z.object({
+  id,
+  sessionId: id,
+  sessionTitle: z.string().min(1),
+  ordinal: z.number().int().positive(),
+  title: z.string().min(1),
+  language: languageSchema,
+  difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]),
+  status: questionStatusSchema,
+  replacesQuestionId: id.nullable(),
+  replacesQuestionTitle: z.string().nullable(),
+  replacedByQuestionId: id.nullable(),
+  replacedByQuestionTitle: z.string().nullable(),
+  attemptCount: z.number().int().nonnegative(),
+  testRunCount: z.number().int().nonnegative(),
+  lastOutcome: z.enum(["passed", "failed", "abandoned", "replaced"]).nullable(),
+  createdAt: isoDate,
+  updatedAt: isoDate,
+});
+export type ChallengeHistorySummary = z.infer<typeof challengeHistorySummarySchema>;
+
+export const abilityHistorySummarySchema = z.object({
+  id,
+  title: z.string().min(1),
+  markdown: z.string(),
+  version: z.number().int().positive(),
+  status: z.enum(["uncertain", "developing", "independent", "stale"]),
+  evidenceCount: z.number().int().nonnegative(),
+  updatedAt: isoDate,
+});
+export type AbilityHistorySummary = z.infer<typeof abilityHistorySummarySchema>;
 
 export const askUserQuestionInputSchema = z.object({
   questions: z.array(z.object({

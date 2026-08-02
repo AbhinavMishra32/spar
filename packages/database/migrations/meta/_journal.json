@@ -15,6 +15,20 @@
       "when": 1785526982851,
       "tag": "0001_flowery_maddog",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785599952849,
+      "tag": "0002_sweet_miracleman",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785601108429,
+      "tag": "0003_account_deletion_cascades",
+      "breakpoints": true
     }
   ]
 }
