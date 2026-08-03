@@ -4,7 +4,8 @@ import { getModels, type Api, type Model, type OAuthCredentials } from "@marioze
 import { getOAuthApiKey, getOAuthProvider } from "@mariozechner/pi-ai/oauth";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
-import type { ProviderInventory, ProviderOAuthEvent, ReasoningEffort } from "../shared/api.js";
+import { anthropicUsage, codexUsageFromHeaders } from "./subscriptionUsage.js";
+import type { ProviderInventory, ProviderOAuthEvent, ReasoningEffort, SubscriptionUsage } from "../shared/api.js";
 
 export const providerIds = [
   "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai",
@@ -35,7 +36,7 @@ type Descriptor = {
 };
 
 const descriptors: Descriptor[] = [
-  { id: "openai-codex", runtimeId: "openai-codex", name: "ChatGPT", kind: "subscription", description: "Reuse your ChatGPT Plus or Pro subscription", defaultModel: "gpt-5.5" },
+  { id: "openai-codex", runtimeId: "openai-codex", name: "ChatGPT", kind: "subscription", description: "Reuse your ChatGPT Plus or Pro subscription", defaultModel: "gpt-5.6-terra" },
   { id: "claude-code", runtimeId: "anthropic", name: "Claude", kind: "subscription", description: "Reuse your Claude Pro or Max subscription", defaultModel: "claude-sonnet-4-6" },
   { id: "github-copilot", runtimeId: "github-copilot", name: "GitHub Copilot", kind: "subscription", description: "Reuse your GitHub Copilot subscription", defaultModel: "gpt-5.4" },
   { id: "openai", runtimeId: "openai", name: "OpenAI", kind: "api-key", description: "OpenAI API models", defaultModel: "gpt-5.4-mini", keyUrl: "https://platform.openai.com/api-keys" },
@@ -57,13 +58,44 @@ const descriptors: Descriptor[] = [
   { id: "custom", runtimeId: "custom", name: "Add custom provider", kind: "custom", description: "Add an OpenAI-compatible provider", defaultModel: "my-model", defaultBaseUrl: "https://example.com/v1" },
 ];
 
+/** pi-ai's model catalog is a snapshot taken when the package was published, and
+ *  ChatGPT ships Codex tiers faster than pi-ai republishes — 0.73.1 still stops
+ *  at GPT-5.5, so the picker was offering a subscription less than it can run.
+ *  These are the tiers ChatGPT's own `/backend-api/codex/models` currently
+ *  returns with `visibility: "list"`, in the priority order it sorts them by.
+ *  Merged over the bundled catalog rather than replacing it, so an id pi-ai
+ *  learns about later keeps pi-ai's own entry and this list can just shrink.
+ *  Per-token cost is not published for these tiers; the nearest tier pi-ai does
+ *  price stands in, which only affects the spend estimate shown for a turn. */
+const codexTiers: Model<Api>[] = [
+  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 } },
+  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 } },
+  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", cost: { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 } },
+].map((tier) => ({
+  ...tier,
+  api: "openai-codex-responses" as const,
+  provider: "openai-codex",
+  baseUrl: "https://chatgpt.com/backend-api",
+  reasoning: true,
+  thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
+  input: ["text", "image"],
+  contextWindow: 272_000,
+  maxTokens: 128_000,
+}));
+
 const descriptorById = new Map(descriptors.map((item) => [item.id, item]));
 const oauthRuntimeId = (id: ProviderId) => id === "claude-code" ? "anthropic" : id;
 /** Spar's own gateway is the only credential the learner does not hold; it is
  *  off unless the build enables it, so it is never a silent stand-in. */
 const gatewayEnabled = () => process.env.SPAR_AI_GATEWAY_ENABLED === "true";
+/** Matches the hover card's own staleness: a quota that moves once per turn does
+ *  not need re-fetching every time the pointer crosses the row. */
+const USAGE_CACHE_MS = 60_000;
 const modelsFor = (provider: string) => {
-  try { return (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { return []; }
+  let bundled: Model<Api>[] = [];
+  try { bundled = (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { bundled = []; }
+  if (provider !== "openai-codex") return bundled;
+  return [...codexTiers.filter((tier) => !bundled.some((model) => model.id === tier.id)), ...bundled];
 };
 
 export class ProviderService {
@@ -121,6 +153,39 @@ export class ProviderService {
     if (descriptor.kind === "subscription") return !!await this.auth.readProviderOAuth(descriptor.id);
     if (descriptor.kind === "local") return this.store.getSetting<boolean>(`provider-connected:${descriptor.id}`, false);
     return !!await this.auth.readSecret(descriptor.id);
+  }
+
+  /** The Codex rate-limit headers the agent worker saw on a turn. Kept because
+   *  ChatGPT reports quota nowhere else, so the last turn's headers are the
+   *  only reading that exists between turns. */
+  recordCodexRateLimits(headers: Record<string, string>) {
+    const usage = codexUsageFromHeaders(headers);
+    if (usage) this.store.setSetting("provider-usage:openai-codex", usage);
+  }
+
+  /** Deliberately not part of `inventory`: Claude's reading is a network call
+   *  that refreshes an OAuth token, and inventory is re-read on every composer
+   *  mount. The renderer asks for this separately, and only while looking. */
+  async subscriptionUsage(providerId: ProviderId): Promise<SubscriptionUsage | null> {
+    if (providerId === "openai-codex") return this.store.getSetting<SubscriptionUsage | null>("provider-usage:openai-codex", null);
+    if (providerId !== "claude-code") return null;
+    const cached = this.store.getSetting<SubscriptionUsage | null>("provider-usage:claude-code", null);
+    if (cached && Date.now() - cached.capturedAt < USAGE_CACHE_MS) return cached;
+    try {
+      const credentials = await this.auth.readProviderOAuth<OAuthCredentials>("claude-code");
+      if (!credentials) return null;
+      const result = await getOAuthApiKey("anthropic", { anthropic: credentials });
+      if (!result) return cached;
+      if (JSON.stringify(result.newCredentials) !== JSON.stringify(credentials)) await this.auth.saveProviderOAuth("claude-code", result.newCredentials);
+      const usage = await anthropicUsage(result.apiKey);
+      if (!usage) return cached;
+      this.store.setSetting("provider-usage:claude-code", usage);
+      return usage;
+    } catch {
+      // A quota reading is decoration. It must never be the reason Settings
+      // reports a working subscription as broken.
+      return cached;
+    }
   }
 
   reasoningEffort(): ReasoningEffort {

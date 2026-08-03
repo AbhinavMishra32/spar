@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, ExternalLink, Ellipsis, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
 import type { Language } from "@spar/domain";
-import type { SparApi, ProviderId, ProviderInventory, ThemePreference } from "../../../shared/api";
+import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -13,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
 import { message } from "@/lib/format";
@@ -94,8 +95,86 @@ function ModelPicker({ provider, onSelect }: { provider: Provider; onSelect(mode
   );
 }
 
+/** A subscription's remaining quota, in the only two windows either upstream
+ *  rations by. The ring reads the weekly window because that is the one that
+ *  ends a week's work; the card behind it spells both out. */
+function UsageRing({ provider, api }: { provider: Provider; api: SparApi | undefined }) {
+  const [usage, setUsage] = useState<SubscriptionUsage | null>(null);
+  const [read, setRead] = useState(false);
+
+  useEffect(() => {
+    if (!api || provider.kind !== "subscription") return;
+    let live = true;
+    void api.providerUsage(provider.id)
+      .then((value) => { if (live) setUsage(value); })
+      .catch(() => undefined)
+      .finally(() => { if (live) setRead(true); });
+    return () => { live = false; };
+  }, [api, provider.id, provider.kind]);
+
+  const weekly = usage?.windows.find((window) => window.kind === "weekly") ?? null;
+  const fiveHour = usage?.windows.find((window) => window.kind === "five-hour") ?? null;
+  /* Nothing to say and nothing still coming: no dimmed ring standing in for a
+     reading that will never arrive. ChatGPT reports quota only on a turn's own
+     response headers, so this row stays empty until one has run. */
+  if (provider.kind !== "subscription" || (read && !weekly && !fiveHour)) return null;
+
+  const left = weekly ? percentLeft(weekly) : 0;
+  return (
+    <HoverCard>
+      {/* A button, not Radix's default anchor: this is not a link, and focusing
+          it is the only way the card opens without a pointer. */}
+      <HoverCardTrigger asChild>
+        <button
+          aria-label={`${provider.name} subscription usage`}
+          className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground"
+          type="button"
+        >
+          <svg className={cn("size-4 -rotate-90", weekly ? "" : "opacity-30")} viewBox="0 0 20 20">
+            <circle className="fill-none stroke-current opacity-25" cx="10" cy="10" r="8" strokeWidth="3" />
+            <circle
+              className="fill-none stroke-current"
+              cx="10"
+              cy="10"
+              pathLength={100}
+              r="8"
+              strokeDasharray={`${left} 100`}
+              strokeLinecap="round"
+              strokeWidth="3"
+            />
+          </svg>
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent align="end" className="w-auto min-w-[13rem] gap-1 p-0 py-2 tabular-nums">
+        <UsageLine entry={fiveHour} label="5 hours" />
+        <UsageLine entry={weekly} label="Weekly" />
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
+function UsageLine({ label, entry }: { label: string; entry: UsageWindow | null }) {
+  return (
+    <div className="flex items-center justify-between gap-6 px-3 py-0.5 text-ui">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="text-foreground">{entry ? describeWindow(entry) : "Not available"}</span>
+    </div>
+  );
+}
+
+const percentLeft = (entry: UsageWindow) => Math.min(100, Math.max(0, Math.round(100 - entry.usedPercent)));
+
+/** Once a window is spent, when it comes back is the only useful thing left to
+ *  say about it. Above zero, how much is left says it better than a reset time. */
+function describeWindow(entry: UsageWindow) {
+  const left = percentLeft(entry);
+  if (left > 0 || entry.resetsAt === null) return `${left}% left`;
+  return `resets ${new Date(entry.resetsAt * 1_000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+}
+
 function ProviderRow({
   provider,
+  api,
   isDefault,
   onModel,
   onMakeDefault,
@@ -104,6 +183,7 @@ function ProviderRow({
   onKeyUrl,
 }: {
   provider: Provider;
+  api: SparApi | undefined;
   isDefault: boolean;
   onModel(model: string): void;
   onMakeDefault(): void;
@@ -132,6 +212,8 @@ function ProviderRow({
       </div>
 
       {provider.models.length > 0 && <ModelPicker onSelect={onModel} provider={provider} />}
+
+      <UsageRing api={api} provider={provider} />
 
       <DropdownMenu>
         <DropdownMenuTrigger
@@ -374,6 +456,7 @@ export function SettingsPage({
           )}
           {connected.map((provider) => (
             <ProviderRow
+              api={api}
               isDefault={inventory?.defaultModel.provider === provider.id}
               key={provider.id}
               onDisconnect={() => void disconnect(provider)}

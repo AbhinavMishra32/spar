@@ -300,6 +300,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (typeof input.model !== "string" || !input.model.trim()) throw new Error("Model is required");
     deps.providers.setDefault(providerId(input.provider), input.model.trim());
   });
+  ipcMain.handle(ipc.settingsProviderUsage, (_event, value) => deps.providers.subscriptionUsage(providerId(value)));
   ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
   ipcMain.handle(ipc.settingsProviderOauthStart, (_event, value) => deps.providers.startOAuth(providerId(value)));
   ipcMain.handle(ipc.settingsProviderOauthSubmit, (_event, value) => {

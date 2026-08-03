@@ -42,6 +42,23 @@ describe("provider service", () => {
     } finally { store.close(); }
   });
 
+  /* pi-ai's bundled catalog lags what a ChatGPT subscription can actually run,
+     so the Codex tiers are overlaid on it. The picker has to offer them, and
+     `setDefault` — which refuses a model the provider does not list — has to
+     accept one, or selecting it from the picker fails. */
+  it("offers the current ChatGPT tiers ahead of pi-ai's bundled catalog", async () => {
+    const store = new LocalStore(":memory:");
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    try {
+      const models = (await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.models ?? [];
+      expect(models.slice(0, 3).map((model) => model.id)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+      expect(models.find((model) => model.id === "gpt-5.6-luna")).toMatchObject({ name: "GPT-5.6 Luna", reasoning: true });
+      expect(models.some((model) => model.id === "gpt-5.5")).toBe(true);
+      service.setDefault("openai-codex", "gpt-5.6-luna");
+      expect((await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.selectedModel).toBe("gpt-5.6-luna");
+    } finally { store.close(); }
+  });
+
   /* The whole point of the readiness flag: with nothing connected there is no
      credential anywhere on the machine that Spar is willing to run a turn on,
      and the inventory says so rather than naming its default provider. */
@@ -80,6 +97,23 @@ describe("provider service", () => {
       expect(inventory.providers.find((provider) => provider.id === "ollama")?.state).toBe("connected");
       expect(inventory.ready).toBe(true);
       expect(await service.resolve("account", null)).toHaveLength(1);
+    } finally { store.close(); }
+  });
+
+  /* ChatGPT reports quota on the headers of the turn that spent it and nowhere
+     else, so the last turn's reading is the only one that exists between turns
+     — and a provider that has never run one has to report nothing, not zero. */
+  it("keeps the Codex rate-limit reading a turn reported, and reports none before one has", async () => {
+    const store = new LocalStore(":memory:");
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    try {
+      expect(await service.subscriptionUsage("openai-codex")).toBeNull();
+      expect(await service.subscriptionUsage("openrouter")).toBeNull();
+      service.recordCodexRateLimits({ "x-codex-primary-used-percent": "18", "x-codex-primary-window-minutes": "300", "x-codex-secondary-used-percent": "64", "x-codex-secondary-window-minutes": "10080" });
+      expect((await service.subscriptionUsage("openai-codex"))?.windows).toEqual([
+        { kind: "five-hour", usedPercent: 18, resetsAt: null },
+        { kind: "weekly", usedPercent: 64, resetsAt: null },
+      ]);
     } finally { store.close(); }
   });
 

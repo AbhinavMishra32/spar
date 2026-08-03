@@ -5,6 +5,7 @@ import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { askUserQuestionInputSchema } from "@spar/domain";
 import { createPiMastraModel, type PiProviderInput } from "./piMastraModel.js";
+import { captureCodexRateLimits } from "./codexRateLimits.js";
 import { nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
 import { normalizeAgentStreamPart } from "./agentStream.js";
 
@@ -17,6 +18,9 @@ type Request = { kind: "request"; id: string; payload: { sessionId: string; mess
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error("Spar must run inside an Electron utility process");
 const pendingTools = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
+/* Not tied to a run: the headers belong to the subscription, not to the turn
+   that happened to reveal them, and the main process files them that way. */
+captureCodexRateLimits((headers) => parentPort.postMessage({ kind: "event", event: { type: "provider-usage", provider: "openai-codex", headers } }));
 type SuggestRequest = { kind: "request"; id: string; payload: { profile: Record<string, unknown>; count: number; provider: PiProviderInput } };
 parentPort.on("message", (event) => {
   const message = event.data as Record<string, unknown>;

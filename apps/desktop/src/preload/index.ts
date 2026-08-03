@@ -43,6 +43,7 @@ const api: SparApi = {
   listProviders: () => ipcRenderer.invoke(ipc.settingsProviders),
   disconnectProvider: (provider) => ipcRenderer.invoke(ipc.settingsProviderDisconnect, provider),
   setDefaultProvider: (provider, model) => ipcRenderer.invoke(ipc.settingsProviderDefault, { provider, model }),
+  providerUsage: (provider) => ipcRenderer.invoke(ipc.settingsProviderUsage, provider),
   setReasoningEffort: (effort) => ipcRenderer.invoke(ipc.settingsReasoningEffort, effort),
   startProviderOAuth: (provider) => ipcRenderer.invoke(ipc.settingsProviderOauthStart, provider),
   submitProviderOAuth: (flowId, value) => ipcRenderer.invoke(ipc.settingsProviderOauthSubmit, { flowId, value }),

@@ -7,7 +7,7 @@ export const ipc = {
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
   authPassword: "auth:password", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
-  settingsProviderDefault: "settings:provider-default", settingsProviderOauthStart: "settings:provider-oauth-start",
+  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
   attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge",
@@ -100,6 +100,13 @@ export type ProviderInventory = {
   ready: boolean;
   defaultModel: { provider: ProviderId; model: string; reasoningEffort: ReasoningEffort };
 };
+/** One rate-limit window of a subscription. `usedPercent` is how much of the
+ *  window has been spent (0–100) — the same direction both upstreams report it
+ *  in — and `resetsAt` is epoch seconds, or null when the upstream omitted it. */
+export type UsageWindow = { kind: "five-hour" | "weekly"; usedPercent: number; resetsAt: number | null };
+/** What Spar currently knows about a subscription's quota. Null, rather than an
+ *  empty reading, whenever nothing has told it — see `subscriptionUsage`. */
+export type SubscriptionUsage = { windows: UsageWindow[]; capturedAt: number };
 export type ProviderOAuthEvent = {
   flowId: string;
   provider: ProviderId;
@@ -197,6 +204,9 @@ export interface SparApi {
   listProviders(): Promise<ProviderInventory>;
   disconnectProvider(provider: ProviderId): Promise<void>;
   setDefaultProvider(provider: ProviderId, model: string): Promise<void>;
+  /** What a connected subscription's quota looks like right now, or null when
+   *  the provider has none to report or nothing has reported one yet. */
+  providerUsage(provider: ProviderId): Promise<SubscriptionUsage | null>;
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
   startProviderOAuth(provider: Extract<ProviderId, "openai-codex" | "claude-code" | "github-copilot">): Promise<{ flowId: string }>;
   submitProviderOAuth(flowId: string, value: string): Promise<void>;
