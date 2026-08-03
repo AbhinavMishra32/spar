@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, globSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { planCppBuild } from "./cppBuild.js";
 
 type Request = {
   kind: "request";
@@ -23,8 +24,19 @@ parentPort.on("message", (event) => {
 });
 
 async function execute(request: Request) {
-  const stages = resolveStages(request.payload.root, request.payload.language, request.payload.command);
+  const resolved = resolveStages(request.payload.root, request.payload.language, request.payload.command);
   const started = Date.now();
+  // A layout the toolchain cannot build is a fact about the candidate, not a
+  // crash. Reporting it as a failed run keeps the diagnostic inside the
+  // validation report the agent reads, instead of aborting the tool call with
+  // an opaque IPC error the agent cannot act on.
+  if ("error" in resolved) {
+    parentPort.postMessage({ kind: "event", requestId: request.id, stream: "stderr", data: resolved.error });
+    parentPort.postMessage({ kind: "event", requestId: request.id, stream: "exit", data: "code:1", exitCode: 1 });
+    parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { exitCode: 1, stdout: "", stderr: resolved.error, durationMs: Date.now() - started } });
+    return;
+  }
+  const stages = resolved.stages;
   const maxOutput = 1_000_000;
   let stdout = "";
   let stderr = "";
@@ -81,27 +93,24 @@ async function execute(request: Request) {
   runStage(0);
 }
 
-function resolveStages(root: string, language: Request["payload"]["language"], command: Request["payload"]["command"]): Stage[] {
+type Resolution = { stages: Stage[] } | { error: string };
+
+function resolveStages(root: string, language: Request["payload"]["language"], command: Request["payload"]["command"]): Resolution {
   const tests = (pattern: string) => globSync(pattern, { cwd: root }).sort();
   if (language === "javascript") {
-    return [{ bin: process.execPath, args: command === "test" ? ["--test", ...tests("**/*.test.js")] : [existsSync(path.join(root, "index.js")) ? "index.js" : "src/index.js"] }];
+    return { stages: [{ bin: process.execPath, args: command === "test" ? ["--test", ...tests("**/*.test.js")] : [existsSync(path.join(root, "index.js")) ? "index.js" : "src/index.js"] }] };
   }
   if (language === "typescript") {
     const tsxCli = fileURLToPath(import.meta.resolve("tsx/cli"));
-    return [{ bin: process.execPath, args: [tsxCli, ...(command === "test" ? ["--test", ...tests("**/*.test.ts")] : [existsSync(path.join(root, "index.ts")) ? "index.ts" : "src/index.ts"])] }];
+    return { stages: [{ bin: process.execPath, args: [tsxCli, ...(command === "test" ? ["--test", ...tests("**/*.test.ts")] : [existsSync(path.join(root, "index.ts")) ? "index.ts" : "src/index.ts"])] }] };
   }
 
-  const executable = path.join(root, ".spar", "solution");
-  mkdirSync(path.dirname(executable), { recursive: true });
-  rmSync(executable, { force: true });
-  const sources = command === "test"
-    ? [...tests("src/**/*.cpp"), ...tests("tests/test.cpp")]
-    : [...tests("src/**/*.cpp"), ...(existsSync(path.join(root, "main.cpp")) ? ["main.cpp"] : [])];
-  if (!sources.length) throw new Error(`No C++ ${command === "test" ? "test" : "entrypoint"} sources found`);
-  return [
-    { bin: "clang++", args: ["-std=c++20", "-O2", "-Wall", "-Wextra", "-pedantic", "-o", executable, ...sources] },
-    { bin: executable, args: [] },
-  ];
+  const output = path.join(root, ".spar");
+  mkdirSync(output, { recursive: true });
+  const plan = planCppBuild({ files: tests("**/*.{cpp,cc,cxx,h,hpp,hh,hxx}"), outputDir: output, command });
+  if ("error" in plan) return plan;
+  for (const binary of plan.binaries) rmSync(binary, { force: true });
+  return { stages: plan.stages };
 }
 
 function safeEnvironment() {

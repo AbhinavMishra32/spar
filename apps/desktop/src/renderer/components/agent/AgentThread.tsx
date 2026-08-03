@@ -1,21 +1,30 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, ArrowDown } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { ActivityGroup } from "./ActivityRow";
+import { ActivityGroup, ChallengePublished, RunFailure } from "./ActivityRow";
 import { SystemEvent } from "./SystemEvent";
-import { type AgentRun, type RunPart } from "./agentRun";
+import { isChallengePublished, type AgentRun, type RunPart } from "./agentRun";
 
 type Message = SessionDetail["messages"][number];
 
 function LiveRun({ run }: { run: AgentRun }) {
+  type ToolPart = Extract<RunPart, { kind: "tool" }>;
   type NonToolPart = Exclude<RunPart, { kind: "tool" }>;
-  const grouped: Array<NonToolPart | { kind: "activity-group"; id: string; parts: Array<Extract<RunPart, { kind: "tool" }>> }> = [];
+  const grouped: Array<
+    | NonToolPart
+    | { kind: "activity-group"; id: string; parts: ToolPart[] }
+    | { kind: "challenge"; id: string; part: ToolPart }
+  > = [];
   for (const part of run.parts) {
     const previous = grouped.at(-1);
-    if (part.kind === "tool" && previous?.kind === "activity-group") previous.parts.push(part);
+    // A published challenge leaves the group it was produced in. It is the
+    // outcome of the turn rather than another step toward it, and folding it
+    // back in among the retrieval rows is what made it disappear.
+    if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
+    else if (part.kind === "tool" && previous?.kind === "activity-group") previous.parts.push(part);
     else if (part.kind === "tool") grouped.push({ kind: "activity-group", id: `group-${part.id}`, parts: [part] });
     else grouped.push(part);
   }
@@ -30,17 +39,8 @@ function LiveRun({ run }: { run: AgentRun }) {
           );
         }
         if (part.kind === "activity-group") return <ActivityGroup key={part.id} parts={part.parts} />;
-        if (part.kind === "error") {
-          return (
-            <div
-              key={part.id}
-              className="flex min-w-0 items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-ui text-destructive"
-            >
-              <AlertTriangle className="mt-px size-3.5 shrink-0" />
-              <span className="min-w-0 break-words whitespace-pre-wrap">{part.body}</span>
-            </div>
-          );
-        }
+        if (part.kind === "challenge") return <ChallengePublished key={part.id} part={part.part} />;
+        if (part.kind === "error") return <RunFailure key={part.id} body={part.body} />;
         return (
           <div key={part.id} className="min-w-0 truncate px-1.5 text-ui-sm text-muted-foreground/70">
             {part.body}

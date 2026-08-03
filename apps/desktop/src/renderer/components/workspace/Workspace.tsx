@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelHandle } from "react-resizable-panels";
+import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
 import { FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
 import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
@@ -11,36 +11,11 @@ import { Toolbar } from "../shell/Toolbar";
 import { FileGlyph } from "../common/LanguageGlyph";
 import type { AgentRun } from "../agent/agentRun";
 import { AgentPanel } from "./AgentPanel";
+import { PaneHandle } from "./PaneHandle";
 import { FileTree } from "./FileTree";
 import { FloatingFileTree } from "./FloatingFileTree";
 import { ChallengeIntro } from "./ChallengeIntro";
 import { ResultPanel, type ResultTab, type RunOutcome } from "./ResultPanel";
-
-/**
- * Sits in the gutter between two blobs rather than drawn as a rule on their
- * edge. Nothing shows until the pointer is on it: the gap is already the
- * boundary, and a permanent line through it would undo the inset.
- */
-function Handle({ direction = "horizontal" }: { direction?: "horizontal" | "vertical" }) {
-  return (
-    <PanelResizeHandle
-      className={cn(
-        "group/handle relative shrink-0",
-        direction === "horizontal" ? "w-2 cursor-col-resize" : "h-2 cursor-row-resize",
-      )}
-    >
-      <span
-        className={cn(
-          "absolute rounded-full bg-transparent transition-colors",
-          "group-hover/handle:bg-[var(--border-strong)] group-data-[resize-handle-state=drag]/handle:bg-[var(--border-strong)]",
-          direction === "horizontal"
-            ? "inset-y-3 left-1/2 w-[3px] -translate-x-1/2"
-            : "inset-x-3 top-1/2 h-[3px] -translate-y-1/2",
-        )}
-      />
-    </PanelResizeHandle>
-  );
-}
 
 export function Workspace({
   detail,
@@ -340,7 +315,14 @@ export function Workspace({
               <kbd className="font-sans text-ui-sm text-muted-foreground/70">⌘↵</kbd>
             </button>
             <button
-              className="inline-flex h-6 items-center gap-1.5 rounded-md bg-[var(--success)] px-2 text-ui font-medium text-white transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-45"
+              /* The default button, not a green one. `--success` is a muted green
+                 in light mode and a *light* one in dark, so hard-coded white text
+                 sat at roughly 1.4:1 against it after dark — and green here was
+                 claiming an outcome the submission has not had yet. Primary is
+                 the strongest emphasis this palette has, it inverts correctly with
+                 the theme, and it is what the rest of the app already uses for the
+                 one action a surface is about. */
+              className="inline-flex h-6 items-center gap-1.5 rounded-md bg-primary px-2 text-ui font-medium text-primary-foreground shadow-[var(--app-shadow-card)] transition-colors hover:bg-primary/85 active:translate-y-px disabled:pointer-events-none disabled:opacity-45"
               disabled={running || submitting}
               onClick={() => void submit()}
               type="button"
@@ -373,7 +355,7 @@ export function Workspace({
           />
         </Panel>
 
-        <Handle />
+        <PaneHandle />
 
         {/* Right: write the solution, then run it against the cases. */}
         <Panel minSize={30} order={2}>
@@ -498,7 +480,7 @@ export function Workspace({
               </div>
             </Panel>
 
-            <Handle direction="vertical" />
+            <PaneHandle direction="vertical" />
 
             <Panel ref={dock} collapsible collapsedSize={0} defaultSize={34} minSize={14} order={2}>
               <div

@@ -10,12 +10,14 @@ const actual={title:"Normalize event batches",language:"javascript" as const,kin
 const run=async(files:Record<string,string>)=>{const root=await mkdtemp(path.join(tmpdir(),"spar-compiler-"));const started=Date.now();try{for(const[file,content]of Object.entries(files)){const target=path.join(root,file);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,content);}try{const result=await promisify(execFile)(process.execPath,["--test",...Object.keys(files).filter(file=>file.endsWith(".test.js"))],{cwd:root,timeout:5000});return{exitCode:0,stdout:result.stdout,stderr:result.stderr,durationMs:Date.now()-started};}catch(error){const value=error as {stdout?:string;stderr?:string;code?:number};return{exitCode:Number(value.code??1),stdout:value.stdout??"",stderr:value.stderr??"",durationMs:Date.now()-started};}}finally{await rm(root,{recursive:true,force:true});}};
 describe("question compiler",()=>{it("releases only when plausible incorrect code passes visible and fails hidden",async()=>{const {report}=await compileQuestion(design,async(files)=>({exitCode:files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files?1:0,stdout:"",stderr:"",durationMs:5}));expect(report.valid).toBe(true);});it("rejects weak hidden tests",async()=>{const {report}=await compileQuestion({...design,expectedFailureSignatures:[]},async()=>({exitCode:0,stdout:"",stderr:"",durationMs:1}));expect(report.valid).toBe(false);});});
 
-it("rejects misconception files that do not replace the reference implementation",async()=>{
+it("rejects misconception files that do not replace the reference implementation without executing anything",async()=>{
   let runs=0;
   const {report}=await compileQuestion({...design,knownIncorrectFiles:[{"wrong-path.ts":"incorrect"}]},async()=>{runs+=1;return{exitCode:0,stdout:"",stderr:"",durationMs:1};});
   expect(report.valid).toBe(false);
   expect(report.checks.find(check=>check.name==="known incorrect 1 replaces reference implementation")?.detail).toContain("queue.ts");
-  expect(runs).toBe(2);
+  // Decidable from the file map alone, so it costs no sandbox runs: the agent
+  // gets the structural fault back immediately instead of after four compiles.
+  expect(runs).toBe(0);
 });
 
 it("materializes JavaScript assertion oracles from the isolated reference solution",async()=>{

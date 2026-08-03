@@ -75,8 +75,10 @@ function Collapsible({ body }: { body: string }) {
         <span className="min-w-0 flex-1 truncate text-muted-foreground/65">{body}</span>
         <ChevronRight className={cn("size-3 shrink-0 text-muted-foreground/50 transition-transform", open && "rotate-90")} />
       </button>
+      {/* Flush with the trigger, like every other disclosure in the transcript:
+          the expanded text is the same event in full, not a child of it. */}
       {open && (
-        <p className="ml-[1.65rem] break-words border-l border-border/70 py-1 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/80">
+        <p className="min-w-0 break-words px-1.5 py-1 text-ui-sm leading-[1.6] text-muted-foreground/80">
           {body}
         </p>
       )}

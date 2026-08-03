@@ -18,6 +18,22 @@
   initial-value: 0deg;
 }
 
+/* The drum's two fade depths, registered for the same reason: they are driven from
+   whether the list is scrolled away from that end, and an unregistered length
+   would snap the mask on rather than ease it. Zero means no fade at all, which is
+   what an end with nothing past it gets. */
+@property --drum-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --drum-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -52,11 +68,33 @@
   --color-surface-sunken: var(--color-background-surface-under);
 
   --radius: 0.625rem;
-  --radius-sm: calc(0.3125rem * var(--squircle-factor));
-  --radius-md: calc(0.5rem * var(--squircle-factor));
-  --radius-lg: calc(0.625rem * var(--squircle-factor));
-  --radius-xl: calc(0.875rem * var(--squircle-factor));
+  /* Controls and chrome: plain arcs at plain sizes. A superellipse only reads as
+     one once the corner is big enough to see the curve — under ~14px it just
+     makes a button look slightly inflated, which is what a browser app looks
+     like and a Mac app does not. Buttons, fields, rows, cards, menus live here.
+
+     The steps are sized to nest. A corner is concentric when the outer radius
+     equals the inner one plus the gap between them, and a corner that isn't
+     concentric reads as a mistake even to someone who could not name why: the
+     two arcs run at different speeds and the gap between them pinches. So the
+     2px steps are for a control wrapping a control at 2px of padding (the
+     segmented thumb in its track), and each larger jump matches the padding a
+     container of that size actually carries. */
+  --radius-sm: 0.3125rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.875rem;
+  /* Sheets: the one place the squircle stays. The content pane, the work blobs
+     and the composer carry a corner long enough for the superellipse to be the
+     point rather than a rounding error. */
   --radius-2xl: calc(1.125rem * var(--squircle-factor));
+
+  /* Menus are their own pair, and the pair is the point: a menu's rim is 6px, so
+     its shell has to be exactly 6px rounder than the row highlight inside it or
+     the highlight's corner drifts off the shell's. Change the rim in
+     `dropdown-menu.tsx` and this offset changes with it. */
+  --radius-item: 0.375rem;
+  --radius-menu: calc(var(--radius-item) + 0.375rem);
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
   --font-spar: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -167,6 +205,17 @@
   --glass-hairline: color-mix(in oklab, var(--foreground) 18%, transparent);
   --shimmer-tint: oklch(14.5% 0 0 / 28%);
 
+  /* Concept kinds. Three hues in an otherwise monochrome app, so they are held to
+     a strict brief: they appear as a 5px dot and a faint wash, never as coloured
+     text or a filled pill. That is enough to tell a row of chips apart at a
+     glance — which is the whole job — without turning challenge history into a
+     bag of sweets. Chosen at one lightness and one modest chroma so no kind
+     shouts louder than the others, and rotated far enough apart to survive the
+     common red-green confusions. */
+  --concept-dsa: oklch(54% 0.14 274);
+  --concept-engineering: oklch(52% 0.09 203);
+  --concept-craft: oklch(55% 0.11 42);
+
   --code-foreground: #33363b;
   --code-comment: #727780;
   --code-keyword: #ce2734;
@@ -249,6 +298,12 @@
   --glass-hairline: oklch(0% 0 0 / 55%);
   --shimmer-tint: oklch(100% 0 0 / 40%);
 
+  /* Lifted and slightly desaturated for the dark pane: the same hues at the light
+     values read as ink rather than as a lit dot. */
+  --concept-dsa: oklch(74% 0.12 274);
+  --concept-engineering: oklch(74% 0.09 203);
+  --concept-craft: oklch(76% 0.10 45);
+
   --code-foreground: #c9d1d9;
   --code-comment: #8b949e;
   --code-keyword: #ff8177;
@@ -284,6 +339,33 @@
       corner-shape: round;
     }
 
+    /* Everything below the sheet scale opts back out. The superellipse is a
+       feature of the big surfaces; applied to every button, field, menu row and
+       card it stops being a material and becomes a tic — and at those radii
+       nobody can see the difference anyway, only the extra weight it lends the
+       corner. Matched on the radius the element asks for rather than by
+       component, so a new control inherits the rule for free. */
+    :is(
+      [class~="rounded-xs"],
+      [class~="rounded-sm"],
+      [class~="rounded-md"],
+      [class~="rounded-lg"],
+      [class~="rounded-xl"],
+      [class*="--radius-sm"],
+      [class*="--radius-md"],
+      [class*="--radius-lg"],
+      [class*="--radius-xl"],
+      [class*="--radius-menu"],
+      [class*="--radius-item"],
+      [data-slot^="dropdown-menu"],
+      [data-slot^="context-menu"],
+      [data-slot^="command"],
+      [data-slot="tooltip-content"],
+      [data-slot="select-content"],
+      [data-slot="select-item"]
+    ) {
+      corner-shape: round;
+    }
   }
 
   *,
@@ -578,10 +660,84 @@
     background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--app-window-fill) var(--app-glass-fill), transparent) 62%);
   }
 
+  /* ---- Scrolling drum ----------------------------------------------------- */
+
+  /* A list taller than the room it was given, presented the way a physical picker
+     drum reads: rows near each edge fade and soften as though rotating away,
+     rather than being cut in half by a boundary.
+
+     Two layers doing two different jobs. The mask fades the content itself, so it
+     dissolves into whatever is genuinely behind the pane — a gradient in a guessed
+     background colour cannot, because the pane is a translucent tint over the
+     window's own material and the "background" is the desktop. The edge strips
+     then taper a small backdrop blur across the same distance, which is what turns
+     a flat fade into a surface curving away from you.
+
+     Each end fades only while there is content past it, driven from the scroll
+     position. A picker drum can get away with fading both ends permanently
+     because its rows are small and interchangeable; these are cards you read, and
+     a first card that is half dissolved when the list is already at the top does
+     not read as rotation — it reads as broken rendering. */
+  .drum {
+    --drum-fade: 2.25rem;
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--drum-top),
+      #000 calc(100% - var(--drum-bottom)),
+      transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--drum-top),
+      #000 calc(100% - var(--drum-bottom)),
+      transparent 100%
+    );
+    transition:
+      --drum-top 180ms ease,
+      --drum-bottom 180ms ease;
+  }
+
+  .drum-edge {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2.25rem;
+    pointer-events: none;
+    /* Small on purpose. Past ~4px the half-visible card stops reading as one on
+       its way out and starts reading as a smear over the list. */
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    /* Matched to the mask's transition so the softening and the fade arrive
+       together; separately they read as two effects. */
+    transition: opacity 180ms ease;
+  }
+
+  .drum-edge-top {
+    top: 0;
+    mask-image: linear-gradient(to bottom, #000, transparent);
+    -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
+  }
+
+  .drum-edge-bottom {
+    bottom: 0;
+    mask-image: linear-gradient(to top, #000, transparent);
+    -webkit-mask-image: linear-gradient(to top, #000, transparent);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .drum,
+    .drum-edge {
+      transition: none;
+    }
+  }
+
   /* ---- Floating panels ---------------------------------------------------- */
 
   .floating-surface {
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-menu);
+    corner-shape: round;
     box-shadow:
       inset 0 0 0 1px var(--glass-rim),
       inset 0 1px 0 0 var(--glass-sheen),
@@ -595,9 +751,13 @@
 
   /* Menus sit closer to opaque than panels do: they are almost entirely small
      text, and every point of transparency costs contrast against whatever
-     happens to be behind them. */
+     happens to be behind them.
+
+     A tight arc, not a squircle: a menu is a list of 24px rows, and a corner
+     wider than the row it clips eats the first and last items' highlight. */
   .menu-surface {
-    border-radius: var(--radius-2xl);
+    border-radius: var(--radius-menu);
+    corner-shape: round;
     background: color-mix(in oklab, var(--popover) var(--glass-fill-solid), transparent);
     box-shadow:
       inset 0 0 0 1px var(--glass-rim),

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { compileQuestion } from "@spar/training";
-import type { AskUserQuestionInput } from "@spar/domain";
-import type { LocalStore } from "./store.js";
+import { compileQuestion, fallbackDesign } from "@spar/training";
+import { abilityStatusSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
+import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 
@@ -20,7 +20,20 @@ export async function executeTrainingTool(
   if (name === "search_attempt_history") return { attempts: local.searchAttempts(String(value.query ?? ""), Number(value.limit ?? 5)) };
   if (name === "search_challenge_history") return { challenges: local.searchChallenges(String(value.query ?? ""), Number(value.limit ?? 6)) };
   if (name === "read_challenge") return { challenge: local.readChallenge(String(value.questionId ?? "")) };
-  if (name === "read_concept_graph") return { nodes: [], bounded: true, note: "The reusable concept graph has no matching persisted nodes yet." };
+  /* Both concept reads answer the same question at different resolutions.
+     `read_concept_graph` is the shelf — what vocabulary exists near this topic
+     and whether the learner has met it. `search_concept_evidence` is the
+     finding — how they actually behave under one concept, split by sub-concept,
+     which is the difference between "arrays are shaky" and "the in-place pass is
+     the problem and two-pointers is fine". */
+  if (name === "read_concept_graph") {
+    const concepts = local.conceptGraph(String(value.query ?? value.conceptId ?? ""), Number(value.limit ?? 14));
+    return { concepts, bounded: true, note: concepts.length ? "Counts roll each sub-concept's evidence into its area. `standing` is derived from graded outcomes; an untested concept is not a weak one." : "No concept in the vocabulary matches this query and the learner has no tagged evidence yet." };
+  }
+  if (name === "search_concept_evidence") {
+    const report = local.conceptEvidenceReport(String(value.concept ?? value.query ?? ""), Number(value.limit ?? 3));
+    return { concepts: report, note: report.length ? "Read subConcepts before the top-level counts: an area's average hides the specific one that is failing." : "This concept has no tagged challenges yet, so there is nothing to read behaviour from." };
+  }
   if (name === "set_session_objective") return { committed: true, ...local.setObjective(sessionId, String(value.objective)) };
   if (name === "set_training_target") { const target=local.setTrainingTarget(sessionId, value as { ability: string; specificGap: string; desiredEvidence: string; avoidTesting: string[] });local.ensureAbility(target.abilityId,target.abilityTitle);local.queueAbilitySync(target.abilityId);return { committed: true, ...target }; }
   if (name === "commit_session_decision") return { committed: true, ...local.commitDecision(sessionId, value as { action: string; reason: string }) };
@@ -42,8 +55,28 @@ export async function executeTrainingTool(
       return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${questionCreatedWhileCompiling.title}) was published while this candidate compiled. This candidate was discarded.` }] } };
     }
     await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
-    const question = local.createQuestion(sessionId, compiled.design, compiled.report);
+    const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: conceptTags(value.concepts) });
     return { status: "playable", question, report: compiled.report };
+  }
+  /* Not in the agent's tool list. The controller reaches for this only after
+     every model-authored candidate has been rejected, so that a session ends
+     with something to attempt rather than with a compiler error. It is
+     compiled and validated exactly like any other candidate — the guarantee
+     comes from the design being written against the build contract, never from
+     trusting it. */
+  if (name === "create_fallback_question") {
+    if (local.readSession(sessionId)?.question) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "A challenge is already active for this session." }] } };
+    const language = value.language === "typescript" || value.language === "cpp" ? value.language : "javascript";
+    const design = fallbackDesign(language);
+    const compiled = await compileCandidate(design, sessionId, workspaces, runner);
+    if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
+    await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
+    /* Tagged like any other challenge, and tagged for what it actually is rather
+       than for the target it failed to hit. An untagged challenge is invisible to
+       every concept rollup, and a fallback the learner attempted is still
+       evidence about them — just evidence about tracing a running total. */
+    const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: [{ slug: "tracing-execution", role: "primary" }, { slug: "prefix-sums", role: "supporting" }] });
+    return { status: "playable", question, report: compiled.report, fallback: true };
   }
   if (name === "replace_current_question") {
     const activeQuestion = local.readSession(sessionId)?.question;
@@ -53,15 +86,53 @@ export async function executeTrainingTool(
     const stillActive = local.readSession(sessionId)?.question;
     if (!stillActive || stillActive.id !== activeQuestion.id) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "The active challenge changed while this replacement compiled. The candidate was discarded." }] } };
     await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
-    const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."));
+    const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."), conceptTags(value.concepts));
     return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report };
   }
   if (name === "inspect_current_attempt" || name === "read_attempt") return { events: local.readAttempt(String(value.attemptId)) };
   if (name === "evaluate_attempt") return { events: local.readAttempt(String(value.attemptId)) };
   if (name === "read_ability") return { ability: local.readAbility(String(value.abilityId)) };
-  if (name === "propose_ability_update") {const updated=local.updateAbility(value as { abilityId: string; markdown: string; evidenceEventIds: string[] });local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
-  if (name === "upsert_ability") {const updated=local.upsertAbility(value as { title: string; markdown: string; evidenceEventIds: string[] });local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
+  if (name === "propose_ability_update") {const updated=local.updateAbility({abilityId:String(value.abilityId),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
+  if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   throw new Error(`Unsupported Spar tool: ${name}`);
+}
+
+/** Concept tags off a tool call. Shape is already checked by the tool schema, so
+ *  this only narrows it — the store owns slug normalization and creation. */
+function conceptTags(value: unknown): ConceptTagInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (typeof entry === "string") return entry.trim() ? [{ slug: entry }] : [];
+    if (!entry || typeof entry !== "object") return [];
+    const record = entry as Record<string, unknown>;
+    const slug = typeof record.slug === "string" ? record.slug : typeof record.title === "string" ? record.title : "";
+    if (!slug.trim()) return [];
+    return [{
+      slug,
+      ...(typeof record.title === "string" ? { title: record.title } : {}),
+      ...(typeof record.kind === "string" ? { kind: record.kind } : {}),
+      ...(typeof record.parentSlug === "string" ? { parentSlug: record.parentSlug } : {}),
+      ...(typeof record.description === "string" ? { description: record.description } : {}),
+      ...(typeof record.role === "string" ? { role: record.role } : {}),
+    }];
+  });
+}
+
+/** The parts of an ability write that are optional on both ability tools, kept in
+ *  one place so `propose_ability_update` and `upsert_ability` cannot drift into
+ *  supporting different halves of what an ability is. */
+function abilityClaim(value: Record<string, unknown>): { summary?: string; practice?: string[]; concepts?: ConceptTagInput[]; status?: AbilityStatus } {
+  const status = abilityStatusSchema.safeParse(value.status);
+  return {
+    ...(typeof value.summary === "string" ? { summary: value.summary } : {}),
+    ...(Array.isArray(value.practice) ? { practice: stringList(value.practice) } : {}),
+    ...(Array.isArray(value.concepts) ? { concepts: conceptTags(value.concepts) } : {}),
+    ...(status.success ? { status: status.data } : {}),
+  };
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0) : [];
 }
 
 async function compileCandidate(input:unknown,sessionId:string,workspaces:WorkspaceService,runner:UtilityClient){

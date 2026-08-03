@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { attemptEventSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityHistorySummary, type ChallengeHistorySummary, type Language, type LearnerProfile, type SessionDetail, type SessionSuggestion } from "@spar/domain";
+import { attemptEventSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type SessionDetail, type SessionSuggestion } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
@@ -13,7 +13,10 @@ export const ipc = {
   attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
-  sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete"
+  sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
+  challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
+  challengeRun: "challenges:run", challengeCheck: "challenges:check", challengeReset: "challenges:reset",
+  conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start"
 } as const;
 
 export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000) });
@@ -25,6 +28,22 @@ export const sessionFlagInput = z.object({ sessionId: z.string().uuid(), value: 
    agent's to set — they promise a turn or a live challenge behind them. */
 export const sessionStatusInput = z.object({ sessionId: z.string().uuid(), status: z.enum(["completed", "paused"]) });
 export const workspacePathInput = z.object({ sessionId: z.string().uuid(), path: z.string().min(1).max(500) });
+/* Practising a challenge out of history is addressed by challenge id alone. The
+   session it came from is looked up rather than passed, so a renderer can never
+   name one challenge and a different session's sandbox. */
+export const challengePathInput = z.object({ challengeId: z.string().uuid(), path: z.string().min(1).max(500) });
+export const challengeWriteInput = challengePathInput.extend({ content: z.string().max(2_000_000) });
+export const challengeIdInput = z.object({ challengeId: z.string().uuid() });
+/* Starting a session from something the learner already has. Named by id rather
+   than carrying a goal string, so the phrasing of a practice session is decided
+   once in the main process — which is also the only side that can look up what
+   the evidence under that ability or concept currently says. `drill` is one of
+   the ability's own suggestions, passed verbatim because the learner picked it. */
+export const practiceInput = z.object({
+  abilityId: z.string().uuid().optional(),
+  conceptSlug: z.string().trim().min(1).max(60).optional(),
+  drill: z.string().trim().min(3).max(400).optional(),
+}).refine((value) => Boolean(value.abilityId ?? value.conceptSlug), "A practice session needs an ability or a concept to aim at");
 export const workspaceWriteInput = workspacePathInput.extend({ content: z.string().max(2_000_000) });
 export const runInput = z.object({ sessionId: z.string().uuid(), language: z.enum(["javascript", "typescript", "cpp"]), command: z.enum(["test", "run"]), timeoutMs: z.number().int().min(100).max(20_000).default(8_000) });
 // Ordering belongs to the authoritative local event store. Renderer processes
@@ -49,6 +68,17 @@ export type NativeSurface = "liquid-glass" | "vibrancy" | "mica" | "none";
 export type WindowControls = "left" | "right" | "none";
 /** `process.platform`, narrowed to what the renderer branches on. */
 export type HostPlatform = "darwin" | "win32" | "linux" | (string & {});
+/** Which copy of Spar this is. Resolved once in the main process — see main/build.ts. */
+export type BuildInfo = {
+  /** From package.json. Identifies a release; says nothing useful about a build from source. */
+  version: string;
+  /** Full SHA this build came from, when it can be established at all. */
+  commit: string | null;
+  /** Branch HEAD pointed at, or null when detached or unknown. */
+  branch: string | null;
+  /** False when running from source, where the commit is the real identity. */
+  packaged: boolean;
+};
 export type ThemePreference = z.infer<typeof themePreferenceSchema>;
 
 export type ProviderId = "openai-codex" | "claude-code" | "github-copilot" | z.infer<typeof providerSettingsInput>["provider"];
@@ -80,11 +110,15 @@ export type ProviderOAuthEvent = {
   allowEmpty?: boolean;
 };
 
-export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending" };
+export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending" };
 /** One file a tool wrote, with the line counts the activity row reports. */
 export type AgentActivityFile = { path: string; added: number; removed: number };
 export type AgentStreamEvent = {
   runId: string;
+  /** Which session this turn is working on. Stamped in the main process, because
+   *  the utility process only knows its own request id — and a card the learner
+   *  is not looking at still has to be able to say "the agent is on this one". */
+  sessionId?: string;
   type: "text" | "tool" | "status" | "error" | "done";
   text?: string;
   tool?: string;
@@ -124,6 +158,30 @@ export interface SparApi {
   setSessionStatus(input: z.infer<typeof sessionStatusInput>): Promise<void>;
   /** Permanent: the session, its challenges, its attempt evidence and its workspace. */
   deleteSession(sessionId: string): Promise<void>;
+  /* ---- Practising a challenge from history ------------------------------
+     Every one of these runs against a per-challenge sandbox. None of them
+     records an attempt event, changes a question's status, or starts an agent
+     turn: re-opening finished work is rehearsal, and rehearsal is not evidence. */
+  listChallengePreviews(): Promise<Record<string, ChallengeCodePreview>>;
+  readChallenge(challengeId: string): Promise<ChallengeDetail | null>;
+  writeChallengeFile(input: z.infer<typeof challengeWriteInput>): Promise<void>;
+  /** Runs the visible cases; output streams over `onRunnerEvent` under this id. */
+  runChallenge(input: z.infer<typeof challengeIdInput>): Promise<{ id: string }>;
+  /** Visible plus hidden, in a throwaway copy of the sandbox. Awaited, not streamed. */
+  checkChallenge(input: z.infer<typeof challengeIdInput>): Promise<{ outcome: "passed" | "failed"; exitCode: number; summary: string }>;
+  /** Throws the learner's practice edits away and re-seeds from the generated files. */
+  resetChallenge(input: z.infer<typeof challengeIdInput>): Promise<ChallengeDetail | null>;
+  /* ---- Concepts and abilities -------------------------------------------
+     Both are reads over the learner's own history, so both are cheap and both
+     are fetched on demand rather than carried in the bootstrap: the concept
+     summaries are, because chips need them everywhere, but the challenge lists
+     behind a chip are only wanted once someone looks. */
+  readConcept(slug: string): Promise<ConceptDetail | null>;
+  readAbility(abilityId: string): Promise<AbilityDetail | null>;
+  /** Opens a new session aimed at an ability or a concept, and returns it so the
+   *  caller can go straight there. Starting the turn is the point: practice that
+   *  did not reach the agent would be a link, not a drill. */
+  startPractice(input: z.infer<typeof practiceInput>): Promise<{ sessionId: string }>;
   passwordAuth(mode: "sign-in" | "sign-up", email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   /** Finish onboarding; resolves with the stored profile. */
@@ -151,6 +209,8 @@ export interface SparApi {
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
   /** Chrome the OS owns: the material behind us, and where its buttons sit. */
   chrome: { platform: HostPlatform; surface: NativeSurface; controls: WindowControls };
+  /** Version and commit of this copy, fixed for the life of the window. */
+  build: BuildInfo;
   onNativeSurface(listener: (surface: NativeSurface) => void): () => void;
   onSyncState(listener: (state: SyncState) => void): () => void;
 }

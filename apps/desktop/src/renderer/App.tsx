@@ -14,6 +14,8 @@ import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { AbilityPage } from "./components/pages/AbilityPage";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
+import { ConceptSheet } from "./components/concepts/ConceptSheet";
+import { ChallengePage } from "./components/pages/ChallengePage";
 import { AuthPage } from "./components/pages/AuthPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { Workspace } from "./components/workspace/Workspace";
@@ -24,7 +26,9 @@ import { useSidebarWidth } from "./hooks/use-sidebar-width";
 
 const api: SparApi | undefined = window.spar;
 
-const PAGE_TITLE: Record<Exclude<Page, "workspace">, string> = {
+/** Pages the shell puts a plain toolbar over. "workspace" and "challenge" draw
+ *  their own, because both carry a back button and their own actions. */
+const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge">, string> = {
   home: "Home",
   sessions: "Sessions",
   ability: "Abilities",
@@ -37,9 +41,22 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page>("home");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
+  /* Which challenge the standalone page is showing. Held here rather than inside
+     the challenges list so navigating away and back does not silently keep a
+     challenge mounted behind the list. */
+  const [challengeId, setChallengeId] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
-  const [run, setRun] = useState<AgentRun | null>(null);
+  /* Every agent turn in flight, by the session it belongs to — not just the one
+     the workspace is showing. A turn is started from a session and then survives
+     the learner navigating away from it, so the dashboard and the sessions list
+     can both keep reporting live work on cards for sessions nobody has open. */
+  const [runs, setRuns] = useState<Record<string, AgentRun>>({});
   const [palette, setPalette] = useState(false);
+  /* One concept sheet for the whole app rather than one per list. A chip appears
+     in challenge history, on an ability, and inside the sheet itself, and every
+     one of them has to open the same surface — nesting a second dialog inside the
+     first is how you end up unable to get back out of it. */
+  const [concept, setConcept] = useState<string | null>(null);
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
   const { width: sidebarWidth, dragging, handleProps: sidebarHandle } = useSidebarWidth();
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
@@ -67,6 +84,18 @@ export function App() {
     }
   }, [refresh]);
 
+  /* Forgetting a session's turn. Only ever called for a run that has settled:
+     a streaming run is the transcript, and dropping one mid-flight would empty
+     the thread the learner is watching. */
+  const clearRun = useCallback((sessionId: string, runId?: string) => {
+    setRuns((current) => {
+      const held = current[sessionId];
+      if (!held || (runId && held.runId !== runId)) return current;
+      const { [sessionId]: _dropped, ...rest } = current;
+      return rest;
+    });
+  }, []);
+
   const openSession = useCallback(async (id: string) => {
     if (!api) return;
     setPage("workspace");
@@ -75,6 +104,14 @@ export function App() {
       const next = await api.openSession(id);
       if (!next) throw new Error("That session no longer exists.");
       setDetail(next);
+      /* A failed turn is reported on the card until someone goes and looks. Once
+         they have, the durable transcript is the record of it and the held run
+         would only keep the failure on the card behind them. */
+      setRuns((current) => {
+        if (!current[id] || current[id].status === "streaming") return current;
+        const { [id]: _settled, ...rest } = current;
+        return rest;
+      });
     } finally {
       setOpening(false);
     }
@@ -86,7 +123,6 @@ export function App() {
   const start = useCallback(async (goal: string) => {
     if (!api) return;
     setError(null);
-    setRun(null);
     try {
       const result = await api.createSession({ goal });
       await refresh();
@@ -127,20 +163,33 @@ export function App() {
   useEffect(() => {
     if (!api) return;
     const offAgent = api.onAgentEvent((event) => {
+      /* The main process stamps the session on every event. The fallback is for
+         a turn that somehow arrives unattributed: routing it to the open session
+         is what this did before runs were held per session, and it keeps the
+         workspace transcript working rather than silently dropping the stream. */
+      const sessionId = event.sessionId ?? detailRef.current?.summary.id;
+      if (!sessionId) return;
+
       if (event.type === "done") {
-        const id = detailRef.current?.summary.id;
-        if (id) void openSession(id).catch((cause) => setError(message(cause))).finally(() => setRun((current) => current?.runId === event.runId ? null : current));
-        else setRun((current) => current?.runId === event.runId ? null : current);
+        // The summaries every card is drawn from are re-read whichever session
+        // finished; only the open one needs its detail re-opened.
+        if (detailRef.current?.summary.id === sessionId) {
+          void openSession(sessionId).catch((cause) => setError(message(cause))).finally(() => clearRun(sessionId, event.runId));
+        } else clearRun(sessionId, event.runId);
         void refresh().catch(() => undefined);
         return;
       }
-      setRun((current) => reduceRun(current, event));
+
+      setRuns((current) => {
+        const next = reduceRun(current[sessionId] ?? null, event);
+        return next ? { ...current, [sessionId]: next } : current;
+      });
     });
 
     return () => {
       offAgent();
     };
-  }, [openSession, refresh]);
+  }, [clearRun, openSession, refresh]);
 
   // A planning session has no challenge to show yet, so poll until one exists.
   useEffect(() => {
@@ -217,9 +266,36 @@ export function App() {
   const navigate = (next: Page) => {
     setPage(next);
     if (next !== "workspace") setDetail(null);
+    if (next !== "challenge") setChallengeId(null);
   };
 
+  /* The sheet's header renders from this before its own read lands, so a chip
+     opens instantly wherever it was clicked. */
+  const conceptSummaries = new Map(data.concepts.map((entry) => [entry.slug, entry]));
+
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
+  const openChallenge = (id: string) => {
+    setChallengeId(id);
+    setPage("challenge");
+    setDetail(null);
+  };
+
+  /* Practice is a real session, so it lands where a new session lands: the sheet
+     closes, the workspace opens, and the agent's first turn is already running by
+     the time it does. Anything less would make an ability page a set of links. */
+  const practise = (input: { abilityId?: string; conceptSlug?: string; drill?: string }) =>
+    void (async () => {
+      if (!api) return;
+      setError(null);
+      try {
+        const created = await api.startPractice(input);
+        setConcept(null);
+        await refresh();
+        await openSession(created.sessionId);
+      } catch (cause) {
+        setError(message(cause));
+      }
+    })();
 
   const sessionActions: SessionActions = {
     rename: (session, title) => void mutateSession((sdk) => sdk.renameSession({ sessionId: session.id, title })),
@@ -236,9 +312,9 @@ export function App() {
     remove: (session) => void mutateSession(async (sdk) => {
       if (detailRef.current?.summary.id === session.id) {
         setDetail(null);
-        setRun(null);
         setPage("home");
       }
+      clearRun(session.id);
       await sdk.deleteSession(session.id);
     }),
   };
@@ -250,7 +326,7 @@ export function App() {
       attemptId: detail.question.attemptId,
       reason,
     });
-    setRun(null);
+    clearRun(detail.summary.id);
     await openSession(detail.summary.id);
     await refresh();
   };
@@ -267,7 +343,7 @@ export function App() {
     setData((current) => current ? { ...current, theme } : current);
   };
   const signedOut = async () => {
-    setRun(null);
+    setRuns({});
     setDetail(null);
     setPage("home");
     setError(null);
@@ -324,8 +400,8 @@ export function App() {
       )}
 
       <main className={cn("app-pane relative flex min-w-0 flex-1 flex-col", sidebar && "app-content-pane")}>
-        {page !== "workspace" && (
-          <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace">]} />
+        {page !== "workspace" && page !== "challenge" && (
+          <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge">]} />
         )}
 
         {error && (
@@ -339,10 +415,39 @@ export function App() {
         )}
 
         <div className="min-h-0 flex-1">
-          {page === "home" && <HomePage busy={opening} data={data} onOpen={open} onOpenSettings={() => navigate("settings")} onStart={(goal) => void start(goal)} onViewAll={() => navigate("sessions")} />}
-          {page === "sessions" && <SessionsPage onOpen={open} sessions={data.sessions} />}
-          {page === "ability" && <AbilityPage abilities={data.abilities} />}
-          {page === "challenges" && <ChallengesPage challenges={data.challenges} onOpen={open} sessions={data.sessions} />}
+          {page === "home" && <HomePage api={api} busy={opening} data={data} onOpen={open} onOpenSettings={() => navigate("settings")} onStart={(goal) => void start(goal)} onViewAll={() => navigate("sessions")} runs={runs} />}
+          {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions} />}
+          {page === "ability" && (
+            <AbilityPage
+              abilities={data.abilities}
+              api={api}
+              challenges={data.challenges}
+              concepts={data.concepts}
+              onOpenConcept={setConcept}
+              onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+              onPractise={practise}
+            />
+          )}
+          {page === "challenges" && (
+            <ChallengesPage
+              api={api}
+              challenges={data.challenges}
+              concepts={data.concepts}
+              onOpen={(challenge) => openChallenge(challenge.id)}
+              onOpenConcept={setConcept}
+            />
+          )}
+          {page === "challenge" && challengeId && (
+            <ChallengePage
+              api={api}
+              challengeId={challengeId}
+              dark={dark}
+              onBack={() => navigate("challenges")}
+              onError={setError}
+              onExpandSidebar={expandSidebar}
+              onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+            />
+          )}
           {page === "settings" && (
             <SettingsPage
               api={api}
@@ -379,7 +484,7 @@ export function App() {
                       onOpenSettings={() => navigate("settings")}
                       onRefresh={() => openSession(detail.summary.id)}
                       question={detail.question}
-                      run={run}
+                      run={runs[detail.summary.id] ?? null}
                     />
                   ) : sessionMode(detail) === "chat" ? (
                     <ChatView
@@ -390,7 +495,7 @@ export function App() {
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
                       onRefresh={() => openSession(detail.summary.id)}
-                      run={run}
+                      run={runs[detail.summary.id] ?? null}
                     />
                   ) : (
                     <PlanningView
@@ -401,7 +506,7 @@ export function App() {
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
                       onRefresh={() => openSession(detail.summary.id)}
-                      run={run}
+                      run={runs[detail.summary.id] ?? null}
                     />
                   )}
                 </motion.div>
@@ -419,6 +524,15 @@ export function App() {
         onPage={navigate}
         open={palette}
         sessions={data.sessions}
+      />
+
+      <ConceptSheet
+        api={api}
+        onOpenChange={(next) => { if (!next) setConcept(null); }}
+        onOpenSession={(sessionId) => { setConcept(null); void openSession(sessionId).catch((cause) => setError(message(cause))); }}
+        onPractise={(conceptSlug) => practise({ conceptSlug })}
+        slug={concept}
+        summaries={conceptSummaries}
       />
     </div>
   );

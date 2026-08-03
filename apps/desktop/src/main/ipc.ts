@@ -1,8 +1,9 @@
 import { BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, createSessionInput, ipc, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
+import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { attemptAppendInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
+import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
@@ -12,13 +13,13 @@ import type { CloudSyncService } from "./sync.js";
 import { requestsChallengeRevision } from "./agentIntent.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; sync: CloudSyncService; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
   const startingAgentRuns = new Map<string, Promise<{ runId: string }>>();
   const failedPlanningRuns = new Set<string>();
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline" }));
+  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline" }));
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
      to clean up to make the error go away. */
@@ -60,8 +61,16 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          default the instructions read — a stated language in the goal still wins. */
       const profile=deps.store.getProfile();
       const payload={sessionId,message,turnKind,activeQuestion:session.question?{id:session.question.id,attemptId:session.question.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
-      const first=deps.agent.request("turn",{...payload,provider:providers[0]});activeAgentRuns.set(sessionId,first.id);
-      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());activeAgentRuns.delete(sessionId);deps.window()?.webContents.send("agent:event",{runId:request.id,type:"done"});}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});activeAgentRuns.set(sessionId,retry.id);return attempt(retry,index+1);}activeAgentRuns.delete(sessionId);if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,type:"error",text:error instanceof Error?error.message:String(error)});}};
+      /* A run is claimed by its session for as long as it is in flight, in two
+         places: `activeAgentRuns` guards against a second turn, and
+         `agentRunSessions` is what lets the main process stamp a session id onto
+         every streamed event — without which a session card that is not open
+         could not tell that the agent is working on it. Both are released
+         together, and a retried turn hands the claim to the new run id. */
+      const claim=(runId:string)=>{activeAgentRuns.set(sessionId,runId);deps.agentRunSessions.set(runId,sessionId);return runId;};
+      const release=(runId:string)=>{activeAgentRuns.delete(sessionId);deps.agentRunSessions.delete(runId);};
+      const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);
+      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);
@@ -85,6 +94,44 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return startAgentTurn(sessionId, "The learner asked for the next challenge. Use the existing evidence, including any challenge they gave up on, to choose one training target and create the next validated question.", "learner", "session-start");
   });
 
+  /* Reads over the learner's own recorded history, so neither starts a turn and
+     neither costs a provider call. */
+  ipcMain.handle(ipc.conceptRead, (_event, value) => { if (typeof value !== "string" || !value.trim()) throw new Error("A concept is required"); return deps.store.conceptDetail(value); });
+  ipcMain.handle(ipc.abilityRead, (_event, value) => deps.store.readAbilityDetail(zUuid(value)));
+
+  /**
+   * Practice from an ability or a concept. This is a real session, aimed: the
+   * goal is written in the learner's voice because that is what a session is
+   * started from, and the agent is separately told which ability or concept it
+   * came from along with what the recorded evidence there currently says — so the
+   * first challenge answers the gap rather than re-testing what already passed.
+   *
+   * Deliberately not a shortcut past `sessionsCreate`'s guard: a practice session
+   * with no provider behind it would be a dead row in the sidebar, same as any
+   * other.
+   */
+  ipcMain.handle(ipc.practiceStart, async (_event, value) => {
+    const input = practiceInput.parse(value);
+    if (!await deps.providers.available()) throw new Error(NO_PROVIDER);
+    const ability = input.abilityId ? deps.store.readAbilityDetail(input.abilityId) : null;
+    if (input.abilityId && !ability) throw new Error("That ability no longer exists");
+    const concept = input.conceptSlug ? deps.store.conceptDetail(input.conceptSlug) : null;
+    if (input.conceptSlug && !concept) throw new Error("That concept no longer exists");
+    const subject = ability?.ability.title ?? concept?.concept.title ?? "";
+    const goal = input.drill ?? (ability
+      ? `I want to go deeper on ${subject.toLowerCase()}.`
+      : `I want to get reliably good at ${subject.toLowerCase()}.`);
+    const created = deps.store.createSession(goal);
+    const aim = [
+      `The learner started this session from ${ability ? `their "${subject}" ability` : `the "${subject}" concept`} rather than by typing a goal, so it is a deliberate drill on that and not a new direction.`,
+      ability ? `That ability is currently ${ability.ability.status} across ${ability.ability.evidenceCount} linked evidence event${ability.ability.evidenceCount === 1 ? "" : "s"}${ability.ability.concepts.length ? `, covering ${ability.ability.concepts.map((tag) => tag.slug).join(", ")}` : ""}.` : "",
+      concept ? `Recorded evidence for that concept: ${concept.concept.passedCount} passed, ${concept.concept.failedCount} failed, ${concept.concept.abandonedCount} abandoned across ${concept.concept.challengeCount} challenge${concept.concept.challengeCount === 1 ? "" : "s"}.${concept.children.length ? ` Sub-concepts with evidence: ${concept.children.map((child) => `${child.slug} (${child.passedCount}/${child.passedCount + child.failedCount + child.abandonedCount} passed)`).join(", ")}.` : ""}` : "",
+      `Read the concept evidence first and aim the target at what is still uncertain there. Do not repeat a challenge title the learner has already seen.`,
+    ].filter(Boolean).join(" ");
+    await startAgentTurn(created.sessionId, `${goal}\n\n${aim}`, "learner", "session-start");
+    return created;
+  });
+
   ipcMain.handle(ipc.sessionsRename, (_event, value) => { const input = sessionRenameInput.parse(value); return deps.store.renameSession(input.sessionId, input.title); });
   ipcMain.handle(ipc.sessionsPin, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionPinned(input.sessionId, input.value); });
   ipcMain.handle(ipc.sessionsArchive, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionArchived(input.sessionId, input.value); });
@@ -105,6 +152,99 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     failedPlanningRuns.delete(sessionId);
     if (!deps.store.deleteSession(sessionId)) return;
     await deps.workspaces.remove(sessionId);
+  });
+
+  /* ---- Practising a challenge from history --------------------------------
+     A challenge in the history list is finished work, and re-opening it is
+     rehearsal: no attempt is started, no event is appended, no agent turn is
+     launched, and the session's own workspace is never touched. Everything
+     below runs against `.spar/practice/<challengeId>` inside the session's
+     directory, which is the learner's to keep and to throw away. */
+  const challengeDetail = async (challengeId: string): Promise<ChallengeDetail | null> => {
+    const record = deps.store.challengeRecord(challengeId);
+    const summary = deps.store.listChallenges().find((item) => item.id === challengeId);
+    if (!record || !summary) return null;
+    const seed = seedFiles(record.design);
+    await deps.workspaces.ensurePractice(record.sessionId, challengeId, seed);
+    const content: Record<string, string> = {};
+    let practiceEdited = false;
+    for (const [path, generated] of Object.entries(seed)) {
+      const saved = await deps.workspaces.readPractice(record.sessionId, challengeId, path);
+      content[path] = saved ?? generated;
+      if (saved !== null && saved !== generated) practiceEdited = true;
+    }
+    return {
+      summary,
+      statement: record.statement,
+      kind: record.kind,
+      sessionGoal: record.sessionGoal,
+      sessionStatus: record.sessionStatus,
+      abilityTitle: record.abilityTitle,
+      specificGap: record.specificGap,
+      desiredEvidence: record.desiredEvidence,
+      action: record.action,
+      files: challengeFiles(record.design, content),
+      hiddenTestCount: Object.keys(record.design.hiddenTests).length,
+      practiceEdited,
+      timeline: challengeTimeline(record.attempts),
+    };
+  };
+  /** The challenge's session and design, or a thrown error the renderer can show. */
+  const practiceTarget = (challengeId: string) => {
+    const record = deps.store.challengeRecord(challengeId);
+    if (!record) throw new Error("That challenge no longer exists");
+    return record;
+  };
+
+  ipcMain.handle(ipc.challengePreviews, () => deps.store.challengePreviews());
+  ipcMain.handle(ipc.challengeRead, (_event, value) => challengeDetail(zUuid(value)));
+  ipcMain.handle(ipc.challengeWrite, async (_event, value) => {
+    const input = challengeWriteInput.parse(value);
+    const record = practiceTarget(input.challengeId);
+    // Visible tests are the challenge's contract. They are read-only in the
+    // editor, and read-only here too — otherwise "practising" could quietly
+    // become editing the cases until they pass.
+    if (input.path in record.design.visibleTests) throw new Error("The test files state the challenge's contract and cannot be edited");
+    await deps.workspaces.ensurePractice(record.sessionId, input.challengeId, seedFiles(record.design));
+    await deps.workspaces.writePractice(record.sessionId, input.challengeId, { [input.path]: input.content });
+  });
+  ipcMain.handle(ipc.challengeRun, async (_event, value) => {
+    const input = challengeIdInput.parse(value);
+    const record = practiceTarget(input.challengeId);
+    const root = await deps.workspaces.ensurePractice(record.sessionId, input.challengeId, seedFiles(record.design));
+    const request = deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: 8_000 });
+    void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) }));
+    return { id: request.id };
+  });
+  /* The hidden suite, in a throwaway copy of the sandbox — the same shape as a
+     real submission minus everything that makes a submission count. The verdict
+     is returned and then forgotten. */
+  ipcMain.handle(ipc.challengeCheck, async (_event, value) => {
+    const input = challengeIdInput.parse(value);
+    const record = practiceTarget(input.challengeId);
+    const seed = seedFiles(record.design);
+    await deps.workspaces.ensurePractice(record.sessionId, input.challengeId, seed);
+    const practised: Record<string, string> = {};
+    for (const path of Object.keys(seed)) practised[path] = (await deps.workspaces.readPractice(record.sessionId, input.challengeId, path)) ?? seed[path]!;
+    const validationId = randomUUID();
+    const root = await deps.workspaces.writeValidation(record.sessionId, validationId, { ...practised, ...record.design.hiddenTests });
+    let result: { exitCode: number; stdout: string; stderr: string; durationMs: number };
+    try {
+      result = await deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: 8_000 }).promise as typeof result;
+    } finally {
+      await deps.workspaces.removeValidation(record.sessionId, validationId);
+    }
+    return {
+      outcome: result.exitCode === 0 ? "passed" as const : "failed" as const,
+      exitCode: result.exitCode,
+      summary: `${result.stdout}\n${result.stderr}`.trim().slice(-12_000),
+    };
+  });
+  ipcMain.handle(ipc.challengeReset, async (_event, value) => {
+    const input = challengeIdInput.parse(value);
+    const record = practiceTarget(input.challengeId);
+    await deps.workspaces.resetPractice(record.sessionId, input.challengeId, seedFiles(record.design));
+    return challengeDetail(input.challengeId);
   });
 
   ipcMain.handle(ipc.agentSend, async (_event, value) => {

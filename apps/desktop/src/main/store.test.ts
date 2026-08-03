@@ -17,7 +17,11 @@ it("keeps the onboarding profile out of the next account",()=>{const store=new L
   // behind would skip onboarding for whoever signs in next, on their predecessor's answers.
   store.clearAccountData();expect(store.getProfile()).toBeNull();}finally{store.close();}});
 
-describe("local learning state",()=>{it("persists an evidence-bearing two-question adaptive chain",()=>{const store=new LocalStore(":memory:");try{const {sessionId}=store.createSession("Learn invariant-driven algorithms deeply");store.setObjective(sessionId,"Distinguish recognizing an invariant from restoring it repeatedly.");const first=store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Repeated restoration after one mutation",desiredEvidence:"Uses a loop until validity returns",avoidTesting:["parsing"]});const q1=store.createQuestion(sessionId,design("Restore the window"),{valid:true});store.appendEvent({id:randomUUID(),attemptId:q1.attemptId,sequence:1,type:"learner_remark",occurredAt:new Date().toISOString(),payload:{body:"I know the invariant but I only repaired it once."},source:"learner",schemaVersion:1});store.updateAbility({abilityId:first.abilityId,markdown:"# Invariant restoration\n\nRecognizes the invariant; repeated restoration remains uncertain.",evidenceEventIds:[]});store.completeAttempt(q1.attemptId,"passed");store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Transfer repeated restoration to an event stream",desiredEvidence:"Restores validity independently in a new representation",avoidTesting:["advanced syntax"]});store.createQuestion(sessionId,design("Repair the event stream"),{valid:true});const detail=store.readSession(sessionId);expect(detail?.summary.questionTitles).toHaveLength(2);expect(detail?.summary.completedQuestions).toBe(1);expect(detail?.question?.title).toBe("Repair the event stream");expect(store.readAbility(first.abilityId)).toMatchObject({version:1,status:"developing"});expect(store.readAttempt(q1.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({type:"learner_remark"})]));}finally{store.close();}});});
+describe("local learning state",()=>{it("persists an evidence-bearing two-question adaptive chain",()=>{const store=new LocalStore(":memory:");try{const {sessionId}=store.createSession("Learn invariant-driven algorithms deeply");store.setObjective(sessionId,"Distinguish recognizing an invariant from restoring it repeatedly.");const first=store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Repeated restoration after one mutation",desiredEvidence:"Uses a loop until validity returns",avoidTesting:["parsing"]});const q1=store.createQuestion(sessionId,design("Restore the window"),{valid:true});const remark=randomUUID();store.appendEvent({id:remark,attemptId:q1.attemptId,sequence:1,type:"learner_remark",occurredAt:new Date().toISOString(),payload:{body:"I know the invariant but I only repaired it once."},source:"learner",schemaVersion:1});
+/* Cited, not merely written beside: confidence follows the number of linked
+   evidence events, so an update with nothing behind it correctly stays
+   uncertain. This chain claims to be evidence-bearing, so it cites the remark. */
+store.updateAbility({abilityId:first.abilityId,markdown:"# Invariant restoration\n\nRecognizes the invariant; repeated restoration remains uncertain.",evidenceEventIds:[remark]});store.completeAttempt(q1.attemptId,"passed");store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Transfer repeated restoration to an event stream",desiredEvidence:"Restores validity independently in a new representation",avoidTesting:["advanced syntax"]});store.createQuestion(sessionId,design("Repair the event stream"),{valid:true});const detail=store.readSession(sessionId);expect(detail?.summary.questionTitles).toHaveLength(2);expect(detail?.summary.completedQuestions).toBe(1);expect(detail?.question?.title).toBe("Repair the event stream");expect(store.readAbility(first.abilityId)).toMatchObject({version:1,status:"developing"});expect(store.readAttempt(q1.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({type:"learner_remark"})]));}finally{store.close();}});});
 
 it("durably pauses an evidence-empty session for placement",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Understand the Node.js event loop");expect(store.hasLearnerEvidence()).toBe(false);const intake={questions:[{header:"Experience",question:"How comfortable are you with callbacks and Promises?",options:[{label:"New",description:"I have not used them."},{label:"Some",description:"I have seen them in small programs."}],multiple:false,custom:true}]};store.setPendingIntake(sessionId,intake);expect(store.readSession(sessionId)?.pendingLearnerQuestion?.questions[0]?.question).toContain("Promises");store.answerIntake(sessionId,"I have not used Promises yet.");expect(store.readSession(sessionId)?.pendingLearnerQuestion).toBeNull();expect(store.answeredIntake(sessionId)).toBe("I have not used Promises yet.");expect(store.setPendingIntake(sessionId,intake).status).toBe("answered");expect(store.readSession(sessionId)?.pendingLearnerQuestion).toBeNull();const target=store.setTrainingTarget(sessionId,{ability:"Function-call sequencing",specificGap:"Follow ordinary calls before asynchronous scheduling",desiredEvidence:"Predicts direct calls",avoidTesting:["Promises","timers"]});store.createQuestion(sessionId,{...design("Trace direct calls"),difficulty:"foundation"},{valid:true});const detail=store.readSession(sessionId);expect(detail?.question?.difficulty).toBe("foundation");expect(detail?.question?.abilityId).toBe(target.abilityId);}finally{store.close();}});
 
@@ -46,3 +50,100 @@ it("takes a deleted session's evidence with it and keeps the ability it taught",
   // A turn that outlived the row it was writing for, and a second delete of the
   // same session, both have to be survivable rather than throwing.
   expect(store.addMessage(sessionId,"agent","An answer that arrived too late")).toBeNull();expect(store.deleteSession(sessionId)).toBe(false);}finally{store.close();}});
+
+/** Two graded challenges under one area: a passed one tagged with two-pointers and
+ *  a failed one tagged with the in-place pass. The whole point of the rollups is
+ *  that the area shows both while each sub-concept keeps its own verdict. */
+function taggedHistory(store:LocalStore){
+  const {sessionId}=store.createSession("Get reliably good at array passes");
+  const target=store.setTrainingTarget(sessionId,{ability:"Array passes",specificGap:"Rewriting a sequence while reading it",desiredEvidence:"Keeps the read and write positions distinct",avoidTesting:[]});
+  // Setting a target introduces the ability it names, exactly as the training
+  // tool does — without the row, the target points at an ability that has no
+  // document behind it and the ledger cannot show what the session was for.
+  store.ensureAbility(target.abilityId,target.abilityTitle);
+  const passed=store.createQuestion(sessionId,design("Meet in the middle"),{valid:true},{concepts:[{slug:"two-pointers",role:"primary"},{slug:"index-arithmetic",role:"supporting"}]});
+  store.appendNextEvent({id:randomUUID(),attemptId:passed.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+  store.completeAttempt(passed.attemptId,"passed");
+  const failed=store.createQuestion(sessionId,design("Compact in place"),{valid:true},{concepts:[{slug:"in-place-mutation",role:"primary"}]});
+  store.appendNextEvent({id:randomUUID(),attemptId:failed.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{passed:false},source:"runner",schemaVersion:1});
+  const evidence=store.appendNextEvent({id:randomUUID(),attemptId:failed.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
+  store.completeAttempt(failed.attemptId,"failed");
+  return {sessionId,abilityId:target.abilityId,passed,failed,evidence};
+}
+
+it("rolls a sub-concept's evidence into its area without averaging the finding away",()=>{const store=new LocalStore(":memory:");try{
+  taggedHistory(store);
+  const concepts=new Map(store.listConcepts().map((concept)=>[concept.slug,concept]));
+  // The area sees both challenges; each sub-concept sees only its own.
+  expect(concepts.get("arrays")).toMatchObject({challengeCount:2,passedCount:1,failedCount:1});
+  expect(concepts.get("two-pointers")).toMatchObject({challengeCount:1,passedCount:1,failedCount:0});
+  expect(concepts.get("in-place-mutation")).toMatchObject({challengeCount:1,passedCount:0,failedCount:1});
+  // Which is the whole point: "arrays" reads uneven, and the specific pass that
+  // is failing is still nameable underneath it.
+  const report=store.conceptEvidenceReport("arrays")[0]!;
+  expect(report.standing).toBe("uneven");
+  expect(report.subConcepts.find((child)=>child.slug==="in-place-mutation")?.standing).toBe("shaky");
+  expect(report.subConcepts.find((child)=>child.slug==="two-pointers")?.standing).toBe("steady");
+  // A concept nobody has been tested on is absent from the learner's list, but
+  // still reachable in the vocabulary the agent chooses tags from.
+  expect(concepts.has("cycle-detection")).toBe(false);
+  expect(store.conceptGraph("linked list cycles").map((concept)=>concept.slug)).toContain("cycle-detection");
+}finally{store.close();}});
+
+it("counts a challenge once for its area however many of that area's concepts it carries",()=>{const store=new LocalStore(":memory:");try{
+  const {sessionId}=store.createSession("Practise windows");
+  store.setTrainingTarget(sessionId,{ability:"Windows",specificGap:"Shrinking until valid",desiredEvidence:"Shrinks repeatedly",avoidTesting:[]});
+  const question=store.createQuestion(sessionId,design("Shrink until valid"),{valid:true},{concepts:[{slug:"window-invariant-restoration",role:"primary"},{slug:"window-shrink-condition",role:"supporting"},{slug:"variable-window",role:"supporting"}]});
+  store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+  store.completeAttempt(question.attemptId,"passed");
+  const area=store.listConcepts().find((concept)=>concept.slug==="sliding-window");
+  expect(area).toMatchObject({challengeCount:1,passedCount:1});
+  // Tagged primary on a sub-concept, so the area inherits the strongest role
+  // rather than filing its own challenge as merely supporting.
+  expect(store.conceptChallenges("sliding-window")[0]?.role).toBe("primary");
+}finally{store.close();}});
+
+it("names a concept the taxonomy never anticipated instead of refusing the tag",()=>{const store=new LocalStore(":memory:");try{
+  const {sessionId}=store.createSession("Practise WebGPU compute shaders");
+  store.setTrainingTarget(sessionId,{ability:"Compute shaders",specificGap:"Workgroup sizing",desiredEvidence:"Sizes a workgroup",avoidTesting:[]});
+  store.createQuestion(sessionId,design("Size a workgroup"),{valid:true},{concepts:[{slug:"Workgroup Sizing",title:"Workgroup sizing",kind:"engineering",parentSlug:"gpu-compute",role:"primary"}]});
+  const invented=store.listConcepts().find((concept)=>concept.slug==="workgroup-sizing");
+  // Normalized on the way in, and filed under an area created for it, so the
+  // next turn finds one concept rather than three spellings of it.
+  expect(invented).toMatchObject({title:"Workgroup sizing",parentSlug:"gpu-compute",challengeCount:1});
+  expect(store.listConcepts().find((concept)=>concept.slug==="gpu-compute")?.challengeCount).toBe(1);
+  // Invented vocabulary names what this learner was working on, so it does not
+  // survive to the next account. The shipped taxonomy does.
+  store.clearAccountData();
+  expect(store.conceptGraph("workgroup sizing").map((concept)=>concept.slug)).not.toContain("workgroup-sizing");
+  expect(store.conceptGraph("two pointers").map((concept)=>concept.slug)).toContain("two-pointers");
+}finally{store.close();}});
+
+it("earns an ability from evidence and keeps the date it was earned",()=>{const store=new LocalStore(":memory:");try{
+  const history=taggedHistory(store);
+  const forming=store.upsertAbility({title:"Two-pointer passes",markdown:"# Two-pointer passes\n\nIntroduced as a hypothesis from the stated goal.",evidenceEventIds:[]});
+  // Introduced is not earned. Nothing has been observed yet, so it says so.
+  expect(forming).toMatchObject({status:"uncertain",earnedAt:null});
+  const earned=store.upsertAbility({title:"Two-pointer passes",markdown:"# Two-pointer passes\n\nHolds two indices under a rule.",summary:"You can hold two indices under a rule instead of scanning twice.",evidenceEventIds:[history.evidence.id],concepts:[{slug:"two-pointers"},{slug:"index-arithmetic"}],practice:["I want to try two pointers on a linked list instead of an array."]});
+  expect(earned).toMatchObject({status:"developing",summary:"You can hold two indices under a rule instead of scanning twice."});
+  expect(earned.earnedAt).not.toBeNull();
+  expect(earned.concepts.map((concept)=>concept.slug).sort()).toEqual(["index-arithmetic","two-pointers"]);
+  // Later versions revise the document; the moment it was earned is not revised.
+  const revised=store.upsertAbility({title:"Two-pointer passes",markdown:"# Two-pointer passes\n\nRevised after another attempt.",evidenceEventIds:[]});
+  expect(revised.earnedAt).toBe(earned.earnedAt);
+  expect(revised.version).toBe(3);
+  // The ability reaches challenge history through the target it was set from.
+  const detail=store.readAbilityDetail(history.abilityId);
+  expect(detail?.evidence.map((item)=>item.outcome).sort()).toEqual(["failed","passed"]);
+  // And the concepts it claims are what pull it into the concept sheet.
+  expect(store.conceptDetail("two-pointers")?.abilities.map((ability)=>ability.title)).toEqual(["Two-pointer passes"]);
+}finally{store.close();}});
+
+it("carries a challenge's concepts on its history row, primary first",()=>{const store=new LocalStore(":memory:");try{
+  taggedHistory(store);
+  const row=store.listChallenges().find((challenge)=>challenge.title==="Meet in the middle")!;
+  expect(row.concepts.map((concept)=>concept.slug)).toEqual(["two-pointers","index-arithmetic"]);
+  expect(row.concepts[0]).toMatchObject({role:"primary",parentTitle:"Arrays & sequences"});
+  // Tagged, therefore searchable: the words never appear in the title.
+  expect(store.searchChallenges("two pointers",5).map((challenge)=>challenge.title)).toContain("Meet in the middle");
+}finally{store.close();}});

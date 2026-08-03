@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { declaredCases } from "@/lib/testCases";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { ProblemStatement } from "./ProblemStatement";
+import { ConceptChip } from "../concepts/ConceptChip";
 
 /**
  * The challenge on its own terms: statement, the cases it will be graded
@@ -37,6 +38,15 @@ export function ProblemView({
             <p className="truncate text-content font-medium">{question.abilityTitle}</p>
           </div>
         </div>
+
+        {/* What it is training, while it is still being worked on. No hover card
+            and no link: mid-challenge is the wrong moment to send someone off to
+            read their own history, and naming the concept is the whole value. */}
+        {question.concepts.length > 0 && (
+          <div className="mb-4 -mt-1.5 flex flex-wrap gap-1">
+            {question.concepts.map((concept) => <ConceptChip key={concept.slug} showArea tag={concept} />)}
+          </div>
+        )}
 
         <ProblemStatement source={question.statement} />
 

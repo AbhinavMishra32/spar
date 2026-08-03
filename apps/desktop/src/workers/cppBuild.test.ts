@@ -1,0 +1,94 @@
+import { describe, expect, it } from "vitest";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import { planCppBuild } from "./cppBuild.js";
+
+/** The layout a model actually writes: header beside the implementation in src/, tests under tests/. */
+const layout = {
+  "src/window.h": "#pragma once\n#include <vector>\nint longest_run(const std::vector<int>& values);\n",
+  "src/window.cpp": "#include \"window.h\"\nint longest_run(const std::vector<int>& values) {\n  int best = 0, run = 0;\n  for (size_t i = 0; i < values.size(); ++i) { run = (i > 0 && values[i] == values[i-1]) ? run + 1 : 1; if (run > best) best = run; }\n  return best;\n}\n",
+  "tests/visible.test.cpp": "#include \"window.h\"\n#include <cassert>\nint main() { assert(longest_run({1,1,2}) == 2); return 0; }\n",
+  "tests/hidden.test.cpp": "#include \"window.h\"\n#include <cassert>\nint main() { assert(longest_run({4,4,4,1}) == 3); return 0; }\n",
+};
+
+async function materialize(files: Record<string, string>) {
+  const root = await mkdtemp(path.join(tmpdir(), "spar-cpp-"));
+  for (const [file, content] of Object.entries(files)) {
+    const target = path.join(root, file);
+    await mkdir(path.dirname(target), { recursive: true });
+    await writeFile(target, content);
+  }
+  return root;
+}
+
+/** Executes the plan the way the runner does: sequential, stopping at the first non-zero stage. */
+async function runPlan(root: string, files: Record<string, string>, command: "test" | "run" = "test") {
+  const plan = planCppBuild({ files: Object.keys(files), outputDir: path.join(root, ".spar"), command });
+  if ("error" in plan) return { exitCode: 1, output: plan.error };
+  await mkdir(path.join(root, ".spar"), { recursive: true });
+  let output = "";
+  for (const stage of plan.stages) {
+    try {
+      const result = await promisify(execFile)(stage.bin, stage.args, { cwd: root, timeout: 20_000 });
+      output += result.stdout + result.stderr;
+    } catch (error) {
+      const value = error as { stdout?: string; stderr?: string; code?: number };
+      return { exitCode: Number(value.code ?? 1), output: output + (value.stdout ?? "") + (value.stderr ?? "") };
+    }
+  }
+  return { exitCode: 0, output };
+}
+
+describe("C++ build planning", () => {
+  it("gives each test file its own binary so visible and hidden tests never collide", () => {
+    const plan = planCppBuild({ files: Object.keys(layout), outputDir: "/out", command: "test" });
+    if ("error" in plan) throw new Error(plan.error);
+    expect(plan.binaries).toHaveLength(2);
+    // Every test links the implementation, and no binary links two mains.
+    for (const stage of plan.stages.filter((item) => item.bin === "clang++")) {
+      expect(stage.args.filter((argument) => /\.test\.cpp$/.test(argument))).toHaveLength(1);
+      expect(stage.args).toContain("src/window.cpp");
+    }
+  });
+
+  it("puts the implementation's header directory on the include path", () => {
+    const plan = planCppBuild({ files: Object.keys(layout), outputDir: "/out", command: "test" });
+    if ("error" in plan) throw new Error(plan.error);
+    expect(plan.stages[0]?.args).toContain("-Isrc");
+  });
+
+  it("explains an unbuildable layout instead of failing silently", () => {
+    const plan = planCppBuild({ files: ["src/window.cpp"], outputDir: "/out", command: "test" });
+    expect("error" in plan && plan.error).toContain("No C++ test sources found");
+  });
+
+  it("builds and passes the ordinary header-beside-implementation layout", async () => {
+    const root = await materialize(layout);
+    try {
+      expect(await runPlan(root, layout)).toMatchObject({ exitCode: 0 });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("fails only the hidden test when the implementation carries the targeted misconception", async () => {
+    // Off-by-one: reports the run length as the number of repeats, so a run of
+    // two still looks right and only a longer run disagrees.
+    const incorrect = { ...layout, "src/window.cpp": "#include \"window.h\"\nint longest_run(const std::vector<int>& values) {\n  int best = 0, run = 0;\n  for (size_t i = 0; i < values.size(); ++i) { run = (i > 0 && values[i] == values[i-1]) ? run + 1 : 1; if (run > best) best = run; }\n  return best > 2 ? 2 : best;\n}\n" };
+    const visibleOnly = { ...incorrect, "tests/hidden.test.cpp": undefined } as Record<string, string | undefined>;
+    const visibleFiles = Object.fromEntries(Object.entries(visibleOnly).filter((entry): entry is [string, string] => entry[1] !== undefined));
+
+    const visibleRoot = await materialize(visibleFiles);
+    const hiddenRoot = await materialize(incorrect);
+    try {
+      expect(await runPlan(visibleRoot, visibleFiles)).toMatchObject({ exitCode: 0 });
+      expect((await runPlan(hiddenRoot, incorrect)).exitCode).not.toBe(0);
+    } finally {
+      await rm(visibleRoot, { recursive: true, force: true });
+      await rm(hiddenRoot, { recursive: true, force: true });
+    }
+  }, 60_000);
+});

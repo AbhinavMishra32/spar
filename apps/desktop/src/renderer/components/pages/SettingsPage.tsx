@@ -22,6 +22,7 @@ import { refreshProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
 import { SparWordmark } from "../common/SparWordmark";
+import { AboutSpar } from "../settings/AboutSpar";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 
 type Provider = ProviderInventory["providers"][number];
@@ -428,6 +429,8 @@ export function SettingsPage({
             <Button onClick={() => setAccountAction("delete")} size="sm" variant="destructive"><Trash2 />Delete account</Button>
           </Row>
         </Group>
+
+        <AboutSpar />
       </div>
 
       <ProviderConnectDialog api={api} onClose={() => setSelected(null)} onConnected={refresh} provider={selected} />

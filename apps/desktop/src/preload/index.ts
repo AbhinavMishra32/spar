@@ -24,6 +24,15 @@ const api: SparApi = {
   setSessionArchived: (input) => ipcRenderer.invoke(ipc.sessionsArchive, input),
   setSessionStatus: (input) => ipcRenderer.invoke(ipc.sessionsStatus, input),
   deleteSession: (sessionId) => ipcRenderer.invoke(ipc.sessionsDelete, sessionId),
+  listChallengePreviews: () => ipcRenderer.invoke(ipc.challengePreviews),
+  readChallenge: (challengeId) => ipcRenderer.invoke(ipc.challengeRead, challengeId),
+  writeChallengeFile: (input) => ipcRenderer.invoke(ipc.challengeWrite, input),
+  runChallenge: (input) => ipcRenderer.invoke(ipc.challengeRun, input),
+  checkChallenge: (input) => ipcRenderer.invoke(ipc.challengeCheck, input),
+  resetChallenge: (input) => ipcRenderer.invoke(ipc.challengeReset, input),
+  readConcept: (slug) => ipcRenderer.invoke(ipc.conceptRead, slug),
+  readAbility: (abilityId) => ipcRenderer.invoke(ipc.abilityRead, abilityId),
+  startPractice: (input) => ipcRenderer.invoke(ipc.practiceStart, input),
   passwordAuth: (mode, email, password) => ipcRenderer.invoke(ipc.authPassword, { mode, email, password }),
   signOut: () => ipcRenderer.invoke(ipc.authSignOut),
   deleteAccount: () => ipcRenderer.invoke(ipc.authDeleteAccount),
@@ -48,6 +57,14 @@ const api: SparApi = {
     platform: process.platform,
     surface: launchFlag("spar-surface", "none") as NativeSurface,
     controls: launchFlag("spar-controls", process.platform === "darwin" ? "left" : "right") as WindowControls,
+  },
+  build: {
+    version: launchFlag("spar-version", "0.0.0"),
+    // Empty means the main process could not establish one, which the About
+    // block has to distinguish from a commit it simply has not read yet.
+    commit: launchFlag("spar-commit", "") || null,
+    branch: launchFlag("spar-branch", "") || null,
+    packaged: launchFlag("spar-packaged", "0") === "1",
   },
   onNativeSurface: (listener) => subscribe("window:surface", listener),
   onSyncState: (listener) => subscribe("sync:state", listener)

@@ -1,5 +1,5 @@
 export type AgentTurnKind = "cold-start" | "session-start" | "attempt-complete" | "learner-message" | "challenge-revision";
-export type ToolStage = { activeTools: string[]; toolChoice: "required" | "auto" | "none" };
+export type ToolStage = { activeTools: string[]; toolChoice: "required" | "auto" | "none"; exhausted?: { attempts: number; failure: string } };
 
 /**
  * A compiler attempt is a phase-level operation, not a free-form model tool.
@@ -18,9 +18,12 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   const completed = (name: string) => (outcomes.get(name)?.length ?? 0) > 0;
   const questionAttempts = [...(outcomes.get("create_question") ?? []),...(outcomes.get("replace_current_question") ?? [])];
   const playableQuestion = questionAttempts.some((value) => value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "playable");
+  // Exhausting the budget is a fact for the controller to act on, not a reason
+  // to end the turn. Throwing here left the learner with a compiler error and
+  // no challenge; the caller now falls back to a host-authored design so the
+  // session always has something to attempt.
   if (questionAttempts.length >= challengeCompilationLimit && !playableQuestion) {
-    const failure = latestCompilationFailure(questionAttempts);
-    throw new Error(`Challenge generation stopped after ${questionAttempts.length} rejected deterministic compilation attempts.${failure ? ` Latest failure: ${failure}` : ""}`);
+    return { activeTools: [], toolChoice: "none", exhausted: { attempts: questionAttempts.length, failure: latestCompilationFailure(questionAttempts) } };
   }
 
   // Explicit difficulty/change requests are state transitions, not optional
@@ -37,7 +40,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   // chat end in prose while real requests can inspect or change host state.
   if (turnKind === "learner-message" && playableQuestion) return { activeTools: [], toolChoice: "none" };
   if (turnKind === "learner-message") return {
-    activeTools: ["read_session", ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability"],
+    activeTools: ["read_session", ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability"],
     toolChoice: "auto",
   };
   if (turnKind === "cold-start") {
@@ -52,10 +55,22 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     if (retrieval) return { activeTools: [retrieval], toolChoice: "required" };
     if (hasRetrievedAbility(outcomes) && !completed("read_ability") && !completed("set_session_objective")) return { activeTools: ["read_ability"], toolChoice: "required" };
     if (!completed("set_session_objective")) return { activeTools: ["set_session_objective"], toolChoice: "required" };
-    if (!completed("set_training_target")) return { activeTools: ["set_training_target"], toolChoice: "required" };
+    /* The vocabulary is read before the target is set, not after. The target's
+       gap and the challenge's primary concept have to name the same thing, and a
+       model that has not seen the existing slugs invents a near-duplicate for a
+       concept the learner already has evidence under — which splits that
+       evidence in two and hides both halves. Gated on the target still being
+       open so a rejected candidate retries the compiler, not the vocabulary. */
+    if (!completed("set_training_target")) {
+      if (!completed("read_concept_graph")) return { activeTools: ["read_concept_graph"], toolChoice: "required" };
+      return { activeTools: ["set_training_target"], toolChoice: "required" };
+    }
     return { activeTools: ["create_question"], toolChoice: "required" };
   }
-  for (const stage of [["inspect_current_attempt", "evaluate_attempt"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["set_training_target"]]) {
+  // `search_concept_evidence` sits between the wider search and the next target:
+  // it is the read that says which sub-concept of the area is actually failing,
+  // and after the target is chosen it can no longer change the aim.
+  for (const stage of [["inspect_current_attempt", "evaluate_attempt"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["search_concept_evidence"], ["set_training_target"]]) {
     const next = stage.find((name) => !completed(name));
     if (next) return { activeTools: [next], toolChoice: "required" };
   }

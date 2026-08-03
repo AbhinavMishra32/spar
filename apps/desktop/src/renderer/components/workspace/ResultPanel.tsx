@@ -120,14 +120,19 @@ export function ResultPanel({
   onClearTerminal,
   onCollapse,
 }: {
-  question: ActiveQuestion;
+  /* Only the visible test files are read here, and a challenge re-opened from
+     history has those without having a live attempt behind it. Narrowed to what
+     is used so the practice page can mount this panel without inventing an
+     attempt id it has no business holding. */
+  question: Pick<ActiveQuestion, "visibleTestFiles">;
   tab: ResultTab;
   onTab(tab: ResultTab): void;
   testFiles: Record<string, string>;
   terminal: string;
   running: boolean;
   outcome: RunOutcome;
-  events: SessionDetail["events"];
+  /** Omitted where there is no attempt to show — the tab goes with it. */
+  events?: SessionDetail["events"];
   onClearTerminal(): void;
   onCollapse(): void;
 }) {
@@ -182,12 +187,14 @@ export function ResultPanel({
           label="Test Result"
           onClick={() => onTab("result")}
         />
-        <Tab
-          active={tab === "attempts"}
-          badge={events.length > 0 ? <Count>{events.length}</Count> : undefined}
-          label="Attempt"
-          onClick={() => onTab("attempts")}
-        />
+        {events && (
+          <Tab
+            active={tab === "attempts"}
+            badge={events.length > 0 ? <Count>{events.length}</Count> : undefined}
+            label="Attempt"
+            onClick={() => onTab("attempts")}
+          />
+        )}
         <div className="ml-auto flex items-center gap-0.5">
           {tab === "result" && terminal && (
             <button
@@ -334,7 +341,7 @@ export function ResultPanel({
         </div>
       )}
 
-      {tab === "attempts" && (
+      {tab === "attempts" && events && (
         <div className="min-h-0 flex-1">
           <AttemptsPanel events={events} />
         </div>

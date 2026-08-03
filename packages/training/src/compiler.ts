@@ -6,7 +6,17 @@ export type ValidationRunner = (files: Record<string,string>, command: string, l
 export type ValidationReport = { id: string; valid: boolean; contentHash: string; checks: Array<{ name: string; passed: boolean; detail: string }>; validatedAt: string };
 
 export async function compileQuestion(untrustedDesign: unknown, run: ValidationRunner): Promise<{ design: QuestionDesign; report: ValidationReport }> {
-  let design = normalizeFileDescriptors(questionDesignSchema.parse(untrustedDesign));
+  let design = normalizeDesign(normalizeFileDescriptors(questionDesignSchema.parse(untrustedDesign)));
+
+  // Shape is checked before anything is executed. A candidate whose tests can
+  // never reach its implementation fails four sandbox runs and reports only
+  // that the command exited non-zero; naming the structural fault directly is
+  // both faster and the difference between a repairable rejection and a guess.
+  const structural = preflight(design);
+  if (structural.some((check) => !check.passed)) {
+    return { design, report: { id: randomUUID(), valid: false, contentHash: createHash("sha256").update(stableJson(design)).digest("hex"), checks: structural, validatedAt: new Date().toISOString() } };
+  }
+
   let differentialDiagnostics: string[] = [];
   if (design.language === "javascript") {
     design = await materializeJavascriptOracles(design, run);
@@ -14,26 +24,12 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
     design = differential.design;
     differentialDiagnostics = differential.diagnostics;
   }
-  const checks: ValidationReport["checks"] = [];
+  const checks: ValidationReport["checks"] = [...structural];
   const reference = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
   checks.push({ name: "reference solution", passed: reference.exitCode === 0, detail: summarize(reference) });
+  // Whether each misconception replaces the implementation was already settled
+  // structurally, so this loop only measures behaviour.
   for (const [index, incorrect] of design.knownIncorrectFiles.entries()) {
-    const incorrectPaths = Object.keys(incorrect);
-    const referencePaths = Object.keys(design.referenceFiles);
-    const replacedPaths = incorrectPaths.filter((file) => Object.hasOwn(design.referenceFiles, file));
-    const replacesImplementation = replacedPaths.length > 0;
-    checks.push({
-      name: `known incorrect ${index + 1} replaces reference implementation`,
-      passed: replacesImplementation,
-      detail: replacesImplementation
-        ? `Replaces ${replacedPaths.join(", ")}`
-        : `Known-incorrect paths (${incorrectPaths.join(", ") || "none"}) do not replace any reference path (${referencePaths.join(", ") || "none"}). Use the exact same implementation path.`,
-    });
-    if (!replacesImplementation) {
-      checks.push({ name: `known incorrect ${index + 1} passes visible`, passed: false, detail: "Not executed because the misconception does not replace the implementation imported by the tests" });
-      checks.push({ name: `known incorrect ${index + 1} fails hidden`, passed: false, detail: "Not executed because the misconception does not replace the implementation imported by the tests" });
-      continue;
-    }
     const visibleResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
     checks.push({ name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : summarize(visibleResult) });
     const hiddenResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
@@ -48,13 +44,190 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
 }
 function summarize(run: ValidationRun) {
   if (run.exitCode === 0) return `Passed in ${run.durationMs}ms`;
-  const output = `${run.stdout}\n${run.stderr}`;
-  const subtest = output.match(/^# Subtest:\s*(.+)$/m)?.[1]?.trim();
-  const assertion = output.match(/^\s*(?:error|name):\s*(?:\|-\s*)?(.+)$/m)?.[1]?.trim();
-  const reason = subtest || assertion || "test command failed";
-  return `Exited ${run.exitCode} in ${run.durationMs}ms: ${reason.slice(0, 180)}`;
+  return `Exited ${run.exitCode} in ${run.durationMs}ms: ${diagnose(run)}`;
+}
+
+const DIAGNOSTIC_BUDGET = 700;
+
+/**
+ * The agent repairs a rejected candidate from this string and nothing else.
+ * Collapsing every failure to "test command failed" discarded the one thing
+ * that said what was wrong, so a bounded retry budget was spent re-making the
+ * same mistake. Quote the toolchain instead, in the order that identifies the
+ * fault: a compiler diagnostic means no test ever ran, so it outranks any
+ * assertion text further down the log.
+ */
+export function diagnose(run: ValidationRun): string {
+  const lines = `${run.stdout}\n${run.stderr}`
+    .replace(/\r/g, "")
+    // Sandbox roots are regenerated per validation; the path tells the agent
+    // nothing and the UUID in it is pure noise in a bounded feedback string.
+    .replace(/(^|[\s"'(])\/\S*?\/validation\/[0-9a-f-]{36}\//g, "$1")
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0);
+  if (!lines.length) return "the test command failed without output";
+
+  const compiler = lines.filter((line) => /\b(?:fatal error|error):/i.test(line) || /^\s*(?:Undefined symbols|ld:|clang|duplicate symbol)/.test(line));
+  if (compiler.length) {
+    const duplicateMain = compiler.some((line) => /duplicate symbol .*\bmain\b/.test(line));
+    const detail = clamp(compiler);
+    return duplicateMain
+      ? `${detail} — two test files each define main(). Give every test file its own file and let the host build them separately; never define main() in more than one file linked together.`
+      : detail;
+  }
+
+  // node:test reports the failing case as a subtest header plus an assertion
+  // body; both together are what identifies which expectation disagreed.
+  const failing = lines.filter((line) => /^#\s*Subtest:/.test(line) || /^\s*(?:error|expected|actual|operator|code):/.test(line));
+  if (failing.length) return clamp(failing);
+
+  const assertion = lines.filter((line) => /Assertion failed|AssertionError|Error:|Exception|Segmentation fault|abort|terminate called/i.test(line));
+  if (assertion.length) return clamp(assertion);
+
+  return clamp(lines.slice(0, 6));
+}
+
+function clamp(lines: string[]): string {
+  // "# Subtest:" is TAP framing around the failing case's name; the name is the
+  // information, so the marker is dropped once the line has been classified.
+  const joined = lines.map((line) => line.trim().replace(/^#\s*Subtest:\s*/, "")).join(" | ");
+  return joined.length > DIAGNOSTIC_BUDGET ? `${joined.slice(0, DIAGNOSTIC_BUDGET)}…` : joined;
 }
 function stableJson(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`; return JSON.stringify(value); }
+
+const LANGUAGE_RULES = {
+  javascript: { extensions: [".js", ".mjs", ".cjs"], test: /\.test\.js$/, runCommand: "node --test" },
+  typescript: { extensions: [".ts", ".tsx"], test: /\.test\.ts$/, runCommand: "node --test" },
+  cpp: { extensions: [".cpp", ".cc", ".cxx", ".h", ".hpp"], test: /\.cpp$/, runCommand: "clang++ && run tests" },
+} as const;
+
+/**
+ * Repairs the mechanical mistakes rather than spending a retry on them. A
+ * candidate rejected for a leading "./" teaches the agent nothing and costs the
+ * learner a compile cycle, so anything decidable here is simply fixed; only
+ * faults that require rewriting the design reach `preflight`.
+ */
+function normalizeDesign(design: QuestionDesign): QuestionDesign {
+  const cleanPath = (file: string) => file.replace(/^\.\/+/, "").replace(/^\/+/, "").replace(/\\/g, "/");
+  const cleanMap = (files: Record<string, string>) => Object.fromEntries(Object.entries(files).map(([file, content]) => [cleanPath(file), content]));
+  return {
+    ...design,
+    starterFiles: cleanMap(design.starterFiles),
+    referenceFiles: cleanMap(design.referenceFiles),
+    visibleTests: cleanMap(design.visibleTests),
+    hiddenTests: cleanMap(design.hiddenTests),
+    knownIncorrectFiles: design.knownIncorrectFiles.map(cleanMap),
+    // The host runner selects the toolchain from `language`; the declared
+    // command is descriptive only, so a wrong one is corrected, never rejected.
+    runCommand: LANGUAGE_RULES[design.language].runCommand,
+  };
+}
+
+/**
+ * Structural checks that need no execution. Each failure names the exact edit
+ * that fixes it, because this text is the whole of what the agent gets to
+ * repair from.
+ */
+function preflight(design: QuestionDesign): ValidationReport["checks"] {
+  const checks: ValidationReport["checks"] = [];
+  const rules = LANGUAGE_RULES[design.language];
+  const pass = (name: string, detail: string) => checks.push({ name, passed: true, detail });
+  const fail = (name: string, detail: string) => checks.push({ name, passed: false, detail });
+
+  const referencePaths = Object.keys(design.referenceFiles);
+  const starterPaths = Object.keys(design.starterFiles);
+  const visiblePaths = Object.keys(design.visibleTests);
+  const hiddenPaths = Object.keys(design.hiddenTests);
+
+  if (!referencePaths.length) fail("reference implementation present", "referenceFiles is empty. Provide the complete working implementation at the same path the starter file uses.");
+  else if (!visiblePaths.length) fail("visible tests present", "visibleTests is empty. Provide at least one learner-visible test file.");
+  else if (!hiddenPaths.length) fail("hidden tests present", "hiddenTests is empty. Provide at least one hidden test file that the targeted misconception fails.");
+  else pass("challenge file set", `${referencePaths.length} reference, ${visiblePaths.length} visible, ${hiddenPaths.length} hidden`);
+
+  // The tests import the implementation by path. If the reference does not
+  // land on a starter path, the learner edits a file no test ever loads.
+  const sharedPath = referencePaths.filter((file) => starterPaths.includes(file));
+  if (referencePaths.length && starterPaths.length && !sharedPath.length) {
+    fail("reference replaces starter implementation", `No reference path matches a starter path. Starter has (${starterPaths.join(", ")}) and reference has (${referencePaths.join(", ")}). Both maps must use the exact same implementation path so the reference replaces the file the learner edits.`);
+  } else if (sharedPath.length) pass("reference replaces starter implementation", `Shares ${sharedPath.join(", ")}`);
+
+  // Checked here rather than after four sandbox runs: a misconception that
+  // does not replace the implementation cannot be distinguished by any test.
+  for (const [index, incorrect] of design.knownIncorrectFiles.entries()) {
+    const replaced = Object.keys(incorrect).filter((file) => referencePaths.includes(file));
+    if (!replaced.length) fail(`known incorrect ${index + 1} replaces reference implementation`, `Known-incorrect paths (${Object.keys(incorrect).join(", ") || "none"}) do not replace any reference path (${referencePaths.join(", ") || "none"}). Use the exact same implementation path.`);
+    else pass(`known incorrect ${index + 1} replaces reference implementation`, `Replaces ${replaced.join(", ")}`);
+  }
+
+  const testPaths = [...visiblePaths, ...hiddenPaths];
+  const overlapping = testPaths.filter((file) => referencePaths.includes(file) || starterPaths.includes(file));
+  if (overlapping.length) fail("tests are separate files", `${overlapping.join(", ")} appears both as a test and as implementation. Tests must live in their own files so the implementation can be swapped underneath them.`);
+  else pass("tests are separate files", "Implementation and tests occupy distinct paths");
+
+  const wrongExtension = [...referencePaths, ...starterPaths, ...testPaths].filter((file) => !rules.extensions.some((extension) => file.endsWith(extension)));
+  if (wrongExtension.length) fail("file extensions match the language", `${wrongExtension.join(", ")} do not use a ${design.language} extension (${rules.extensions.join(", ")}).`);
+  else pass("file extensions match the language", `All paths use ${design.language} extensions`);
+
+  if (design.language === "cpp") checks.push(...preflightCpp(design, testPaths));
+  else checks.push(...preflightNode(design, testPaths, rules.test));
+
+  if (!design.expectedFailureSignatures.length) fail("expected failure signatures declared", "expectedFailureSignatures is empty. Name at least one observable way the targeted misconception fails.");
+  else pass("expected failure signatures declared", `${design.expectedFailureSignatures.length} declared`);
+
+  return checks;
+}
+
+/**
+ * C++ has no test runner, so each test file is its own program. The host builds
+ * and runs them one at a time against the shared implementation, which only
+ * works if exactly the test files carry `main`.
+ */
+function preflightCpp(design: QuestionDesign, testPaths: string[]): ValidationReport["checks"] {
+  const checks: ValidationReport["checks"] = [];
+  const definesMain = (source: string) => /\bint\s+main\s*\(/.test(source);
+  const allTests = { ...design.visibleTests, ...design.hiddenTests };
+
+  const missingMain = testPaths.filter((file) => !definesMain(allTests[file] ?? ""));
+  if (missingMain.length) {
+    checks.push({ name: "each C++ test defines main", passed: false, detail: `${missingMain.join(", ")} does not define int main(). There is no test framework: every test file must be a standalone program with its own int main() that returns 0 when all expectations hold and non-zero otherwise.` });
+  } else checks.push({ name: "each C++ test defines main", passed: true, detail: `${testPaths.length} standalone test programs` });
+
+  const implementationWithMain = Object.entries({ ...design.referenceFiles, ...design.starterFiles })
+    .filter(([file, source]) => file.endsWith(".cpp") && definesMain(source))
+    .map(([file]) => file);
+  if (implementationWithMain.length) {
+    checks.push({ name: "implementation defines no main", passed: false, detail: `${implementationWithMain.join(", ")} defines int main(). The implementation is linked into every test program, so a main() here collides with the test's own. Move it out and expose the behaviour as a function declared in a header.` });
+  } else checks.push({ name: "implementation defines no main", passed: true, detail: "Implementation is a library translation unit" });
+
+  // A test that includes a header nobody ships fails to compile, and the
+  // resulting diagnostic points at the include rather than at the omission.
+  const available = new Set([...Object.keys(design.starterFiles), ...Object.keys(design.referenceFiles), ...testPaths].map((file) => file.slice(file.lastIndexOf("/") + 1)));
+  const missingHeaders = [...new Set(Object.values(allTests).flatMap((source) => [...source.matchAll(/#include\s+"([^"]+)"/g)].map((match) => match[1] ?? "")))]
+    .filter((header) => header && !available.has(header.slice(header.lastIndexOf("/") + 1)));
+  if (missingHeaders.length) {
+    checks.push({ name: "included headers are provided", passed: false, detail: `Tests include ${missingHeaders.join(", ")}, which no starter, reference, or test file provides. Ship the header in starterFiles and referenceFiles, or include the implementation's actual header name.` });
+  } else checks.push({ name: "included headers are provided", passed: true, detail: "Every quoted include resolves to a shipped file" });
+
+  return checks;
+}
+
+/** Node's runner discovers `*.test.js`/`*.test.ts`, and a test that imports nothing cannot exercise the implementation. */
+function preflightNode(design: QuestionDesign, testPaths: string[], testPattern: RegExp): ValidationReport["checks"] {
+  const checks: ValidationReport["checks"] = [];
+  const misnamed = testPaths.filter((file) => !testPattern.test(file));
+  if (misnamed.length) {
+    checks.push({ name: "tests use the runner's naming", passed: false, detail: `${misnamed.join(", ")} will not be discovered. Node's test runner only collects files matching ${testPattern.source}; rename them.` });
+  } else checks.push({ name: "tests use the runner's naming", passed: true, detail: `${testPaths.length} discoverable test files` });
+
+  // Deliberately not checked here: whether each test imports the implementation
+  // relatively. A test that inlines the logic is already caught behaviourally —
+  // the known-incorrect implementation would pass the hidden tests — and a
+  // static check for it rejects legitimate designs that reach the
+  // implementation indirectly. A false rejection costs a whole retry, so the
+  // behavioural signal is the one worth trusting.
+  return checks;
+}
 
 function normalizeFileDescriptors(design: QuestionDesign): QuestionDesign {
   return {

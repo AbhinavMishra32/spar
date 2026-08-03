@@ -112,6 +112,7 @@ const TOOL_VERBS: Record<string, string> = {
   read_attempt: "Read attempt trace",
   read_session: "Read session",
   read_concept_graph: "Read concept graph",
+  search_concept_evidence: "Checked your concept evidence",
   ask_user_question: "Asked you a question",
   set_session_objective: "Set the session objective",
   set_training_target: "Set the training target",
@@ -156,6 +157,7 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   read_session: ["Read session context", "Read session context"],
   read_challenge: ["Read challenge context", "Read challenge context"],
   read_concept_graph: ["Read concept context", "Read concept context"],
+  search_concept_evidence: ["Check concept evidence", "Checked concept evidence"],
   inspect_current_attempt: ["Inspect current attempt", "Inspected current attempt"],
   evaluate_attempt: ["Evaluate attempt", "Evaluated attempt"],
   set_session_objective: ["Update session objective", "Updated session objective"],
@@ -165,13 +167,17 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   commit_session_decision: ["Choose next step", "Chose next step"],
   create_question: ["Build challenge", "Built challenge"],
   replace_current_question: ["Build replacement challenge", "Built replacement challenge"],
+  create_fallback_question: ["Set a standard challenge", "Set a standard challenge"],
   ask_user_question: ["Prepare a question", "Prepared a question"],
 };
 
 /** Transcript-safe labels never expose tool arguments, database IDs, or queries. */
 export function safeToolLabel(tool: string, running: boolean, failed = false): string {
-  if (failed && tool === "replace_current_question") return "Replacement candidate failed validation";
-  if (failed && tool === "create_question") return "Challenge candidate failed validation";
+  // A rejected candidate is the compiler doing its job and the agent iterating,
+  // so it is named as a rejection rather than as a failure the learner should
+  // read as breakage.
+  if (failed && tool === "replace_current_question") return "Replacement candidate rejected";
+  if (failed && (tool === "create_question" || tool === "create_fallback_question")) return "Challenge candidate rejected";
   if (failed) return "Could not complete tool step";
   const labels = SAFE_TOOL_LABELS[tool];
   if (labels) return labels[running ? 0 : 1];
@@ -213,6 +219,97 @@ function joinLabels(labels: string[]): string {
   if (labels.length <= 1) return labels[0] ?? "earlier work";
   if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
   return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
+}
+
+const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "create_fallback_question"];
+
+/**
+ * A challenge that actually reached durable storage. `phase === "done"` is the
+ * distinction that matters: the same tool rejected by the compiler settles as
+ * "error" and stays an ordinary step, because nothing was published.
+ */
+export function isChallengePublished(part: RunPart): boolean {
+  return part.kind === "tool" && part.phase === "done" && CHALLENGE_TOOLS.includes(part.tool);
+}
+
+/** What a card away from the transcript says about a turn that is under way. */
+export type RunActivity = {
+  state: "working" | "failed";
+  /** The one line: what the agent is doing at this instant. */
+  headline: string;
+  /**
+   * Identity of that line, which is not the same thing as its text. A step
+   * change should be animated; a reply growing by a token should not, and
+   * keying an animation on the words themselves would restart it on every
+   * delta of a streaming sentence.
+   */
+  headlineKey: string;
+  /** The step it finished immediately before, so the line above reads as motion. */
+  previous?: string;
+  /** Settled tool calls so far — a count of work done, not of tokens spent. */
+  steps: number;
+  startedAt: number;
+  /** A compiled challenge has landed in this run; the session has something new. */
+  published: boolean;
+};
+
+/**
+ * Reduces a run to the few facts a session card can hold.
+ *
+ * A finished run is deliberately `null` rather than a "done" activity: the card
+ * behind it is drawn from the session summary, which the main process has
+ * already refreshed by the time the run settles, and a card that kept reporting
+ * the last turn would be showing older news than the row it sits in.
+ *
+ * The headline prefers the open tool call over the streaming reply. Both are
+ * true at once near the end of a turn, and "Building challenge" says more about
+ * where the session is than the first clause of a sentence about it does.
+ */
+export function runActivity(run: AgentRun | null | undefined): RunActivity | null {
+  if (!run || run.status === "done") return null;
+  const tools = run.parts.filter((part): part is Extract<RunPart, { kind: "tool" }> => part.kind === "tool");
+  const settled = tools.filter((part) => part.phase !== "running");
+  const base = {
+    steps: settled.length,
+    startedAt: run.startedAt,
+    published: run.parts.some(isChallengePublished),
+    ...(settled.at(-1) ? { previous: safeToolLabel(settled.at(-1)!.tool, false, settled.at(-1)!.phase === "error") } : {}),
+  };
+
+  if (run.status === "error") {
+    const failure = [...run.parts].reverse().find((part) => part.kind === "error");
+    return { ...base, state: "failed", headlineKey: "failed", headline: firstSentence(failure?.kind === "error" ? failure.body : "") || "That turn did not finish" };
+  }
+
+  const running = tools.find((part) => part.phase === "running");
+  if (running) return { ...base, state: "working", headlineKey: `tool:${running.id}`, headline: safeToolLabel(running.tool, true) };
+
+  const last = run.parts.at(-1);
+  if (last?.kind === "text") {
+    const tail = tailLine(last.body);
+    if (tail) return { ...base, state: "working", headlineKey: `text:${last.id}`, headline: tail };
+  }
+  return { ...base, state: "working", headlineKey: `idle:${base.steps}`, headline: base.steps ? "Working through what it found" : "Reading your evidence" };
+}
+
+function firstSentence(body: string): string {
+  const [head] = body.split(/(?:\.\s+|\n)/).filter((line) => line.trim());
+  return (head ?? "").trim().replace(/\.$/, "");
+}
+
+/**
+ * The sentence the reply is currently in. A card is one line tall, so it follows
+ * the front of the stream rather than the start of the message — and a clause
+ * still being typed is left as it is instead of being padded with an ellipsis,
+ * which at this size reads as a truncation the learner could open to see.
+ */
+function tailLine(body: string): string {
+  const lines = body.split("\n").map((line) => line.trim()).filter(Boolean);
+  const last = lines.at(-1);
+  if (!last) return "";
+  const sentences = last.split(/(?<=[.!?])\s+/);
+  const tail = (sentences.at(-1) ?? last).replace(/^[#>*\-\s]+/, "");
+  return tail.length > 120 ? `${tail.slice(0, 120)}…` : tail;
 }
 
 export function diffTotals(files: AgentActivityFile[]): { added: number; removed: number } {

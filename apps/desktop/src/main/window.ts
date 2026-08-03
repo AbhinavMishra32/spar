@@ -1,6 +1,7 @@
 import { BrowserWindow, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildInfo } from "./build.js";
 import { applyNativeSurface, planSurface, syncWindowControls } from "./surface.js";
 
 export function createMainWindow() {
@@ -8,6 +9,7 @@ export function createMainWindow() {
   // Which translucent material the OS can give us, and the window options and
   // window-button placement that follow from it. See main/surface.ts.
   const plan = planSurface();
+  const build = buildInfo();
 
   const window = new BrowserWindow({
     width: 1480,
@@ -26,8 +28,17 @@ export function createMainWindow() {
       nodeIntegration: false,
       webSecurity: true,
       // Read by the preload before first paint, so the renderer can reserve the
-      // right edge for the window buttons without an IPC round trip.
-      additionalArguments: [`--spar-controls=${plan.controls}`, `--spar-surface=${plan.surface}`],
+      // right edge for the window buttons without an IPC round trip. Build
+      // identity rides along the same way: it cannot change while the window
+      // is open, so a channel for it would only be a slower constant.
+      additionalArguments: [
+        `--spar-controls=${plan.controls}`,
+        `--spar-surface=${plan.surface}`,
+        `--spar-version=${build.version}`,
+        `--spar-commit=${build.commit ?? ""}`,
+        `--spar-branch=${build.branch ?? ""}`,
+        `--spar-packaged=${build.packaged ? "1" : "0"}`,
+      ],
     },
   });
 

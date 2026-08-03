@@ -48,6 +48,12 @@ export function AgentPanel({
   const direction = ORDER.indexOf(view) >= ORDER.indexOf(previous.current) ? 1 : -1;
   previous.current = view;
 
+  // How far off resting size each view sits at the ends of the swap. Signed by
+  // direction so going forward brings the arriving view down onto the surface
+  // and pushes the leaving one behind it, and going back runs that inverted —
+  // the pair reads as one stack, not two unrelated fades.
+  const depth = direction * 0.045;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Identity stays put while the body swaps: which problem you are on is
@@ -83,17 +89,37 @@ export function AgentPanel({
 
       {/* Both views are absolutely stacked so they cross-dissolve rather than
           waiting for one another — a tab switch that takes two animations to
-          finish reads as lag. Blur carries the swap; opacity alone looks like a
-          dropped frame at this duration. */}
+          finish reads as lag. The arriving view resolves out of a blur at
+          slightly-too-large and settles onto its resting size, which is what
+          makes it feel like it came forward instead of being swapped in. Scale
+          carries the swap now, so the lateral nudge drops to a hint — just
+          enough to say which way the switch went. Size and position ride a
+          flat spring so they arrive without a bounce, while blur and opacity
+          stay on tweens: the leaving view clears out early and fast so the two
+          never sit half-visible on top of each other. */}
       <div className="relative min-h-0 flex-1">
         <AnimatePresence initial={false}>
           <motion.div
             key={view}
-            animate={{ opacity: 1, filter: "blur(0px)", x: 0 }}
-            className="absolute inset-0 flex flex-col"
-            exit={{ opacity: 0, filter: "blur(10px)", x: direction * -10 }}
-            initial={{ opacity: 0, filter: "blur(10px)", x: direction * 10 }}
-            transition={{ duration: 0.26, ease: [0.22, 0.61, 0.36, 1] }}
+            animate={{ opacity: 1, filter: "blur(0px)", scale: 1, x: 0 }}
+            className="absolute inset-0 flex flex-col will-change-[transform,filter,opacity]"
+            exit={{
+              opacity: 0,
+              filter: "blur(12px)",
+              scale: 1 - depth,
+              x: direction * -4,
+              transition: {
+                default: { duration: 0.28, ease: [0.32, 0, 0.67, 0] },
+                opacity: { duration: 0.16, ease: [0.4, 0, 1, 1] },
+                filter: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+              },
+            }}
+            initial={{ opacity: 0, filter: "blur(12px)", scale: 1 + depth, x: direction * 4 }}
+            transition={{
+              default: { type: "spring", visualDuration: 0.38, bounce: 0 },
+              opacity: { duration: 0.24, ease: [0.22, 0.61, 0.36, 1] },
+              filter: { duration: 0.34, ease: [0.22, 0.61, 0.36, 1] },
+            }}
           >
             {view === "problem" ? (
               <ProblemView question={question} testFiles={testFiles} />

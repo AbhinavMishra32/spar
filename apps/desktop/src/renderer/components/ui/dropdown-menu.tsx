@@ -20,7 +20,7 @@ function DropdownMenuTrigger({
 
 function DropdownMenuContent({
   className,
-  sideOffset = 6,
+  sideOffset = 4,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
@@ -29,9 +29,11 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          // The macOS material lives in .floating-surface so menus, popovers and
-          // the file tree all read as the same pane of glass.
-          "menu-surface app-scroll z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[12rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-y-auto p-1.5",
+          // The macOS material lives in .menu-surface so menus, popovers and
+          // the file tree all read as the same pane of glass. The 6px rim is
+          // what --radius-menu is derived from — keep the two in step, or the
+          // row highlight stops sitting concentric inside the shell.
+          "menu-surface app-scroll z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[11rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-y-auto p-1.5",
           "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
@@ -57,8 +59,13 @@ function DropdownMenuLabel({
   )
 }
 
+/* A 26px row at the app's 13px text, near the AppKit menu proportion. The web
+   default — 32px and a 16px icon — is a touch target, and a desktop menu that
+   opens under the pointer never needed one. `leading-none` is load-bearing:
+   text-content carries a 22px line box that would otherwise set the height on
+   its own and undo the min-height. */
 const itemClass =
-  "relative flex min-h-8 cursor-default select-none items-center gap-2.5 rounded-[var(--radius-md)] px-2.5 py-1.5 text-content outline-none transition-colors data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+  "relative flex min-h-[1.625rem] cursor-default select-none items-center gap-2 rounded-[var(--radius-item)] px-2.5 py-1 text-content leading-none outline-none transition-colors duration-75 data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5"
 
 function DropdownMenuItem({
   className,
@@ -101,7 +108,7 @@ function DropdownMenuCheckItem({
       {...props}
     >
       {children}
-      {checked && <Check className="ml-auto opacity-70" />}
+      {checked && <Check className="ml-auto size-3.5 opacity-70" />}
     </DropdownMenuPrimitive.Item>
   )
 }
@@ -124,14 +131,14 @@ function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight className="ml-auto opacity-50" />
+      <ChevronRight className="ml-auto size-3.5 opacity-45" />
     </DropdownMenuPrimitive.SubTrigger>
   )
 }
 
 function DropdownMenuSubContent({
   className,
-  sideOffset = 4,
+  sideOffset = 2,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.SubContent>) {
   return (
@@ -140,7 +147,7 @@ function DropdownMenuSubContent({
         data-slot="dropdown-menu-sub-content"
         sideOffset={sideOffset}
         className={cn(
-          "menu-surface app-scroll z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[12rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-y-auto p-1.5",
+          "menu-surface app-scroll z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[11rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-y-auto p-1.5",
           "data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
           className
         )}
@@ -157,7 +164,7 @@ function DropdownMenuSeparator({
   return (
     <DropdownMenuPrimitive.Separator
       data-slot="dropdown-menu-separator"
-      className={cn("-mx-1.5 my-1.5 h-px bg-border", className)}
+      className={cn("-mx-1.5 my-1 h-px bg-border", className)}
       {...props}
     />
   )

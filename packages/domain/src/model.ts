@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { conceptTagSchema } from "./concepts.js";
 
 export const id = z.string().uuid();
 export const isoDate = z.string().datetime();
@@ -99,10 +100,29 @@ export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visi
   avoidTesting: z.array(z.string()),
   files: z.array(workspaceFileEntrySchema),
   visibleTestFiles: z.array(z.string()),
+  /** What this challenge is training, so the learner can see it while they work
+   *  rather than only afterwards in history. */
+  concepts: z.array(conceptTagSchema),
   attemptId: id,
   latestEventSequence: z.number().int().min(-1)
 });
 export type ActiveQuestion = z.infer<typeof activeQuestionSchema>;
+
+/** The few lines of the challenge's own starter file that a history card shows.
+ *  Enough to recognise the shape of the problem without opening it, and the
+ *  starter rather than the tests, because the starter is what you would write.
+ *
+ *  Fetched as its own map keyed by challenge id rather than carried on the
+ *  history row: the row is read on every bootstrap and a code excerpt per
+ *  challenge is a lot of payload for a list that may never be opened. */
+export const challengeCodePreviewSchema = z.object({
+  path: z.string().min(1),
+  language: z.string().min(1),
+  code: z.string(),
+  /** Lines the preview left behind, so a card can say the file keeps going. */
+  remainingLines: z.number().int().nonnegative(),
+});
+export type ChallengeCodePreview = z.infer<typeof challengeCodePreviewSchema>;
 
 export const challengeHistorySummarySchema = z.object({
   id,
@@ -120,21 +140,106 @@ export const challengeHistorySummarySchema = z.object({
   attemptCount: z.number().int().nonnegative(),
   testRunCount: z.number().int().nonnegative(),
   lastOutcome: z.enum(["passed", "failed", "abandoned", "replaced"]).nullable(),
+  /** What this challenge was about. Ordered primary first, so a row that only has
+   *  room for one chip shows the one the challenge was actually aimed at. */
+  concepts: z.array(conceptTagSchema),
   createdAt: isoDate,
   updatedAt: isoDate,
 });
 export type ChallengeHistorySummary = z.infer<typeof challengeHistorySummarySchema>;
 
+/** One file of a challenge as the practice page mounts it. `content` is whatever
+ *  is on the practice sandbox's disk: the learner's own edit once they have made
+ *  one, and the generated file until then. */
+export const challengeFileSchema = z.object({
+  path: z.string().min(1),
+  language: z.string().min(1),
+  role: z.enum(["solution", "test"]),
+  readOnly: z.boolean(),
+  content: z.string(),
+});
+export type ChallengeFile = z.infer<typeof challengeFileSchema>;
+
+/** One thing that happened while this challenge was open, flattened across every
+ *  attempt at it so the detail page can draw a single timeline. */
+export const challengeTimelineEntrySchema = z.object({
+  id,
+  attemptOrdinal: z.number().int().positive(),
+  type: z.string().min(1),
+  source: z.string().min(1),
+  occurredAt: isoDate,
+  /** The one line worth reading out of the payload — an outcome, a path, a reason. */
+  detail: z.string(),
+});
+export type ChallengeTimelineEntry = z.infer<typeof challengeTimelineEntrySchema>;
+
+/** Everything the standalone challenge page needs: what the challenge is, the
+ *  session and target it came out of, its files, and what happened to it.
+ *
+ *  This is deliberately not `ActiveQuestion`. A challenge read from history has
+ *  no live attempt behind it — practising one records no evidence — so it must
+ *  not carry an `attemptId` that would let a caller write against it. */
+export const challengeDetailSchema = z.object({
+  summary: challengeHistorySummarySchema,
+  statement: z.string(),
+  kind: questionSchema.shape.kind,
+  sessionGoal: z.string(),
+  sessionStatus: sessionStatusSchema,
+  abilityTitle: z.string(),
+  specificGap: z.string(),
+  desiredEvidence: z.string(),
+  action: pedagogicalActionSchema.nullable(),
+  files: z.array(challengeFileSchema),
+  /** Cases the learner cannot read. Checking runs them; practising never does. */
+  hiddenTestCount: z.number().int().nonnegative(),
+  /** Whether the practice sandbox holds edits, so the page can offer a reset. */
+  practiceEdited: z.boolean(),
+  timeline: z.array(challengeTimelineEntrySchema),
+});
+export type ChallengeDetail = z.infer<typeof challengeDetailSchema>;
+
+export const abilityStatusSchema = z.enum(["uncertain", "developing", "independent", "stale"]);
+export type AbilityStatus = z.infer<typeof abilityStatusSchema>;
+
 export const abilityHistorySummarySchema = z.object({
   id,
   title: z.string().min(1),
   markdown: z.string(),
+  /** One line the learner reads first: what they can now do. The markdown is the
+   *  agent's working document; this is the claim it supports. */
+  summary: z.string(),
   version: z.number().int().positive(),
-  status: z.enum(["uncertain", "developing", "independent", "stale"]),
+  status: abilityStatusSchema,
   evidenceCount: z.number().int().nonnegative(),
+  /** The concepts this ability spans, which is how it reaches challenge history. */
+  concepts: z.array(conceptTagSchema),
+  /** Drills the agent wrote for going deeper on this specific ability. Each one
+   *  starts a session, so they are phrased as the learner's own goal. */
+  practice: z.array(z.string()),
+  /** When evidence first supported this ability, or null while it is still
+   *  forming. An ability with no evidence behind it is a hypothesis, and the UI
+   *  is required to say so rather than present it as earned. */
+  earnedAt: isoDate.nullable(),
   updatedAt: isoDate,
 });
 export type AbilityHistorySummary = z.infer<typeof abilityHistorySummarySchema>;
+
+/** Everything the ability's own page shows: the document, the concepts it spans,
+ *  and the graded challenges that are the reason it exists. */
+export const abilityDetailSchema = z.object({
+  ability: abilityHistorySummarySchema,
+  evidence: z.array(z.object({
+    challengeId: id,
+    sessionId: id,
+    sessionTitle: z.string(),
+    title: z.string(),
+    language: languageSchema,
+    difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]),
+    outcome: z.enum(["passed", "failed", "abandoned", "replaced", "open"]),
+    occurredAt: isoDate,
+  })),
+});
+export type AbilityDetail = z.infer<typeof abilityDetailSchema>;
 
 export const askUserQuestionInputSchema = z.object({
   questions: z.array(z.object({

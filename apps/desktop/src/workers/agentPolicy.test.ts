@@ -48,10 +48,15 @@ describe("Training Agent controller policy", () => {
     expect(nextToolStage("session-start", outcomes).activeTools).toEqual(["create_question"]);
   });
 
-  it("stops after fifteen rejected candidates and reports the latest deterministic failed check", () => {
+  it("reports exhaustion after fifteen rejected candidates instead of ending the turn", () => {
     const rejected = { result: { status: "invalid", report: { checks: [{ name: "reference solution", passed: false, detail: "exit 1" }] } } };
     const outcomes = new Map<string, unknown[]>([["create_question", Array.from({ length: 15 }, () => rejected)]]);
-    expect(() => nextToolStage("session-start", outcomes)).toThrow(/15 rejected.*reference solution: exit 1/);
+    const stage = nextToolStage("session-start", outcomes);
+    // The controller falls back to a host-authored challenge from here, so the
+    // budget running out must be reportable state rather than a thrown error.
+    expect(stage.exhausted).toMatchObject({ attempts: 15 });
+    expect(stage.exhausted?.failure).toContain("reference solution: exit 1");
+    expect(stage.activeTools).toEqual([]);
   });
 
   it("allows only one question compiler invocation per phase, even when the provider changes the payload", () => {

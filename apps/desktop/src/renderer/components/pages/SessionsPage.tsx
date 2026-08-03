@@ -1,8 +1,11 @@
 import { useMemo, useState } from "react";
 import { LayoutGrid, Search } from "lucide-react";
-import type { SessionSummary } from "@spar/domain";
+import type { ChallengeHistorySummary, SessionSummary } from "@spar/domain";
+import type { SparApi } from "../../../shared/api";
+import type { AgentRun } from "../agent/agentRun";
 import { EmptyState } from "../common/EmptyState";
 import { SessionCard } from "../common/SessionCard";
+import { useSessionPreviews } from "../../hooks/use-session-previews";
 import { cn } from "@/lib/utils";
 
 type Filter = "all" | "open" | "completed";
@@ -14,14 +17,22 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 ];
 
 export function SessionsPage({
+  api,
   sessions,
+  challenges,
+  runs,
   onOpen,
 }: {
+  api: SparApi | undefined;
   sessions: SessionSummary[];
+  challenges: ChallengeHistorySummary[];
+  /** Agent turns in flight, by session. Cards for these report the live work. */
+  runs: Record<string, AgentRun>;
   onOpen(session: SessionSummary): void;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
+  const previewFor = useSessionPreviews(api, challenges);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -35,7 +46,9 @@ export function SessionsPage({
 
   return (
     <div className="app-scroll h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-[52rem] px-6 pb-16 pt-8">
+      {/* The same measure the challenge history uses: the two "everything you
+          have" pages are siblings, and their cards should be one width. */}
+      <div className="mx-auto w-full max-w-[62rem] px-18 pb-16 pt-8">
         <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Sessions</h1>
         <p className="mt-1 text-content text-muted-foreground">
           Durable learning journeys, generated one evidence target at a time.
@@ -68,11 +81,20 @@ export function SessionsPage({
           </div>
         </div>
 
+        {/* One card per row rather than a two-up grid. The card carries a code
+            plate on its trailing edge now, and at half this width there is no
+            room for one — so the grid would have quietly been a different card. */}
         <div className="mt-4">
           {visible.length ? (
-            <div className="grid grid-cols-2 items-start gap-2.5">
+            <div className="flex flex-col gap-2.5">
               {visible.map((session) => (
-                <SessionCard key={session.id} session={session} onOpen={() => onOpen(session)} />
+                <SessionCard
+                  key={session.id}
+                  onOpen={() => onOpen(session)}
+                  preview={previewFor(session.id)}
+                  run={runs[session.id] ?? null}
+                  session={session}
+                />
               ))}
             </div>
           ) : (

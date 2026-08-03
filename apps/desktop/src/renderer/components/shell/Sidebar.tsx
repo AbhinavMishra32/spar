@@ -9,7 +9,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SparWordmark } from "../common/SparWordmark";
 
-export type Page = "home" | "sessions" | "ability" | "challenges" | "settings" | "workspace";
+/* "challenge" is one challenge opened on its own, out of the history list. Like
+   "workspace" it draws its own toolbar and is not a destination in the nav — the
+   sidebar highlights "challenges" while it is up, because that is where it came
+   from and where Back returns to. */
+export type Page = "home" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
 
 /** What the sidebar can do to a session. Every one of these is a write the main
  *  process owns, so the row reports intent and never edits its own copy. */
@@ -149,7 +153,9 @@ export function Sidebar({
             key={id}
             className={cn(
               ROW,
-              page === id
+              // A single challenge is a page under Challenges, so the section
+              // stays lit rather than the nav going blank while it is open.
+              page === id || (id === "challenges" && page === "challenge")
                 ? "bg-[var(--sidebar-accent-active)] text-foreground"
                 : "text-foreground/85 hover:bg-[var(--sidebar-accent)]",
             )}
@@ -315,7 +321,7 @@ function SessionRow({
             which moves the highlight and leaves the hint lying about what it does. */}
         <DropdownMenuContent
           align="start"
-          className="min-w-[13rem]"
+          className="min-w-[11.5rem]"
           onKeyDown={(event) => {
             if (event.metaKey || event.ctrlKey || event.altKey) return;
             const item = items.find((entry) => entry.key === event.key.toLowerCase());

@@ -72,17 +72,17 @@ export function ModelPicker({
         <ChevronDown className="size-3.5 shrink-0 opacity-50" />
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="min-w-[13.5rem]" side="top">
+      <DropdownMenuContent align="end" className="min-w-[12.5rem]" side="top">
         {/* Reads as the menu's first row, not a separate header: same inset, same
             height, no rule under it. Radix runs a typeahead on printable keys, so
             the field has to swallow them to stay typable. */}
         <div
-          className="flex min-h-8 items-center gap-2.5 px-2.5"
+          className="flex min-h-[1.625rem] items-center gap-2 px-2.5"
           onKeyDown={(event) => event.stopPropagation()}
         >
-          <Search className="size-4 shrink-0 text-muted-foreground/70" />
+          <Search className="size-3.5 shrink-0 text-muted-foreground/70" />
           <input
-            className="w-full bg-transparent text-content outline-none placeholder:text-muted-foreground/60"
+            className="w-full bg-transparent text-content leading-none outline-none placeholder:text-muted-foreground/60"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search models"
             value={query}
@@ -98,22 +98,22 @@ export function ModelPicker({
                   key={`${provider.id}:${model.id}`}
                   onSelect={() => onSelect(provider, model.id)}
                 >
-                  <ProviderGlyph className="size-4 shrink-0 opacity-80" provider={provider.id} />
+                  <ProviderGlyph className="size-3.5 shrink-0 opacity-80" provider={provider.id} />
                   <span className="min-w-0 flex-1 truncate">{model.name}</span>
                   <span className="shrink-0 text-ui text-muted-foreground">{provider.name}</span>
                 </DropdownMenuCheckItem>
               ))
             ) : (
-              <p className="px-2.5 py-2 text-content text-muted-foreground">No model matches “{query.trim()}”.</p>
+              <p className="px-2.5 py-1.5 text-content text-muted-foreground">No model matches “{query.trim()}”.</p>
             )
           ) : (
             connected.map((provider) => (
               <DropdownMenuSub key={provider.id}>
                 <DropdownMenuSubTrigger>
-                  <ProviderGlyph className="size-4 shrink-0" provider={provider.id} />
+                  <ProviderGlyph className="size-3.5 shrink-0" provider={provider.id} />
                   <span className="truncate">{provider.name}</span>
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-80 min-w-[13.5rem]">
+                <DropdownMenuSubContent className="max-h-[17rem] min-w-[12.5rem]">
                   {provider.models.map((model) => (
                     <DropdownMenuCheckItem
                       checked={provider.id === active.id && model.id === inventory?.defaultModel.model}
@@ -134,7 +134,7 @@ export function ModelPicker({
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onOpenSettings}>
               <span className="flex-1">Settings</span>
-              <ArrowUpRight className="opacity-50" />
+              <ArrowUpRight className="size-3.5 opacity-45" />
             </DropdownMenuItem>
           </>
         )}
