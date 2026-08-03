@@ -26,6 +26,14 @@ function ToolIcon({ part }: { part: ToolPart }) {
   return <Check className="size-3.5" />;
 }
 
+/** How long a settled call took. Absent for a stored row, which does not keep
+ *  timings, and for anything under a second, where the number is noise. */
+function took(part: ToolPart): string {
+  if (part.phase === "running" || !part.startedAt || !part.endedAt) return "";
+  const seconds = (part.endedAt - part.startedAt) / 1_000;
+  return seconds < 1 ? "" : `in ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+}
+
 function DiffStat({ added, removed }: { added: number; removed: number }) {
   if (added === 0 && removed === 0) return null;
   return (
@@ -99,6 +107,7 @@ export function ActivityGroup({ parts }: { parts: ToolPart[] }) {
                   <span className="min-w-0 flex-1 truncate">
                     {safeToolLabel(part.tool, part.phase === "running", part.phase === "error")}
                     {count > 1 && <span className="ml-1 tabular-nums text-muted-foreground/60">×{count}</span>}
+                    {took(part) && <span className="ml-1.5 tabular-nums text-muted-foreground/50">{took(part)}</span>}
                   </span>
                   <DiffStat added={totals.added} removed={totals.removed} />
                 </div>
@@ -126,9 +135,8 @@ export function ActivityGroup({ parts }: { parts: ToolPart[] }) {
  * being dropped as protocol noise before they reached the transcript.
  */
 export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning" }> }) {
-  const [open, setOpen] = useState(false);
   const tail = useRef<HTMLDivElement>(null);
-  const body = part.body.trim();
+  const sections = thoughts(part.body);
 
   useEffect(() => {
     if (part.open) tail.current?.scrollIntoView({ block: "end" });
@@ -136,17 +144,21 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
 
   const seconds = Math.max(1, Math.round(((part.endedAt ?? Date.now()) - part.startedAt) / 1_000));
 
+  /* Live: the heading the model is under right now, with its prose following it.
+     Only the tail is shown, because the point while it runs is watching where the
+     thinking has got to rather than reading all of it. */
   if (part.open) {
+    const current = sections.at(-1);
     return (
       <div className="min-w-0 px-1.5">
         <div className="flex items-center gap-2 py-0.5">
           <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
-          <span className="thinking-shimmer text-ui font-medium">Thinking</span>
+          <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">{current?.title ?? "Thinking"}</span>
         </div>
-        {body && (
-          <div className="app-scroll relative max-h-24 overflow-y-auto">
-            <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] whitespace-pre-wrap text-muted-foreground/70">
-              {body}
+        {current?.body && (
+          <div className="app-scroll max-h-20 overflow-y-auto">
+            <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/70">
+              {current.body}
             </p>
             <div ref={tail} />
           </div>
@@ -155,23 +167,84 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
     );
   }
 
-  if (!body) return null;
+  if (!sections.length) return null;
+  /* Settled: one row per heading the model gave its own thinking, which is what
+     makes a long turn readable — "Resolving the language conflict" says something,
+     and seven rows of "Thought for 9s" say nothing. */
+  return (
+    <div className="min-w-0">
+      {sections.map((section, index) => (
+        <Thought
+          key={`${part.id}-${index}`}
+          body={section.body}
+          title={section.title ?? `Thought for ${seconds}s`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function Thought({ title, body }: { title: string; body: string }) {
+  const [open, setOpen] = useState(false);
+  if (!body) {
+    return (
+      <div className="flex min-w-0 items-center gap-2 px-1.5 py-1 text-ui text-muted-foreground">
+        <span className="grid size-4 shrink-0 place-items-center"><Brain className="size-3.5 text-muted-foreground/70" /></span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+      </div>
+    );
+  }
   return (
     <Collapsible onOpenChange={setOpen} open={open}>
       <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-left text-ui text-muted-foreground transition-colors hover:bg-accent/50">
         <span className="grid size-4 shrink-0 place-items-center">
           <Brain className="size-3.5 text-muted-foreground/70" />
         </span>
-        <span className="min-w-0 flex-1 truncate">Thought for {seconds}s</span>
+        <span className="min-w-0 flex-1 truncate">{title}</span>
         <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-200", !open && "-rotate-90")} />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p className="mx-1.5 mb-1 border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] whitespace-pre-wrap text-muted-foreground/75">
+        <p className="mx-1.5 mb-1 border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/75">
           {body}
         </p>
       </CollapsibleContent>
     </Collapsible>
   );
+}
+
+/**
+ * Reasoning summaries arrive as `**A heading**` followed by prose, several to a
+ * block. Those headings are the model's own account of what it is doing, so they
+ * become the rows — and the markup is removed rather than shown, which is what
+ * put literal asterisks in the transcript.
+ */
+function thoughts(body: string): Array<{ title?: string; body: string }> {
+  const sections: Array<{ title?: string; body: string }> = [];
+  const pattern = /\*\*(.+?)\*\*/g;
+  let cursor = 0;
+  for (let match = pattern.exec(body); match; match = pattern.exec(body)) {
+    const before = clean(body.slice(cursor, match.index));
+    if (before) {
+      const open = sections.at(-1);
+      if (open) open.body = clean(`${open.body} ${before}`);
+      else sections.push({ body: before });
+    }
+    sections.push({ title: clean(match[1] ?? ""), body: "" });
+    cursor = match.index + match[0].length;
+  }
+  const rest = clean(body.slice(cursor));
+  if (rest) {
+    const open = sections.at(-1);
+    if (open) open.body = clean(`${open.body} ${rest}`);
+    else sections.push({ body: rest });
+  }
+  return sections.filter((section) => section.title || section.body);
+}
+
+/** Reasoning is emitted with hard wraps and blank runs that read as gaps in the
+ *  transcript. The words are what matter here, so the whitespace is normalised. */
+function clean(value: string): string {
+  return value.replace(/\*\*/g, "").replace(/\s*\n\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
 /**

@@ -68,8 +68,13 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
         return { ...run, parts: settled, status: "streaming" };
       }
       if (!text) return run;
-      if (last?.kind === "reasoning" && last.open) {
-        parts[parts.length - 1] = { ...last, body: last.body + text };
+      /* Continues the trailing block even when it was closed, as long as nothing
+         happened in between. A turn runs as several provider calls, each opening
+         its own reasoning; without this the transcript grew one "Thought for Ns"
+         row per call and read as a stack of stubs rather than as one thought. */
+      if (last?.kind === "reasoning") {
+        const { endedAt: _reopened, ...held } = last;
+        parts[parts.length - 1] = { ...held, body: last.body + text, open: true };
       } else {
         parts.push({ kind: "reasoning", id: `${event.runId}-r${parts.length}`, body: text, open: true, startedAt: Date.now() });
       }
