@@ -82,63 +82,62 @@ export function AttemptsPanel({
   const { stats } = replay;
   return (
     <div className="app-scroll h-full overflow-y-auto px-4 py-3">
-      <div className="mx-auto w-full max-w-[46rem] space-y-4">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <Stat label="on this attempt" value={duration(elapsed(replay, startedAt, completedAt))} />
-          <Stat label={stats.runs === 1 ? "run" : "runs"} value={String(stats.runs)} />
-          <Stat label={stats.submissions === 1 ? "submission" : "submissions"} value={String(stats.submissions)} />
-          <Stat label={stats.saves === 1 ? "save" : "saves"} value={String(stats.saves)} />
+      <div className="mx-auto w-full max-w-[46rem]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-2 text-ui text-muted-foreground">
+          <span className="font-medium tabular-nums text-foreground">{duration(elapsed(replay, startedAt, completedAt))}</span>
+          <Dot />
+          <span className="tabular-nums">{stats.runs} {stats.runs === 1 ? "run" : "runs"}</span>
+          <Dot />
+          <span className="tabular-nums">{stats.submissions} {stats.submissions === 1 ? "submission" : "submissions"}</span>
+          <Dot />
+          <span className="tabular-nums">{stats.saves} {stats.saves === 1 ? "save" : "saves"}</span>
           {stats.regressions > 0 && (
-            <span className="rounded-md bg-destructive/12 px-1.5 py-0.5 text-ui-sm text-destructive">
-              {stats.regressions} case{stats.regressions === 1 ? "" : "s"} broke after passing
-            </span>
+            <>
+              <Dot />
+              <span className="tabular-nums text-destructive">
+                {stats.regressions} broke after passing
+              </span>
+            </>
           )}
         </div>
 
         {replay.cases.length > 0 && (
-          <Section
-            hint={`One row per case, one mark per run, oldest first.${replay.cases.some((item) => item.hidden) ? " Hidden cases only run when you submit." : ""}`}
-            title="How each case went"
-          >
-            <div className="space-y-px">
-              {replay.cases.map((item) => (
-                <CaseRow key={item.name} item={item} />
-              ))}
-            </div>
-          </Section>
+          <div className="hairline-t space-y-px py-1">
+            {replay.cases.map((item) => (
+              <CaseRow key={item.name} item={item} />
+            ))}
+          </div>
         )}
 
-        <Section hint="Times are measured from the moment this challenge opened." title="What happened, when">
-          <ol className="space-y-px">
-            {replay.moments.map((moment) => {
-              const Icon = MOMENT_ICONS[moment.kind];
-              return (
-                <li
-                  key={`${moment.eventId}-${moment.kind}`}
-                  className="flex items-baseline gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-accent/50"
-                >
-                  <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/55">
-                    {offset(moment.offsetMs)}
-                  </span>
-                  <Icon
-                    className={cn(
-                      "size-3 shrink-0 translate-y-0.5",
-                      moment.kind === "submission" ? "text-foreground/70" : "text-muted-foreground/60",
-                    )}
-                  />
-                  <span className="min-w-0 flex-1 break-words text-ui text-foreground/85">{moment.text}</span>
-                </li>
-              );
-            })}
-          </ol>
-        </Section>
-
-        <p className="px-2 pb-1 text-ui-sm text-muted-foreground/55">
-          Spar reads this same log — every event, every case, with these timings — to decide what to ask you next.
-        </p>
+        <ol className="hairline-t space-y-px py-1">
+          {replay.moments.map((moment) => {
+            const Icon = MOMENT_ICONS[moment.kind];
+            return (
+              <li
+                key={`${moment.eventId}-${moment.kind}`}
+                className="flex items-baseline gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-accent/50"
+              >
+                <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/55">
+                  {offset(moment.offsetMs)}
+                </span>
+                <Icon
+                  className={cn(
+                    "size-3 shrink-0 translate-y-0.5",
+                    moment.kind === "submission" ? "text-foreground/70" : "text-muted-foreground/60",
+                  )}
+                />
+                <span className="min-w-0 flex-1 break-words text-ui text-foreground/85">{moment.text}</span>
+              </li>
+            );
+          })}
+        </ol>
       </div>
     </div>
   );
+}
+
+function Dot() {
+  return <span className="text-muted-foreground/35">·</span>;
 }
 
 /** The panel shows the clock's own elapsed time where it has it, so the two
@@ -159,42 +158,36 @@ function Stat({ value, label }: { value: string; label: string }) {
   );
 }
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <div className="mb-1 px-2">
-        <p className="text-ui font-medium">{title}</p>
-        {hint && <p className="mt-0.5 text-ui-sm text-muted-foreground/65">{hint}</p>}
-      </div>
-      {children}
-    </section>
-  );
-}
-
+/** One case: its name, what became of it, and its mark in every run. Kept to a
+ *  single line, with the expected/actual pair only where it is still failing —
+ *  a case that is passing has nothing left to explain. */
 function CaseRow({ item }: { item: ReplayCase }) {
+  const failing = item.finalVerdict === "failed";
   return (
-    <div className="rounded-lg px-2 py-1.5 transition-colors hover:bg-accent/50">
+    <div className="rounded-lg px-2 py-1 transition-colors hover:bg-accent/50">
       <div className="flex items-baseline gap-2">
-        <span className="min-w-0 flex-1 truncate text-ui text-foreground/90">{item.name}</span>
         <span
-          className="shrink-0"
+          className="shrink-0 translate-y-0.5"
           title={item.hidden ? "Hidden — only runs when you submit" : "Visible while you work"}
         >
           {item.hidden ? (
-            <EyeOff className="size-3 text-muted-foreground/50" />
+            <EyeOff className="size-3 text-muted-foreground/45" />
           ) : (
-            <Eye className="size-3 text-muted-foreground/35" />
+            <Eye className="size-3 text-muted-foreground/30" />
           )}
         </span>
+        <span className={cn("min-w-0 flex-1 truncate text-ui", failing ? "text-foreground" : "text-foreground/80")}>
+          {item.name}
+        </span>
+        <span className="shrink-0 text-ui-sm text-muted-foreground/65">{story(item)}</span>
         <span className="flex shrink-0 items-center gap-0.5">
           {item.verdicts.map((verdict, index) => (
             <Mark key={index} verdict={verdict} />
           ))}
         </span>
       </div>
-      <p className="mt-0.5 text-ui-sm text-muted-foreground/70">{story(item)}</p>
-      {item.finalVerdict === "failed" && item.lastFailure?.expected !== undefined && (
-        <p className="mt-0.5 font-mono text-ui-sm text-muted-foreground/60">
+      {failing && item.lastFailure?.expected !== undefined && (
+        <p className="ml-5 font-mono text-ui-sm text-muted-foreground/55">
           expected {item.lastFailure.expected}
           {item.lastFailure.actual === undefined ? "" : ` · got ${item.lastFailure.actual}`}
         </p>
@@ -203,16 +196,12 @@ function CaseRow({ item }: { item: ReplayCase }) {
   );
 }
 
-/** One case's whole history in a sentence, in the second person. */
+/** What became of one case, in as few words as carry it. */
 function story(item: ReplayCase): string {
-  const failures = `${item.failures} failure${item.failures === 1 ? "" : "s"}`;
-  if (item.neverPassed) return `Never passed — ${failures}.`;
-  if (item.regressed) {
-    return `Passed at ${offset(item.fixedAtMs ?? 0)}, then broke again at ${offset(item.lastFailure?.atMs ?? 0)}.`;
-  }
-  if (item.fixedAtMs !== undefined) return `Fixed at ${offset(item.fixedAtMs)}, after ${failures}.`;
-  if (item.passedFirstTry) return "Right from the first run.";
-  return "Passed.";
+  if (item.neverPassed) return item.failures > 1 ? `failed ${item.failures}×` : "failed";
+  if (item.regressed) return `broke again at ${offset(item.lastFailure?.atMs ?? 0)}`;
+  if (item.fixedAtMs !== undefined) return `fixed at ${offset(item.fixedAtMs)}`;
+  return "";
 }
 
 function Mark({ verdict }: { verdict: CaseVerdict }) {

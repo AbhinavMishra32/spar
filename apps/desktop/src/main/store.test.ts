@@ -147,3 +147,26 @@ it("carries a challenge's concepts on its history row, primary first",()=>{const
   // Tagged, therefore searchable: the words never appear in the title.
   expect(store.searchChallenges("two pointers",5).map((challenge)=>challenge.title)).toContain("Meet in the middle");
 }finally{store.close();}});
+
+/* A finished turn used to collapse to its last sentence: the tool steps lived
+   only in the live stream, and the renderer dropped that the moment the turn
+   ended. They are stored with the reply now, including for a turn whose whole
+   answer was a challenge rather than a sentence. */
+it("keeps a turn's activity with the reply it produced",()=>{const store=new LocalStore(":memory:");try{
+  const{sessionId}=store.createSession("Practise sliding windows");
+  store.addMessage(sessionId,"agent","Here is what I found.",[
+    {tool:"replay_attempt",label:"full log · case history",detail:"34m on it · 5 runs",ok:true},
+    {tool:"search_concept_evidence",label:"window-invariant-restoration",detail:"1 result",ok:true},
+  ]);
+  // No reply at all, which is what an attempt-complete turn produces.
+  store.addMessage(sessionId,"agent","",[{tool:"create_question",label:"Restore the window",detail:"status playable",ok:true}]);
+
+  const messages=store.readSession(sessionId)?.messages??[];
+  expect(messages[0]?.activity.map((step)=>step.tool)).toEqual(["replay_attempt","search_concept_evidence"]);
+  expect(messages[0]?.activity[0]?.detail).toBe("34m on it · 5 runs");
+  expect(messages[1]?.body).toBe("");
+  expect(messages[1]?.activity).toHaveLength(1);
+  // A learner message carries none, and reads back as an empty list rather than undefined.
+  store.addMessage(sessionId,"learner","thanks");
+  expect(store.readSession(sessionId)?.messages.at(-1)?.activity).toEqual([]);
+}finally{store.close();}});

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
-import type { SessionDetail } from "@spar/domain";
+import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { ActivityGroup, ChallengePublished, RunFailure, SolveRead } from "./ActivityRow";
@@ -72,6 +72,49 @@ function ThinkingLine({ parts }: { parts: RunPart[] }) {
   );
 }
 
+/**
+ * A finished turn: what it did, then what it said.
+ *
+ * The steps are drawn from the same components the live stream uses, so a turn
+ * looks the same after it lands as it did while it ran — which is the whole point
+ * of storing them. A turn with no reply is still a turn worth seeing; that is
+ * what an attempt-complete turn is, and it used to leave nothing behind at all.
+ */
+function AgentMessage({ body, activity }: { body: string; activity: AgentActivityStep[] }) {
+  const parts = activity.map((step, index) => settledPart(step, index));
+  const published = parts.filter(isChallengePublished);
+  const solveReads = parts.filter((part) => part.tool === "replay_attempt" && part.phase !== "error");
+  const steps = parts.filter((part) => !published.includes(part) && !solveReads.includes(part));
+
+  return (
+    <div className="min-w-0 space-y-1.5">
+      {steps.length > 0 && <ActivityGroup parts={steps} />}
+      {solveReads.map((part) => <SolveRead key={part.id} part={part} />)}
+      {published.map((part) => <ChallengePublished key={part.id} part={part} />)}
+      {body.trim() && (
+        <div className="min-w-0 px-1.5">
+          <Markdown source={body} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A stored step as the transcript's own part shape. Timing is not kept — how
+ *  long a settled call took is not something the row shows. */
+function settledPart(step: AgentActivityStep, index: number): Extract<RunPart, { kind: "tool" }> {
+  return {
+    kind: "tool",
+    id: `stored-${index}-${step.tool}`,
+    tool: step.tool,
+    label: step.label,
+    detail: step.detail,
+    phase: step.ok ? "done" : "error",
+    files: [],
+    startedAt: 0,
+  };
+}
+
 function LearnerMessage({ body }: { body: string }) {
   return (
     <div className="flex min-w-0 justify-end">
@@ -97,9 +140,11 @@ export function AgentThread({
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
-  // Completion persists the final streamed text before the refreshed session
-  // reaches the renderer. Reconcile by content during that narrow hand-off so
-  // the durable message and its live precursor can never render twice.
+  /* Completion persists the final streamed text before the refreshed session
+     reaches the renderer. Reconcile by content during that narrow hand-off so the
+     durable message and its live precursor can never render twice. Dropping the
+     live run no longer loses the turn's work: the steps are stored on the message
+     and drawn from there, which is what a finished turn is made of. */
   const streamedText=run?.parts.filter((part)=>part.kind==="text").map((part)=>part.body).join("").trim()??"";
   const lastAgentMessage=[...messages].reverse().find((item)=>item.role==="agent");
   const visibleRun=run&&streamedText&&lastAgentMessage?.body.trim()===streamedText?null:run;
@@ -147,9 +192,7 @@ export function AgentThread({
                   ) : item.role === "system" ? (
                     <SystemEvent key={item.id} body={item.body} />
                   ) : (
-                    <div key={item.id} className="min-w-0 px-1.5">
-                      <Markdown source={item.body} />
-                    </div>
+                    <AgentMessage key={item.id} activity={item.activity} body={item.body} />
                   ),
                 )}
                 {visibleRun && <LiveRun run={visibleRun} />}

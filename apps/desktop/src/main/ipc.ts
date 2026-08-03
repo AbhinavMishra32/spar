@@ -12,6 +12,7 @@ import type { WorkspaceService } from "./workspaces.js";
 import type { ProviderService } from "./provider.js";
 import type { CloudSyncService } from "./sync.js";
 import { requestsChallengeRevision } from "./agentIntent.js";
+import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 
 export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; window: () => BrowserWindow | null }) {
@@ -71,7 +72,17 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       const claim=(runId:string)=>{activeAgentRuns.set(sessionId,runId);deps.agentRunSessions.set(runId,sessionId);return runId;};
       const release=(runId:string)=>{activeAgentRuns.delete(sessionId);deps.agentRunSessions.delete(runId);};
       const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);
-      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};if(value.text?.trim())deps.store.addMessage(sessionId,"agent",value.text.trim());deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
+      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};
+        /* The turn's own steps go into storage with the reply they produced. The
+           live run is dropped the instant this `done` reaches the renderer, and
+           without this the transcript would keep only the last sentence of a
+           turn that read six things to arrive at it. */
+        const activity=takeAgentActivity(request.id);
+        /* Recorded when there is activity even with no reply: an attempt-complete
+           turn answers with a challenge rather than a sentence, and it used to
+           leave the transcript with no trace that it ran at all. */
+        if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity);
+        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){forgetAgentActivity(request.id);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);

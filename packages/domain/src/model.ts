@@ -260,12 +260,29 @@ export const askUserQuestionRequestSchema = askUserQuestionInputSchema.extend({ 
 export type AskUserQuestionInput = z.infer<typeof askUserQuestionInputSchema>;
 export type AskUserQuestionRequest = z.infer<typeof askUserQuestionRequestSchema>;
 
+/**
+ * One settled step of agent work, kept with the reply it helped produce.
+ *
+ * The live stream shows these while a turn runs, and a turn that has ended is
+ * still the only account of how its answer was reached — so the steps are stored
+ * rather than discarded when the stream closes.
+ */
+export const agentActivityStepSchema = z.object({
+  tool: z.string().min(1),
+  /** What the call was about, in the learner's terms. Never a raw argument. */
+  label: z.string().default(""),
+  /** What it returned, already reduced to one line by the worker. */
+  detail: z.string().default(""),
+  ok: z.boolean().default(true),
+});
+export type AgentActivityStep = z.infer<typeof agentActivityStepSchema>;
+
 export const sessionDetailSchema = z.object({
   summary: sessionSummarySchema,
   question: activeQuestionSchema.nullable(),
   checkpoint: z.unknown().nullable(),
   pendingLearnerQuestion: askUserQuestionRequestSchema.nullable(),
-  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate })),
+  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate, activity: z.array(agentActivityStepSchema).default([]) })),
   events: z.array(z.object({ id, sequence: z.number().int(), type: z.string(), occurredAt: isoDate, payload: z.record(z.unknown()), source: z.string() }))
 });
 export type SessionDetail = z.infer<typeof sessionDetailSchema>;
