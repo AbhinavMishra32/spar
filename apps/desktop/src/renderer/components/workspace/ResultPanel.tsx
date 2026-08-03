@@ -14,7 +14,7 @@ import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/format";
 import { declaredCases } from "@/lib/testCases";
-import { EMPTY_REPORT, headline, parseTestOutput, type CaseStatus, type TestCaseResult } from "@/lib/testReport";
+import { EMPTY_REPORT, headline, parseTestOutput, type CaseStatus, type TestCaseResult } from "../../../shared/testReport";
 import { AttemptsPanel } from "./AttemptsPanel";
 
 export type ResultTab = "testcase" | "result" | "attempts";
@@ -118,6 +118,7 @@ export function ResultPanel({
   busyLabel,
   outcome,
   events,
+  attempt,
   onClearTerminal,
   onCollapse,
 }: {
@@ -137,6 +138,9 @@ export function ResultPanel({
   outcome: RunOutcome;
   /** Omitted where there is no attempt to show — the tab goes with it. */
   events?: SessionDetail["events"];
+  /** What the attempt is of, and when its clock started, so the replay names the
+   *  challenge and times itself the same way the toolbar does. */
+  attempt?: { title?: string; language?: string; startedAt?: string; completedAt?: string | null };
   onClearTerminal(): void;
   onCollapse(): void;
 }) {
@@ -347,7 +351,7 @@ export function ResultPanel({
 
       {tab === "attempts" && events && (
         <div className="min-h-0 flex-1">
-          <AttemptsPanel events={events} />
+          <AttemptsPanel events={events} {...attempt} />
         </div>
       )}
     </div>

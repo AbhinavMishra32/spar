@@ -5,6 +5,10 @@
  *
  * C++ challenges compile and run an arbitrary binary, so nothing is parsed there;
  * `parsed` stays false and callers fall back to the raw output.
+ *
+ * Shared rather than renderer-local because the same parse has to happen twice:
+ * once to draw the result panel, and once where a run is recorded, so the
+ * attempt keeps which cases failed rather than only that something did.
  */
 
 export type CaseStatus = "passed" | "failed" | "skipped" | "todo";
@@ -112,6 +116,77 @@ export function parseTestOutput(output: string): TestReport {
     skipped: totals.skipped ?? cases.filter((item) => item.status === "skipped").length,
     ...(durationMs === undefined ? {} : { durationMs }),
   };
+}
+
+/**
+ * One case as an attempt event carries it. Values are clipped: what a later turn
+ * needs is which case failed and roughly how, and an assertion that dumped a
+ * whole array would otherwise sit in the event store forever.
+ */
+export type TestCaseRecord = {
+  name: string;
+  status: CaseStatus;
+  durationMs?: number;
+  expected?: string;
+  actual?: string;
+  message?: string;
+};
+
+const VALUE_LIMIT = 220;
+
+/**
+ * The durable per-case record of a run. Every recorded run carries this, so the
+ * history of a single case across an attempt — failed, failed, passed, failed
+ * again — can be reconstructed without keeping any raw output at all.
+ */
+export function caseRecords(report: TestReport): TestCaseRecord[] {
+  return report.cases.map((item) => ({
+    name: item.name,
+    status: item.status,
+    ...(item.durationMs === undefined ? {} : { durationMs: Math.round(item.durationMs * 100) / 100 }),
+    ...(item.failure?.expected === undefined ? {} : { expected: clip(item.failure.expected) }),
+    ...(item.failure?.actual === undefined ? {} : { actual: clip(item.failure.actual) }),
+    ...(headline(item.failure?.message) ? { message: clip(headline(item.failure?.message)!) } : {}),
+  }));
+}
+
+/**
+ * What a run leaves behind in the attempt it belongs to. Cases are the durable
+ * part: they are what lets a later turn say which case the learner fixed and
+ * which one they broke doing it. Raw output is kept only where there are no
+ * cases to keep — a C++ binary, or a run that died before the runner started —
+ * because there it is the only evidence of what happened.
+ *
+ * Shared so the visible run recorded by the renderer and the submission recorded
+ * by the main process cannot describe the same event in two different shapes.
+ */
+export type RunEvidence = {
+  cases: TestCaseRecord[];
+  /** Raw output, and only when there were no cases to keep instead. */
+  summary: string;
+  passedCases?: number;
+  failedCases?: number;
+  skippedCases?: number;
+  runMs?: number;
+};
+
+const MAX_EVENT_SUMMARY = 4_000;
+export function runEvidence(output: string): RunEvidence {
+  const report = parseTestOutput(output);
+  if (!report.parsed) return { cases: [], summary: output.trim().slice(0, MAX_EVENT_SUMMARY) };
+  return {
+    cases: caseRecords(report),
+    passedCases: report.passed,
+    failedCases: report.failed,
+    ...(report.skipped ? { skippedCases: report.skipped } : {}),
+    ...(report.durationMs === undefined ? {} : { runMs: Math.round(report.durationMs) }),
+    summary: "",
+  };
+}
+
+function clip(value: string): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > VALUE_LIMIT ? `${flat.slice(0, VALUE_LIMIT)}…` : flat;
 }
 
 /** Reads the `---` … `...` YAML block that follows a TAP point, if present. */

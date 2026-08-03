@@ -4,6 +4,7 @@ import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-p
 import { FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
 import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
+import { runEvidence } from "../../../shared/testReport";
 import { cn } from "@/lib/utils";
 import { fileName, languageFor, message } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
@@ -15,6 +16,7 @@ import { PaneHandle } from "./PaneHandle";
 import { FileTree } from "./FileTree";
 import { FloatingFileTree } from "./FloatingFileTree";
 import { ChallengeIntro } from "./ChallengeIntro";
+import { AttemptClock } from "./AttemptClock";
 import { ResultPanel, type ResultTab, type RunOutcome } from "./ResultPanel";
 
 export function Workspace({
@@ -126,7 +128,7 @@ export function Workspace({
       if (event.stream === "exit") {
         setRunning(false);
         visibleRunId.current=null;
-        void api.appendAttemptEvent({id:crypto.randomUUID(),attemptId:question.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",exitCode:event.exitCode??-1,passed:event.exitCode===0,summary:terminalRef.current.trim().slice(-12000)},source:"runner",schemaVersion:1}).then(()=>onRefresh()).catch((error)=>onError(message(error)));
+        void api.appendAttemptEvent({id:crypto.randomUUID(),attemptId:question.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",exitCode:event.exitCode??-1,passed:event.exitCode===0,...runEvidence(terminalRef.current)},source:"runner",schemaVersion:1}).then(()=>onRefresh()).catch((error)=>onError(message(error)));
       }
     });
   }, [api,onError,onRefresh,question.attemptId]);
@@ -299,6 +301,7 @@ export function Workspace({
       <Toolbar
         actions={
           <>
+            <AttemptClock completedAt={question.attemptCompletedAt} startedAt={question.attemptStartedAt} />
             <button
               className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
               disabled={running || submitting || givingUp}
@@ -498,6 +501,12 @@ export function Workspace({
                   onClearTerminal={() => {terminalRef.current="";setTerminal("");}}
                   onCollapse={() => dock.current?.collapse()}
                   onTab={setResultTab}
+                  attempt={{
+                    title: question.title,
+                    language: question.language,
+                    startedAt: question.attemptStartedAt,
+                    completedAt: question.attemptCompletedAt,
+                  }}
                   busyLabel={submitting ? "Running the visible and hidden cases…" : undefined}
                   outcome={outcome}
                   question={question}

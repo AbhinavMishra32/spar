@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { BookOpen, Check, ChevronDown, CircleAlert, FilePenLine, Search } from "lucide-react";
+import { BookOpen, Check, ChevronDown, CircleAlert, FilePenLine, History, Search } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,7 @@ import { activityGroupLabel, diffTotals, safeToolLabel, type RunPart } from "./a
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
 function orbFor(tool: string): OrbState {
-  if (tool.startsWith("search_") || tool.startsWith("read_") || tool.startsWith("inspect_")) return "searching";
+  if (tool.startsWith("search_") || tool.startsWith("read_") || tool.startsWith("inspect_") || tool === "replay_attempt") return "searching";
   if (tool === "create_question" || tool === "replace_current_question") return "shaping";
   if (tool === "evaluate_attempt") return "solving";
   if (tool === "ask_user_question") return "listening";
@@ -109,6 +109,58 @@ export function ActivityGroup({ parts }: { parts: ToolPart[] }) {
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+}
+
+/**
+ * Spar reading how the challenge was actually solved.
+ *
+ * This is the step the rest of the turn is built on, and the learner should be
+ * able to see it happen: what it looked at, and what it found in their own
+ * attempt. It is deliberately not a retrieval row — "read your solve" is a
+ * statement about them, and it is the difference between a tutor that saw the
+ * verdict and one that watched the work.
+ */
+export function SolveRead({ part }: { part: ToolPart }) {
+  const running = part.phase === "running";
+  const looked = part.label ? part.label.split(" — ") : [];
+  return (
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className="relative my-1 min-w-0 overflow-hidden rounded-[var(--radius-xl)] border border-border bg-[var(--color-background-elevated-secondary,var(--card))] px-3 py-2.5"
+      initial={{ opacity: 0, y: 8 }}
+      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+    >
+      <div className="flex min-w-0 items-start gap-2.5">
+        <span className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-accent text-muted-foreground">
+          {running ? (
+            <ThinkingOrb aria-label="Reading your solve" size={20} state="searching" style={{ width: 14, height: 14 }} />
+          ) : (
+            <History className="size-3.5" />
+          )}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-ui-sm font-medium tracking-wide text-muted-foreground/80 uppercase">
+            {running ? "Reading your solve" : "Read your solve"}
+          </p>
+          {looked.length > 0 && (
+            <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+              {looked.map((chip) => (
+                <span
+                  key={chip}
+                  className="rounded-md bg-accent px-1.5 py-0.5 text-ui-sm text-muted-foreground"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
+          )}
+          {!running && part.detail && (
+            <p className="mt-1.5 min-w-0 break-words text-ui leading-[1.55] text-foreground/85">{part.detail}</p>
+          )}
+        </div>
+      </div>
+    </motion.div>
   );
 }
 

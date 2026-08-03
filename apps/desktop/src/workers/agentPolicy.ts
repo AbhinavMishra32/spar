@@ -31,7 +31,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   // request without actually replacing the active challenge.
   if (turnKind === "challenge-revision") {
     if (playableQuestion) return { activeTools: [], toolChoice: "none" };
-    if (!completed("inspect_current_attempt")) return { activeTools: ["inspect_current_attempt"], toolChoice: "required" };
+    if (!completed("replay_attempt")) return { activeTools: ["replay_attempt"], toolChoice: "required" };
     if (!completed("set_training_target")) return { activeTools: ["set_training_target"], toolChoice: "required" };
     return { activeTools: ["replace_current_question"], toolChoice: "required" };
   }
@@ -40,7 +40,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   // chat end in prose while real requests can inspect or change host state.
   if (turnKind === "learner-message" && playableQuestion) return { activeTools: [], toolChoice: "none" };
   if (turnKind === "learner-message") return {
-    activeTools: ["read_session", ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability"],
+    activeTools: ["read_session", ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability"],
     toolChoice: "auto",
   };
   if (turnKind === "cold-start") {
@@ -67,13 +67,27 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     }
     return { activeTools: ["create_question"], toolChoice: "required" };
   }
-  // `search_concept_evidence` sits between the wider search and the next target:
-  // it is the read that says which sub-concept of the area is actually failing,
-  // and after the target is chosen it can no longer change the aim.
-  for (const stage of [["inspect_current_attempt", "evaluate_attempt"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["search_concept_evidence"], ["set_training_target"]]) {
+  /* A question asked of the learner suspends the turn where it is asked. The
+     answer arrives as its own turn and carries the target and the next challenge
+     with it, so continuing to the compiler here would publish a challenge aimed
+     at a gap the learner is in the middle of explaining. */
+  if (completed("ask_user_question")) return { activeTools: [], toolChoice: "none" };
+
+  /* The replay comes before everything else on an attempt-complete turn: it is
+     the account of how the challenge was solved, and every judgement made after
+     it — the ability update, the decision, the next target — is supposed to be a
+     judgement about that. `search_concept_evidence` sits between the wider
+     search and the next target because after the target is chosen it can no
+     longer change the aim. */
+  for (const stage of [["replay_attempt", "evaluate_attempt"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["search_concept_evidence"]]) {
     const next = stage.find((name) => !completed(name));
     if (next) return { activeTools: [next], toolChoice: "required" };
   }
+  /* The one stage with a real choice in it. Everything needed to aim the next
+     question has been read by now, so the agent either aims it or says that the
+     trace raised something only the learner can answer — and asking is a first
+     class outcome of reading a replay rather than a failure to decide. */
+  if (!completed("set_training_target")) return { activeTools: ["ask_user_question", "set_training_target"], toolChoice: "required" };
   return { activeTools: ["create_question"], toolChoice: "required" };
 }
 

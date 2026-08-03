@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { compileQuestion, fallbackDesign } from "@spar/training";
 import { abilityStatusSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
+import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
@@ -91,10 +92,55 @@ export async function executeTrainingTool(
   }
   if (name === "inspect_current_attempt" || name === "read_attempt") return { events: local.readAttempt(String(value.attemptId)) };
   if (name === "evaluate_attempt") return { events: local.readAttempt(String(value.attemptId)) };
+  if (name === "replay_attempt") return replayForAgent(local, value);
   if (name === "read_ability") return { ability: local.readAbility(String(value.abilityId)) };
   if (name === "propose_ability_update") {const updated=local.updateAbility({abilityId:String(value.abilityId),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   throw new Error(`Unsupported Spar tool: ${name}`);
+}
+
+/**
+ * One tool call, the attempt's whole log.
+ *
+ * A string rather than a structure on purpose: the questions worth asking of a
+ * solve are questions about order and adjacency — was this fixed before or after
+ * that was seen — and a nested object makes the reader rebuild both. The
+ * parameters are the only thing that decides how much comes back, so a turn that
+ * needs the entire log takes it and a turn that needs only the failing cases
+ * since the last submission pays for that much. `stats` rides along for the row
+ * the learner sees in the transcript; the log itself is `report`.
+ */
+function replayForAgent(local: LocalStore, value: Record<string, unknown>) {
+  const attemptId = String(value.attemptId ?? "");
+  const events = local.readAttempt(attemptId);
+  if (!events.length) {
+    return { report: `No events are recorded for attempt ${attemptId || "(none given)"}, so there is no log to read. Do not infer anything about the learner from this.`, stats: null, filters: null };
+  }
+  const subject = local.attemptSubject(attemptId);
+  const filters = {
+    sections: sectionList(value.sections),
+    events: stringList(value.eventTypes),
+    cases: caseFilter(value.cases),
+    scope: value.scope === "since-last-submission" ? "since-last-submission" as const : "all" as const,
+    caseDetail: value.caseDetail === "brief" ? "brief" as const : "full" as const,
+    maxLines: typeof value.maxLines === "number" && Number.isFinite(value.maxLines) ? Math.max(20, Math.min(2_000, Math.round(value.maxLines))) : 400,
+  };
+  const replay = foldAttempt(events, {
+    ...(subject?.title ? { title: subject.title } : {}),
+    ...(subject?.language ? { language: subject.language } : {}),
+  });
+  return { report: formatSolveLog(replay, filters), stats: replay.stats, filters };
+}
+
+function sectionList(value: unknown): ReplaySection[] {
+  const allowed: ReplaySection[] = ["log", "cases", "runs", "timings"];
+  if (!Array.isArray(value)) return DEFAULT_SECTIONS;
+  const chosen = value.filter((entry): entry is ReplaySection => allowed.includes(entry as ReplaySection));
+  return chosen.length ? chosen : DEFAULT_SECTIONS;
+}
+
+function caseFilter(value: unknown): CaseFilter {
+  return value === "failed-ever" || value === "still-failing" || value === "fixed" ? value : "all";
 }
 
 /** Concept tags off a tool call. Shape is already checked by the tool schema, so

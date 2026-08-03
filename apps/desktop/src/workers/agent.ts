@@ -113,6 +113,22 @@ const toolDefinitions = {
   create_question: ["Compile and validate a complete question from the active target. All paths are relative and the reference implementation must replace starter implementation files.", questionInputSchema],
   replace_current_question: ["Compile a validated replacement for the active challenge while preserving its attempt, tests, and replacement lineage in history.", questionInputSchema.extend({reason:z.string().min(3).max(500)})],
   inspect_current_attempt: ["Inspect current immutable events, diffs, test runs, and submission evidence.", z.object({ attemptId: z.string().uuid() })],
+  replay_attempt: [
+    "Read the attempt's own log: every recorded event in order — edits, runs, submissions, verdicts — with its offset from when the attempt opened, plus one line per test case inside every run with its expected/actual values. Nothing in it is summarised or interpreted; it is what was recorded. Two derived sections come with it because a log in order cannot show them: each case's verdict across every run (a transpose) and each run's newly-passing and newly-failing cases (a diff). Take the whole log when the attempt is small — that is the default — and use the parameters to narrow it when it is long or when you only need one metric. This is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
+    z.object({
+      attemptId: z.string().uuid(),
+      sections: z.array(z.enum(["log", "cases", "runs", "timings"])).min(1).max(4).optional()
+        .describe("log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs."),
+      eventTypes: z.array(z.string().min(3).max(40)).max(12).optional()
+        .describe("Keep only these event types in the log, e.g. [\"test_run\"] for nothing but the runs, or [\"file_changed\",\"test_run\"] for the edit-and-run rhythm. Omit for every type. Recorded types: attempt_started, file_changed, command_executed, test_run, submission_created, submission_evaluated, attempt_completed, hint_requested, learner_remark, agent_message."),
+      cases: z.enum(["all", "failed-ever", "still-failing", "fixed"]).optional()
+        .describe("Narrow the case history. `still-failing` is what is wrong now; `fixed` is what they repaired themselves, which is evidence of learning inside one attempt."),
+      scope: z.enum(["all", "since-last-submission"]).optional()
+        .describe("`since-last-submission` keeps only what happened after the last graded run, which is often the whole question on a follow-up turn."),
+      caseDetail: z.enum(["brief", "full"]).optional().describe("`brief` drops the expected/actual pair from each failing case line in the log. Default full."),
+      maxLines: z.number().int().min(20).max(2_000).optional().describe("Cap on log lines, newest kept, and it says how many it dropped. Default 400. Raise it rather than guessing at what a truncated log left out."),
+    }),
+  ],
   evaluate_attempt: ["Read the already-recorded deterministic runner outcome and evidence. Never judge correctness with the model.", z.object({ attemptId: z.string().uuid() })],
   propose_ability_update: ["Propose a versioned markdown ability change backed by evidence. Include summary, concepts and practice whenever the evidence now supports naming this as something the learner can do.", z.object({ abilityId: z.string().uuid(), markdown: z.string(), evidenceEventIds: z.array(z.string().uuid()), ...abilityClaimShape })],
   upsert_ability: ["Introduce an uncertain ability, or grant one: append an evidence-backed version and give it the summary, concepts and practice drills that make it something the learner can see and train.", z.object({title:z.string().min(2).max(120),markdown:z.string().min(20),evidenceEventIds:z.array(z.string().uuid()).default([]), ...abilityClaimShape})],
@@ -193,6 +209,19 @@ function summarizeToolInput(name: string, input: unknown): { label?: string; fil
     return { ...(label ? { label } : {}), ...(files.length ? { files } : {}) };
   }
 
+  /* The learner is shown what the replay looked at, in their own terms. This is
+     the one tool whose arguments are worth surfacing: "read the case history
+     since your last submission" is a statement about them, not a query string. */
+  if (name === "replay_attempt") {
+    const sections = Array.isArray(record.sections) ? record.sections.filter((entry): entry is string => typeof entry === "string") : [];
+    const named = sections.length ? sections.map((section) => SECTION_WORDS[section] ?? section) : ["full log", "case history", "run deltas"];
+    const narrowed = [
+      record.cases === "still-failing" ? "still failing" : record.cases === "fixed" ? "what you fixed" : record.cases === "failed-ever" ? "everything that failed" : "",
+      record.scope === "since-last-submission" ? "since your last submission" : "",
+    ].filter(Boolean);
+    return { label: [named.join(" · "), ...narrowed].join(" — ") };
+  }
+
   if (name === "ask_user_question") {
     const questions=record.questions;
     const first=Array.isArray(questions)&&questions[0]&&typeof questions[0]==="object"?questions[0] as Record<string,unknown>:undefined;
@@ -224,7 +253,33 @@ function failedChecks(value: unknown): string[] {
   });
 }
 
+const SECTION_WORDS: Record<string, string> = {
+  log: "full log",
+  cases: "case history",
+  runs: "run deltas",
+  timings: "timings",
+};
+
+/** The replay's own numbers, for the row the learner sees. Deliberately the same
+ *  facts the report opens with, so the transcript never claims more than the
+ *  agent actually read. */
+function describeReplay(value: unknown): string {
+  const stats = (value && typeof value === "object" ? (value as { stats?: unknown }).stats : null) as Record<string, unknown> | null;
+  if (!stats) return "nothing recorded yet";
+  const number = (key: string) => (typeof stats[key] === "number" ? stats[key] as number : 0);
+  const minutes = Math.round(number("elapsedMs") / 60_000);
+  const parts = [
+    minutes >= 1 ? `${minutes}m on it` : "under a minute on it",
+    `${number("runs")} run${number("runs") === 1 ? "" : "s"}`,
+    `${number("casesTracked")} case${number("casesTracked") === 1 ? "" : "s"} followed`,
+  ];
+  if (number("regressions")) parts.push(`${number("regressions")} broke after passing`);
+  if (number("neverPassed")) parts.push(`${number("neverPassed")} never passed`);
+  return parts.join(" · ");
+}
+
 function describeToolResult(name: string, value: unknown): string {
+  if (name === "replay_attempt") return describeReplay(value);
   const record = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   if ((name === "create_question" || name === "replace_current_question") && typeof record.status === "string") {
     // The transcript row only has one line to spare; the agent's own repair
@@ -406,9 +461,9 @@ function stableJson(value: unknown): string {
 function allowedTools(turnKind: AgentTurnKind,hasActiveQuestion=false) {
   if (turnKind === "cold-start") return new Set(["search_learner_model", "search_attempt_history", "ask_user_question"]);
   if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question"]);
-  if (turnKind === "attempt-complete") return new Set(["inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "read_concept_graph", "search_concept_evidence", "set_training_target", "create_question"]);
-  if (turnKind === "challenge-revision") return new Set(["inspect_current_attempt", "set_training_target", "replace_current_question"]);
-  return new Set(["read_session", ...(hasActiveQuestion?["inspect_current_attempt","replace_current_question"]:["create_question"]), "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability"]);
+  if (turnKind === "attempt-complete") return new Set(["replay_attempt", "inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question"]);
+  if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question"]);
+  return new Set(["read_session", ...(hasActiveQuestion?["inspect_current_attempt","replace_current_question"]:["create_question"]), "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability"]);
 }
 function settle(message: Record<string, unknown>) { const pending = pendingTools.get(String(message.id)); if (!pending) return; pendingTools.delete(String(message.id)); if (message.ok) pending.resolve(message.value); else pending.reject(new Error(String(message.error))); }
 /**
@@ -426,9 +481,28 @@ function languageContracts() {
   ].join(" ");
 }
 
-function instructions() { return `You are the single Training Agent for a personalized coding gym. Own pedagogical decisions, not persistence, execution, or correctness verification. On a cold-start turn, retrieve learner and attempt evidence once, then ask exactly one short, plain-language question establishing prerequisite experience and confidence for the stated goal; do not set a target or create a challenge. For a new broad goal with existing evidence or a completed cold-start answer: call search_learner_model once and search_attempt_history once using focused queries, then stop retrieving, set a concise session objective, set exactly one Training Target, and create one complete validated question. Retrieved history calibrates difficulty but must never replace the learner's current goal: use prior evidence only when it is materially relevant, and otherwise choose an accessible foundation diagnostic from the goal and placement answer. Treat a cold-start answer as evidence about accessibility and never infer advanced readiness merely because the learner named an advanced topic. When retrieved evidence contains an existing ability relevant to the target, reuse its exact title so evidence updates the same durable Ability Ledger identity. Write every question in the context's preferredLanguage unless the learner explicitly asks for a different one in this session; their request wins over the preference for as long as they hold it. When the context carries a learnerProfile, treat its stated experience and weakness as self-reported evidence that calibrates the first target before any attempt exists — weaker than a recorded attempt, and never a reason to skip retrieval. ${languageContracts()} Starter and reference maps must use the same implementation path, so the reference replaces the exact file the learner edits. Every reference solution must pass all tests. Every known incorrect implementation must represent the targeted misconception, pass all visible tests, and fail when hidden tests are included. The question's observable return contract must expose the targeted misconception: for repeated invariant restoration, do not rely only on a monotone maximum if a one-step shrink can return the same maximum; prefer counting valid windows, returning restored state, or another output where incomplete restoration is behaviorally distinguishable. Before calling create_question, ensure its title, statement, function contract, examples, reference code, visible tests, hidden tests, and expected failure signatures all describe the same exact operation and constraints. The model only proposes candidate designs; it must never declare a candidate or learner submission correct. The deterministic host compiler and runner are the sole verification authority. When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run. There is no reviewer or judge model. Use tools as reality and never claim a write, test, evaluation, or update without its tool result. Ask the learner only when history cannot answer something materially important. After a completed attempt: inspect the attempt once, read its already-recorded deterministic evaluation once, read the active ability once, propose one evidence-backed markdown update, commit exactly one action (diagnose, teach, practise, transfer, advance, or retain), call search_learner_model once for wider context, then create the next target and validated question. The next question must discriminate what remains uncertain from the attempt in a meaningfully different representation while avoiding unrelated difficulty. Its persisted Training Target and generated task must name the same transfer context and constraint. Prefer evidence over scores and never overreact to one attempt. Keep chat concise.
+function instructions() { return `You are the single Training Agent for a personalized coding gym. Own pedagogical decisions, not persistence, execution, or correctness verification. On a cold-start turn, retrieve learner and attempt evidence once, then ask exactly one short, plain-language question establishing prerequisite experience and confidence for the stated goal; do not set a target or create a challenge. For a new broad goal with existing evidence or a completed cold-start answer: call search_learner_model once and search_attempt_history once using focused queries, then stop retrieving, set a concise session objective, set exactly one Training Target, and create one complete validated question. Retrieved history calibrates difficulty but must never replace the learner's current goal: use prior evidence only when it is materially relevant, and otherwise choose an accessible foundation diagnostic from the goal and placement answer. Treat a cold-start answer as evidence about accessibility and never infer advanced readiness merely because the learner named an advanced topic. When retrieved evidence contains an existing ability relevant to the target, reuse its exact title so evidence updates the same durable Ability Ledger identity. Write every question in the context's preferredLanguage unless the learner explicitly asks for a different one in this session; their request wins over the preference for as long as they hold it. When the context carries a learnerProfile, treat its stated experience and weakness as self-reported evidence that calibrates the first target before any attempt exists — weaker than a recorded attempt, and never a reason to skip retrieval. ${languageContracts()} Starter and reference maps must use the same implementation path, so the reference replaces the exact file the learner edits. Every reference solution must pass all tests. Every known incorrect implementation must represent the targeted misconception, pass all visible tests, and fail when hidden tests are included. The question's observable return contract must expose the targeted misconception: for repeated invariant restoration, do not rely only on a monotone maximum if a one-step shrink can return the same maximum; prefer counting valid windows, returning restored state, or another output where incomplete restoration is behaviorally distinguishable. Before calling create_question, ensure its title, statement, function contract, examples, reference code, visible tests, hidden tests, and expected failure signatures all describe the same exact operation and constraints. The model only proposes candidate designs; it must never declare a candidate or learner submission correct. The deterministic host compiler and runner are the sole verification authority. When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run. There is no reviewer or judge model. Use tools as reality and never claim a write, test, evaluation, or update without its tool result. After a completed attempt: replay the attempt once and read how it was solved, read its already-recorded deterministic evaluation once, read the active ability once, propose one evidence-backed markdown update, commit exactly one action (diagnose, teach, practise, transfer, advance, or retain), call search_learner_model once for wider context, then either ask the learner about a specific moment the replay could not explain or create the next target and validated question. The next question must discriminate what remains uncertain from the attempt in a meaningfully different representation while avoiding unrelated difficulty. Its persisted Training Target and generated task must name the same transfer context and constraint. Prefer evidence over scores and never overreact to one attempt. Keep chat concise.
+
+${replayDoctrine()}
 
 ${conceptDoctrine()}`; }
+
+/**
+ * The solve, as evidence.
+ *
+ * Everything else the agent reads is a summary of an outcome. This is the only
+ * instrument that shows the work: which case they could never get, which one
+ * they broke while fixing another, how long they sat before running anything.
+ * Stated as an obligation because the failure mode is not misusing it — it is
+ * skipping it and aiming the next question at a score.
+ */
+function replayDoctrine() {
+  return `A verdict tells you almost nothing about a learner. Two people reach 6/7 by completely different routes, and the one who fixed a case in ninety seconds is not the one who broke two others getting there. replay_attempt gives you the attempt's raw log to see the difference with: every recorded event in order with its offset, every test case's result inside every run with its expected and actual values, plus the per-case history across runs and each run's newly-passing and newly-failing sets. It states no conclusions — reading it is your job. Call it before you judge a completed attempt, and again on any later turn where the learner's own behaviour is what is in question. Default to taking the whole log; narrow with eventTypes, cases, scope or maxLines only when the attempt is long or you genuinely need one metric, and when a log comes back truncated raise maxLines rather than guessing at what was cut.
+
+These are the readings that have carried the most, and you are expected to find others. A case that never passed across several runs is where the misconception lives, and it is worth far more than the total. A case that passed and then failed again is the sharpest thing in the log: their fix for one thing broke another, so the two are not separate in their model of the problem. A hidden case first seen on a submission tells you what they could not have known; a visible case failed repeatedly tells you what they could read and still could not do. Offsets are evidence too — a long stretch before the first run, a run after nearly every save, a long quiet gap before a correct fix — and so is work recorded after the grade, which counts for nothing and still says a lot.
+
+Then aim the next question at what the behaviour exposes rather than at the score, and cite the actual moment when you speak to the learner: "the shrink case was passing at +12:36 and broke when you fixed the total" is worth more to them than any summary, and it is how they learn Spar is really watching. Quote only what the log contains — offsets, case names, values — and never dress an event up as a motive. The log says what happened, never why. When the why matters for aiming the next question, and it usually does, ask them with ask_user_question and name the exact moment you are asking about. Asking is a first-class outcome of reading a log rather than a failure to decide: a question that makes the next challenge land beats a confident guess that misses, so do not hesitate to ask, and ask again whenever a later attempt raises something new.`;
+}
 
 /**
  * Concepts and Abilities, stated as obligations rather than as features.

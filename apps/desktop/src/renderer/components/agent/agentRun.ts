@@ -122,6 +122,7 @@ const TOOL_VERBS: Record<string, string> = {
   read_challenge: "Read challenge history",
   upsert_ability: "Updated ability",
   inspect_current_attempt: "Inspected your attempt",
+  replay_attempt: "Read your solve",
   evaluate_attempt: "Evaluated your attempt",
   propose_ability_update: "Updated ability document",
   commit_session_decision: "Committed next action",
@@ -139,6 +140,7 @@ export function toolVerb(tool: string, running: boolean, rejected = false): stri
   return settled
     .replace(/^Searched/, "Searching")
     .replace(/^Read\b/, "Reading")
+    .replace(/^Replayed\b/, "Replaying")
     .replace(/^Asked/, "Asking")
     .replace(/^Set\b/, "Setting")
     .replace(/^Created/, "Creating")
@@ -159,6 +161,7 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   read_concept_graph: ["Read concept context", "Read concept context"],
   search_concept_evidence: ["Check concept evidence", "Checked concept evidence"],
   inspect_current_attempt: ["Inspect current attempt", "Inspected current attempt"],
+  replay_attempt: ["Read how you solved it", "Read how you solved it"],
   evaluate_attempt: ["Evaluate attempt", "Evaluated attempt"],
   set_session_objective: ["Update session objective", "Updated session objective"],
   set_training_target: ["Update training target", "Updated training target"],

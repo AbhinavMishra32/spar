@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTestOutput } from "./testReport";
+import { caseRecords, parseTestOutput, runEvidence } from "./testReport.js";
 
 /* Verbatim `node --test` output (Node 22, piped stdio) for a two-case visible
    file plus a hidden file, with the stacks trimmed. Submissions used to reach
@@ -92,6 +92,29 @@ describe("parseTestOutput", () => {
 
     expect(hidden?.failure?.expected).toBe("[ 30 ]");
     expect(hidden?.failure?.actual).toBe("[ 29 ]");
+  });
+
+  it("records each case durably, and keeps raw output only when there are no cases", () => {
+    const evidence = runEvidence(SUBMISSION);
+
+    expect(evidence.passedCases).toBe(1);
+    expect(evidence.failedCases).toBe(2);
+    expect(evidence.cases.map((item) => item.status)).toEqual(["failed", "passed", "failed"]);
+    expect(evidence.cases[0]?.expected).toBe("3");
+    // A recorded run carries cases instead of the log it parsed them out of.
+    expect(evidence.summary).toBe("");
+
+    const cpp = runEvidence("tests/hidden.test.cpp:12: assertion failed\n");
+    expect(cpp.cases).toEqual([]);
+    expect(cpp.summary).toBe("tests/hidden.test.cpp:12: assertion failed");
+  });
+
+  it("clips an assertion value rather than storing a whole dump in the attempt", () => {
+    const long = `TAP version 13\nnot ok 1 - big\n  ---\n  expected: '${"x".repeat(400)}'\n  ...\n`;
+    const [record] = caseRecords(parseTestOutput(long));
+
+    expect(record?.expected).toHaveLength(221);
+    expect(record?.expected?.endsWith("…")).toBe(true);
   });
 
   it("reports output with no TAP in it as unparsed rather than as zero cases", () => {

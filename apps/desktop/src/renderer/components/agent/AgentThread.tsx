@@ -4,7 +4,7 @@ import { ThinkingOrb } from "thinking-orbs";
 import type { SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { ActivityGroup, ChallengePublished, RunFailure } from "./ActivityRow";
+import { ActivityGroup, ChallengePublished, RunFailure, SolveRead } from "./ActivityRow";
 import { SystemEvent } from "./SystemEvent";
 import { isChallengePublished, type AgentRun, type RunPart } from "./agentRun";
 
@@ -17,6 +17,7 @@ function LiveRun({ run }: { run: AgentRun }) {
     | NonToolPart
     | { kind: "activity-group"; id: string; parts: ToolPart[] }
     | { kind: "challenge"; id: string; part: ToolPart }
+    | { kind: "solve-read"; id: string; part: ToolPart }
   > = [];
   for (const part of run.parts) {
     const previous = grouped.at(-1);
@@ -24,6 +25,9 @@ function LiveRun({ run }: { run: AgentRun }) {
     // outcome of the turn rather than another step toward it, and folding it
     // back in among the retrieval rows is what made it disappear.
     if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
+    // Reading the solve leaves the group for the same reason: it is what the
+    // rest of the turn is a response to.
+    else if (part.kind === "tool" && part.tool === "replay_attempt" && part.phase !== "error") grouped.push({ kind: "solve-read", id: `solve-${part.id}`, part });
     else if (part.kind === "tool" && previous?.kind === "activity-group") previous.parts.push(part);
     else if (part.kind === "tool") grouped.push({ kind: "activity-group", id: `group-${part.id}`, parts: [part] });
     else grouped.push(part);
@@ -40,6 +44,7 @@ function LiveRun({ run }: { run: AgentRun }) {
         }
         if (part.kind === "activity-group") return <ActivityGroup key={part.id} parts={part.parts} />;
         if (part.kind === "challenge") return <ChallengePublished key={part.id} part={part.part} />;
+        if (part.kind === "solve-read") return <SolveRead key={part.id} part={part.part} />;
         if (part.kind === "error") return <RunFailure key={part.id} body={part.body} />;
         return (
           <div key={part.id} className="min-w-0 truncate px-1.5 text-ui-sm text-muted-foreground/70">

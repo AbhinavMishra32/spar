@@ -104,6 +104,12 @@ export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visi
    *  rather than only afterwards in history. */
   concepts: z.array(conceptTagSchema),
   attemptId: id,
+  /** When the clock started. The learner sees it running while they work, and it
+   *  is the zero every offset in a solve replay is measured from. */
+  attemptStartedAt: isoDate,
+  /** Set once the attempt is graded or given up on, which is what stops the
+   *  timer — work after this point is still recorded, but it is practice. */
+  attemptCompletedAt: isoDate.nullable(),
   latestEventSequence: z.number().int().min(-1)
 });
 export type ActiveQuestion = z.infer<typeof activeQuestionSchema>;
