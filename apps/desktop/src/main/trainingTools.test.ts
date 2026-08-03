@@ -94,6 +94,52 @@ describe("replay_attempt", () => {
   });
 });
 
+/**
+ * The loop this prevents: submitting completes the attempt, and every lifecycle
+ * guard read the still-present question as "a challenge is already active" — so
+ * the turn whose whole job is to publish the next challenge was refused fifteen
+ * times, then refused its fallback, and the session stalled with nothing to do.
+ */
+describe("challenge lifecycle after a solve", () => {
+  it("publishes the next challenge once the attempt is complete", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise loops");
+      store.setTrainingTarget(sessionId, { ability: "Loops", specificGap: "Boundaries", desiredEvidence: "Stops on an exact hit", avoidTesting: [] });
+      const solved = store.createQuestion(sessionId, design("Repair the stopping boundary"), { valid: true });
+
+      // While the learner is on it, a second challenge is correctly refused.
+      const during = await executeTrainingTool("create_question", { title: "Something else" }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; report: { checks: Array<{ name: string; detail: string }> } };
+      expect(during.status).toBe("invalid");
+      expect(during.report.checks[0]?.detail).toContain("already active");
+
+      store.completeAttempt(solved.attemptId, "passed");
+
+      // And once it is solved the lifecycle no longer blocks the next one: the
+      // candidate reaches validation, which is where a candidate belongs. It is
+      // still rejected here — the stub runner passes every run, so the
+      // misconception never fails its hidden tests — but for its design rather
+      // than for the session's state.
+      const after = await executeTrainingTool("create_question", design("Transfer the boundary fix"), sessionId, store, workspaceStub(), passingRunner()) as { status: string; report: { checks: Array<{ name: string; passed: boolean; detail: string }> } };
+
+      expect(after.report.checks.map((check) => check.detail).join(" ")).not.toContain("already active");
+      expect(after.report.checks.some((check) => check.name.includes("fails hidden") && !check.passed)).toBe(true);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+/** Enough of the sandbox for a compilation to run without touching a disk. */
+function workspaceStub(): WorkspaceService {
+  return { writeValidation: async () => "/tmp/spar-test", removeValidation: async () => undefined, writeAll: async () => undefined } as unknown as WorkspaceService;
+}
+
+/** Every run passes, which is exactly what a candidate must not be able to do. */
+function passingRunner(): UtilityClient {
+  return { request: () => ({ id: "run", promise: Promise.resolve({ exitCode: 0, stdout: "", stderr: "", durationMs: 1 }) }) } as unknown as UtilityClient;
+}
+
 function design(title: string) {
   return {
     title,

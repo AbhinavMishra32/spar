@@ -42,7 +42,7 @@ export async function executeTrainingTool(
     return { pending: true, ...local.setPendingIntake(sessionId, value as AskUserQuestionInput) };
   }
   if (name === "create_question") {
-    const activeQuestion = local.readSession(sessionId)?.question;
+    const activeQuestion = openChallenge(local, sessionId);
     if (activeQuestion) {
       return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${activeQuestion.title}) is already active for this session. End this agent turn instead of publishing another challenge.` }] } };
     }
@@ -51,7 +51,7 @@ export async function executeTrainingTool(
     if (duplicateTitle) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `A prior question in this session is already titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
     const compiled = await compileCandidate(input, sessionId, workspaces, runner);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
-    const questionCreatedWhileCompiling = local.readSession(sessionId)?.question;
+    const questionCreatedWhileCompiling = openChallenge(local, sessionId);
     if (questionCreatedWhileCompiling) {
       return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${questionCreatedWhileCompiling.title}) was published while this candidate compiled. This candidate was discarded.` }] } };
     }
@@ -66,7 +66,7 @@ export async function executeTrainingTool(
      comes from the design being written against the build contract, never from
      trusting it. */
   if (name === "create_fallback_question") {
-    if (local.readSession(sessionId)?.question) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "A challenge is already active for this session." }] } };
+    if (openChallenge(local, sessionId)) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "A challenge is already active for this session." }] } };
     const language = value.language === "typescript" || value.language === "cpp" ? value.language : "javascript";
     const design = fallbackDesign(language);
     const compiled = await compileCandidate(design, sessionId, workspaces, runner);
@@ -80,7 +80,7 @@ export async function executeTrainingTool(
     return { status: "playable", question, report: compiled.report, fallback: true };
   }
   if (name === "replace_current_question") {
-    const activeQuestion = local.readSession(sessionId)?.question;
+    const activeQuestion = openChallenge(local, sessionId);
     if (!activeQuestion) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "There is no active challenge to replace." }] } };
     const compiled = await compileCandidate(input, sessionId, workspaces, runner);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
@@ -97,6 +97,22 @@ export async function executeTrainingTool(
   if (name === "propose_ability_update") {const updated=local.updateAbility({abilityId:String(value.abilityId),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   throw new Error(`Unsupported Spar tool: ${name}`);
+}
+
+/**
+ * The challenge the learner is still on, or null.
+ *
+ * `readSession` returns the newest question whatever became of it, so a solved
+ * one is still there — and every lifecycle guard here read that as "a challenge
+ * is already active". The turn that runs right after a learner solves something
+ * is exactly the turn that must publish the next challenge, so it was refused
+ * fifteen times in a row and then refused its fallback for the same reason. The
+ * attempt's completion is the honest signal: while it is open the learner can
+ * still submit, and once it closes the session is waiting for what is next.
+ */
+function openChallenge(local: LocalStore, sessionId: string) {
+  const question = local.readSession(sessionId)?.question;
+  return question && !question.attemptCompletedAt ? question : null;
 }
 
 /**

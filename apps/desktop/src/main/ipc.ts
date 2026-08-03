@@ -62,7 +62,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          any attempt exists to calibrate it from. `preferredLanguage` is the
          default the instructions read — a stated language in the goal still wins. */
       const profile=deps.store.getProfile();
-      const payload={sessionId,message,turnKind,activeQuestion:session.question?{id:session.question.id,attemptId:session.question.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
+      const payload={sessionId,message,turnKind,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
       /* A run is claimed by its session for as long as it is in flight, in two
          places: `activeAgentRuns` guards against a second turn, and
          `agentRunSessions` is what lets the main process stamp a session id onto
@@ -263,7 +263,18 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
 
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
     const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
-    if(deps.store.pendingIntake(sessionId)){deps.store.answerIntake(sessionId,input.message.trim());return startAgentTurn(sessionId,`The learner answered the cold-start placement question: ${input.message.trim()}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`,"learner","session-start");}
+    if(deps.store.pendingIntake(sessionId)){
+      deps.store.answerIntake(sessionId,input.message.trim());
+      /* An answer given while a challenge is open is context for that challenge,
+         not the start of a session: the agent asked something about work in
+         progress, and a session-start turn would try to publish a second
+         challenge over the one the learner is still on. */
+      const answered=deps.store.readSession(sessionId);
+      if(answered&&openQuestion(answered)){
+        return startAgentTurn(sessionId,`The learner answered your question: ${input.message.trim()}\nUse it as evidence about the challenge they are working on now. A challenge is already active, so do not create another one.`,"learner","learner-message");
+      }
+      return startAgentTurn(sessionId,`The learner answered the cold-start placement question: ${input.message.trim()}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`,"learner","session-start");
+    }
     const session=deps.store.readSession(sessionId);
     const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
     return startAgentTurn(sessionId,input.message.trim(),"learner",turnKind);
@@ -411,6 +422,19 @@ function withoutFinalReply(activity: AgentActivityStep[], reply: string): AgentA
   if (last?.kind !== "note") return activity;
   const said = last.text.trim();
   return said && (body.startsWith(said) || said.startsWith(body)) ? activity.slice(0, -1) : activity;
+}
+
+/**
+ * Whether the session has a challenge the learner is still on.
+ *
+ * `readSession` returns the newest question whatever became of it, so a solved
+ * one is still there — and treating that as active is what made an
+ * attempt-complete turn look like a session that already had a challenge. The
+ * attempt's own completion is the honest signal: while it is open the learner can
+ * still submit, and once it closes the session is waiting for what comes next.
+ */
+function openQuestion(session: { question: { attemptCompletedAt: string | null } | null }): boolean {
+  return Boolean(session.question && !session.question.attemptCompletedAt);
 }
 
 function zUuid(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Invalid identifier"); return value; }

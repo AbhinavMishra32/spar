@@ -50,6 +50,12 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     return { activeTools: [], toolChoice: "none" };
   }
   if (playableQuestion) return { activeTools: [], toolChoice: "none" };
+  /* A challenge the learner has not finished is the session's current state, and
+     the host refuses to publish a second one over it. Forcing create_question
+     here spent the whole compilation budget on candidates that were rejected for
+     lifecycle before they were ever compiled — fifteen times, then a fallback
+     that was refused for the same reason. There is nothing for this turn to do. */
+  if (context.hasActiveQuestion) return { activeTools: [], toolChoice: "none" };
   if (turnKind === "session-start") {
     const retrieval = ["search_learner_model", "search_attempt_history"].find((name) => !completed(name));
     if (retrieval) return { activeTools: [retrieval], toolChoice: "required" };
