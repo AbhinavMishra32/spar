@@ -75,3 +75,4 @@ it("reports a CommonJS target whose return contract hides the misconception",asy
 it("executes real visible and hidden tests against reference and plausible wrong code",async()=>{
   const compiled=await compileQuestion(actual,run);expect(compiled.report.valid).toBe(true);expect(compiled.report.checks.find(check=>check.name==="known incorrect 1 passes visible")?.passed).toBe(true);expect(compiled.report.checks.find(check=>check.name==="known incorrect 1 fails hidden")?.passed).toBe(true);expect(compiled.report.checks.find(check=>check.name==="reference solution")?.passed).toBe(true);
 });
+
