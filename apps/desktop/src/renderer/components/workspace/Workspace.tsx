@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
-import { FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
+import { Check, FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
 import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { runEvidence } from "../../../shared/testReport";
@@ -79,6 +79,13 @@ export function Workspace({
   const visibleRunId = useRef<string | null>(null);
   const terminalRef = useRef("");
   const readOnly = Boolean(question.files.find((file) => file.path === activeFile)?.readOnly);
+  /* Only a submission that passes everything completes the attempt, so this is
+     true exactly when the challenge is solved. A failed submission leaves the
+     attempt open to be submitted again, which is what makes solving it the
+     point; the two ways out are passing and giving up. Submitting a completed
+     attempt used to come back as "Active attempt not found", because the store
+     only bundles an active one. */
+  const graded = Boolean(question.attemptCompletedAt);
   const agentBusy = sending || run?.status === "streaming";
 
   const load = useCallback(
@@ -174,7 +181,7 @@ export function Workspace({
   };
 
   const submit = async () => {
-    if (!api || running || submitting) return;
+    if (!api || running || submitting || question.attemptCompletedAt) return;
     try {
       setSubmitting(true);
       setOutcome(null);
@@ -304,9 +311,9 @@ export function Workspace({
             <AttemptClock completedAt={question.attemptCompletedAt} startedAt={question.attemptStartedAt} />
             <button
               className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
-              disabled={running || submitting || givingUp}
+              disabled={running || submitting || givingUp || graded}
               onClick={() => setGiveUpOpen(true)}
-              title="End this challenge and go back to chat"
+              title={graded ? "You solved this one" : "Stop here without solving it and move on"}
               type="button"
             >
               <Flag className="size-3" />
@@ -331,12 +338,13 @@ export function Workspace({
                  the theme, and it is what the rest of the app already uses for the
                  one action a surface is about. */
               className="inline-flex h-6 items-center gap-1.5 rounded-md bg-primary px-2 text-ui font-medium text-primary-foreground shadow-[var(--app-shadow-card)] transition-colors hover:bg-primary/85 active:translate-y-px disabled:pointer-events-none disabled:opacity-45"
-              disabled={running || submitting}
+              disabled={running || submitting || graded}
               onClick={() => void submit()}
+              title={graded ? "Solved. Spar is setting up what comes next." : "Runs the visible and hidden cases. If any still fail you can fix them and submit again."}
               type="button"
             >
-              {submitting ? <Loader2 className="size-3 animate-spin" /> : <Send className="size-3" />}
-              {submitting ? "Judging…" : "Submit"}
+              {submitting ? <Loader2 className="size-3 animate-spin" /> : graded ? <Check className="size-3" /> : <Send className="size-3" />}
+              {submitting ? "Judging…" : graded ? "Solved" : "Submit"}
             </button>
           </>
         }
