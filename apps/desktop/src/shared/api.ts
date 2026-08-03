@@ -151,7 +151,9 @@ export interface SparApi {
   readWorkspaceFile(input: z.infer<typeof workspacePathInput>): Promise<string>;
   writeWorkspaceFile(input: z.infer<typeof workspaceWriteInput>): Promise<void>;
   run(input: z.infer<typeof runInput>): Promise<{ id: string }>;
-  submitAttempt(input:{sessionId:string;attemptId:string}):Promise<{outcome:"passed"|"failed";exitCode:number;summary:string}>;
+  /** `output` is the runner's own stdout+stderr, so the result panel can read the
+      submission as test cases instead of only reporting the verdict. */
+  submitAttempt(input:{sessionId:string;attemptId:string}):Promise<{outcome:"passed"|"failed";exitCode:number;durationMs:number;output:string;summary:string}>;
   sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
   /** Give up on the active challenge; the session returns to general chat. */
   abandonAttempt(input: { sessionId: string; attemptId: string; reason: string }): Promise<void>;
@@ -175,7 +177,7 @@ export interface SparApi {
   /** Runs the visible cases; output streams over `onRunnerEvent` under this id. */
   runChallenge(input: z.infer<typeof challengeIdInput>): Promise<{ id: string }>;
   /** Visible plus hidden, in a throwaway copy of the sandbox. Awaited, not streamed. */
-  checkChallenge(input: z.infer<typeof challengeIdInput>): Promise<{ outcome: "passed" | "failed"; exitCode: number; summary: string }>;
+  checkChallenge(input: z.infer<typeof challengeIdInput>): Promise<{ outcome: "passed" | "failed"; exitCode: number; durationMs: number; output: string; summary: string }>;
   /** Throws the learner's practice edits away and re-seeds from the generated files. */
   resetChallenge(input: z.infer<typeof challengeIdInput>): Promise<ChallengeDetail | null>;
   /* ---- Concepts and abilities -------------------------------------------

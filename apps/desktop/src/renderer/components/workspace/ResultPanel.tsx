@@ -115,6 +115,7 @@ export function ResultPanel({
   testFiles,
   terminal,
   running,
+  busyLabel,
   outcome,
   events,
   onClearTerminal,
@@ -130,6 +131,9 @@ export function ResultPanel({
   testFiles: Record<string, string>;
   terminal: string;
   running: boolean;
+  /** What is in flight — a submission runs the hidden suite too, so saying
+      "visible cases" through that wait would be a lie. */
+  busyLabel?: string | undefined;
   outcome: RunOutcome;
   /** Omitted where there is no attempt to show — the tab goes with it. */
   events?: SessionDetail["events"];
@@ -267,7 +271,7 @@ export function ResultPanel({
           {running ? (
             <div className="flex flex-1 items-center gap-2 px-3 py-3 text-ui text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
-              Running the visible cases…
+              {busyLabel ?? "Running the visible cases…"}
             </div>
           ) : !terminal ? (
             <div className="flex flex-1 items-center gap-2 px-3 py-3 text-ui text-muted-foreground/70">

@@ -175,12 +175,17 @@ export function Workspace({
     if (!api || running || submitting) return;
     try {
       setSubmitting(true);
+      setOutcome(null);
       setResultTab("result");
       dock.current?.expand();
       await save();
-      setTerminal((value) => {const next=`${value}\n$ submit visible + hidden tests\n`;terminalRef.current=next;return next;});
+      // The submission replaces the visible run rather than appending to it: two
+      // TAP documents in one buffer read as one confused report.
+      terminalRef.current="$ submit visible + hidden tests\n";
+      setTerminal(terminalRef.current);
       const result = await api.submitAttempt({ sessionId: detail.summary.id, attemptId: question.attemptId });
-      setTerminal((value) => {const next=`${value}\n${result.summary}\n`;terminalRef.current=next;return next;});
+      terminalRef.current=`${terminalRef.current}${result.output}${result.output.endsWith("\n")?"":"\n"}${result.summary}\n`;
+      setTerminal(terminalRef.current);
       setOutcome({ kind: result.outcome, summary: result.summary });
       await onRefresh();
     } catch (error) {
@@ -493,9 +498,10 @@ export function Workspace({
                   onClearTerminal={() => {terminalRef.current="";setTerminal("");}}
                   onCollapse={() => dock.current?.collapse()}
                   onTab={setResultTab}
+                  busyLabel={submitting ? "Running the visible and hidden cases…" : undefined}
                   outcome={outcome}
                   question={question}
-                  running={running}
+                  running={running || submitting}
                   tab={resultTab}
                   terminal={terminal}
                   testFiles={testFiles}

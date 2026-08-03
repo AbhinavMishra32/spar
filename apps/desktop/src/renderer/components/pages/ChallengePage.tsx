@@ -377,10 +377,12 @@ export function ChallengePage({
       setResultTab("result");
       dock.current?.expand();
       await save();
-      terminalRef.current = `${terminalRef.current}\n$ check visible + hidden tests\n`;
+      // The check replaces the visible run rather than appending to it: two TAP
+      // documents in one buffer read as one confused report.
+      terminalRef.current = "$ check visible + hidden tests\n";
       setTerminal(terminalRef.current);
       const result = await api.checkChallenge({ challengeId });
-      terminalRef.current = `${terminalRef.current}${result.summary}\n`;
+      terminalRef.current = `${terminalRef.current}${result.output}${result.output.endsWith("\n") ? "" : "\n"}${result.summary}\n`;
       setTerminal(terminalRef.current);
       setOutcome({ kind: result.outcome, summary: result.summary });
     } catch (error) {
@@ -594,6 +596,7 @@ export function ChallengePage({
                   }}
                   onCollapse={() => dock.current?.collapse()}
                   onTab={setResultTab}
+                  busyLabel={checking ? "Running the visible and hidden cases…" : undefined}
                   outcome={outcome}
                   question={{ visibleTestFiles }}
                   running={running || checking}

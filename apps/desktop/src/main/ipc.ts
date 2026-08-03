@@ -237,7 +237,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return {
       outcome: result.exitCode === 0 ? "passed" as const : "failed" as const,
       exitCode: result.exitCode,
-      summary: `${result.stdout}\n${result.stderr}`.trim().slice(-12_000),
+      durationMs: result.durationMs,
+      output: runOutput(result.stdout, result.stderr),
+      summary: result.exitCode === 0 ? "All visible and hidden tests passed." : "The check failed one or more deterministic tests.",
     };
   });
   ipcMain.handle(ipc.challengeReset, async (_event, value) => {
@@ -254,7 +256,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
     return startAgentTurn(sessionId,input.message.trim(),"learner",turnKind);
   });
-  ipcMain.handle(ipc.attemptSubmit,async(_event,value)=>{const input=value as {sessionId?:unknown;attemptId?:unknown};const sessionId=zUuid(input.sessionId);const attemptId=zUuid(input.attemptId);const bundle=deps.store.submissionBundle(attemptId);if(!bundle||bundle.session_id!==sessionId)throw new Error("Active attempt not found");const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,summary:`${result.stdout}\n${result.stderr}`.trim().slice(-12000)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");append("attempt_completed",{outcome},"system");deps.store.completeAttempt(attemptId,outcome);void startAgentTurn(sessionId,`The learner submitted attempt ${attemptId}. Deterministic visible and hidden tests produced outcome ${outcome} with exit code ${result.exitCode}. Inspect the attempt events and test evidence, update the relevant ability document, commit exactly one next pedagogical action, then create the next validated question from that decision. The new target and question must explicitly respond to this attempt without overreacting to it.`,"system","attempt-complete");return{outcome,exitCode:result.exitCode,summary:outcome==="passed"?"All visible and hidden tests passed.":"The submission failed one or more deterministic tests."};});
+  ipcMain.handle(ipc.attemptSubmit,async(_event,value)=>{const input=value as {sessionId?:unknown;attemptId?:unknown};const sessionId=zUuid(input.sessionId);const attemptId=zUuid(input.attemptId);const bundle=deps.store.submissionBundle(attemptId);if(!bundle||bundle.session_id!==sessionId)throw new Error("Active attempt not found");const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,summary:`${result.stdout}\n${result.stderr}`.trim().slice(-12000)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");append("attempt_completed",{outcome},"system");deps.store.completeAttempt(attemptId,outcome);void startAgentTurn(sessionId,`The learner submitted attempt ${attemptId}. Deterministic visible and hidden tests produced outcome ${outcome} with exit code ${result.exitCode}. Inspect the attempt events and test evidence, update the relevant ability document, commit exactly one next pedagogical action, then create the next validated question from that decision. The new target and question must explicitly respond to this attempt without overreacting to it.`,"system","attempt-complete");return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output:runOutput(result.stdout,result.stderr),summary:outcome==="passed"?"All visible and hidden tests passed.":"The submission failed one or more deterministic tests."};});
   ipcMain.handle(ipc.authPassword, async (_event, value) => { const input = value as { mode: "sign-in" | "sign-up"; email?: unknown; password?: unknown }; if ((input.mode !== "sign-in" && input.mode !== "sign-up") || typeof input.email !== "string" || typeof input.password !== "string") throw new Error("Email and password are required"); return deps.auth.password(input.mode, input.email, input.password); });
   /* Suggestions are drafted, never stored: until the learner opens one it is not
      evidence about them, and the intake it came from is already on disk. */
@@ -358,6 +360,20 @@ function starterSuggestions(profile: LearnerProfile): SessionSuggestion[] {
   return weakness
     ? [{ title: "Your stated weak spot", goal: weakness, why: "Straight from what you told Spar you get stuck on." }, ...seeds]
     : seeds;
+}
+
+/**
+ * A submission's own output, for the result panel to read as test cases. The
+ * head is kept rather than the tail: the TAP header and the earliest failures
+ * are what the panel parses, and a run long enough to be cut has already said
+ * everything the learner needs before the cut.
+ */
+const MAX_SUBMIT_OUTPUT = 200_000;
+function runOutput(stdout: string, stderr: string) {
+  const combined = `${stdout}${stderr ? `${stdout.endsWith("\n") || !stdout ? "" : "\n"}${stderr}` : ""}`;
+  return combined.length > MAX_SUBMIT_OUTPUT
+    ? `${combined.slice(0, MAX_SUBMIT_OUTPUT)}\n…output truncated.\n`
+    : combined;
 }
 
 function zUuid(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Invalid identifier"); return value; }

@@ -1,0 +1,102 @@
+import { describe, expect, it } from "vitest";
+import { parseTestOutput } from "./testReport";
+
+/* Verbatim `node --test` output (Node 22, piped stdio) for a two-case visible
+   file plus a hidden file, with the stacks trimmed. Submissions used to reach
+   the result panel as a single prose sentence, so nothing here was ever parsed
+   and every submission rendered as raw output. */
+const SUBMISSION = `TAP version 13
+# Subtest: adds two numbers
+not ok 1 - adds two numbers
+  ---
+  duration_ms: 1.6075
+  type: 'test'
+  location: '/tmp/spar/validation/a.test.js:4:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+
+    2 !== 3
+
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 3
+  actual: 2
+  operator: 'strictEqual'
+  ...
+# Subtest: adds zero
+ok 2 - adds zero
+  ---
+  duration_ms: 0.407625
+  type: 'test'
+  ...
+# Subtest: hidden big numbers
+not ok 3 - hidden big numbers
+  ---
+  duration_ms: 2.726208
+  type: 'test'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+
+      [
+    +   29
+    -   30
+      ]
+
+  code: 'ERR_ASSERTION'
+  expected:
+    0: 30
+  actual:
+    0: 29
+  operator: 'deepStrictEqual'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 1
+# fail 2
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 122.505833
+`;
+
+describe("parseTestOutput", () => {
+  it("reads a submission's visible and hidden cases as structured results", () => {
+    const report = parseTestOutput(SUBMISSION);
+
+    expect(report.parsed).toBe(true);
+    expect(report.cases.map((item) => [item.ordinal, item.name, item.status])).toEqual([
+      [1, "adds two numbers", "failed"],
+      [2, "adds zero", "passed"],
+      [3, "hidden big numbers", "failed"],
+    ]);
+    expect(report.passed).toBe(1);
+    expect(report.failed).toBe(2);
+    expect(report.durationMs).toBeCloseTo(122.505833);
+  });
+
+  it("keeps the expected/actual pair a failure is judged on", () => {
+    const [first] = parseTestOutput(SUBMISSION).cases;
+
+    expect(first?.failure?.expected).toBe("3");
+    expect(first?.failure?.actual).toBe("2");
+    expect(first?.failure?.operator).toBe("strictEqual");
+    expect(first?.failure?.location).toBe("validation/a.test.js:4:1");
+    expect(first?.durationMs).toBeCloseTo(1.6075);
+  });
+
+  it("rebuilds a non-scalar expected value from Node's nested map", () => {
+    const hidden = parseTestOutput(SUBMISSION).cases[2];
+
+    expect(hidden?.failure?.expected).toBe("[ 30 ]");
+    expect(hidden?.failure?.actual).toBe("[ 29 ]");
+  });
+
+  it("reports output with no TAP in it as unparsed rather than as zero cases", () => {
+    // The C++ toolchain, and any run that dies before the runner starts.
+    expect(parseTestOutput("The submission failed one or more deterministic tests.").parsed).toBe(false);
+    expect(parseTestOutput("g++: error: unrecognized command-line option").cases).toEqual([]);
+  });
+});
