@@ -126,7 +126,7 @@ export type AgentStreamEvent = {
    *  the utility process only knows its own request id — and a card the learner
    *  is not looking at still has to be able to say "the agent is on this one". */
   sessionId?: string;
-  type: "text" | "tool" | "status" | "error" | "done";
+  type: "text" | "reasoning" | "tool" | "status" | "error" | "done";
   text?: string;
   tool?: string;
   detail?: string;

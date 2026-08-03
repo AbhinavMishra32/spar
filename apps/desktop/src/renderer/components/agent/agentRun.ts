@@ -4,6 +4,10 @@ export type ToolPhase = "running" | "done" | "error";
 
 export type RunPart =
   | { kind: "text"; id: string; body: string }
+  /** The model's own reasoning, streamed in as it arrives. `open` while more is
+   *  still coming, which is what makes it read as thinking rather than as a
+   *  block that appears finished. */
+  | { kind: "reasoning"; id: string; body: string; open: boolean; startedAt: number; endedAt?: number }
   | {
       kind: "tool";
       id: string;
@@ -43,8 +47,32 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
     case "text": {
       const text = event.text ?? "";
       if (!text) return run;
-      if (last?.kind === "text") parts[parts.length - 1] = { ...last, body: last.body + text };
-      else parts.push({ kind: "text", id: `${event.runId}-t${parts.length}`, body: text });
+      // A word of the answer closes the thinking that produced it.
+      const settled = closeReasoning(parts);
+      const tail = settled[settled.length - 1];
+      if (tail?.kind === "text") settled[settled.length - 1] = { ...tail, body: tail.body + text };
+      else settled.push({ kind: "text", id: `${event.runId}-t${settled.length}`, body: text });
+      return { ...run, parts: settled, status: "streaming" };
+    }
+
+    /* Reasoning accumulates into the open block, and a new block starts whenever
+       the last thing in the transcript is not one — so thinking that resumes
+       after a tool call reads as a second thought rather than as more of the
+       first. */
+    case "reasoning": {
+      if (event.phase === "end") return { ...run, parts: closeReasoning(parts), status: "streaming" };
+      const text = event.text ?? "";
+      if (event.phase === "start") {
+        const settled = closeReasoning(parts);
+        settled.push({ kind: "reasoning", id: `${event.runId}-r${settled.length}`, body: "", open: true, startedAt: Date.now() });
+        return { ...run, parts: settled, status: "streaming" };
+      }
+      if (!text) return run;
+      if (last?.kind === "reasoning" && last.open) {
+        parts[parts.length - 1] = { ...last, body: last.body + text };
+      } else {
+        parts.push({ kind: "reasoning", id: `${event.runId}-r${parts.length}`, body: text, open: true, startedAt: Date.now() });
+      }
       return { ...run, parts, status: "streaming" };
     }
 
@@ -52,6 +80,8 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       const tool = event.tool ?? "tool";
       const id = event.callId ?? `${event.runId}-x${parts.length}`;
       const index = parts.findIndex((part) => part.kind === "tool" && part.id === id);
+      // A call starting closes the thinking that decided on it.
+      if (event.phase !== "end" && index < 0) closeReasoning(parts, true);
 
       if (event.phase === "end") {
         if (index < 0) return run;
@@ -94,11 +124,59 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       return { ...run, parts, status: "error" };
 
     case "done":
-      return { ...run, parts, status: "done" };
+      return { ...run, parts: closeReasoning(parts), status: "done" };
 
     default:
       return run;
   }
+}
+
+/**
+ * Settles the open reasoning block, if there is one, and stamps when it closed so
+ * the collapsed row can say how long it thought. Mutates in place when asked, for
+ * the caller that is already building the next part onto the same array.
+ */
+function closeReasoning(parts: RunPart[], inPlace = false): RunPart[] {
+  const target = inPlace ? parts : [...parts];
+  const index = target.length - 1;
+  const last = target[index];
+  if (last?.kind === "reasoning" && last.open) target[index] = { ...last, open: false, endedAt: Date.now() };
+  return target;
+}
+
+export type ToolPart = Extract<RunPart, { kind: "tool" }>;
+
+/** A transcript row: either one part, or a run of consecutive tool calls shown as
+ *  one collapsible group. */
+export type GroupedPart =
+  | Exclude<RunPart, { kind: "tool" }>
+  | { kind: "activity-group"; id: string; parts: ToolPart[] }
+  | { kind: "challenge"; id: string; part: ToolPart }
+  | { kind: "solve-read"; id: string; part: ToolPart };
+
+/**
+ * Rows, in the order everything happened.
+ *
+ * Shared between the live stream and a turn read back from storage: a finished
+ * turn is supposed to look exactly like it did while it ran, and two functions
+ * doing this separately is how that stops being true.
+ */
+export function groupParts(parts: RunPart[]): GroupedPart[] {
+  const grouped: GroupedPart[] = [];
+  for (const part of parts) {
+    const previous = grouped.at(-1);
+    // A published challenge leaves the group it was produced in. It is the
+    // outcome of the turn rather than another step toward it, and folding it
+    // back in among the retrieval rows is what made it disappear.
+    if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
+    // Reading the solve leaves the group for the same reason: it is what the
+    // rest of the turn is a response to.
+    else if (part.kind === "tool" && part.tool === "replay_attempt" && part.phase !== "error") grouped.push({ kind: "solve-read", id: `solve-${part.id}`, part });
+    else if (part.kind === "tool" && previous?.kind === "activity-group") previous.parts.push(part);
+    else if (part.kind === "tool") grouped.push({ kind: "activity-group", id: `group-${part.id}`, parts: [part] });
+    else grouped.push(part);
+  }
+  return grouped;
 }
 
 function isProtocolNoise(body: string): boolean {
@@ -288,6 +366,11 @@ export function runActivity(run: AgentRun | null | undefined): RunActivity | nul
   if (running) return { ...base, state: "working", headlineKey: `tool:${running.id}`, headline: safeToolLabel(running.tool, true) };
 
   const last = run.parts.at(-1);
+  // Thinking is a real state now, so a card says so rather than reporting the
+  // step before it as though the turn had stalled there.
+  if (last?.kind === "reasoning" && last.open) {
+    return { ...base, state: "working", headlineKey: `reasoning:${last.id}`, headline: "Thinking it through" };
+  }
   if (last?.kind === "text") {
     const tail = tailLine(last.body);
     if (tail) return { ...base, state: "working", headlineKey: `text:${last.id}`, headline: tail };

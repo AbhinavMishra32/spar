@@ -4,37 +4,26 @@ import { ThinkingOrb } from "thinking-orbs";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { ActivityGroup, ChallengePublished, RunFailure, SolveRead } from "./ActivityRow";
+import { ActivityGroup, ChallengePublished, Reasoning, RunFailure, SolveRead } from "./ActivityRow";
 import { SystemEvent } from "./SystemEvent";
-import { isChallengePublished, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, type AgentRun, type RunPart } from "./agentRun";
 
 type Message = SessionDetail["messages"][number];
 
 function LiveRun({ run }: { run: AgentRun }) {
-  type ToolPart = Extract<RunPart, { kind: "tool" }>;
-  type NonToolPart = Exclude<RunPart, { kind: "tool" }>;
-  const grouped: Array<
-    | NonToolPart
-    | { kind: "activity-group"; id: string; parts: ToolPart[] }
-    | { kind: "challenge"; id: string; part: ToolPart }
-    | { kind: "solve-read"; id: string; part: ToolPart }
-  > = [];
-  for (const part of run.parts) {
-    const previous = grouped.at(-1);
-    // A published challenge leaves the group it was produced in. It is the
-    // outcome of the turn rather than another step toward it, and folding it
-    // back in among the retrieval rows is what made it disappear.
-    if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
-    // Reading the solve leaves the group for the same reason: it is what the
-    // rest of the turn is a response to.
-    else if (part.kind === "tool" && part.tool === "replay_attempt" && part.phase !== "error") grouped.push({ kind: "solve-read", id: `solve-${part.id}`, part });
-    else if (part.kind === "tool" && previous?.kind === "activity-group") previous.parts.push(part);
-    else if (part.kind === "tool") grouped.push({ kind: "activity-group", id: `group-${part.id}`, parts: [part] });
-    else grouped.push(part);
-  }
   return (
     <div className="min-w-0 space-y-1.5">
-      {grouped.map((part) => {
+      <Rows parts={run.parts} />
+      {run.status === "streaming" && <WaitingLine parts={run.parts} />}
+    </div>
+  );
+}
+
+/** Every row of a turn, live or read back from storage, in the order it happened. */
+function Rows({ parts }: { parts: RunPart[] }) {
+  return (
+    <>
+      {groupParts(parts).map((part) => {
         if (part.kind === "text") {
           return (
             <div key={part.id} className="min-w-0 px-1.5 text-foreground">
@@ -42,6 +31,7 @@ function LiveRun({ run }: { run: AgentRun }) {
             </div>
           );
         }
+        if (part.kind === "reasoning") return <Reasoning key={part.id} part={part} />;
         if (part.kind === "activity-group") return <ActivityGroup key={part.id} parts={part.parts} />;
         if (part.kind === "challenge") return <ChallengePublished key={part.id} part={part.part} />;
         if (part.kind === "solve-read") return <SolveRead key={part.id} part={part.part} />;
@@ -52,22 +42,31 @@ function LiveRun({ run }: { run: AgentRun }) {
           </div>
         );
       })}
-      {run.status === "streaming" && <ThinkingLine parts={run.parts} />}
-    </div>
+    </>
   );
 }
 
-function ThinkingLine({ parts }: { parts: RunPart[] }) {
-  const open = [...parts].reverse().find((part) => part.kind === "tool" && part.phase === "running");
-  // While a tool is open its own row already animates; this line covers the gaps.
-  if (open) return null;
+/**
+ * The gap before the provider has sent anything at all.
+ *
+ * This used to be a permanent "Thinking" row that covered every quiet moment of a
+ * turn, which is what made the transcript look like one opaque label with a tool
+ * list above it — the reasoning and the replies were arriving and the row simply
+ * sat on top of them. Now anything the model is actually doing has its own part
+ * in the transcript, and this only fills the wait before the first token.
+ */
+function WaitingLine({ parts }: { parts: RunPart[] }) {
+  const live = parts.some((part) =>
+    (part.kind === "tool" && part.phase === "running") || (part.kind === "reasoning" && part.open),
+  );
+  if (live || parts.length > 0) return null;
   return (
     <div className="flex items-center gap-2 px-1.5 py-0.5">
       <span className="relative grid size-5 place-items-center">
         <span className="absolute inset-0 rounded-full bg-[var(--accent)]/10 blur-sm" />
-        <ThinkingOrb aria-label="Thinking" size={20} state="working" style={{ width: 18, height: 18 }} />
+        <ThinkingOrb aria-label="Working" size={20} state="working" style={{ width: 18, height: 18 }} />
       </span>
-      <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">Thinking</span>
+      <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">Connecting to the model</span>
     </div>
   );
 }
@@ -81,16 +80,9 @@ function ThinkingLine({ parts }: { parts: RunPart[] }) {
  * what an attempt-complete turn is, and it used to leave nothing behind at all.
  */
 function AgentMessage({ body, activity }: { body: string; activity: AgentActivityStep[] }) {
-  const parts = activity.map((step, index) => settledPart(step, index));
-  const published = parts.filter(isChallengePublished);
-  const solveReads = parts.filter((part) => part.tool === "replay_attempt" && part.phase !== "error");
-  const steps = parts.filter((part) => !published.includes(part) && !solveReads.includes(part));
-
   return (
     <div className="min-w-0 space-y-1.5">
-      {steps.length > 0 && <ActivityGroup parts={steps} />}
-      {solveReads.map((part) => <SolveRead key={part.id} part={part} />)}
-      {published.map((part) => <ChallengePublished key={part.id} part={part} />)}
+      <Rows parts={activity.map(storedPart)} />
       {body.trim() && (
         <div className="min-w-0 px-1.5">
           <Markdown source={body} />
@@ -100,9 +92,19 @@ function AgentMessage({ body, activity }: { body: string; activity: AgentActivit
   );
 }
 
-/** A stored step as the transcript's own part shape. Timing is not kept — how
- *  long a settled call took is not something the row shows. */
-function settledPart(step: AgentActivityStep, index: number): Extract<RunPart, { kind: "tool" }> {
+/** A stored step as the transcript's own part shape, so the rows a finished turn
+ *  draws are the same rows it drew while it was running. */
+function storedPart(step: AgentActivityStep, index: number): RunPart {
+  if (step.kind === "reasoning") {
+    return {
+      kind: "reasoning",
+      id: `stored-${index}-thinking`,
+      body: step.text,
+      open: false,
+      startedAt: 0,
+      endedAt: step.seconds * 1_000,
+    };
+  }
   return {
     kind: "tool",
     id: `stored-${index}-${step.tool}`,

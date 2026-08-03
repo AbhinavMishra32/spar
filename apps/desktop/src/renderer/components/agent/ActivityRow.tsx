@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { BookOpen, Check, ChevronDown, CircleAlert, FilePenLine, History, Search } from "lucide-react";
+import { BookOpen, Brain, Check, ChevronDown, CircleAlert, FilePenLine, History, Search } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -107,6 +107,68 @@ export function ActivityGroup({ parts }: { parts: ToolPart[] }) {
             );
           })}
         </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/**
+ * The model's own reasoning, live.
+ *
+ * While it is arriving the text is shown as it comes, following its own tail so
+ * the newest line is the one in view — the point is that the learner can watch it
+ * think, not read a finished essay. Once it settles it folds to one line saying
+ * how long it took, because a transcript of a long session should be readable and
+ * the thinking is still there to open.
+ *
+ * This replaced a fixed "Thinking" label with a spinner. That label was not
+ * standing in for anything: the reasoning deltas were arriving all along and
+ * being dropped as protocol noise before they reached the transcript.
+ */
+export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning" }> }) {
+  const [open, setOpen] = useState(false);
+  const tail = useRef<HTMLDivElement>(null);
+  const body = part.body.trim();
+
+  useEffect(() => {
+    if (part.open) tail.current?.scrollIntoView({ block: "end" });
+  }, [part.body, part.open]);
+
+  const seconds = Math.max(1, Math.round(((part.endedAt ?? Date.now()) - part.startedAt) / 1_000));
+
+  if (part.open) {
+    return (
+      <div className="min-w-0 px-1.5">
+        <div className="flex items-center gap-2 py-0.5">
+          <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
+          <span className="thinking-shimmer text-ui font-medium">Thinking</span>
+        </div>
+        {body && (
+          <div className="app-scroll relative max-h-24 overflow-y-auto">
+            <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] whitespace-pre-wrap text-muted-foreground/70">
+              {body}
+            </p>
+            <div ref={tail} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (!body) return null;
+  return (
+    <Collapsible onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-left text-ui text-muted-foreground transition-colors hover:bg-accent/50">
+        <span className="grid size-4 shrink-0 place-items-center">
+          <Brain className="size-3.5 text-muted-foreground/70" />
+        </span>
+        <span className="min-w-0 flex-1 truncate">Thought for {seconds}s</span>
+        <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-200", !open && "-rotate-90")} />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <p className="mx-1.5 mb-1 border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] whitespace-pre-wrap text-muted-foreground/75">
+          {body}
+        </p>
       </CollapsibleContent>
     </Collapsible>
   );

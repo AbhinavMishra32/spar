@@ -154,16 +154,22 @@ it("carries a challenge's concepts on its history row, primary first",()=>{const
    answer was a challenge rather than a sentence. */
 it("keeps a turn's activity with the reply it produced",()=>{const store=new LocalStore(":memory:");try{
   const{sessionId}=store.createSession("Practise sliding windows");
+  const tool=(tool:string,label:string,detail:string)=>({kind:"tool" as const,tool,label,detail,ok:true,text:"",seconds:0});
   store.addMessage(sessionId,"agent","Here is what I found.",[
-    {tool:"replay_attempt",label:"full log · case history",detail:"34m on it · 5 runs",ok:true},
-    {tool:"search_concept_evidence",label:"window-invariant-restoration",detail:"1 result",ok:true},
+    {kind:"reasoning",tool:"",label:"",detail:"",ok:true,text:"The shrink case is the one that keeps breaking.",seconds:7},
+    tool("replay_attempt","full log · case history","34m on it · 5 runs"),
+    tool("search_concept_evidence","window-invariant-restoration","1 result"),
   ]);
   // No reply at all, which is what an attempt-complete turn produces.
-  store.addMessage(sessionId,"agent","",[{tool:"create_question",label:"Restore the window",detail:"status playable",ok:true}]);
+  store.addMessage(sessionId,"agent","",[tool("create_question","Restore the window","status playable")]);
 
   const messages=store.readSession(sessionId)?.messages??[];
-  expect(messages[0]?.activity.map((step)=>step.tool)).toEqual(["replay_attempt","search_concept_evidence"]);
-  expect(messages[0]?.activity[0]?.detail).toBe("34m on it · 5 runs");
+  // Order is preserved, and the thinking is stored beside the calls it led to.
+  expect(messages[0]?.activity.map((step)=>step.kind)).toEqual(["reasoning","tool","tool"]);
+  expect(messages[0]?.activity[0]?.text).toContain("shrink case");
+  expect(messages[0]?.activity[0]?.seconds).toBe(7);
+  expect(messages[0]?.activity.map((step)=>step.tool)).toEqual(["","replay_attempt","search_concept_evidence"]);
+  expect(messages[0]?.activity[1]?.detail).toBe("34m on it · 5 runs");
   expect(messages[1]?.body).toBe("");
   expect(messages[1]?.activity).toHaveLength(1);
   // A learner message carries none, and reads back as an empty list rather than undefined.

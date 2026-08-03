@@ -1,18 +1,30 @@
 export type NormalizedAgentStreamPart = {
-  type: "text" | "tool" | "status" | "error";
+  type: "text" | "reasoning" | "tool" | "status" | "error";
   text: string;
   tool?: string;
   detail?: string;
+  /** Boundaries of a reasoning block, so the transcript can close one and start
+   *  another rather than growing one block for a whole turn. */
+  phase?: "start" | "end";
 };
 
 /**
  * Mastra's public stream wraps model deltas in `payload.text`. Older AI SDK
  * stream shapes exposed `textDelta` directly, so accept both without ever
  * coercing an unknown object into learner-visible text.
+ *
+ * Reasoning is forwarded as its own kind of part. It used to fall through to the
+ * status branch and get filtered out as protocol noise, which is why the
+ * transcript could only show a fixed "Thinking" label with nothing behind it: the
+ * model's actual reasoning was arriving and being thrown away one delta at a
+ * time.
  */
 export function normalizeAgentStreamPart(part: Record<string, unknown>): NormalizedAgentStreamPart {
   const type = String(part.type);
   if (type === "text-delta") return { type: "text", text: textDelta(part) };
+  if (type === "reasoning-delta") return { type: "reasoning", text: textDelta(part) };
+  if (type === "reasoning-start") return { type: "reasoning", text: "", phase: "start" };
+  if (type === "reasoning-end") return { type: "reasoning", text: "", phase: "end" };
   if (type === "error") return { type: "error", text: errorText(part.error ?? part) };
 
   // Provider stream parts describe protocol mechanics, not work. Host tool

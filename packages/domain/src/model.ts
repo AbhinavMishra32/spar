@@ -268,12 +268,18 @@ export type AskUserQuestionRequest = z.infer<typeof askUserQuestionRequestSchema
  * rather than discarded when the stream closes.
  */
 export const agentActivityStepSchema = z.object({
-  tool: z.string().min(1),
+  /** Defaulted for rows written before reasoning was kept, which are all tools. */
+  kind: z.enum(["tool", "reasoning"]).default("tool"),
+  tool: z.string().default(""),
   /** What the call was about, in the learner's terms. Never a raw argument. */
   label: z.string().default(""),
   /** What it returned, already reduced to one line by the worker. */
   detail: z.string().default(""),
   ok: z.boolean().default(true),
+  /** The reasoning itself, for a step that is thinking rather than a call. */
+  text: z.string().default(""),
+  /** How long that thinking took, so the folded row can say it. */
+  seconds: z.number().nonnegative().default(0),
 });
 export type AgentActivityStep = z.infer<typeof agentActivityStepSchema>;
 

@@ -1,53 +1,93 @@
 import type { AgentActivityStep } from "@spar/domain";
 
 /**
- * What a turn did, held only until its reply is written.
+ * What a turn did, in order, held only until its reply is written.
  *
- * The worker reports every tool call as it starts and settles, and those reports
- * went straight to the renderer and nowhere else — so the moment a turn finished
- * and the live run was dropped, the account of how the answer was reached was
- * gone. It is collected here on the way past, and the reply it belongs to takes
- * it with it into storage.
+ * The worker reports its reasoning and every tool call as they happen, and those
+ * reports went straight to the renderer and nowhere else — so the moment a turn
+ * finished and the live run was dropped, the account of how the answer was
+ * reached was gone. It is collected here on the way past, in the order it
+ * happened, and the reply it belongs to takes it into storage.
+ *
+ * Order is the whole point. A turn that thought, called two tools, thought again
+ * and then answered is a different turn from one that called two tools and
+ * thought once, and a set of steps with the thinking hoisted out of it cannot
+ * tell them apart.
  *
  * Keyed by run rather than by session because two sessions can be mid-turn at
  * once, and a run whose reply never lands must not leak its steps into the next.
  */
-const steps = new Map<string, AgentActivityStep[]>();
+const segments = new Map<string, AgentActivityStep[]>();
+/** When the open reasoning block started, so its stored row can say how long. */
+const thinkingSince = new Map<string, number>();
 
-/** Beyond this a turn is looping, and the transcript row is not the place to
- *  show it. The oldest steps are the ones dropped: what a turn did last is what
- *  its reply is actually built on. */
-const MAX_STEPS = 60;
+/** Beyond this a turn is looping, and the transcript row is not the place to show
+ *  it. The oldest steps go first: what a turn did last is what its reply is built
+ *  on. */
+const MAX_STEPS = 80;
+/** Reasoning is verbose by nature, and this is stored per turn forever. Enough to
+ *  read back why a turn went the way it did, not a full transcript of the model. */
+const MAX_REASONING = 4_000;
 
-/**
- * Records one worker event if it is a settled tool call. Start events are
- * ignored: the point of the stored copy is what happened, and a call that opened
- * without closing did not.
- */
 export function recordAgentActivity(runId: string, event: Record<string, unknown>) {
+  if (event.type === "reasoning") return recordReasoning(runId, event);
   if (event.type !== "tool" || event.phase !== "end") return;
   const tool = typeof event.tool === "string" ? event.tool : "";
   if (!tool) return;
-  const held = steps.get(runId) ?? [];
-  held.push({
+  push(runId, {
+    kind: "tool",
     tool,
     label: typeof event.label === "string" ? event.label : "",
     detail: typeof event.detail === "string" ? event.detail : "",
     ok: event.ok !== false,
+    text: "",
+    seconds: 0,
   });
-  steps.set(runId, held.length > MAX_STEPS ? held.slice(-MAX_STEPS) : held);
+  thinkingSince.delete(runId);
+}
+
+/**
+ * Reasoning deltas append to the open thinking step, so one block of thought is
+ * one row rather than one row per token. A tool call between two blocks ends the
+ * first, which is what keeps the stored order faithful to what happened.
+ */
+function recordReasoning(runId: string, event: Record<string, unknown>) {
+  if (event.phase === "end") {
+    thinkingSince.delete(runId);
+    return;
+  }
+  const text = typeof event.text === "string" ? event.text : "";
+  if (event.phase === "start" || !text) return;
+  const held = segments.get(runId) ?? [];
+  const open = held.at(-1);
+  const startedAt = thinkingSince.get(runId);
+  if (open?.kind === "reasoning" && startedAt !== undefined) {
+    open.text = open.text.length >= MAX_REASONING ? open.text : (open.text + text).slice(0, MAX_REASONING);
+    open.seconds = Math.round((Date.now() - startedAt) / 1_000);
+    return;
+  }
+  thinkingSince.set(runId, Date.now());
+  push(runId, { kind: "reasoning", tool: "", label: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0 });
+}
+
+function push(runId: string, step: AgentActivityStep) {
+  const held = segments.get(runId) ?? [];
+  held.push(step);
+  segments.set(runId, held.length > MAX_STEPS ? held.slice(-MAX_STEPS) : held);
 }
 
 /** The run's steps, and the last word on them — reading clears the entry, so a
  *  turn that retried onto a second provider cannot report the first one twice. */
 export function takeAgentActivity(runId: string): AgentActivityStep[] {
-  const held = steps.get(runId) ?? [];
-  steps.delete(runId);
+  const held = segments.get(runId) ?? [];
+  segments.delete(runId);
+  thinkingSince.delete(runId);
   return held;
 }
 
 /** Dropped without being written, for a turn that ended with no reply to attach
  *  them to. Called on failure so a long session cannot accumulate dead runs. */
 export function forgetAgentActivity(runId: string) {
-  steps.delete(runId);
+  segments.delete(runId);
+  thinkingSince.delete(runId);
 }

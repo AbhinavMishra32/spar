@@ -75,3 +75,69 @@ describe("live session activity", () => {
     expect(runActivity(solving)?.headline).toBe("Your loop bound is off by one");
   });
 });
+
+/**
+ * Reasoning used to reach the renderer and be discarded as protocol noise, so the
+ * transcript could only show a fixed "Thinking" label with nothing behind it.
+ * These lock the shape the thread actually renders: an ordered transcript where
+ * thinking, tool calls, and replies sit where they happened.
+ */
+describe("streaming a turn", () => {
+  const stream = (...events: Array<Partial<Parameters<typeof reduceRun>[1]>>) =>
+    events.reduce<AgentRun | null>((current, event) => reduceRun(current, { runId: "run", ...event } as Parameters<typeof reduceRun>[1]), null);
+
+  it("streams reasoning into one open block rather than one part per delta", () => {
+    const result = stream(
+      { type: "reasoning", phase: "start" },
+      { type: "reasoning", text: "The shrink case " },
+      { type: "reasoning", text: "keeps failing." },
+    );
+
+    expect(result?.parts).toHaveLength(1);
+    const thinking = result?.parts[0];
+    expect(thinking?.kind).toBe("reasoning");
+    if (thinking?.kind !== "reasoning") throw new Error("expected reasoning");
+    expect(thinking.body).toBe("The shrink case keeps failing.");
+    expect(thinking.open).toBe(true);
+  });
+
+  it("closes the thinking that produced a reply, and keeps both in order", () => {
+    const result = stream(
+      { type: "reasoning", text: "Deciding what to read." },
+      { type: "text", text: "You fixed the shrink case." },
+    );
+
+    expect(result?.parts.map((part) => part.kind)).toEqual(["reasoning", "text"]);
+    const thinking = result?.parts[0];
+    if (thinking?.kind !== "reasoning") throw new Error("expected reasoning");
+    expect(thinking.open).toBe(false);
+  });
+
+  it("interleaves thinking, tool calls, and thinking again as separate blocks", () => {
+    const result = stream(
+      { type: "reasoning", text: "First I need the log." },
+      { type: "tool", tool: "replay_attempt", callId: "c1", phase: "start" },
+      { type: "tool", tool: "replay_attempt", callId: "c1", phase: "end", ok: true, detail: "5 runs" },
+      { type: "reasoning", text: "Now I know what broke." },
+      { type: "text", text: "Here is what I found." },
+    );
+
+    // Not one thought and a list of calls: the second thought is its own row,
+    // after the call it followed.
+    expect(result?.parts.map((part) => part.kind)).toEqual(["reasoning", "tool", "reasoning", "text"]);
+    const first = result?.parts[0];
+    if (first?.kind !== "reasoning") throw new Error("expected reasoning");
+    expect(first.open).toBe(false);
+    expect(first.body).toBe("First I need the log.");
+  });
+
+  it("settles the open thinking when the turn finishes", () => {
+    const result = stream({ type: "reasoning", text: "Half a thought" }, { type: "done" });
+    const thinking = result?.parts[0];
+
+    expect(result?.status).toBe("done");
+    if (thinking?.kind !== "reasoning") throw new Error("expected reasoning");
+    expect(thinking.open).toBe(false);
+    expect(thinking.endedAt).toBeGreaterThan(0);
+  });
+});
