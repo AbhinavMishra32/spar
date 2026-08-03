@@ -3,6 +3,7 @@ import { existsSync, globSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { planCppBuild } from "./cppBuild.js";
+import { TEST_FLAGS } from "./testCommand.js";
 
 type Request = {
   kind: "request";
@@ -15,6 +16,7 @@ type Request = {
   };
 };
 type Stage = { bin: string; args: string[] };
+
 
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error("Code runner must run inside an Electron utility process");
@@ -98,11 +100,11 @@ type Resolution = { stages: Stage[] } | { error: string };
 function resolveStages(root: string, language: Request["payload"]["language"], command: Request["payload"]["command"]): Resolution {
   const tests = (pattern: string) => globSync(pattern, { cwd: root }).sort();
   if (language === "javascript") {
-    return { stages: [{ bin: process.execPath, args: command === "test" ? ["--test", ...tests("**/*.test.js")] : [existsSync(path.join(root, "index.js")) ? "index.js" : "src/index.js"] }] };
+    return { stages: [{ bin: process.execPath, args: command === "test" ? [...TEST_FLAGS, ...tests("**/*.test.js")] : [existsSync(path.join(root, "index.js")) ? "index.js" : "src/index.js"] }] };
   }
   if (language === "typescript") {
     const tsxCli = fileURLToPath(import.meta.resolve("tsx/cli"));
-    return { stages: [{ bin: process.execPath, args: [tsxCli, ...(command === "test" ? ["--test", ...tests("**/*.test.ts")] : [existsSync(path.join(root, "index.ts")) ? "index.ts" : "src/index.ts"])] }] };
+    return { stages: [{ bin: process.execPath, args: [tsxCli, ...(command === "test" ? [...TEST_FLAGS, ...tests("**/*.test.ts")] : [existsSync(path.join(root, "index.ts")) ? "index.ts" : "src/index.ts"])] }] };
   }
 
   const output = path.join(root, ".spar");

@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { compileQuestion, fallbackDesign, type ValidationRun } from "@spar/training";
 import { planCppBuild } from "./cppBuild.js";
+import { TEST_FLAGS } from "./testCommand.js";
 
 /**
  * The fallback only guarantees a challenge if it genuinely validates, so it is
@@ -55,9 +56,9 @@ async function resolveStages(root: string, files: Record<string, string>, langua
     // transform does not provide inside a test module; createRequire reaches
     // the same file.
     const tsx = createRequire(import.meta.url).resolve("tsx/cli");
-    return [{ bin: process.execPath, args: [tsx, "--test", ...paths.filter((file) => file.endsWith(".test.ts"))] }];
+    return [{ bin: process.execPath, args: [tsx, ...TEST_FLAGS, ...paths.filter((file) => file.endsWith(".test.ts"))] }];
   }
-  return [{ bin: process.execPath, args: ["--test", ...paths.filter((file) => file.endsWith(".test.js"))] }];
+  return [{ bin: process.execPath, args: [...TEST_FLAGS, ...paths.filter((file) => file.endsWith(".test.js"))] }];
 }
 
 describe("guaranteed fallback challenge", () => {
