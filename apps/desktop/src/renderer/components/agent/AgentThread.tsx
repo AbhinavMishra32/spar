@@ -95,6 +95,8 @@ function AgentMessage({ body, activity }: { body: string; activity: AgentActivit
 /** A stored step as the transcript's own part shape, so the rows a finished turn
  *  draws are the same rows it drew while it was running. */
 function storedPart(step: AgentActivityStep, index: number): RunPart {
+  // A note is what the agent said between its calls, so it reads as what it was.
+  if (step.kind === "note") return { kind: "text", id: `stored-${index}-note`, body: step.text };
   if (step.kind === "reasoning") {
     return {
       kind: "reasoning",

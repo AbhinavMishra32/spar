@@ -28,9 +28,12 @@ const MAX_STEPS = 80;
 /** Reasoning is verbose by nature, and this is stored per turn forever. Enough to
  *  read back why a turn went the way it did, not a full transcript of the model. */
 const MAX_REASONING = 4_000;
+/** A phase narration is one sentence. This is a guard, not a budget. */
+const MAX_NOTE = 600;
 
 export function recordAgentActivity(runId: string, event: Record<string, unknown>) {
   if (event.type === "reasoning") return recordReasoning(runId, event);
+  if (event.type === "text") return recordNote(runId, event);
   if (event.type !== "tool" || event.phase !== "end") return;
   const tool = typeof event.tool === "string" ? event.tool : "";
   if (!tool) return;
@@ -68,6 +71,25 @@ function recordReasoning(runId: string, event: Record<string, unknown>) {
   }
   thinkingSince.set(runId, Date.now());
   push(runId, { kind: "reasoning", tool: "", label: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0 });
+}
+
+/**
+ * A sentence the agent said mid-turn, before one of its calls. These arrive as
+ * text deltas exactly like the final reply does, and they used to be streamed to
+ * the renderer and then lost — so a finished turn had the calls and the thinking
+ * but not the narration that tied them together.
+ */
+function recordNote(runId: string, event: Record<string, unknown>) {
+  const text = typeof event.text === "string" ? event.text : "";
+  if (!text) return;
+  const held = segments.get(runId) ?? [];
+  const open = held.at(-1);
+  if (open?.kind === "note") {
+    open.text = open.text.length >= MAX_NOTE ? open.text : (open.text + text).slice(0, MAX_NOTE);
+    return;
+  }
+  thinkingSince.delete(runId);
+  push(runId, { kind: "note", tool: "", label: "", detail: "", ok: true, text: text.slice(0, MAX_NOTE), seconds: 0 });
 }
 
 function push(runId: string, step: AgentActivityStep) {

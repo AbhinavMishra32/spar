@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { attemptAppendInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
 import { runEvidence } from "../shared/testReport.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
@@ -77,7 +77,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
            live run is dropped the instant this `done` reaches the renderer, and
            without this the transcript would keep only the last sentence of a
            turn that read six things to arrive at it. */
-        const activity=takeAgentActivity(request.id);
+        const activity=withoutFinalReply(takeAgentActivity(request.id),value.text ?? "");
         /* Recorded when there is activity even with no reply: an attempt-complete
            turn answers with a challenge rather than a sentence, and it used to
            leave the transcript with no trace that it ran at all. */
@@ -386,6 +386,20 @@ function runOutput(stdout: string, stderr: string) {
   return combined.length > MAX_SUBMIT_OUTPUT
     ? `${combined.slice(0, MAX_SUBMIT_OUTPUT)}\n…output truncated.\n`
     : combined;
+}
+
+/**
+ * The last phase's own words are the reply, and the reply is stored as the
+ * message body. Without dropping it the transcript would show the same sentence
+ * twice: once as a mid-turn note and again as the answer.
+ */
+function withoutFinalReply(activity: AgentActivityStep[], reply: string): AgentActivityStep[] {
+  const body = reply.trim();
+  if (!body) return activity;
+  const last = activity.at(-1);
+  if (last?.kind !== "note") return activity;
+  const said = last.text.trim();
+  return said && (body.startsWith(said) || said.startsWith(body)) ? activity.slice(0, -1) : activity;
 }
 
 function zUuid(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Invalid identifier"); return value; }

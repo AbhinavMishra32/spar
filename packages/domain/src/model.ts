@@ -268,8 +268,9 @@ export type AskUserQuestionRequest = z.infer<typeof askUserQuestionRequestSchema
  * rather than discarded when the stream closes.
  */
 export const agentActivityStepSchema = z.object({
-  /** Defaulted for rows written before reasoning was kept, which are all tools. */
-  kind: z.enum(["tool", "reasoning"]).default("tool"),
+  /** Defaulted for rows written before reasoning was kept, which are all tools.
+   *  `note` is a sentence the agent said mid-turn, before one of its calls. */
+  kind: z.enum(["tool", "reasoning", "note"]).default("tool"),
   tool: z.string().default(""),
   /** What the call was about, in the learner's terms. Never a raw argument. */
   label: z.string().default(""),
