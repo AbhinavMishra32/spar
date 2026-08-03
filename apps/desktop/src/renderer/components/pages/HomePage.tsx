@@ -15,6 +15,10 @@ import { useSessionPreviews } from "../../hooks/use-session-previews";
  *  the page down — but still bounded, since the full history has its own page. */
 const SHOWN = 12;
 
+/** Mirrors `createSessionInput` in the main process. Held here so a two-letter
+ *  goal keeps the send button off rather than coming back as a rejected IPC. */
+const GOAL_MIN_LENGTH = 3;
+
 /** How tall the session drum grows before it starts scrolling. Deliberately not a
  *  whole number of cards: a list that ends exactly on a card boundary looks
  *  finished, and the point of the cut-off row is to say there is more. */
@@ -126,11 +130,12 @@ export function HomePage({
                 )}
               </>
             }
+            minLength={GOAL_MIN_LENGTH}
             onChange={setGoal}
             {...(onOpenSettings ? { onOpenSettings } : {})}
             onSubmit={() => {
               const value = goal.trim();
-              if (!value) return;
+              if (value.length < GOAL_MIN_LENGTH) return;
               setGoal("");
               onStart(value);
             }}

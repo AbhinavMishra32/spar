@@ -1,5 +1,30 @@
+/** Electron wraps anything an IPC handler throws as
+ *  `Error invoking remote method 'x': <thrown>`, and a Zod failure stringifies
+ *  as its raw issue array — so a goal one character too short reached the
+ *  learner as a JSON dump. Both wrappers are peeled off here, at the one place
+ *  every screen turns a bridge rejection into text it shows. */
+const REMOTE_PREFIX = /^Error invoking remote method '[^']*':\s*/;
+
 export function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const raw = (error instanceof Error ? error.message : String(error)).replace(REMOTE_PREFIX, "");
+  return validationMessages(raw) ?? raw;
+}
+
+/** The `message` of every Zod issue, joined — or null when this was never one,
+ *  so an ordinary error is never mangled by trying to read it as one. */
+function validationMessages(raw: string): string | null {
+  if (!raw.startsWith("[")) return null;
+  try {
+    const issues = JSON.parse(raw) as unknown;
+    if (!Array.isArray(issues) || !issues.length) return null;
+    const sentences = issues.flatMap((issue) =>
+      issue && typeof issue === "object" && typeof (issue as { message?: unknown }).message === "string"
+        ? [(issue as { message: string }).message]
+        : []);
+    return sentences.length === issues.length ? sentences.join(" ") : null;
+  } catch {
+    return null;
+  }
 }
 
 export function formatDuration(seconds: number): string {

@@ -23,6 +23,7 @@ export function Composer({
   onAttach,
   onOpenSettings,
   busy = false,
+  minLength = 1,
   placeholder = "Ask Spar anything…",
   autoFocus = false,
   hint,
@@ -37,6 +38,10 @@ export function Composer({
   onAttach?(): void;
   onOpenSettings?(): void;
   busy?: boolean;
+  /** Shortest draft the receiver will accept. A chat message needs one
+   *  character; a session goal is validated at three in the main process, and
+   *  refusing it here is what keeps that contract from arriving as an error. */
+  minLength?: number;
   placeholder?: string;
   autoFocus?: boolean;
   hint?: React.ReactNode;
@@ -71,7 +76,7 @@ export function Composer({
     };
   }, [resize]);
 
-  const canSend = value.trim().length > 0 && !busy && ready;
+  const canSend = value.trim().length >= Math.max(1, minLength) && !busy && ready;
 
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
