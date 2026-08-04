@@ -12,16 +12,34 @@ import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { ProviderService } from "./provider.js";
 import type { CloudSyncService } from "./sync.js";
+import type { WebSearchService } from "./webSearch.js";
 import { requestsChallengeRevision } from "./agentIntent.js";
 import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; web: WebSearchService; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
   const startingAgentRuns = new Map<string, Promise<{ runId: string }>>();
-  const failedPlanningRuns = new Set<string>();
+  /* How many planning turns opening a session has launched on its own.
+     `startingAgentRuns` only holds for as long as a launch is in flight, so it
+     covers a burst of polls and nothing else: a turn that ended without leaving
+     a question or a target behind released the claim, the next poll saw the same
+     unfinished planning session and launched again, and the learner watched five
+     identical "Resume placement" messages stack up in one thread. Auto-resume is
+     a recovery path, so it gets one attempt; after that the session waits for the
+     learner, who has Next challenge and the composer to ask again. Counted per
+     session and never cleared by a launch — clearing it there is what made the
+     old failure set unable to stop anything. */
+  const autoResumedPlanning = new Map<string, number>();
+  const AUTO_RESUME_LIMIT = 1;
+  const mayAutoResume = (sessionId: string) => (autoResumedPlanning.get(sessionId) ?? 0) < AUTO_RESUME_LIMIT;
+  const countAutoResume = (sessionId: string) => autoResumedPlanning.set(sessionId, (autoResumedPlanning.get(sessionId) ?? 0) + 1);
+  /* A real learner action is the only thing that earns a fresh budget: they have
+     seen the state and asked for it, so this is no longer a loop the app is
+     driving by itself. */
+  const clearAutoResume = (sessionId: string) => autoResumedPlanning.delete(sessionId);
   ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", serverConfigured: !apiOriginIsUnconfigured() }));
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
@@ -30,12 +48,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sessionsOpen, (_event, sessionId) => {
     const id=zUuid(sessionId);let detail=deps.store.readSession(id);
     if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return detail;
-    if(deps.store.resetIncompletePlanning(id)){failedPlanningRuns.delete(id);detail=deps.store.readSession(id);}
+    if(deps.store.resetIncompletePlanning(id)){clearAutoResume(id);detail=deps.store.readSession(id);}
     if(!detail)return null;
+    if(!mayAutoResume(id))return detail;
     const placementAnswer=deps.store.answeredIntake(id);
-    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)&&!placementAnswer){if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume placement for this learner goal: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
-    if(placementAnswer){if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Commit one accessible target and create a validated question.`,"system","session-start");return detail;}
-    if(!failedPlanningRuns.has(id))void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
+    countAutoResume(id);
+    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)&&!placementAnswer){void startAgentTurn(id,`Resume placement for this learner goal: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
+    if(placementAnswer){void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Commit one accessible target and create a validated question.`,"system","session-start");return detail;}
+    void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
     return detail;
   });
   ipcMain.handle(ipc.checkpointSave, (_event, value) => deps.store.saveCheckpoint(sessionCheckpointSchema.parse(value)));
@@ -55,7 +75,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       if(!account)throw new Error("Sign in before starting Spar");
       const providers=await deps.providers.resolve(account.id,token);
       if(!providers.length)throw new Error(NO_PROVIDER);
-      failedPlanningRuns.delete(sessionId);deps.store.addMessage(sessionId,role,message);
+      deps.store.addMessage(sessionId,role,message);
       const session=deps.store.readSession(sessionId);if(!session)throw new Error("Session not found");
       const target=deps.store.latestTarget(sessionId);const defaultObjective="Investigating your prior evidence and defining the first training target.";
       /* Onboarding is evidence like any other: what the learner said about their
@@ -63,7 +83,17 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          any attempt exists to calibrate it from. `preferredLanguage` is the
          default the instructions read — a stated language in the goal still wins. */
       const profile=deps.store.getProfile();
-      const payload={sessionId,message,turnKind,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
+      /* Resolved per turn rather than at startup: the learner can add or remove
+         the key while the app is open, and the worker decides whether the web
+         tools exist at all from this one flag. */
+      const webSearch=await deps.web.keySource()!=="none";
+      const payload={sessionId,message,turnKind,webSearch,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),
+        /* Carried unconditionally, unlike `relevantAbilitySummary`, which is
+           scoped to the goal and so cannot show a topic the goal never mentions.
+           Repetition across sessions is exactly the thing a goal-scoped view
+           hides: the agent needs to see the last dozen challenges to know it has
+           asked about the same concept twelve times. */
+        recentChallenges:deps.store.recentChallengeCoverage(12),accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
       /* A run is claimed by its session for as long as it is in flight, in two
          places: `activeAgentRuns` guards against a second turn, and
          `agentRunSessions` is what lets the main process stamp a session id onto
@@ -83,7 +113,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
            turn answers with a challenge rather than a sentence, and it used to
            leave the transcript with no trace that it ran at all. */
         if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity);
-        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){forgetAgentActivity(request.id);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);failedPlanningRuns.add(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
+        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){forgetAgentActivity(request.id);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);
@@ -104,6 +134,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sessionNextChallenge, async (_event, value) => {
     const sessionId = zUuid((value as { sessionId?: unknown }).sessionId);
     deps.store.setSessionStatus(sessionId, "planning");
+    clearAutoResume(sessionId);
     return startAgentTurn(sessionId, "The learner asked for the next challenge. Use the existing evidence, including any challenge they gave up on, to choose one training target and create the next validated question.", "learner", "session-start");
   });
 
@@ -162,7 +193,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sessionsDelete, async (_event, value) => {
     const sessionId = zUuid(value);
     activeAgentRuns.delete(sessionId);
-    failedPlanningRuns.delete(sessionId);
+    clearAutoResume(sessionId);
     if (!deps.store.deleteSession(sessionId)) return;
     await deps.workspaces.remove(sessionId);
   });
@@ -264,6 +295,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
 
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
     const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
+    clearAutoResume(sessionId);
     if(deps.store.pendingIntake(sessionId)){
       deps.store.answerIntake(sessionId,input.message.trim());
       /* An answer given while a challenge is open is context for that challenge,
@@ -339,6 +371,16 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   });
   ipcMain.handle(ipc.settingsProviderUsage, (_event, value) => deps.providers.subscriptionUsage(providerId(value)));
   ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
+  /* The key goes in and never comes back out. Settings needs to know whether one
+     is set and where it came from, which is not the same as needing to read it —
+     and a renderer that can read it is one XSS away from exfiltrating it. */
+  ipcMain.handle(ipc.settingsWebSearch, async () => ({ source: await deps.web.keySource() }));
+  ipcMain.handle(ipc.settingsWebSearchSave, async (_event, value) => {
+    const key = typeof value === "string" ? value.trim() : "";
+    if (!key) throw new Error("An Exa API key is required");
+    await deps.auth.saveSecret("exa", key);
+  });
+  ipcMain.handle(ipc.settingsWebSearchClear, () => deps.auth.deleteSecret("exa"));
   ipcMain.handle(ipc.settingsProviderOauthStart, (_event, value) => deps.providers.startOAuth(providerId(value)));
   ipcMain.handle(ipc.settingsProviderOauthSubmit, (_event, value) => {
     const input = value as { flowId?: unknown; value?: unknown };
