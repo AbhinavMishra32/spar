@@ -60,6 +60,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - run: pnpm --filter @spar/desktop verify:build
 
   package:
     name: Package ${{ matrix.platform }}
@@ -98,6 +99,12 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+
+      # Both faults that shipped in 0.1.0 were invisible to typecheck, tests and
+      # packaging, and both produced an app that opens and then cannot work. This
+      # is the gate that would have caught either one.
+      - name: Verify the built output can launch
+        run: pnpm --filter @spar/desktop verify:build
 
       - name: Rebuild native modules for Electron
         run: pnpm --filter @spar/desktop rebuild:native
