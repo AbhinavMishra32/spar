@@ -70,13 +70,13 @@ jobs:
         include:
           - platform: macos
             os: macos-15
-            script: package
+            flag: "--mac"
           - platform: windows
             os: windows-2025
-            script: package:win
+            flag: "--win"
           - platform: linux
             os: ubuntu-24.04
-            script: package:linux
+            flag: "--linux"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -129,9 +129,16 @@ jobs:
             export CSC_IDENTITY_AUTO_DISCOVERY=false
             echo "::warning title=Unsigned build::MACOS_CERTIFICATE_BASE64 is not set, so this build is unsigned and Gatekeeper will warn on first launch."
           fi
+          # electron-builder is invoked directly rather than through a package
+          # script: forwarding flags via `pnpm run x -- --publish never` did not
+          # reach it, and electron-builder defaults to publishing on CI when a tag
+          # is present, so the flag being dropped meant every job tried to publish
+          # and failed on a token it was never given. Locally the same command
+          # looked fine, because off CI the default is not to publish.
+          #
           # extraMetadata writes the origin into the packaged package.json, which
           # is the only way a build-time value survives into a downloaded app.
-          pnpm run ${{ matrix.script }} -- --publish never \
+          pnpm exec electron-builder ${{ matrix.flag }} --publish never \
             -c.extraMetadata.sparHostedApiOrigin="$SPAR_HOSTED_API_ORIGIN"
 
       # latest*.yml is what electron-updater reads, so it is a release asset like
