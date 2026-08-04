@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "An adaptive coding gym that writes your next exercise from your own attempt history.",
+  "homepage": "https://github.com/AbhinavMishra32/spar",
+  "author": "Abhinav Mishra <AbhinavMishra32@users.noreply.github.com>",
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "concurrently -k --names renderer,main,electron --prefix-colors cyan,magenta,green \"vite\" \"node scripts/dev-main.mjs\" \"wait-on tcp:5173 file:dist/.main-ready file:../../packages/domain/dist/index.js && node scripts/dev-electron.mjs\"",
