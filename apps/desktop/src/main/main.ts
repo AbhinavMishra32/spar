@@ -2,6 +2,7 @@ import { app, BrowserWindow, nativeTheme } from "electron";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
 import { AuthService } from "./auth.js";
+import { installDockIcon } from "./dockIcon.js";
 import { installIpc } from "./ipc.js";
 import { installMenu } from "./menu.js";
 import { LocalStore } from "./store.js";
@@ -31,7 +32,7 @@ else {
     const agentRunSessions = new Map<string, string>();
     const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner));
     const sync=new CloudSyncService(store,auth,apiOrigin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
-    installIpc({ store, workspaces, auth, providers, runner, agent, agentRunSessions, sync, window: () => mainWindow }); installMenu(() => mainWindow); mainWindow = createMainWindow(); startUpdates(mainWindow);
+    installIpc({ store, workspaces, auth, providers, runner, agent, agentRunSessions, sync, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow(); startUpdates(mainWindow);
     app.on("before-quit", () => { sync.stop(); runner.stop(); agent.stop(); store.close(); });
     app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(); });
   });
