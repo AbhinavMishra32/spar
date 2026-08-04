@@ -240,6 +240,19 @@ export class LocalStore {
    *  agent looking for "sliding window" evidence has to find the challenges that
    *  were tagged with it even when the title never says the words. */
   searchChallenges(query:string,limit:number){const terms=searchTerms(query);const rows=this.listChallenges();if(!terms.length)return rows.slice(0,limit);return rows.map((row)=>({row,score:relevance(`${row.title}\n${row.sessionTitle}\n${row.difficulty}\n${row.lastOutcome??""}\n${row.concepts.map((tag)=>`${tag.slug.replace(/-/g," ")} ${tag.title} ${tag.parentTitle??""}`).join("\n")}`,terms)})).filter((item)=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updatedAt.localeCompare(a.row.updatedAt)).slice(0,limit).map((item)=>item.row);}
+  /** What the learner has actually been asked lately, across every session,
+   *  flattened to the fields a targeting decision needs.
+   *
+   *  Deliberately not a search: a search only answers the question the agent
+   *  thought to ask, and the failure this exists to prevent is a new goal that
+   *  never thinks to ask. Carried on every planning turn's context so the same
+   *  primary concept coming back for the thirteenth time is visible before the
+   *  target is set rather than after the challenge is published. */
+  recentChallengeCoverage(limit=12){return this.listChallenges().slice(0,limit).map((row)=>({title:row.title,goal:row.sessionTitle,primaryConcept:row.concepts[0]?.slug??null,difficulty:row.difficulty,outcome:row.lastOutcome,askedAt:row.createdAt}));}
+  /** Whether this exact title has been asked before anywhere. The session-scoped
+   *  check let the same challenge come back under a new session, which is what
+   *  the learner sees as repetition — the library is one library to them. */
+  challengeTitleUsed(title:string){const normalized=title.trim().toLocaleLowerCase();if(!normalized)return false;const rows=this.db.prepare("SELECT title FROM questions").all() as Array<{title:string}>;return rows.some((row)=>row.title.trim().toLocaleLowerCase()===normalized);}
   readChallenge(id:string){const row=this.db.prepare("SELECT q.*,s.title session_title FROM questions q JOIN sessions s ON s.id=q.session_id WHERE q.id=?").get(id) as (QuestionRow&{session_title:string;validation_report:string})|undefined;if(!row)return null;const attempts=this.db.prepare("SELECT id,status,started_at,completed_at FROM attempts WHERE question_id=? ORDER BY started_at").all(id) as Array<Record<string,unknown>>;return{...row,sessionTitle:row.session_title,concepts:this.questionConcepts(id),design:JSON.parse(row.design),validationReport:JSON.parse(row.validation_report),attempts:attempts.map((attempt)=>({...attempt,events:this.readAttempt(String(attempt.id))}))};}
   /** One challenge with everything it needs to stand on its own away from its
    *  session: the design it was compiled from, the goal and target it answers,

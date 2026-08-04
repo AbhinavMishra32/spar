@@ -41,10 +41,16 @@ export function recordAgentActivity(runId: string, event: Record<string, unknown
     kind: "tool",
     tool,
     label: typeof event.label === "string" ? event.label : "",
+    actionTitle: typeof event.actionTitle === "string" ? event.actionTitle : "",
     detail: typeof event.detail === "string" ? event.detail : "",
     ok: event.ok !== false,
     text: "",
     seconds: 0,
+    /* Stored so a turn read back weeks later opens to the same arguments and
+       results it showed while it ran. Already redacted and bounded by the
+       worker, which is the only place that sees the unredacted design. */
+    input: typeof event.input === "string" ? event.input : "",
+    output: typeof event.output === "string" ? event.output : "",
   });
   thinkingSince.delete(runId);
 }
@@ -70,7 +76,7 @@ function recordReasoning(runId: string, event: Record<string, unknown>) {
     return;
   }
   thinkingSince.set(runId, Date.now());
-  push(runId, { kind: "reasoning", tool: "", label: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0 });
+  push(runId, { kind: "reasoning", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0, input: "", output: "" });
 }
 
 /**
@@ -89,7 +95,7 @@ function recordNote(runId: string, event: Record<string, unknown>) {
     return;
   }
   thinkingSince.delete(runId);
-  push(runId, { kind: "note", tool: "", label: "", detail: "", ok: true, text: text.slice(0, MAX_NOTE), seconds: 0 });
+  push(runId, { kind: "note", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_NOTE), seconds: 0, input: "", output: "" });
 }
 
 function push(runId: string, step: AgentActivityStep) {
