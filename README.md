@@ -31,6 +31,16 @@ against the specific thing it thinks you can't do yet.
 The result is closer to sparring with someone who has been watching you than to
 working through a list.
 
+<p align="center">
+  <img src="docs/assets/screenshots/workspace.png" alt="A Spar challenge open: the problem statement and sample cases on the left, the file being repaired in the editor, and the declared test cases below it." width="900">
+</p>
+
+<p align="center">
+  <sub>A challenge Spar wrote after watching four earlier attempts. The bug is real,
+  the tests are committed, and the clock top-right has been running since the
+  attempt opened.</sub>
+</p>
+
 ## Getting Spar
 
 Grab the build for your machine from the
@@ -142,6 +152,16 @@ you things back. It says what it is about to do before each phase, so you are
 never watching a spinner wondering what's happening. Its thinking is labelled by
 what it was actually doing, not by how long it took.
 
+The panel under the editor is where a run lands. **Testcase** is what the visible
+suite declares — the call and the expected value, before you run anything.
+**Test Result** fills in per-case verdicts once you do, selecting the first
+failure for you rather than making you hunt for it. **Attempt** is the replay:
+every edit and run, timestamped from the moment the attempt opened.
+
+While anything is running, the app animates its own logo — the dot grid waking up
+along its diagonal — instead of a generic spinner. Small thing, but you see it
+during every test run, so it may as well be Spar's.
+
 ### The ability ledger
 
 The page that answers "what am I actually good at now".
@@ -156,12 +176,36 @@ that is the one thing an abilities page must never do.
 The ledger is the thing that grows. It is also the thing Spar reads before it
 picks your next challenge.
 
+<p align="center">
+  <img src="docs/assets/screenshots/ability-detail.png" alt="An ability page: the claim, its status, evidence counts, the concepts it covers, suggested next goals, and the list of challenges that earned it." width="900">
+</p>
+
+Open one and it has to show its work. The claim is stated in plain language —
+*you can repair TypeScript loop boundaries across scalar counters and array
+scans* — and everything under it is the receipt: how many pieces of evidence
+back it, how many challenges you passed of those aimed here, which version of
+the claim this is (it gets rewritten as evidence accumulates), and the exact
+list of attempts that earned it. **Go further** turns the ability into the next
+session's goal, phrased narrowly enough to be worth an hour.
+
 ### Concepts
 
-Every challenge is tagged with what it exercises. Tap any of those tags —
-anywhere in the app — and you get everything you have ever done under that
-concept: the challenges, how they went, what the ledger currently says. Useful
-when you want to know whether "closures" is a real gap or one bad afternoon.
+Every challenge is tagged with what it exercises. Hover any of those tags —
+anywhere in the app — and you get a straight answer about that concept: passed,
+failed, still open, and the attempts behind each.
+
+<p align="center">
+  <img src="docs/assets/screenshots/concept-hovercard.png" alt="A hover card over a concept tag, showing a Steady verdict with four passed, one failed and three open, above the challenges that produced them." width="560">
+</p>
+
+Click through and the full sheet opens on everything you have ever done under
+that concept — which abilities cover it, all the challenges that touched it, and
+a button that starts a new session aimed squarely at it. This is how you find out
+whether "closures" is a real gap or one bad afternoon.
+
+<p align="center">
+  <img src="docs/assets/screenshots/concept-sheet.png" alt="The concept sheet for loop boundary tracing: a Steady verdict across 8 challenges and 52 test runs, the abilities covering it, the full challenge list, and a Practise this button." width="760">
+</p>
 
 ### Sessions and history
 
@@ -169,6 +213,17 @@ Work is organised into sessions, each with a goal you set and targets Spar
 derives from it. The dashboard shows recent ones with live progress while the
 agent is working; the sessions page holds the full history. Nothing is thrown
 away — a session you abandoned is still evidence.
+
+<p align="center">
+  <img src="docs/assets/screenshots/challenge-history.png" alt="The challenges page: every generated challenge with its status, the session it came from, its concepts, test-run and attempt counts, and a preview of the file." width="900">
+</p>
+
+Every challenge Spar has ever written for you stays here, filterable by whether
+it is open, passed, or was replaced — Spar swaps a challenge out when your
+evidence moves on before you got to it, and it says so rather than quietly
+dropping it. Each row carries the session it came from, the concepts it exercises,
+how many times you ran the tests, and a peek at the file. Open any of them to read
+it again, or to practise it without touching the session it belongs to.
 
 ### Bring your own model
 
@@ -194,8 +249,13 @@ in your home directory.
 It follows your system appearance, or you can pin it to light or dark. There's a
 command palette for getting anywhere quickly. On a Mac it uses the real window
 material, so it sits on your desktop like something native rather than a web page
-in a frame. The app icon follows your appearance too, for as long as Spar is
-running.
+in a frame. The app icon is drawn on the measured macOS 26 squircle rather than an
+approximation of it, and follows your appearance for as long as Spar is running.
+
+Every waiting state in the app is the logo rather than a borrowed spinner: the
+dot grid runs a diagonal wave while something is being produced, and breathes
+while something is being read. Different motion for different kinds of waiting,
+so the app tells you which one you are in.
 
 ## What v0.1.0 doesn't do yet
 
