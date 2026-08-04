@@ -51,7 +51,7 @@ Grab the build for your machine from the
 | Mac, Apple silicon (M1 and later) | `Spar-0.1.0-arm64.dmg` |
 | Mac, Intel | `Spar-0.1.0.dmg` |
 | Windows | `Spar-0.1.0-x64.exe` |
-| Linux | `Spar-0.1.0-x64.AppImage` or `Spar-0.1.0-x64.deb` |
+| Linux | `Spar-0.1.0-x86_64.AppImage` or `Spar-0.1.0-amd64.deb` |
 
 **v0.1.0 builds are not code-signed yet.** Your operating system will say so, in
 its usual alarming way. On a Mac, right-click the app and choose *Open* the first

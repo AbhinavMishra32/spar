@@ -154,7 +154,7 @@ jobs:
             apps/desktop/dist-release/*.exe
             apps/desktop/dist-release/*.AppImage
             apps/desktop/dist-release/*.deb
-            apps/desktop/dist-release/*.yml
+            apps/desktop/dist-release/latest*.yml
             apps/desktop/dist-release/*.blockmap
 
   publish:
