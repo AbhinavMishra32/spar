@@ -1,5 +1,29 @@
 import { describe, expect, it } from "vitest";
-import { nextToolStage, phaseExecutionKey } from "./agentPolicy.js";
+import { allowedTools, nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
+
+const TURN_KINDS: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message", "challenge-revision"];
+
+/**
+ * Every tool the stage machine can ask for on this turn kind.
+ *
+ * Walks the machine settling the last tool of each stage, which is the branch
+ * that keeps going where a first-tool choice (`ask_user_question`) suspends the
+ * turn. The settled result carries every shape the machine inspects at once, so
+ * the ability branch and the compiler-retry branch are both reached.
+ */
+function reachableStages(turnKind: AgentTurnKind, hasActiveQuestion: boolean, webSearch = false): Set<string> {
+  const outcomes = new Map<string, unknown[]>();
+  const seen = new Set<string>();
+  const settled = { result: { ok: true, passages: [{ id: "ability" }], attempts: [], challenges: [], status: "invalid" } };
+  for (let step = 0; step < 40; step += 1) {
+    const stage = nextToolStage(turnKind, outcomes, 3, { hasActiveQuestion, webSearch });
+    if (!stage.activeTools.length) break;
+    for (const name of stage.activeTools) seen.add(name);
+    const advance = stage.activeTools.at(-1)!;
+    outcomes.set(advance, [...(outcomes.get(advance) ?? []), settled]);
+  }
+  return seen;
+}
 
 describe("Training Agent controller policy", () => {
   it("lets the single agent choose tools or prose for learner chat", () => {
@@ -31,10 +55,62 @@ describe("Training Agent controller policy", () => {
     expect(nextToolStage("attempt-complete", new Map()).activeTools).toEqual(["replay_attempt"]);
     const coldStartSearches = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [] } }]], ["search_attempt_history", [{ result: { attempts: [] } }]]]);
     expect(nextToolStage("cold-start", coldStartSearches).activeTools).toEqual(["ask_user_question"]);
-    const noAbility = new Map<string, unknown[]>([["search_learner_model", [{ result: [] }]], ["search_attempt_history", [{ result: [] }]]]);
+    const noAbility = new Map<string, unknown[]>([["search_learner_model", [{ result: [] }]], ["search_attempt_history", [{ result: [] }]], ["search_challenge_history", [{ result: { challenges: [] } }]]]);
     expect(nextToolStage("session-start", noAbility).activeTools).toEqual(["set_session_objective"]);
-    const withAbility = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [{ id: "ability" }] } }]], ["search_attempt_history", [{ result: { attempts: [] } }]]]);
+    const withAbility = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [{ id: "ability" }] } }]], ["search_attempt_history", [{ result: { attempts: [] } }]], ["search_challenge_history", [{ result: { challenges: [] } }]]]);
     expect(nextToolStage("session-start", withAbility).activeTools).toEqual(["read_ability"]);
+  });
+
+  /* Requiring a tool the turn never built does not fail loudly: the provider
+     writes the call out as message text, no outcome is recorded, and the same
+     phase repeats until the protocol retry budget is gone. Adding
+     `search_challenge_history` to the session-start stages without adding it to
+     that turn's tool set did exactly that — ten identical retries and no
+     challenge. The two lists have to agree, so nothing relies on remembering. */
+  it("never stages a tool the turn does not build", () => {
+    for (const turnKind of TURN_KINDS) {
+      for (const hasActiveQuestion of [false, true]) {
+        for (const webSearch of [false, true]) {
+          const built = allowedTools(turnKind, hasActiveQuestion, webSearch);
+          const staged = [...reachableStages(turnKind, hasActiveQuestion, webSearch)];
+          expect(staged.filter((name) => !built.has(name)), `${turnKind} (activeQuestion=${hasActiveQuestion}, web=${webSearch})`).toEqual([]);
+        }
+      }
+    }
+  });
+
+  /* Reaching outside the learner's own record is offered, never demanded. A
+     planning turn with no key must not stage a tool that can only answer "not
+     set up", and one with a key must still be able to decline and commit. */
+  it("offers the web alongside the objective, and not at all without a key", () => {
+    const retrieved = () => new Map<string, unknown[]>([
+      ["search_learner_model", [{ result: { passages: [] } }]],
+      ["search_attempt_history", [{ result: { attempts: [] } }]],
+      ["search_challenge_history", [{ result: { challenges: [] } }]],
+    ]);
+    expect(nextToolStage("session-start", retrieved(), 3, { webSearch: false }).activeTools).toEqual(["set_session_objective"]);
+
+    const offered = nextToolStage("session-start", retrieved(), 3, { webSearch: true });
+    expect(offered.activeTools).toEqual(["web_search", "set_session_objective"]);
+
+    // Declining it commits the objective and the chain moves on rather than
+    // coming back to the same choice.
+    const declined = retrieved();
+    declined.set("set_session_objective", [{ result: { committed: true } }]);
+    expect(nextToolStage("session-start", declined, 3, { webSearch: true }).activeTools).not.toContain("web_search");
+  });
+
+  it("builds the challenge library search for every turn that can be staged to read it", () => {
+    expect(allowedTools("session-start").has("search_challenge_history")).toBe(true);
+    expect(reachableStages("session-start", false).has("search_challenge_history")).toBe(true);
+  });
+
+  it("makes a planning turn read what it has already asked before it aims a target", () => {
+    // The agent was structurally blind here: `search_challenge_history` existed
+    // but no stage required it, so a session's first target was chosen from the
+    // ability ledger alone and every goal re-derived the same challenge.
+    const outcomes = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [] } }]], ["search_attempt_history", [{ result: { attempts: [] } }]]]);
+    expect(nextToolStage("session-start", outcomes).activeTools).toEqual(["search_challenge_history"]);
   });
 
   it("replays the solve before judging it, and lets a question replace the next target", () => {
@@ -70,6 +146,7 @@ describe("Training Agent controller policy", () => {
     const outcomes = new Map<string, unknown[]>([
       ["search_learner_model", [{ result: { passages: [] } }]],
       ["search_attempt_history", [{ result: { attempts: [] } }]],
+      ["search_challenge_history", [{ result: { challenges: [] } }]],
       ["set_session_objective", [{ result: { committed: true } }]],
       ["set_training_target", [{ result: { committed: true } }]],
       ["create_question", [{ result: { status: "invalid" } }]],

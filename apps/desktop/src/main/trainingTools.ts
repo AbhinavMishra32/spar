@@ -5,6 +5,7 @@ import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type Re
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
+import type { WebSearchService } from "./webSearch.js";
 
 export async function executeTrainingTool(
   name: string,
@@ -13,9 +14,22 @@ export async function executeTrainingTool(
   local: LocalStore,
   workspaces: WorkspaceService,
   runner: UtilityClient,
+  web?: WebSearchService,
 ) {
   if (!sessionId) throw new Error("Training tool call is missing its session context");
   const value = input as Record<string, unknown>;
+  /* Optional so the tool tests can call this without standing up a network
+     service. Missing reads as unconfigured, which is already a result the agent
+     knows how to carry on from. */
+  if (name === "web_search") {
+    if (!web) return { configured: false, note: "Web search is unavailable in this context." };
+    return web.search(String(value.query ?? ""), Number(value.limit ?? 5));
+  }
+  if (name === "web_fetch") {
+    if (!web) return { configured: false, note: "Web fetch is unavailable in this context." };
+    const urls = Array.isArray(value.urls) ? value.urls.map((entry) => String(entry)) : [String(value.url ?? "")];
+    return web.fetch(urls);
+  }
   if (name === "read_session") return local.readSession(String(value.sessionId));
   if (name === "search_learner_model") return { passages: local.searchLearner(String(value.query ?? ""), Number(value.limit ?? 4)) };
   if (name === "search_attempt_history") return { attempts: local.searchAttempts(String(value.query ?? ""), Number(value.limit ?? 5)) };
@@ -47,8 +61,12 @@ export async function executeTrainingTool(
       return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${activeQuestion.title}) is already active for this session. End this agent turn instead of publishing another challenge.` }] } };
     }
     const proposedTitle = String(value.title ?? "").trim();
-    const duplicateTitle = local.readSession(sessionId)?.summary.questionTitles.some((question) => question.title.trim().toLocaleLowerCase() === proposedTitle.toLocaleLowerCase());
-    if (duplicateTitle) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `A prior question in this session is already titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
+    /* Checked against the whole library, not this session. A session boundary is
+       an implementation detail to the learner: the same challenge arriving under
+       a new goal is the same challenge. */
+    if (local.challengeTitleUsed(proposedTitle)) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `The learner has already been asked a challenge titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
+    const saturation = saturatedConcept(local, sessionId, value.concepts);
+    if (saturation) return { status: "invalid", report: { valid: false, checks: [{ name: "goal coverage", passed: false, detail: saturation }] } };
     const compiled = await compileCandidate(input, sessionId, workspaces, runner);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
     const questionCreatedWhileCompiling = openChallenge(local, sessionId);
@@ -157,6 +175,50 @@ function sectionList(value: unknown): ReplaySection[] {
 
 function caseFilter(value: unknown): CaseFilter {
   return value === "failed-ever" || value === "still-failing" || value === "fixed" ? value : "all";
+}
+
+/**
+ * Refuses a session's *first* challenge when it lands on the concept the last
+ * three challenges were already about and the learner's own goal never named it.
+ *
+ * This is the failure the learner actually reported: four unrelated goals — a
+ * Google interview, TypeScript, C++, "hii" — each produced another off-by-one
+ * loop repair, because the ability ledger held exactly one ability and every
+ * retrieval returned it. Retrieval is supposed to calibrate difficulty; here it
+ * was replacing the goal.
+ *
+ * Narrow on purpose, so legitimate repetition survives. It only applies to the
+ * first challenge of a session — staying on a concept after an attempt is how
+ * teaching works, and this must not touch that. And it yields whenever the goal
+ * names the concept, which is what a drill started from an ability or concept
+ * card does: those goals read "I want to go deeper on <that ability>", so the
+ * learner asking for more of the same is always honoured.
+ */
+function saturatedConcept(local: LocalStore, sessionId: string, concepts: unknown): string | null {
+  const primary = primaryConceptSlug(concepts);
+  if (!primary) return null;
+  const summary = local.readSession(sessionId)?.summary;
+  if (!summary || summary.questionTitles.length > 0) return null;
+  const recent = local.recentChallengeCoverage(3);
+  if (recent.length < 3 || !recent.every((row) => row.primaryConcept === primary)) return null;
+  if (goalNames(summary.originalGoal, primary)) return null;
+  return `The learner's last ${recent.length} challenges were all aimed at "${primary}" (${recent.map((row) => `"${row.title}"`).join(", ")}), and this session's goal — "${summary.originalGoal}" — does not name it. Retrieved history calibrates difficulty; it does not choose the topic. Set a target inside the surface this goal actually describes and aim this first challenge at a concept the learner has no recent evidence under.`;
+}
+
+function primaryConceptSlug(concepts: unknown): string | null {
+  const tags = conceptTags(concepts);
+  if (!tags.length) return null;
+  return (tags.find((tag) => tag.role === "primary") ?? tags[0])?.slug?.trim().toLocaleLowerCase() ?? null;
+}
+
+/** Whether the goal itself asks for this concept. Slug words rather than the
+ *  whole slug, so "loop-boundary-tracing" is named by "go deeper on loop
+ *  boundary tracing" — the wording a drill session is created with. */
+function goalNames(goal: string, slug: string): boolean {
+  const words = slug.split(/[^a-z0-9]+/i).filter((word) => word.length > 2);
+  if (!words.length) return false;
+  const haystack = goal.toLocaleLowerCase();
+  return words.every((word) => haystack.includes(word.toLocaleLowerCase()));
 }
 
 /** Concept tags off a tool call. Shape is already checked by the tool schema, so

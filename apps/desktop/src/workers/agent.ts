@@ -6,15 +6,16 @@ import { z } from "zod";
 import { askUserQuestionInputSchema } from "@spar/domain";
 import { createPiMastraModel, type PiProviderInput } from "./piMastraModel.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
-import { nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
 import { normalizeAgentStreamPart } from "./agentStream.js";
+import { ACTION_TITLE_KEY, splitActionTitle, toolPayload } from "./toolPayload.js";
 
 const AGENT_MAX_STEPS = 96;
 const IDENTICAL_TOOL_CALL_LIMIT = 15;
 const AGENT_PHASE_TIMEOUT_MS = 180_000;
 const CHALLENGE_COMPILATION_LIMIT = 15;
 const PROTOCOL_RETRY_LIMIT = 15;
-type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { objective?: unknown; target?: unknown }; provider: PiProviderInput } };
+type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { objective?: unknown; target?: unknown }; webSearch?: boolean; provider: PiProviderInput } };
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error("Spar must run inside an Electron utility process");
 const pendingTools = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -103,6 +104,12 @@ const toolDefinitions = {
   search_attempt_history: ["Search attempts by ability or failure signature.", z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) })],
   search_challenge_history: ["Search the learner's durable challenge library, including outcomes and replacement lineage.", z.object({ query:z.string(),limit:z.number().int().min(1).max(12).default(6) })],
   read_challenge: ["Read one stored challenge design, validation report, attempts, and test history.", z.object({ questionId:z.string().uuid() })],
+  /* The one pair of tools that reads anything outside the learner's own record.
+     Named for what they are for: grounding a goal in what the world actually
+     asks — a company's real interview surface, a language's current idiom — not
+     for looking up answers, which the host compiler decides anyway. */
+  web_search: ["Search the web for current, external information: what a company's interviews actually cover, what a library's current API is, what a topic's standard formulation is. Returns titles, URLs, and short extracts. Use it to ground a goal in reality when the learner's own record cannot answer the question, and prefer one focused query over several vague ones.", z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(10).default(5) })],
+  web_fetch: ["Read one or more web pages in full, by URL. Use it after web_search has told you which page is worth reading. http and https only.", z.object({ urls: z.array(z.string().url()).min(1).max(5) })],
   read_attempt: ["Read a focused attempt trace.", z.object({ attemptId: z.string().uuid() })],
   read_session: ["Read the current session summary and decisions.", z.object({ sessionId: z.string().uuid() })],
   read_concept_graph: ["Read the concept vocabulary near a topic, with this learner's evidence against each one. Use it to choose what to tag and what to test next.", z.object({ query: z.string().optional(), limit: z.number().int().min(1).max(24).default(14) })],
@@ -146,7 +153,11 @@ function hostTool(
   phaseExecutions: Map<string, { phase: number; promise: Promise<unknown> }>,
 ) {
   return createTool({ id: name, description, inputSchema: schema, execute: (input) => {
-    const signature = phaseExecutionKey(name, stableJson(input));
+    /* Keyed on the arguments alone. The title is prose the model rewrites freely,
+       and letting it into the signature would make two identical calls that were
+       merely described differently look like two different pieces of work — which
+       is exactly what the per-phase cache exists to collapse. */
+    const signature = phaseExecutionKey(name, stableJson(splitActionTitle(input).arguments));
     const cached = phaseExecutions.get(signature);
     if (cached?.phase === currentPhase()) return cached.promise;
 
@@ -170,25 +181,33 @@ async function callHostTool(
 ) {
   const id = randomUUID();
   const result = new Promise((resolve, reject) => pendingTools.set(id, { resolve, reject }));
+  /* Split before anything else happens to it. The title is for the transcript and
+     the rest is the call: passing the title through to the host would hand a tool
+     an argument it never declared, and `create_question` forwards its whole input
+     to the compiler. */
+  const { actionTitle, arguments: args } = splitActionTitle(input);
   // The host tool call is the real unit of agent work, so the renderer is told
   // about it directly rather than inferring rows from provider stream parts.
-  const summary = summarizeToolInput(name, input);
-  parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "start", callId: id, ...summary } });
-  parentPort.postMessage({ kind: "tool-call", id, requestId: runId, sessionId, name, input });
+  const summary = summarizeToolInput(name, args);
+  const payload = { input: toolPayload(name, args) };
+  const titled = { ...summary, ...(actionTitle ? { actionTitle } : {}) };
+  parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "start", callId: id, ...titled, ...payload } });
+  parentPort.postMessage({ kind: "tool-call", id, requestId: runId, sessionId, name, input: args });
   try {
     const value = await result;
-    record?.(name, input, value);
+    record?.(name, args, value);
     // Compilation rejection is an expected tool result rather than an IPC
     // error, but it must never be rendered as a successfully created
     // challenge. Only a playable result reaches durable question storage.
     const published = !["create_question", "replace_current_question", "create_fallback_question"].includes(name) || isPlayableQuestion(value);
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...summary } });
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...titled, ...payload, output: toolPayload(name, value) } });
     return value;
   } catch (error) {
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...summary } });
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...titled, ...payload, output: toolPayload(name, { error: error instanceof Error ? error.message : String(error) }) } });
     throw error;
   }
 }
+
 
 /** Files a tool writes, counted so the renderer can show real `+N -N` stats. */
 function summarizeToolInput(name: string, input: unknown): { label?: string; files?: Array<{ path: string; added: number; removed: number }> } {
@@ -302,9 +321,30 @@ function countLines(content: string): number {
   return lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
 }
 
+/**
+ * The name of the row this call will draw in the transcript, written by the agent.
+ *
+ * Added to every tool uniformly rather than to each schema by hand, so no tool can
+ * be added later with no way to say what it is doing. The host used to name these
+ * rows from a fixed table — "Searched attempt history" for every search, whatever
+ * was searched for — which is accurate and says nothing. The agent knows why it is
+ * making the call; this is where it says so.
+ *
+ * It is a label and never an instruction: shown, stored, and otherwise ignored.
+ */
+function withActionTitle(schema: z.ZodTypeAny): z.ZodTypeAny {
+  if (!(schema instanceof z.ZodObject)) return schema;
+  return schema.extend({
+    [ACTION_TITLE_KEY]: z.string().min(3).max(70).describe(
+      "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
+    ),
+  });
+}
+
 async function run(request: Request) {
   const hasActiveQuestion=Boolean(request.payload.activeQuestion);
-  const allowed = allowedTools(request.payload.turnKind,hasActiveQuestion);
+  const webSearch = request.payload.webSearch === true;
+  const allowed = allowedTools(request.payload.turnKind,hasActiveQuestion,webSearch);
   const outcomes = new Map<string, unknown[]>();
   if (request.payload.resumeState?.objective) outcomes.set("set_session_objective", [request.payload.resumeState.objective]);
   if (request.payload.resumeState?.target && request.payload.turnKind !== "challenge-revision") outcomes.set("set_training_target", [request.payload.resumeState.target]);
@@ -317,7 +357,7 @@ async function run(request: Request) {
     callSignatures.push(`${name}:${stableJson(input)}`);
     assertNoExtremeToolLoop(callSignatures);
   };
-  const tools = Object.fromEntries(Object.entries(toolDefinitions).filter(([name]) => allowed.has(name)).map(([name, [description, schema]]) => [name, hostTool(request.id,request.payload.sessionId,name, description, schema, record, () => currentPhase, phaseExecutions)]));
+  const tools = Object.fromEntries(Object.entries(toolDefinitions).filter(([name]) => allowed.has(name)).map(([name, [description, schema]]) => [name, hostTool(request.id,request.payload.sessionId,name, description, withActionTitle(schema), record, () => currentPhase, phaseExecutions)]));
   const model = createPiMastraModel(request.payload.provider);
   const agent = new Agent({ id: "spar-agent", name: "Spar", model, instructions: instructions().replaceAll("Training Agent","Spar"), tools, maxRetries: 1 });
   new Mastra({ agents: { training: agent }, logger: false });
@@ -327,7 +367,7 @@ async function run(request: Request) {
     let finishReason = "stop";
     for (let step = 0; step < AGENT_MAX_STEPS; step += 1) {
       currentPhase = step;
-      const stage = nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT,{hasActiveQuestion});
+      const stage = nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT,{hasActiveQuestion,webSearch});
       if (stage.exhausted) {
         const value = await publishFallbackChallenge(request, outcomes, stage.exhausted);
         parentPort.postMessage({ kind: "result", id: request.id, ok: value.ok, ...(value.ok ? { value: { text: value.text, usage: sumUsage(usage), finishReason: "fallback-challenge", phaseSteps: step + 1 } } : { error: value.error }) });
@@ -458,13 +498,6 @@ function stableJson(value: unknown): string {
   if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`).join(",")}}`;
   return JSON.stringify(value) ?? "undefined";
 }
-function allowedTools(turnKind: AgentTurnKind,hasActiveQuestion=false) {
-  if (turnKind === "cold-start") return new Set(["search_learner_model", "search_attempt_history", "ask_user_question"]);
-  if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question"]);
-  if (turnKind === "attempt-complete") return new Set(["replay_attempt", "inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question"]);
-  if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question"]);
-  return new Set(["read_session", ...(hasActiveQuestion?["inspect_current_attempt","replace_current_question"]:["create_question"]), "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability"]);
-}
 function settle(message: Record<string, unknown>) { const pending = pendingTools.get(String(message.id)); if (!pending) return; pendingTools.delete(String(message.id)); if (message.ok) pending.resolve(message.value); else pending.reject(new Error(String(message.error))); }
 /**
  * The exact build contract per language. C++ had none, so every C++ candidate
@@ -481,7 +514,7 @@ function languageContracts() {
   ].join(" ");
 }
 
-function instructions() { return `You are the single Training Agent for a personalized coding gym. Own pedagogical decisions, not persistence, execution, or correctness verification. On a cold-start turn, retrieve learner and attempt evidence once, then ask exactly one short, plain-language question establishing prerequisite experience and confidence for the stated goal; do not set a target or create a challenge. For a new broad goal with existing evidence or a completed cold-start answer: call search_learner_model once and search_attempt_history once using focused queries, then stop retrieving, set a concise session objective, set exactly one Training Target, and create one complete validated question. Retrieved history calibrates difficulty but must never replace the learner's current goal: use prior evidence only when it is materially relevant, and otherwise choose an accessible foundation diagnostic from the goal and placement answer. Treat a cold-start answer as evidence about accessibility and never infer advanced readiness merely because the learner named an advanced topic. When retrieved evidence contains an existing ability relevant to the target, reuse its exact title so evidence updates the same durable Ability Ledger identity. Write every question in the context's preferredLanguage unless the learner explicitly asks for a different one in this session; their request wins over the preference for as long as they hold it. When the context carries a learnerProfile, treat its stated experience and weakness as self-reported evidence that calibrates the first target before any attempt exists — weaker than a recorded attempt, and never a reason to skip retrieval. ${languageContracts()} Starter and reference maps must use the same implementation path, so the reference replaces the exact file the learner edits. Write the statement for the kind of challenge it is: a repair challenge ships a starter that already runs and is wrong, so its statement must say the file contains a working-looking implementation with a defect, name the observable symptom, and state the contract as what the function must return — never as something to implement, which contradicts the finished code the learner is looking at. Only a challenge whose starter is a stub asks the learner to implement anything. Every reference solution must pass all tests. Every known incorrect implementation must represent the targeted misconception, pass all visible tests, and fail when hidden tests are included. The question's observable return contract must expose the targeted misconception: for repeated invariant restoration, do not rely only on a monotone maximum if a one-step shrink can return the same maximum; prefer counting valid windows, returning restored state, or another output where incomplete restoration is behaviorally distinguishable. Before calling create_question, ensure its title, statement, function contract, examples, reference code, visible tests, hidden tests, and expected failure signatures all describe the same exact operation and constraints. The model only proposes candidate designs; it must never declare a candidate or learner submission correct. The deterministic host compiler and runner are the sole verification authority. When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run. There is no reviewer or judge model. Use tools as reality and never claim a write, test, evaluation, or update without its tool result. After a completed attempt: replay the attempt once and read how it was solved, read its already-recorded deterministic evaluation once, read the active ability once, propose one evidence-backed markdown update, commit exactly one action (diagnose, teach, practise, transfer, advance, or retain), call search_learner_model once for wider context, then either ask the learner about a specific moment the replay could not explain or create the next target and validated question. The next question must discriminate what remains uncertain from the attempt in a meaningfully different representation while avoiding unrelated difficulty. Its persisted Training Target and generated task must name the same transfer context and constraint. Prefer evidence over scores and never overreact to one attempt. Keep chat concise.
+function instructions() { return `You are the single Training Agent for a personalized coding gym. Own pedagogical decisions, not persistence, execution, or correctness verification. On a cold-start turn, retrieve learner and attempt evidence once, then ask exactly one short, plain-language question establishing prerequisite experience and confidence for the stated goal; do not set a target or create a challenge. For a new broad goal with existing evidence or a completed cold-start answer: call search_learner_model once and search_attempt_history once using focused queries, then stop retrieving, set a concise session objective, set exactly one Training Target, and create one complete validated question. Retrieved history calibrates difficulty but must never replace the learner's current goal: use prior evidence only when it is materially relevant, and otherwise choose an accessible foundation diagnostic from the goal and placement answer. A goal names a surface, and a broad goal names a wide one — "pass a Google interview" is arrays, hashing, two pointers, recursion, trees, graphs, and complexity, not whichever narrow gap the ledger already happens to hold. Before setting the first target of a session, name the surface this goal describes and choose inside it; a search hit is only relevant if it sits on that surface, and a ledger holding one or two abilities will return them for almost any query, which is a property of the search and not evidence about this goal. The context's recentChallenges is the record of what you have already asked, across every session, most recent first. Read it as a coverage constraint: do not aim a session's first target at a primary concept that already dominates that list unless the goal itself names that concept or the learner's most recent attempt on it failed, and never repeat a challenge's operation under a new title. Foundation difficulty means an accessible first rung on this goal's surface, never a retreat to the same off-by-one loop repair for every goal. When retrieved evidence contains an existing ability that genuinely sits on this goal's surface, reuse its exact title so evidence updates the same durable Ability Ledger identity; when nothing retrieved belongs to this goal, open a new ability for it rather than bending the goal to fit the ledger. Treat a cold-start answer as evidence about accessibility and never infer advanced readiness merely because the learner named an advanced topic. Write every question in the context's preferredLanguage unless the learner explicitly asks for a different one in this session; their request wins over the preference for as long as they hold it. When the context carries a learnerProfile, treat its stated experience and weakness as self-reported evidence that calibrates the first target before any attempt exists — weaker than a recorded attempt, and never a reason to skip retrieval. ${languageContracts()} Starter and reference maps must use the same implementation path, so the reference replaces the exact file the learner edits. Write the statement for the kind of challenge it is: a repair challenge ships a starter that already runs and is wrong, so its statement must say the file contains a working-looking implementation with a defect, name the observable symptom, and state the contract as what the function must return — never as something to implement, which contradicts the finished code the learner is looking at. Only a challenge whose starter is a stub asks the learner to implement anything. Every reference solution must pass all tests. Every known incorrect implementation must represent the targeted misconception, pass all visible tests, and fail when hidden tests are included. The question's observable return contract must expose the targeted misconception: for repeated invariant restoration, do not rely only on a monotone maximum if a one-step shrink can return the same maximum; prefer counting valid windows, returning restored state, or another output where incomplete restoration is behaviorally distinguishable. Before calling create_question, ensure its title, statement, function contract, examples, reference code, visible tests, hidden tests, and expected failure signatures all describe the same exact operation and constraints. The model only proposes candidate designs; it must never declare a candidate or learner submission correct. The deterministic host compiler and runner are the sole verification authority. When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run. There is no reviewer or judge model. Every tool call takes an actionTitle, and it is the row the learner sees for that step in the transcript. Write it about this specific call, in their language: name what you are looking for or deciding, not what the tool is called. "Checking whether arrays have ever been tested" and "Reading how you solved the window repair" are titles; "Searched attempt history" and "read_ability" are not. Keep it under about eight words, sentence case, no trailing period, and phrased as the action in progress. It is a caption and never an instruction to yourself. Use tools as reality and never claim a write, test, evaluation, or update without its tool result. After a completed attempt: replay the attempt once and read how it was solved, read its already-recorded deterministic evaluation once, read the active ability once, propose one evidence-backed markdown update, commit exactly one action (diagnose, teach, practise, transfer, advance, or retain), call search_learner_model once for wider context, then either ask the learner about a specific moment the replay could not explain or create the next target and validated question. The next question must discriminate what remains uncertain from the attempt in a meaningfully different representation while avoiding unrelated difficulty. Its persisted Training Target and generated task must name the same transfer context and constraint. Prefer evidence over scores and never overreact to one attempt. Keep chat concise.
 
 ${replayDoctrine()}
 
