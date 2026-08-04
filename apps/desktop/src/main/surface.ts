@@ -99,10 +99,19 @@ export async function applyNativeSurface(window: BrowserWindow, plan: SurfacePla
   if (plan.surface !== "liquid-glass") return plan.surface;
 
   try {
-    const { default: liquidGlass } = await import("electron-liquid-glass");
+    /* Imported through a variable specifier on purpose. The package is an
+       optional darwin-only dependency, so on a Linux or Windows build machine it
+       is simply not installed — and a static import of a module that is not there
+       is a type error that fails the whole build, on the one platform that was
+       never going to load it anyway. A variable defeats that resolution, and the
+       shape actually used is declared here instead. */
+    const specifier: string = "electron-liquid-glass";
+    const module = (await import(specifier)) as {
+      default: { addView(handle: Buffer, options: { cornerRadius: number }): number };
+    };
     // Matches the window corner macOS 26 draws, so the glass reaches the edge
     // of the frame instead of stopping short of it inside a squarer rectangle.
-    const id = liquidGlass.addView(window.getNativeWindowHandle(), { cornerRadius: 16 });
+    const id = module.default.addView(window.getNativeWindowHandle(), { cornerRadius: 16 });
     if (id < 0) throw new Error("NSGlassEffectView unavailable");
     return "liquid-glass";
   } catch (cause) {
