@@ -1,12 +1,15 @@
-import { Fragment, useLayoutEffect, useRef, useState } from "react";
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, LayoutGrid, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Trash2, Waypoints } from "lucide-react";
+import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, LayoutGrid, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
 import type { SessionSummary } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
-import { initials, relativeTime } from "@/lib/format";
+import { formatDuration, initials, relativeTime } from "@/lib/format";
+import { challengeBands } from "@/lib/progress";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Meter } from "@/components/ui/meter";
 import { SparWordmark } from "../common/SparWordmark";
 
 /* "challenge" is one challenge opened on its own, out of the history list. Like
@@ -32,8 +35,20 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
   { id: "challenges", label: "Challenges", icon: History },
 ];
 
+/* No transition on the fill. A source list is the one surface where the pointer
+   is expected to travel fast, and a 150ms crossfade per row turns that into a
+   wake of half-lit rows trailing the cursor. AppKit paints the highlight on the
+   frame the pointer arrives — hovering here should feel like touching hardware,
+   not like waking a web page up. */
 const ROW =
-  "flex h-7 w-full items-center gap-2 rounded-md px-2 text-ui font-normal transition-colors outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+  "flex h-7 w-full items-center gap-2 rounded-md px-2 text-ui font-normal outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+
+const STATUS_COPY: Record<SessionSummary["status"], string> = {
+  planning: "Planning",
+  active: "In progress",
+  paused: "Paused",
+  completed: "Completed",
+};
 
 const SYNC: Record<BootstrapData["syncState"], { label: string; tone: string }> = {
   synced: { label: "Cloud synced", tone: "bg-[var(--success)]" },
@@ -117,7 +132,7 @@ export function Sidebar({
       <div className="flex h-[var(--titlebar-height)] shrink-0 items-center pl-[max(0.625rem,var(--window-controls-leading))] pr-2.5">
         <SparWordmark className="text-[0.98rem] text-foreground/90" />
         <button
-          className="app-no-drag ml-auto grid size-6 place-items-center rounded-md text-muted-foreground/70 transition-colors hover:bg-[var(--sidebar-accent)] hover:text-foreground"
+          className="app-no-drag ml-auto grid size-6 place-items-center rounded-md text-muted-foreground/70 hover:bg-[var(--sidebar-accent)] hover:text-foreground"
           onClick={onCollapse}
           title="Hide sidebar  ⌘B"
           type="button"
@@ -191,7 +206,7 @@ export function Sidebar({
         {shelved.length > 0 && (
           <>
             <button
-              className="flex h-6 w-full items-center gap-1 px-2 pt-1 text-ui-sm font-medium text-muted-foreground/70 transition-colors hover:text-foreground"
+              className="flex h-6 w-full items-center gap-1 px-2 pt-1 text-ui-sm font-medium text-muted-foreground/70 hover:text-foreground"
               onClick={() => setShowArchived((value) => !value)}
               type="button"
             >
@@ -236,13 +251,20 @@ export function Sidebar({
   );
 }
 
+/** The control cluster's buttons, in the order they sit in the row. */
+const ICON_BUTTON =
+  "grid size-5 shrink-0 place-items-center rounded-[var(--radius-sm)] text-muted-foreground/75 hover:bg-[var(--sidebar-accent-active)] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none";
+
 /**
  * One session in the list, with everything you can do to it behind ⋮ or a
- * right-click on the row.
+ * right-click on the row — and the two you actually reach for, pinning and
+ * filing, as their own icons on hover.
  *
- * The trigger is only drawn on hover, but the gutter it sits in is reserved
- * permanently: revealing a control that pushes the title it belongs to is worse
- * than truncating four characters earlier all the time.
+ * No gutter is reserved for them. The old row paid for the ⋮ on every row it
+ * drew, so titles ended in an ellipsis a word early even with nothing hovered;
+ * here the controls take their room from the title only while they are visible,
+ * and the title fades under them rather than being cut. What the fade hides,
+ * hovering walks past — see {@link RowTitle}.
  */
 function SessionRow({
   session,
@@ -264,6 +286,7 @@ function SessionRow({
   onRequestDelete(): void;
 }) {
   const [open, setOpen] = useState(false);
+  const [peeking, setPeeking] = useState(false);
   const archived = !!session.archivedAt;
   const finished = session.status === "completed";
   // A live challenge is what the session is, so its status is not the learner's
@@ -282,68 +305,256 @@ function SessionRow({
     { key: "d", label: "Delete…", icon: Trash2, run: onRequestDelete, destructive: true },
   ];
 
+  /* Pin and file, the two that are one click on the row rather than two through a
+     menu. Everything else stays in the menu: shelf position is worth an icon,
+     renaming and deleting are not — and three icons is already the most a row
+     this narrow can show without becoming a toolbar. */
+  const quick = [
+    ...(archived ? [] : [{ label: session.pinnedAt ? "Unpin" : "Pin to top", icon: session.pinnedAt ? PinOff : Pin, run: () => actions.setPinned(session, !session.pinnedAt) }]),
+    { label: archived ? "Restore" : "Archive", icon: archived ? ArchiveRestore : Archive, run: () => actions.setArchived(session, !archived) },
+  ];
+
   if (renaming) return <RenameRow onCancel={onRenameEnd} onCommit={(title) => { actions.rename(session, title); onRenameEnd(); }} session={session} />;
 
-  return (
-    <div className="group/session relative" onContextMenu={(event) => { event.preventDefault(); setOpen(true); }}>
-      <button
-        className={cn(
-          ROW,
-          active
-            ? "bg-[var(--sidebar-accent-active)] text-foreground"
-            : "text-foreground/80 hover:bg-[var(--sidebar-accent)]",
-          archived && !active && "text-foreground/55",
-        )}
-        onClick={onOpen}
-        title={[session.title, archived ? "archived" : null, relativeTime(session.updatedAt)].filter(Boolean).join(" · ")}
-        type="button"
-      >
-        <StatusDot status={session.status} />
-        <span className="min-w-0 flex-1 truncate pr-5 text-left">{session.title}</span>
-      </button>
+  /** Asking for the menu withdraws the peek. Both open off the same row, so the
+   *  two of them up at once is two panels fighting over one anchor — and once the
+   *  menu has been dismissed the pointer has to leave and come back before the
+   *  peek is offered again, rather than springing up in the menu's place. */
+  const openMenu = (next: boolean) => {
+    setOpen(next);
+    if (next) setPeeking(false);
+  };
 
-      <DropdownMenu modal={false} onOpenChange={setOpen} open={open}>
-        <DropdownMenuTrigger asChild>
+  return (
+    <HoverCard closeDelay={90} onOpenChange={setPeeking} open={peeking && !open} openDelay={420}>
+      <HoverCardTrigger asChild>
+        <div
+          className="sidebar-row group/session relative"
+          onContextMenu={(event) => { event.preventDefault(); openMenu(true); }}
+          // The cluster is absolute, so the gutter it needs has to be stated: one
+          // slot per quick action plus the ⋮, and the inset it sits in.
+          style={{ "--sidebar-controls-width": `calc(${quick.length + 1} * 1.25rem + 0.7rem)` } as CSSProperties}
+        >
           <button
-            aria-label={`Options for ${session.title}`}
             className={cn(
-              "absolute right-1 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded-[var(--radius-sm)]",
-              "text-muted-foreground/70 opacity-0 transition-opacity hover:bg-[var(--sidebar-accent-active)] hover:text-foreground",
-              "focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none group-hover/session:opacity-100",
-              open && "bg-[var(--sidebar-accent-active)] text-foreground opacity-100",
+              ROW,
+              active
+                ? "bg-[var(--sidebar-accent-active)] text-foreground"
+                : "text-foreground/80 hover:bg-[var(--sidebar-accent)]",
+              archived && !active && "text-foreground/55",
             )}
+            onClick={onOpen}
             type="button"
           >
-            <EllipsisVertical className="size-3.5" />
+            <RowTitle>{session.title}</RowTitle>
           </button>
-        </DropdownMenuTrigger>
-        {/* The letters are real: Radix would otherwise spend them on typeahead,
-            which moves the highlight and leaves the hint lying about what it does. */}
-        <DropdownMenuContent
-          align="start"
-          className="min-w-[11.5rem]"
-          onKeyDown={(event) => {
-            if (event.metaKey || event.ctrlKey || event.altKey) return;
-            const item = items.find((entry) => entry.key === event.key.toLowerCase());
-            if (!item) return;
-            event.preventDefault();
-            setOpen(false);
-            item.run();
-          }}
-          side="right"
-        >
-          {items.map((item) => (
-            <Fragment key={item.key}>
-              {item.destructive && <DropdownMenuSeparator />}
-              <DropdownMenuItem onSelect={item.run} variant={item.destructive ? "destructive" : "default"}>
-                <item.icon />
-                <span className="flex-1">{item.label}</span>
-                <kbd className="font-sans text-ui-sm text-muted-foreground/60 uppercase">{item.key}</kbd>
-              </DropdownMenuItem>
-            </Fragment>
-          ))}
-        </DropdownMenuContent>
-      </DropdownMenu>
+
+          {/* No `flex` utility here: display is CSS's to own, because it is the
+              thing hover toggles, and a utility-layer `display` would outrank the
+              rule that hides the cluster at rest. */}
+          <div
+            className="absolute right-1 top-1/2 -translate-y-1/2 items-center gap-px"
+            data-open={open}
+            data-row-controls
+          >
+            {quick.map((action) => (
+              <button
+                key={action.label}
+                aria-label={`${action.label}: ${session.title}`}
+                className={ICON_BUTTON}
+                onClick={action.run}
+                title={action.label}
+                type="button"
+              >
+                <action.icon className="size-3.5" />
+              </button>
+            ))}
+
+            <DropdownMenu modal={false} onOpenChange={openMenu} open={open}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label={`Options for ${session.title}`}
+                  className={cn(ICON_BUTTON, open && "bg-[var(--sidebar-accent-active)] text-foreground")}
+                  type="button"
+                >
+                  <EllipsisVertical className="size-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              {/* The letters are real: Radix would otherwise spend them on typeahead,
+                  which moves the highlight and leaves the hint lying about what it does. */}
+              <DropdownMenuContent
+                align="start"
+                className="min-w-[11.5rem]"
+                onKeyDown={(event) => {
+                  if (event.metaKey || event.ctrlKey || event.altKey) return;
+                  const item = items.find((entry) => entry.key === event.key.toLowerCase());
+                  if (!item) return;
+                  event.preventDefault();
+                  setOpen(false);
+                  item.run();
+                }}
+                side="right"
+              >
+                {items.map((item) => (
+                  <Fragment key={item.key}>
+                    {item.destructive && <DropdownMenuSeparator />}
+                    <DropdownMenuItem onSelect={item.run} variant={item.destructive ? "destructive" : "default"}>
+                      <item.icon />
+                      <span className="flex-1">{item.label}</span>
+                      <kbd className="font-sans text-ui-sm text-muted-foreground/60 uppercase">{item.key}</kbd>
+                    </DropdownMenuItem>
+                  </Fragment>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </HoverCardTrigger>
+
+      {/* Unmounted while the menu is up rather than only closed, so there is no
+          panel left to animate out over the menu that replaced it.
+
+          Not hoverable either: there is nothing in it to click, and a panel that
+          kept itself alive under the pointer would swallow clicks on the page it
+          is floating over. */}
+      {!open && (
+        <HoverCardContent align="start" className="pointer-events-none w-[18.5rem]" side="right" sideOffset={10}>
+          <SessionPeek session={session} />
+        </HoverCardContent>
+      )}
+    </HoverCard>
+  );
+}
+
+/**
+ * A sidebar title that fades where it runs out of room, and walks the rest of
+ * itself past the fade while its row is hovered.
+ *
+ * Both need the same measurement — how much of the title does not fit — and it
+ * has to be taken live: the width changes when the sidebar is dragged, when the
+ * hover controls claim their gutter, and when the title is renamed. The clipped
+ * flag and the travel are handed to CSS, which owns the hover state; see
+ * `.sidebar-title` in theme.css.
+ */
+function RowTitle({ children }: { children: string }) {
+  const viewport = useRef<HTMLSpanElement>(null);
+  const text = useRef<HTMLSpanElement>(null);
+  const [overflow, setOverflow] = useState(0);
+
+  useLayoutEffect(() => {
+    const box = viewport.current;
+    const inner = text.current;
+    if (!box || !inner) return;
+    const measure = () => {
+      const hidden = inner.scrollWidth - box.clientWidth;
+      // Sub-pixel layout leaves a fraction over on titles that do fit, and a row
+      // that marquees by half a pixel is a row that twitches under the cursor.
+      setOverflow(hidden > 1 ? hidden : 0);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    observer.observe(inner);
+    return () => observer.disconnect();
+  }, [children]);
+
+  /* Travel is the hidden part plus the fade, so the last character ends up clear
+     of the gradient rather than arriving inside it. Pace is constant — a long
+     title takes longer than a short one instead of moving faster — with a floor
+     so a two-word overrun is not a flick. */
+  const travel = overflow + TITLE_FADE;
+  const seconds = Math.min(9, Math.max(2.6, travel / 38 + 1.4));
+
+  return (
+    <span
+      ref={viewport}
+      className="sidebar-title text-left"
+      data-clipped={overflow > 0}
+      style={overflow > 0 ? ({ "--sidebar-title-shift": `-${travel}px`, "--sidebar-title-duration": `${seconds}s` } as CSSProperties) : undefined}
+    >
+      <span ref={text}>{children}</span>
+    </span>
+  );
+}
+
+/** Width of the gradient that hides the overrun, matching `--sidebar-title-fade`. */
+const TITLE_FADE = 22;
+
+/**
+ * What the row could not say in one line: where the session got to, and what it
+ * has actually been doing.
+ *
+ * This is what the native tooltip on the row used to be. A tooltip could only
+ * repeat the title and a timestamp, which is the one thing the fade and the
+ * marquee already cover — so the space is spent on the numbers you would open the
+ * session to find out.
+ */
+function SessionPeek({ session }: { session: SessionSummary }) {
+  const questions = session.questionTitles;
+  const done = questions.filter((question) => question.status === "completed").length;
+  // The focus is what the agent settled on; the goal is only the stand-in from
+  // before it had.
+  const focus = session.currentFocus.join(" · ") || session.objective || session.originalGoal;
+  const meta = [
+    STATUS_COPY[session.status],
+    session.archivedAt ? "archived" : null,
+    relativeTime(session.updatedAt),
+    session.totalSeconds > 0 ? formatDuration(session.totalSeconds) : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1">
+        <p className="text-ui leading-snug font-medium text-foreground">{session.title}</p>
+        <p className="text-ui-sm text-muted-foreground/75">{meta.join(" · ")}</p>
+      </div>
+
+      {focus && <p className="line-clamp-2 text-ui-sm leading-[1.5] text-muted-foreground">{focus}</p>}
+
+      {questions.length > 0 ? (
+        <div className="space-y-1.5 border-t border-border/60 pt-2">
+          <div className="flex items-baseline justify-between text-ui-sm">
+            <span className="text-muted-foreground/70">Challenges</span>
+            <span className="tabular-nums text-foreground/80">{done}/{questions.length} evaluated</span>
+          </div>
+          <Meter animate={false} bands={challengeBands(questions)} height="0.1875rem" />
+          {/* Newest first, and only three: this is a glance, and the whole list is
+              one click away in the session itself.
+
+              The one the learner has open is marked in place rather than named
+              again underneath. It is nearly always the newest challenge, so a
+              line for it repeated the row directly above it word for word. */}
+          <ul className="space-y-0.5 pt-0.5">
+            {questions.slice(-3).reverse().map((question) => {
+              const live = question.id === session.activeQuestion?.id;
+              return (
+                <li key={question.id} className={cn("flex items-center gap-1.5 text-ui-sm", live ? "text-foreground/85" : "text-muted-foreground")}>
+                  {/* One slot whichever mark goes in it, so the titles keep a
+                      single left edge down the list. */}
+                  <span className="grid size-3 shrink-0 place-items-center">
+                    {live ? (
+                      <Target className="size-3 text-foreground/70" />
+                    ) : (
+                      <span
+                        className={cn(
+                          "size-1.5 rounded-full",
+                          question.status === "completed" ? "bg-[var(--success)]" : "bg-muted-foreground/40",
+                        )}
+                      />
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{question.title}</span>
+                  {live && <span className="shrink-0 text-muted-foreground/60">open</span>}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : (
+        <p className="border-t border-border/60 pt-2 text-ui-sm text-muted-foreground/70">
+          No challenges compiled yet — the agent is still working out what to set.
+        </p>
+      )}
     </div>
   );
 }
@@ -377,7 +588,6 @@ function RenameRow({ session, onCommit, onCancel }: { session: SessionSummary; o
 
   return (
     <div className={cn(ROW, "bg-[var(--sidebar-accent-active)] text-foreground")}>
-      <StatusDot status={session.status} />
       <input
         ref={input}
         aria-label="Session title"
