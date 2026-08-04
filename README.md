@@ -69,13 +69,16 @@ You point it at a model you already pay for or run yourself — see
 [Bring your own model](#bring-your-own-model) below. There is no Spar
 subscription.
 
-**A place for your account and history to live.** v0.1.0 does not talk to a
-hosted Spar service, because there isn't one yet. It expects to find the Spar API
-at `http://localhost:4318`, which means you run it yourself, or point the app at
-your own deployment with the `SPAR_API_ORIGIN` environment variable. The
-[For developers](#for-developers) section covers the setup. If you were hoping to
-download an app and be practising in ninety seconds, this is the release that
-doesn't do that yet — it is a real 0.1.
+**A place for your account and history to live.** Spar signs you in against the
+Spar API, and v0.1.0 ships without a hosted one — so it looks for the API on
+`http://localhost:4318`, which means running it yourself for now.
+[`docs/hosting.md`](docs/hosting.md) covers both paths: deploying it to Vercel in
+a few commands, or running it locally. Builds from 0.1.1 onward are stamped with a
+deployed origin so a download signs in without any of this, and
+`SPAR_API_ORIGIN` always overrides it if you would rather host your own.
+
+If you were hoping to download an app and be practising in ninety seconds, that
+is the next release rather than this one — 0.1.0 is a real 0.1.
 
 ## Your first session
 
@@ -262,7 +265,7 @@ so the app tells you which one you are in.
 Being straight about the edges:
 
 - **Three languages.** JavaScript, TypeScript, and C++. That's it for now.
-- **No hosted service.** You run the backend, as described above.
+- **No hosted service in this build.** You run the backend, as described above.
 - **Unsigned builds.** Your OS will complain on first launch.
 - **macOS is the polished one.** The Windows and Linux builds are real, but the
   Mac is where the window chrome, materials, and window controls have had the
@@ -299,6 +302,8 @@ deterministic challenge compiler.
   why the renderer is treated as untrusted
 - [`docs/threat-model.md`](docs/threat-model.md) — what runs untrusted code and
   what contains it
+- [`docs/hosting.md`](docs/hosting.md) — deploying the API, and how a build
+  learns which one to talk to
 - [`docs/releasing.md`](docs/releasing.md) — how a release is cut
 - [`apps/desktop/scripts/icon/README.md`](apps/desktop/scripts/icon/README.md) —
   how the app icon's macOS geometry was measured
