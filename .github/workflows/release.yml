@@ -109,6 +109,10 @@ jobs:
         working-directory: apps/desktop
         shell: bash
         env:
+          # Stamped into the build so a downloaded app knows where the hosted API
+          # is. Without it a packaged build falls back to localhost, which nobody
+          # who downloads Spar is running. Set as a repository variable.
+          SPAR_HOSTED_API_ORIGIN: ${{ vars.SPAR_HOSTED_API_ORIGIN }}
           MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_ID_INPUT: ${{ secrets.APPLE_ID }}
@@ -125,7 +129,10 @@ jobs:
             export CSC_IDENTITY_AUTO_DISCOVERY=false
             echo "::warning title=Unsigned build::MACOS_CERTIFICATE_BASE64 is not set, so this build is unsigned and Gatekeeper will warn on first launch."
           fi
-          pnpm run ${{ matrix.script }} -- --publish never
+          # extraMetadata writes the origin into the packaged package.json, which
+          # is the only way a build-time value survives into a downloaded app.
+          pnpm run ${{ matrix.script }} -- --publish never \
+            -c.extraMetadata.sparHostedApiOrigin="$SPAR_HOSTED_API_ORIGIN"
 
       # latest*.yml is what electron-updater reads, so it is a release asset like
       # any installer, not a build leftover.

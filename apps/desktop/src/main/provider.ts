@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { shell } from "electron";
 import { getModels, type Api, type Model, type OAuthCredentials } from "@mariozechner/pi-ai";
 import { getOAuthApiKey, getOAuthProvider } from "@mariozechner/pi-ai/oauth";
+import { apiOrigin } from "./apiOrigin.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import { anthropicUsage, codexUsageFromHeaders } from "./subscriptionUsage.js";
@@ -356,7 +357,7 @@ export class ProviderService {
     // credential is Spar's own gateway, and it is off unless the build turns it
     // on — an unconnected Spar resolves to nothing at all, and says so, rather
     // than reaching for a key it found lying around on the machine.
-    if (accessToken && gatewayEnabled()) values.push({ provider: "spar-gateway", model: "spar-training", api: "openai-completions", baseUrl: `${process.env.SPAR_API_ORIGIN ?? "http://localhost:4318"}/v1/ai`, apiKey: accessToken, source: "gateway", reasoningEffort: this.reasoningEffort() });
+    if (accessToken && gatewayEnabled()) values.push({ provider: "spar-gateway", model: "spar-training", api: "openai-completions", baseUrl: `${apiOrigin()}/v1/ai`, apiKey: accessToken, source: "gateway", reasoningEffort: this.reasoningEffort() });
     return dedupe(values);
   }
 
