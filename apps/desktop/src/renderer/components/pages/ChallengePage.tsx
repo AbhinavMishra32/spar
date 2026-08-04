@@ -27,6 +27,7 @@ import { DifficultyPill } from "../workspace/Difficulty";
 import { PaneHandle } from "../workspace/PaneHandle";
 import { ProblemStatement } from "../workspace/ProblemStatement";
 import { ResultPanel, type ResultTab, type RunOutcome } from "../workspace/ResultPanel";
+import { SparDots } from "@/components/common/SparDots";
 
 /**
  * One challenge, on its own, away from the session that produced it.
@@ -450,7 +451,7 @@ export function ChallengePage({
         <Toolbar onBack={onBack} onExpandSidebar={onExpandSidebar} title="Challenge" />
         <div className="grid flex-1 place-items-center">
           <div className="flex items-center gap-2 text-ui text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
+            <SparDots pattern="sweep" size={18} label="Opening challenge" />
             Opening challenge…
           </div>
         </div>

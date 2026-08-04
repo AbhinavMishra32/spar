@@ -25,6 +25,7 @@ import { ProviderGlyph } from "../common/ProviderGlyph";
 import { SparWordmark } from "../common/SparWordmark";
 import { AboutSpar } from "../settings/AboutSpar";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
+import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
 
@@ -450,7 +451,7 @@ export function SettingsPage({
         <Group label="Providers">
           {!inventory && (
             <Row>
-              <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
+              <SparDots className="text-muted-foreground" pattern="pulse" size={16} />
               <span className="text-ui text-muted-foreground">Reading the provider inventory…</span>
             </Row>
           )}

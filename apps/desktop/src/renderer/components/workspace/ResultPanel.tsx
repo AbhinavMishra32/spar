@@ -4,7 +4,6 @@ import {
   Check,
   ChevronDown,
   CircleSlash,
-  Loader2,
   MinusCircle,
   Terminal,
   Trash2,
@@ -14,6 +13,7 @@ import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/format";
 import { declaredCases } from "@/lib/testCases";
+import { SparDots } from "@/components/common/SparDots";
 import { EMPTY_REPORT, headline, parseTestOutput, type CaseStatus, type TestCaseResult } from "../../../shared/testReport";
 import { AttemptsPanel } from "./AttemptsPanel";
 
@@ -180,7 +180,7 @@ export function ResultPanel({
           active={tab === "result"}
           badge={
             running ? (
-              <Loader2 className="size-3 animate-spin" />
+              <SparDots pattern="wave" size={14} />
             ) : report.parsed ? (
               <span
                 className={cn(
@@ -274,7 +274,7 @@ export function ResultPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           {running ? (
             <div className="flex flex-1 items-center gap-2 px-3 py-3 text-ui text-muted-foreground">
-              <Loader2 className="size-3.5 animate-spin" />
+              <SparDots pattern="wave" size={18} />
               {busyLabel ?? "Running the visible cases…"}
             </div>
           ) : !terminal ? (

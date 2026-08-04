@@ -995,7 +995,56 @@
   }
 }
 
+/* The app icon's dot grid, animated — see components/common/SparDots.tsx. Each
+   dot carries its own resting scale in --dot-rest, and every pattern departs from
+   that value and comes back to it, so the grid the learner sees between passes is
+   the mark exactly as the icon draws it. */
+@keyframes spar-dots-wave {
+  0%,
+  100% {
+    transform: scale(calc(var(--dot-rest) * 0.62));
+    opacity: calc(var(--dot-tone) * 0.55);
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* A tighter crest than the wave: the dot sits at rest for most of the cycle and
+   is only briefly lit, which is what turns a continuous swell into one pass. */
+@keyframes spar-dots-sweep {
+  0%,
+  62%,
+  100% {
+    transform: scale(calc(var(--dot-rest) * 0.72));
+    opacity: calc(var(--dot-tone) * 0.6);
+  }
+  24% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes spar-dots-pulse {
+  0%,
+  100% {
+    transform: scale(calc(var(--dot-rest) * 0.78));
+    opacity: calc(var(--dot-tone) * 0.62);
+  }
+  50% {
+    transform: scale(var(--dot-rest));
+    opacity: var(--dot-tone);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* Collapse to the resting mark. A loading state that cannot move should still
+     be the logo rather than nothing. */
+  .spar-dots circle {
+    animation: none !important;
+  }
+
   .thinking-shimmer,
   .boot-wordmark,
   .streaming-caret::after,

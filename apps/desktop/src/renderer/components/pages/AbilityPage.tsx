@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowUpRight, ChevronRight, Dumbbell, Layers3, Loader2, Sparkles, Target } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, ChevronRight, Dumbbell, Layers3, Sparkles, Target } from "lucide-react";
 import type { AbilityDetail, AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { LanguageMark } from "../common/LanguageGlyph";
 import { Markdown } from "../agent/Markdown";
 import { ConceptChip, OutcomeMark } from "../concepts/ConceptChip";
 import { Standing } from "../concepts/ConceptSheet";
+import { SparDots } from "@/components/common/SparDots";
 
 type View = "abilities" | "concepts";
 
@@ -339,7 +340,7 @@ function AbilityDetailView({
   if (!ability) {
     return (
       <div className="grid h-full place-items-center">
-        <p className="flex items-center gap-1.5 text-ui text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Opening ability…</p>
+        <p className="flex items-center gap-2 text-ui text-muted-foreground"><SparDots pattern="sweep" size={18} label="Opening ability" />Opening ability…</p>
       </div>
     );
   }
@@ -458,7 +459,7 @@ function AbilityDetailView({
               <p className="text-ui leading-[1.6] text-muted-foreground">No challenges have been set against this ability yet.</p>
             )
           ) : (
-            <p className="flex items-center gap-1.5 text-ui text-muted-foreground"><Loader2 className="size-3 animate-spin" />Reading evidence…</p>
+            <p className="flex items-center gap-2 text-ui text-muted-foreground"><SparDots pattern="pulse" size={16} />Reading evidence…</p>
           )}
         </section>
 

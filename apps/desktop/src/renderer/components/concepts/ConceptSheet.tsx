@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Dumbbell, Loader2, Sparkles } from "lucide-react";
+import { ArrowUpRight, Dumbbell, Sparkles } from "lucide-react";
 import type { ConceptDetail, ConceptSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Meter, MeterKey } from "@/components/ui/meter";
 import { LanguageMark, languageOf } from "../common/LanguageGlyph";
 import { OutcomeMark } from "./ConceptChip";
+import { SparDots } from "@/components/common/SparDots";
 
 /**
  * Everything the learner has done under one concept.
@@ -124,7 +125,7 @@ export function ConceptSheet({
                   </p>
                 )
               ) : (
-                <p className="flex items-center gap-1.5 text-ui text-muted-foreground"><Loader2 className="size-3 animate-spin" />Reading your history…</p>
+                <p className="flex items-center gap-2 text-ui text-muted-foreground"><SparDots pattern="pulse" size={16} />Reading your history…</p>
               )}
             </Section>
 
@@ -140,7 +141,7 @@ export function ConceptSheet({
           </div>
         ) : (
           <div className="grid h-40 place-items-center">
-            <p className="flex items-center gap-1.5 text-ui text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Opening…</p>
+            <p className="flex items-center gap-2 text-ui text-muted-foreground"><SparDots pattern="sweep" size={18} label="Opening" />Opening…</p>
           </div>
         )}
       </DialogContent>

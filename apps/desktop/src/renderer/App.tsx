@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Loader2, X } from "lucide-react";
+import { AlertCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { SessionDetail, SessionSummary } from "@spar/domain";
 import type { BootstrapData, SparApi, ThemePreference } from "../shared/api";
@@ -23,6 +23,7 @@ import { PlanningView } from "./components/workspace/PlanningView";
 import { ChatView } from "./components/workspace/ChatView";
 import { reduceRun, type AgentRun } from "./components/agent/agentRun";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
+import { SparDots } from "@/components/common/SparDots";
 
 const api: SparApi | undefined = window.spar;
 
@@ -560,7 +561,7 @@ function WorkspaceSkeleton() {
   return (
     <div className="grid h-full place-items-center">
       <div className="flex items-center gap-2 text-ui text-muted-foreground">
-        <Loader2 className="size-3.5 animate-spin" />
+        <SparDots pattern="sweep" size={18} label="Opening session" />
         Opening session…
       </div>
     </div>
