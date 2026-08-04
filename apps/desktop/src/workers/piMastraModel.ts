@@ -23,6 +23,7 @@ import {
   type Usage,
 } from "@mariozechner/pi-ai";
 import type { ReasoningEffort } from "../shared/api.js";
+import { clineModelFor } from "../shared/clineCatalog.js";
 
 export type PiProviderInput = {
   provider: string;
@@ -34,12 +35,16 @@ export type PiProviderInput = {
   reasoningEffort?: ReasoningEffort;
 };
 
-const lookupModels = (provider: string) => {
-  try { return (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { return []; }
+/** What the bundled catalog knows about this model, which is where everything
+ *  the request shape depends on comes from — cache and reasoning compatibility
+ *  above all. pi-ai ships no Cline provider, so Cline answers for its own. */
+const lookupModel = (provider: string, id: string): Model<Api> | undefined => {
+  if (provider === "cline") return clineModelFor(id);
+  try { return (getModels as unknown as (value: string) => Model<Api>[])(provider).find((model) => model.id === id); } catch { return undefined; }
 };
 
 export function createPiMastraModel(input: PiProviderInput): LanguageModelV2 {
-  const registered = lookupModels(input.provider).find((model) => model.id === input.model);
+  const registered = lookupModel(input.provider, input.model);
   const model: Model<Api> = {
     id: input.model,
     name: registered?.name ?? input.model,

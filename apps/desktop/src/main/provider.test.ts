@@ -14,11 +14,16 @@ class MemoryCredentials {
   deleteProviderOAuth(provider: string) { this.oauth.delete(provider); return Promise.resolve(); }
 }
 
+/** Cline's tier list is the one catalog read over the network. Every test here
+ *  refuses it, so what they assert is the seeded catalog rather than whatever
+ *  Cline happens to be promoting today. */
+const offline: typeof fetch = () => Promise.reject(new Error("offline"));
+
 describe("provider service", () => {
   it("persists a selected API provider without exposing its key in inventory", async () => {
     const store = new LocalStore(":memory:");
     const credentials = new MemoryCredentials();
-    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined, offline);
     try {
       await service.saveCredential({ provider: "openrouter", model: "openrouter/free", baseUrl: "https://openrouter.ai/api/v1/", secret: "sk-or-secret" });
       const inventory = await service.inventory();
@@ -33,7 +38,7 @@ describe("provider service", () => {
 
   it("keeps subscription providers distinct from direct API-key providers", async () => {
     const store = new LocalStore(":memory:");
-    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined, offline);
     try {
       const inventory = await service.inventory();
       expect(inventory.providers.find((provider) => provider.id === "openai-codex")).toMatchObject({ name: "ChatGPT", kind: "subscription", state: "disconnected" });
@@ -48,7 +53,7 @@ describe("provider service", () => {
      accept one, or selecting it from the picker fails. */
   it("offers the current ChatGPT tiers ahead of pi-ai's bundled catalog", async () => {
     const store = new LocalStore(":memory:");
-    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined, offline);
     try {
       const models = (await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.models ?? [];
       expect(models.slice(0, 3).map((model) => model.id)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
@@ -59,12 +64,65 @@ describe("provider service", () => {
     } finally { store.close(); }
   });
 
+  /* Cline is one endpoint in front of every lab, and the reason to reach for it
+     is the models it currently charges nothing for. Those have to arrive first
+     in the picker, say so in their name, and — since `setDefault` refuses a
+     model the provider does not list — be selectable from it. */
+  it("offers Cline's free models first, and resolves one against Cline's own endpoint", async () => {
+    const store = new LocalStore(":memory:");
+    const credentials = new MemoryCredentials();
+    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined, offline);
+    try {
+      const cline = (await service.inventory()).providers.find((provider) => provider.id === "cline");
+      expect(cline).toMatchObject({ name: "Cline", kind: "api-key", state: "disconnected", selectedModel: "deepseek/deepseek-v4-flash", baseUrl: "https://api.cline.bot/api/v1" });
+      expect(cline?.models[0]).toMatchObject({ id: "deepseek/deepseek-v4-flash", name: "DeepSeek: DeepSeek V4 Flash (free)", reasoning: true });
+      // Behind the promoted handful, Cline still offers the catalog it fronts.
+      expect(cline?.models.some((model) => model.id === "deepseek/deepseek-v4-pro")).toBe(true);
+
+      await service.saveCredential({ provider: "cline", model: "deepseek/deepseek-v4-flash", baseUrl: "https://api.cline.bot/api/v1", secret: "cline-secret" });
+      service.setDefault("cline", "deepseek/deepseek-v4-flash");
+      const resolved = await service.resolve("account", null);
+      expect(resolved).toEqual([{
+        provider: "cline",
+        model: "deepseek/deepseek-v4-flash",
+        api: "openai-completions",
+        baseUrl: "https://api.cline.bot/api/v1",
+        apiKey: "cline-secret",
+        source: "spar-keychain",
+        reasoningEffort: "off",
+      }]);
+    } finally { store.close(); }
+  });
+
+  /* The free tier is a promotion Cline rotates, so it is read from Cline rather
+     than pinned in the build — and a reading that lands has to reach the picker,
+     including a model pi-ai's bundled catalog has never heard of. */
+  it("takes Cline's current free tier over the one it shipped with", async () => {
+    const store = new LocalStore(":memory:");
+    const tiers = { free: [{ id: "acme/brand-new-flash", name: "brand-new-flash" }], recommended: [] };
+    const service = new ProviderService(
+      new MemoryCredentials() as unknown as AuthService,
+      store,
+      () => undefined,
+      () => Promise.resolve(new Response(JSON.stringify(tiers), { headers: { "content-type": "application/json" } })),
+    );
+    try {
+      await service.inventory();
+      // The refresh is deliberately not awaited by `inventory`, so the reading
+      // lands on the next read rather than the one that asked for it.
+      await new Promise((resolve) => setImmediate(resolve));
+      const models = (await service.inventory()).providers.find((provider) => provider.id === "cline")?.models ?? [];
+      expect(models[0]).toMatchObject({ id: "acme/brand-new-flash", name: "brand-new-flash (free)" });
+      expect(models.find((model) => model.id === "deepseek/deepseek-v4-flash")?.name).toBe("DeepSeek: DeepSeek V4 Flash");
+    } finally { store.close(); }
+  });
+
   /* The whole point of the readiness flag: with nothing connected there is no
      credential anywhere on the machine that Spar is willing to run a turn on,
      and the inventory says so rather than naming its default provider. */
   it("reports no runtime, and resolves nothing, until a provider is connected", async () => {
     const store = new LocalStore(":memory:");
-    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined, offline);
     try {
       expect(await service.available()).toBe(false);
       expect((await service.inventory()).ready).toBe(false);
@@ -75,7 +133,7 @@ describe("provider service", () => {
   it("stops being ready once the connected provider is disconnected", async () => {
     const store = new LocalStore(":memory:");
     const credentials = new MemoryCredentials();
-    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined, offline);
     try {
       await service.saveCredential({ provider: "openrouter", model: "openrouter/free", baseUrl: "https://openrouter.ai/api/v1", secret: "sk-or-secret" });
       expect((await service.inventory()).ready).toBe(true);
@@ -89,7 +147,7 @@ describe("provider service", () => {
      Adding it is the connection, and inventory and `resolve` have to agree. */
   it("treats an added local runtime as connected without a key", async () => {
     const store = new LocalStore(":memory:");
-    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined, offline);
     try {
       expect((await service.inventory()).providers.find((provider) => provider.id === "ollama")?.state).toBe("disconnected");
       await service.saveCredential({ provider: "ollama", model: "qwen3", baseUrl: "http://localhost:11434/v1" });
@@ -105,7 +163,7 @@ describe("provider service", () => {
      — and a provider that has never run one has to report nothing, not zero. */
   it("keeps the Codex rate-limit reading a turn reported, and reports none before one has", async () => {
     const store = new LocalStore(":memory:");
-    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined, offline);
     try {
       expect(await service.subscriptionUsage("openai-codex")).toBeNull();
       expect(await service.subscriptionUsage("openrouter")).toBeNull();
@@ -122,7 +180,7 @@ describe("provider service", () => {
     const credentials = new MemoryCredentials();
     credentials.oauth.set("openai-codex", { refresh: "secret-refresh-token" });
     store.setSetting("provider-auth-expired:openai-codex", true);
-    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined);
+    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined, offline);
     try {
       const inventory = await service.inventory();
       expect(inventory.providers.find((provider) => provider.id === "openai-codex")?.state).toBe("auth-expired");

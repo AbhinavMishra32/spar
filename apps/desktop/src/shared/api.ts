@@ -50,7 +50,7 @@ export const runInput = z.object({ sessionId: z.string().uuid(), language: z.enu
 // supply event identity and content, but never a guessed stream sequence.
 export const attemptAppendInput = attemptEventSchema.omit({ sequence: true });
 export const providerSettingsInput = z.object({
-  provider: z.enum(["openai", "anthropic", "google", "xai", "openrouter", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom"]),
+  provider: z.enum(["openai", "anthropic", "google", "xai", "openrouter", "cline", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom"]),
   model: z.string().trim().min(1).max(200),
   baseUrl: z.string().url().refine((value) => value.startsWith("https://") || value.startsWith("http://localhost:") || value.startsWith("http://127.0.0.1:"), "Provider URL must use HTTPS unless it is local"),
   secret: z.string().max(20_000),

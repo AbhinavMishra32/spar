@@ -769,6 +769,24 @@
     isolation: isolate;
   }
 
+  /* The same shell without the glass, for a surface that moves while you are
+     looking at it. An item-aligned select slides its whole popup as you scroll —
+     that is the behaviour, not a bug — and a backdrop-filter underneath has to
+     recompute the blur against whatever it is passing over on every frame, which
+     is what turns a slide into a judder. A menu never moves once it is open, so
+     a menu keeps the glass. */
+  .menu-surface-opaque {
+    border-radius: var(--radius-menu);
+    corner-shape: round;
+    background: var(--popover);
+    box-shadow:
+      inset 0 0 0 1px var(--glass-rim),
+      inset 0 1px 0 0 var(--glass-sheen),
+      0 0 0 0.5px var(--glass-hairline),
+      var(--app-shadow-menu);
+    isolation: isolate;
+  }
+
   /* ---- Work blobs --------------------------------------------------------- */
 
   /* The workspace is laid out the way a browser window is: one continuous

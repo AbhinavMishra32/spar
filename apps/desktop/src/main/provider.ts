@@ -6,10 +6,11 @@ import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import { anthropicUsage, codexUsageFromHeaders } from "./subscriptionUsage.js";
 import type { ProviderInventory, ProviderOAuthEvent, ReasoningEffort, SubscriptionUsage } from "../shared/api.js";
+import { clineModels, clineSeedTiers, fetchClineTiers, type ClineTiers } from "../shared/clineCatalog.js";
 
 export const providerIds = [
   "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai",
-  "openrouter", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding",
+  "openrouter", "cline", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding",
   "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom",
 ] as const;
 export type ProviderId = (typeof providerIds)[number];
@@ -44,6 +45,7 @@ const descriptors: Descriptor[] = [
   { id: "google", runtimeId: "google", name: "Google", kind: "api-key", description: "Gemini models", defaultModel: "gemini-3-flash-preview", keyUrl: "https://aistudio.google.com/api-keys" },
   { id: "xai", runtimeId: "xai", name: "SpaceXAI", kind: "api-key", description: "Grok models", defaultModel: "grok-4.1-fast", keyUrl: "https://console.x.ai/" },
   { id: "openrouter", runtimeId: "openrouter", name: "OpenRouter", kind: "api-key", description: "Use models through OpenRouter", defaultModel: "openrouter/free", keyUrl: "https://openrouter.ai/settings/keys" },
+  { id: "cline", runtimeId: "cline", name: "Cline", kind: "api-key", description: "Every lab's coding models on one key, some of them free", defaultModel: "deepseek/deepseek-v4-flash", keyUrl: "https://app.cline.bot/" },
   { id: "opencode", runtimeId: "opencode", name: "OpenCode Zen", kind: "api-key", description: "Curated coding models through OpenCode Zen", defaultModel: "gpt-5.4-mini", keyUrl: "https://opencode.ai/docs/zen/" },
   { id: "opencode-go", runtimeId: "opencode-go", name: "OpenCode Go", kind: "api-key", description: "OpenCode Go subscription models", defaultModel: "glm-5", keyUrl: "https://opencode.ai/docs/go/" },
   { id: "deepseek", runtimeId: "deepseek", name: "DeepSeek", kind: "api-key", description: "DeepSeek API models", defaultModel: "deepseek-v4-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
@@ -91,6 +93,10 @@ const gatewayEnabled = () => process.env.SPAR_AI_GATEWAY_ENABLED === "true";
 /** Matches the hover card's own staleness: a quota that moves once per turn does
  *  not need re-fetching every time the pointer crosses the row. */
 const USAGE_CACHE_MS = 60_000;
+/** Which models Cline promotes and bills at nothing is a promotion, not a
+ *  release, so it is re-read through the day — but nowhere near as often as the
+ *  composer re-reads the inventory that shows it. */
+const CLINE_TIERS_CACHE_MS = 6 * 60 * 60 * 1_000;
 const modelsFor = (provider: string) => {
   let bundled: Model<Api>[] = [];
   try { bundled = (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { bundled = []; }
@@ -105,9 +111,36 @@ export class ProviderService {
     private readonly auth: AuthService,
     private readonly store: LocalStore,
     private readonly emit: (event: ProviderOAuthEvent) => void,
+    /** Only Cline's tier list is read over the network from here. Injected so a
+     *  test exercises the catalog it seeds with rather than today's promotion. */
+    private readonly fetcher: typeof fetch = fetch,
   ) {}
 
+  /** Every provider's model catalog. pi-ai answers for the ones it ships;
+   *  Cline's is assembled from its own tier list — see clineCatalog.ts. */
+  private catalog(runtimeId: string): Model<Api>[] {
+    return runtimeId === "cline" ? clineModels(this.clineTiers()) : modelsFor(runtimeId);
+  }
+
+  private clineTiers(): ClineTiers {
+    return this.store.getSetting<ClineTiers>("provider-tiers:cline", clineSeedTiers);
+  }
+
+  /** Deliberately not awaited by its caller: the inventory is re-read on every
+   *  composer mount, and which models are free must never be what a turn waits
+   *  on. The attempt is stamped before it resolves, so a Cline that cannot be
+   *  reached is asked once per window rather than on every mount. */
+  private refreshClineTiers() {
+    const attemptedAt = this.store.getSetting<number>("provider-tiers-at:cline", 0);
+    if (Date.now() - attemptedAt < CLINE_TIERS_CACHE_MS) return;
+    this.store.setSetting("provider-tiers-at:cline", Date.now());
+    void fetchClineTiers(this.fetcher)
+      .then((tiers) => { if (tiers) this.store.setSetting("provider-tiers:cline", tiers); })
+      .catch(() => undefined);
+  }
+
   async inventory(): Promise<ProviderInventory> {
+    this.refreshClineTiers();
     const selectedProvider = this.store.getSetting<ProviderId>("provider-id", "openrouter");
     const selectedModel = this.store.getSetting("provider-model", descriptorById.get(selectedProvider)?.defaultModel ?? "openrouter/free");
     const providers = await Promise.all(descriptors.map(async (descriptor) => {
@@ -116,7 +149,7 @@ export class ProviderService {
         && this.store.getSetting<boolean>(`provider-auth-expired:${descriptor.id}`, false);
       const storedModel = this.store.getSetting<string>(`provider-model:${descriptor.id}`, descriptor.defaultModel);
       const storedBaseUrl = this.store.getSetting<string>(`provider-base-url:${descriptor.id}`, descriptor.defaultBaseUrl ?? "");
-      const catalog = modelsFor(descriptor.runtimeId);
+      const catalog = this.catalog(descriptor.runtimeId);
       return {
         id: descriptor.id,
         name: descriptor.name,
@@ -222,7 +255,7 @@ export class ProviderService {
   setDefault(providerId: ProviderId, model: string) {
     const descriptor = descriptorById.get(providerId);
     if (!descriptor) throw new Error("Unknown provider");
-    const known = modelsFor(descriptor.runtimeId);
+    const known = this.catalog(descriptor.runtimeId);
     if (known.length && !known.some((item) => item.id === model)) throw new Error("That model is not available for this provider");
     this.select(providerId, model);
   }
@@ -293,7 +326,7 @@ export class ProviderService {
             this.store.setSetting(`provider-auth-expired:${selected}`, false);
             const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
             const provider = getOAuthProvider(runtimeId);
-            const available = provider?.modifyModels?.(modelsFor(runtimeId), result.newCredentials) ?? modelsFor(runtimeId);
+            const available = provider?.modifyModels?.(this.catalog(runtimeId), result.newCredentials) ?? this.catalog(runtimeId);
             const model = available.find((item) => item.id === modelId) ?? available[0];
             if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort() });
           } else {
@@ -308,7 +341,7 @@ export class ProviderService {
       const secret = await this.auth.readSecret(selected);
       if (secret || await this.hasCredential(selectedDescriptor)) {
         const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
-        const model = modelsFor(selectedDescriptor.runtimeId).find((item) => item.id === modelId);
+        const model = this.catalog(selectedDescriptor.runtimeId).find((item) => item.id === modelId);
         const baseUrl = this.store.getSetting(`provider-base-url:${selected}`, selectedDescriptor.defaultBaseUrl ?? model?.baseUrl ?? "");
         values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain", reasoningEffort: this.reasoningEffort() });
       }

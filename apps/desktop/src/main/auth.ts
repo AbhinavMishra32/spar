@@ -23,7 +23,7 @@ export class AuthService {
     }
     await this.signOut();
     await Promise.all([
-      "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai", "openrouter", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom",
+      "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai", "openrouter", "cline", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom",
     ].flatMap((provider) => [this.deleteSecret(provider), this.deleteProviderOAuth(provider)]));
   }
   saveSecret(account: string, secret: string) { return keytar.setPassword(service, `provider:${account}`, secret).then(() => undefined); }

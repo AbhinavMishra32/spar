@@ -8,6 +8,7 @@ import { message } from "@/lib/format";
 import { credentialStore } from "@/lib/platform";
 import { ProviderGlyph } from "../common/ProviderGlyph";
 import { SparWordmark } from "../common/SparWordmark";
+import { ModelSelectField } from "./ModelSelect";
 
 export type Provider = ProviderInventory["providers"][number];
 
@@ -161,8 +162,12 @@ export function ProviderConnectDialog({
         ) : (
           <div className="space-y-3">
             {provider.keyUrl && <p className="text-ui text-muted-foreground">Get a key from <button className="underline underline-offset-2 hover:text-foreground" onClick={() => void api?.openExternal(provider.keyUrl!)} type="button">{provider.name}</button>.</p>}
-            <label className="block space-y-1.5 text-ui font-medium">Model<Input list={`models-${provider.id}`} onChange={(event) => setModelId(event.target.value)} value={modelId} /></label>
-            <datalist id={`models-${provider.id}`}>{provider.models.map((model) => <option key={model.id} value={model.id}>{model.name}</option>)}</datalist>
+            {/* A datalist stood here, which meant the one field with hundreds of
+                right answers was the one field with no way to see them. */}
+            <div className="space-y-1.5">
+              <label className="block text-ui font-medium" htmlFor={`model-${provider.id}`}>Model</label>
+              <ModelSelectField id={`model-${provider.id}`} models={provider.models} onChange={setModelId} value={modelId} />
+            </div>
             <label className="block space-y-1.5 text-ui font-medium">Base URL<Input onChange={(event) => setBaseUrl(event.target.value)} value={baseUrl} /></label>
             {provider.kind !== "local" && <label className="block space-y-1.5 text-ui font-medium">API Key<Input autoComplete="off" onChange={(event) => setSecret(event.target.value)} placeholder={provider.state === "connected" ? "Leave blank to keep the current key" : `Stored only in ${credentialStore}`} type="password" value={secret} /></label>}
           </div>

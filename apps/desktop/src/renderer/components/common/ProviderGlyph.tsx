@@ -79,6 +79,17 @@ function OpenRouterGlyph(props: GlyphProps) {
   );
 }
 
+/* Cline's own mark, on the viewBox Cline draws it in rather than re-scaled onto
+   24×24 by hand — the wrapper fits whatever box a glyph declares, and rewriting
+   these coordinates is how a logo ends up subtly wrong. */
+function ClineGlyph(props: GlyphProps) {
+  return (
+    <svg viewBox="0 0 466.73 487.04" {...glyph(props)}>
+      <path d="M463.6,275.08l-29.26-58.75v-33.83c0-56.08-45.01-101.5-100.53-101.5h-50.01c3.62-7.43,5.61-15.79,5.61-24.61,0-31.17-25.08-56.39-56.07-56.39s-56.07,25.22-56.07,56.39c0,8.82,1.99,17.17,5.61,24.61h-50.01c-55.51,0-100.52,45.42-100.52,101.5v33.83l-29.87,58.59c-3.01,5.9-3.01,12.92,0,18.81l29.87,57.93v33.83c0,56.08,45.01,101.5,100.52,101.5h200.95c55.51,0,100.53-45.42,100.53-101.5v-33.83l29.21-58.13c2.9-5.79,2.9-12.61.05-18.46ZM202.75,322.96c0,25.48-20.54,46.14-45.88,46.14s-45.88-20.66-45.88-46.14v-82.02c0-25.48,20.54-46.14,45.88-46.14s45.88,20.66,45.88,46.14v82.02ZM350.58,322.96c0,25.48-20.54,46.14-45.88,46.14s-45.88-20.66-45.88-46.14v-82.02c0-25.48,20.54-46.14,45.88-46.14s45.88,20.66,45.88,46.14v82.02Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 function OpenCodeGlyph(props: GlyphProps) {
   return (
     <svg viewBox="0 0 24 24" {...glyph(props)}>
@@ -182,6 +193,7 @@ const GLYPHS: Partial<Record<ProviderId, (props: GlyphProps) => ReactElement>> =
   "google": GoogleGlyph,
   "xai": XaiGlyph,
   "openrouter": OpenRouterGlyph,
+  "cline": ClineGlyph,
   "opencode": OpenCodeGlyph,
   "opencode-go": OpenCodeGlyph,
   "deepseek": DeepSeekGlyph,

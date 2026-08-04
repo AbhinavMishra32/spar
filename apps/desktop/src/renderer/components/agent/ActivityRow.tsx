@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { BookOpen, Brain, Check, ChevronDown, CircleAlert, FilePenLine, History, Search } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
@@ -135,11 +135,18 @@ export function ActivityGroup({ parts }: { parts: ToolPart[] }) {
  * being dropped as protocol noise before they reached the transcript.
  */
 export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning" }> }) {
-  const tail = useRef<HTMLDivElement>(null);
+  const excerpt = useRef<HTMLDivElement>(null);
   const sections = thoughts(part.body);
 
-  useEffect(() => {
-    if (part.open) tail.current?.scrollIntoView({ block: "end" });
+  /* Its own box, by hand. `scrollIntoView` on a tail element looks like the same
+     thing and is not: it scrolls every ancestor that can scroll, so each delta
+     also aimed the thread's viewport at this block — which the thread's own
+     auto-follow immediately undid, and the transcript juddered up and down for
+     as long as the model was thinking. Setting scrollTop touches this box alone.
+     Layout effect, so the tail is never painted at the old offset first. */
+  useLayoutEffect(() => {
+    const node = excerpt.current;
+    if (part.open && node) node.scrollTop = node.scrollHeight;
   }, [part.body, part.open]);
 
   const seconds = Math.max(1, Math.round(((part.endedAt ?? Date.now()) - part.startedAt) / 1_000));
@@ -156,11 +163,10 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
           <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">{current?.title ?? "Thinking"}</span>
         </div>
         {current?.body && (
-          <div className="app-scroll max-h-20 overflow-y-auto">
+          <div className="app-scroll max-h-20 overflow-y-auto" ref={excerpt}>
             <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/70">
               {current.body}
             </p>
-            <div ref={tail} />
           </div>
         )}
       </div>
