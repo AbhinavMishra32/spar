@@ -506,6 +506,64 @@
     box-shadow: inset 0 1px 0 0 var(--border);
   }
 
+  /* ---- Sidebar rows ------------------------------------------------------ */
+
+  /* A title longer than the sidebar fades out where it runs out of room rather
+     than ending in an ellipsis. The ellipsis has to be paid for three characters
+     before the edge, and it spends them saying "there is more" — which the fade
+     says for nothing. The mask is on the text itself rather than a scrim laid
+     over it because the sidebar is glass: a scrim would have to guess what is
+     behind it, and would be wrong on every wallpaper but one. */
+  .sidebar-title {
+    /* In px, not rem, because the marquee below has to travel exactly this far
+       to clear the fade and reads the same number out of TypeScript. */
+    --sidebar-title-fade: 22px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .sidebar-title[data-clipped="true"] {
+    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - var(--sidebar-title-fade)), transparent 100%);
+  }
+
+  .sidebar-title > span {
+    display: block;
+    white-space: nowrap;
+  }
+
+  /* The row's controls take their room from the title, because the title is the
+     one thing in the row that can afford to be shorter. */
+  .sidebar-row:hover .sidebar-title,
+  .sidebar-row:has(:focus-visible) .sidebar-title,
+  .sidebar-row:has([data-row-controls][data-open="true"]) .sidebar-title {
+    margin-right: var(--sidebar-controls-width, 4rem);
+  }
+
+  [data-row-controls] {
+    display: none;
+  }
+
+  .sidebar-row:hover [data-row-controls],
+  .sidebar-row:has(:focus-visible) [data-row-controls],
+  [data-row-controls][data-open="true"] {
+    display: flex;
+  }
+
+  /* Hovering a clipped title walks the rest of it past the fade and back, so the
+     whole name is readable without asking for a tooltip. It rests at both ends
+     instead of turning the moment it arrives — the far end is the half you
+     hovered to read. */
+  .sidebar-row:hover .sidebar-title[data-clipped="true"] > span {
+    animation: sidebar-title-marquee var(--sidebar-title-duration, 4s) 0.45s ease-in-out infinite alternate;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-row:hover .sidebar-title[data-clipped="true"] > span {
+      animation: none;
+    }
+  }
+
   /* ---- Scrollbars ------------------------------------------------------- */
 
   .app-scroll {
@@ -919,6 +977,19 @@
   }
 }
 
+/* The dwell at each end is 10% of the run, so a name that has been walked into
+   view stays still long enough to read before it goes back. */
+@keyframes sidebar-title-marquee {
+  0%,
+  10% {
+    transform: translateX(0);
+  }
+  90%,
+  100% {
+    transform: translateX(var(--sidebar-title-shift, 0px));
+  }
+}
+
 @keyframes blob-breathe {
   from {
     opacity: 0.25;
@@ -993,6 +1064,50 @@
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* Long content inside a transcript row.
+   The agent's thinking and a tool's payload are both unbounded — a page fetch
+   runs to thousands of lines — and a row that grows to fit either one stops being
+   a row. Every one of them scrolls inside the same height instead, live and
+   settled alike: a thought that was 1.5in tall while it streamed must not reflow
+   the whole thread the moment it finishes.
+
+   The ends fade only where there is more to see. `data-fade` is set from the
+   element's own scroll position, because a mask applied unconditionally dims the
+   first line of text that is already fully in view and reads as a rendering
+   fault rather than as an invitation to scroll. */
+:root { --agent-scroll-max: 9rem; }
+.agent-scroll { max-height: var(--agent-scroll-max); overflow: auto; }
+.agent-scroll[data-fade="top"] { mask-image: linear-gradient(to bottom, transparent, black 1.15rem); }
+.agent-scroll[data-fade="bottom"] { mask-image: linear-gradient(to top, transparent, black 1.15rem); }
+.agent-scroll[data-fade="both"] {
+  mask-image: linear-gradient(to bottom, transparent, black 1.15rem, black calc(100% - 1.15rem), transparent);
+}
+
+/* Disclosure, animated.
+   Every collapsible in the transcript opens and closes on the same curve, so a
+   tool call folding out reads as the row growing rather than as the rest of the
+   thread jumping down to make room. Radix publishes the measured height as
+   --radix-collapsible-content-height, which is what lets `height: auto` be
+   animated at all; keying on data-state keeps it in one place instead of each
+   caller wiring its own AnimatePresence. */
+@keyframes disclosure-open {
+  from { height: 0; opacity: 0; }
+  to { height: var(--radix-collapsible-content-height); opacity: 1; }
+}
+@keyframes disclosure-close {
+  from { height: var(--radix-collapsible-content-height); opacity: 1; }
+  to { height: 0; opacity: 0; }
+}
+[data-slot="collapsible-content"] { overflow: hidden; }
+[data-slot="collapsible-content"][data-state="open"] { animation: disclosure-open 220ms cubic-bezier(0.32, 0.72, 0, 1); }
+[data-slot="collapsible-content"][data-state="closed"] { animation: disclosure-close 170ms cubic-bezier(0.32, 0.72, 0, 1); }
+/* Honour the OS setting: the point of the animation is continuity, and someone
+   who has asked for less motion still needs the disclosure to work. */
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="collapsible-content"][data-state="open"],
+  [data-slot="collapsible-content"][data-state="closed"] { animation-duration: 1ms; }
 }
 
 /* The app icon's dot grid, animated — see components/common/SparDots.tsx. Each
