@@ -11,7 +11,7 @@
 <p align="center">
   A coding gym that watches you work and writes your next exercise.
   <br>
-  macOS · Windows · Linux — <a href="https://github.com/AbhinavMishra32/spar/releases/latest">download v0.1.0</a>
+  macOS · Windows · Linux — <a href="https://github.com/AbhinavMishra32/spar/releases/latest">download v0.1.1</a>
 </p>
 
 ---
@@ -48,12 +48,12 @@ Grab the build for your machine from the
 
 | Your machine | Download |
 | --- | --- |
-| Mac, Apple silicon (M1 and later) | `Spar-0.1.0-arm64.dmg` |
-| Mac, Intel | `Spar-0.1.0.dmg` |
-| Windows | `Spar-0.1.0-x64.exe` |
-| Linux | `Spar-0.1.0-x86_64.AppImage` or `Spar-0.1.0-amd64.deb` |
+| Mac, Apple silicon (M1 and later) | `Spar-0.1.1-arm64.dmg` |
+| Mac, Intel | `Spar-0.1.1.dmg` |
+| Windows | `Spar-0.1.1-x64.exe` |
+| Linux | `Spar-0.1.1-x86_64.AppImage` or `Spar-0.1.1-amd64.deb` |
 
-**v0.1.0 builds are not code-signed yet.** Your operating system will say so, in
+**v0.1.1 builds are not code-signed yet.** Your operating system will say so, in
 its usual alarming way. On a Mac, right-click the app and choose *Open* the first
 time rather than double-clicking it, or run
 `xattr -d com.apple.quarantine /Applications/Spar.app`. On Windows, choose *More
@@ -70,15 +70,13 @@ You point it at a model you already pay for or run yourself — see
 subscription.
 
 **A place for your account and history to live.** Spar signs you in against the
-Spar API, and v0.1.0 ships without a hosted one — so it looks for the API on
-`http://localhost:4318`, which means running it yourself for now.
+Spar API, and a release is stamped with the origin it should talk to. If the build
+you downloaded was cut before a Spar API was deployed, it falls back to
+`http://localhost:4318` and the sign-in screen says so plainly rather than
+reporting a refused connection — in which case you run the API yourself.
 [`docs/hosting.md`](docs/hosting.md) covers both paths: deploying it to Vercel in
-a few commands, or running it locally. Builds from 0.1.1 onward are stamped with a
-deployed origin so a download signs in without any of this, and
-`SPAR_API_ORIGIN` always overrides it if you would rather host your own.
-
-If you were hoping to download an app and be practising in ninety seconds, that
-is the next release rather than this one — 0.1.0 is a real 0.1.
+a few commands, or running it locally. `SPAR_API_ORIGIN` overrides the stamp
+whenever you would rather point somewhere else.
 
 ## Your first session
 
@@ -260,12 +258,12 @@ dot grid runs a diagonal wave while something is being produced, and breathes
 while something is being read. Different motion for different kinds of waiting,
 so the app tells you which one you are in.
 
-## What v0.1.0 doesn't do yet
+## What v0.1.1 doesn't do yet
 
 Being straight about the edges:
 
 - **Three languages.** JavaScript, TypeScript, and C++. That's it for now.
-- **No hosted service in this build.** You run the backend, as described above.
+- **Hosting is yours to set up.** There is no Spar-operated service; you deploy the API or run it locally, as described above.
 - **Unsigned builds.** Your OS will complain on first launch.
 - **macOS is the polished one.** The Windows and Linux builds are real, but the
   Mac is where the window chrome, materials, and window controls have had the
