@@ -29,11 +29,14 @@ function problemWith(email: string, password: string): { field: "email" | "passw
 export function AuthPage({
   api,
   error,
+  serverConfigured,
   onAuthenticated,
   onError,
 }: {
   api: SparApi | undefined;
   error: string | null;
+  /** False when this build has no Spar server to sign in against. */
+  serverConfigured: boolean;
   onAuthenticated(): Promise<void>;
   onError(value: string): void;
 }) {
@@ -45,7 +48,13 @@ export function AuthPage({
   const [attempted, setAttempted] = useState(false);
 
   const problem = attempted ? problemWith(email, password) : null;
-  const notice = problem?.text ?? error;
+  /* A build with nowhere to sign in cannot be fixed by trying again, so it is
+     said before the attempt rather than reported as its failure — otherwise the
+     learner reads a refused connection to localhost as Spar being broken. */
+  const unconfigured = !serverConfigured
+    ? "This build has no Spar server configured, so there is nothing to sign in to. See docs/hosting.md."
+    : null;
+  const notice = problem?.text ?? error ?? unconfigured;
 
   const change = (set: (value: string) => void) => (event: React.ChangeEvent<HTMLInputElement>) => {
     set(event.target.value);

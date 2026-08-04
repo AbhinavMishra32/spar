@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
+import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
@@ -21,7 +22,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   // renderer's planning poll can launch several turns for one session.
   const startingAgentRuns = new Map<string, Promise<{ runId: string }>>();
   const failedPlanningRuns = new Set<string>();
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline" }));
+  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", serverConfigured: !apiOriginIsUnconfigured() }));
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
      to clean up to make the error go away. */

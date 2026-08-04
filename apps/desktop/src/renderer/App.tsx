@@ -249,7 +249,7 @@ export function App() {
 
   if (error && !data) return <FatalError error={error} />;
   if (!data) return <BootShell />;
-  if (!data.account) return <AuthPage api={api} error={error} onAuthenticated={signedIn} onError={setError} />;
+  if (!data.account) return <AuthPage api={api} error={error} serverConfigured={data.serverConfigured} onAuthenticated={signedIn} onError={setError} />;
   /* Onboarding is a gate, not a page: until the profile exists the agent has no
      language, no stated weakness, and probably no provider, so there is nothing
      useful behind it. */
