@@ -1,6 +1,7 @@
 import { context } from "esbuild";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { preloadOptions } from "./preload-build.mjs";
 
 const projectRoot = resolve(import.meta.dirname, "..");
 const outputDirectory = resolve(projectRoot, "dist");
@@ -20,19 +21,7 @@ const build = await context({
   sourcemap: "inline",
   logLevel: "info"
 });
-const preload = await context({
-  absWorkingDir: projectRoot,
-  entryPoints: { "preload/index": "src/preload/index.ts" },
-  outdir: outputDirectory,
-  bundle: true,
-  external: ["electron"],
-  platform: "node",
-  format: "cjs",
-  outExtension: { ".js": ".cjs" },
-  target: "node22",
-  sourcemap: "inline",
-  logLevel: "info"
-});
+const preload = await context(preloadOptions(projectRoot));
 
 await build.rebuild();
 await preload.rebuild();
