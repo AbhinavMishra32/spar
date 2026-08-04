@@ -12,3 +12,4 @@ coverage/
 apps/desktop/.spar/
 apps/api/uploads/
 supabase/.temp/
+.DS_Store
