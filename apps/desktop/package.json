@@ -139,6 +139,7 @@
     "linux": {
       "icon": "build/icons",
       "category": "Development",
+      "executableName": "spar",
       "synopsis": "An adaptive coding gym",
       "target": [
         {
