@@ -274,6 +274,9 @@ export const agentActivityStepSchema = z.object({
   tool: z.string().default(""),
   /** What the call was about, in the learner's terms. Never a raw argument. */
   label: z.string().default(""),
+  /** The agent's own name for this step. Empty for rows written before it existed,
+   *  which fall back to the fixed per-tool label. */
+  actionTitle: z.string().default(""),
   /** What it returned, already reduced to one line by the worker. */
   detail: z.string().default(""),
   ok: z.boolean().default(true),
@@ -281,6 +284,13 @@ export const agentActivityStepSchema = z.object({
   text: z.string().default(""),
   /** How long that thinking took, so the folded row can say it. */
   seconds: z.number().nonnegative().default(0),
+  /** The call's arguments and what it returned, as formatted JSON, so a turn read
+   *  back from storage can be opened up to exactly what it did. Redacted at the
+   *  worker before they get here: a challenge design's reference solution and
+   *  hidden tests would let the learner read the answer out of the transcript of
+   *  the turn that wrote the challenge. Empty for rows written before this. */
+  input: z.string().default(""),
+  output: z.string().default(""),
 });
 export type AgentActivityStep = z.infer<typeof agentActivityStepSchema>;
 

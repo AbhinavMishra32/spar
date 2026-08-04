@@ -10,6 +10,7 @@ export const ipc = {
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
+  settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
   attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
@@ -138,8 +139,16 @@ export type AgentStreamEvent = {
   callId?: string;
   phase?: "start" | "end";
   ok?: boolean;
-  /** Short human summary of the tool's input, e.g. the search query or title. */
+  /** Short human summary of the tool's input, e.g. the challenge's own title.
+   *  Host-generated, and distinct from `actionTitle`: a published challenge row
+   *  needs the challenge's name, not the agent's caption for the step. */
   label?: string;
+  /** The agent's own name for this step, shown as its row in the transcript. */
+  actionTitle?: string;
+  /** The full arguments and result as formatted JSON, with challenge solutions
+   *  redacted at the worker. What the learner opens a call to read. */
+  input?: string;
+  output?: string;
   files?: AgentActivityFile[];
 };
 /** Native menu items are routed to the renderer so the macOS menu bar drives the same UI as the in-app controls. */
@@ -214,6 +223,11 @@ export interface SparApi {
    *  the provider has none to report or nothing has reported one yet. */
   providerUsage(provider: ProviderId): Promise<SubscriptionUsage | null>;
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
+  /** Whether the agent can reach the web, and where its key came from. The key
+   *  itself is never read back — Settings shows the state, not the secret. */
+  webSearchStatus(): Promise<{ source: "keychain" | "env" | "none" }>;
+  saveWebSearchKey(key: string): Promise<void>;
+  clearWebSearchKey(): Promise<void>;
   startProviderOAuth(provider: Extract<ProviderId, "openai-codex" | "claude-code" | "github-copilot">): Promise<{ flowId: string }>;
   submitProviderOAuth(flowId: string, value: string): Promise<void>;
   cancelProviderOAuth(flowId: string): Promise<void>;
