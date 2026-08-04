@@ -1,32 +1,174 @@
-name: Signed macOS release
+name: Release
+
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to build, e.g. v0.1.0. Must already exist."
+        required: true
+        type: string
+
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
-  release:
+  verify:
+    name: Verify
     runs-on: macos-15
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
       - uses: pnpm/action-setup@v4
         with: { version: 10.13.1 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm test && pnpm build
-      - name: Import Developer ID certificate
-        env:
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-        run: pnpm --filter @spar/desktop exec electron-builder install-app-deps
-      - name: Sign, notarize, and publish
-        env:
-          CSC_LINK: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
-          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: pnpm --filter @spar/desktop package --publish always
 
+      - run: pnpm install --frozen-lockfile
+
+      # A tag that disagrees with the manifest produces installers whose in-app
+      # version does not match the release they were downloaded from, and an
+      # updater that never settles. Fail here instead.
+      - name: Check the tag matches the manifests
+        run: |
+          EXPECTED="${{ steps.tag.outputs.version }}"
+          for manifest in package.json apps/desktop/package.json; do
+            ACTUAL="$(node -p "require('./${manifest}').version")"
+            if [ "$ACTUAL" != "$EXPECTED" ]; then
+              echo "::error::${manifest} is at ${ACTUAL} but the tag says ${EXPECTED}"
+              exit 1
+            fi
+          done
+
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            os: macos-15
+            script: package
+          - platform: windows
+            os: windows-2025
+            script: package:win
+          - platform: linux
+            os: ubuntu-24.04
+            script: package:linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.13.1 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+
+      # keytar links against libsecret, and the runner image ships neither the
+      # headers nor a prebuild for this Electron ABI.
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsecret-1-dev
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Rebuild native modules for Electron
+        run: pnpm --filter @spar/desktop rebuild:native
+
+      # Signing is opt-in: with no certificate in the repository secrets the mac
+      # build is unsigned rather than failed, and auto-discovery is turned off so
+      # the result does not depend on whatever happens to be in the keychain.
+      - name: Package
+        working-directory: apps/desktop
+        shell: bash
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID_INPUT: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD_INPUT: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID_INPUT: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$MACOS_CERTIFICATE_BASE64" ]; then
+            export CSC_LINK="$MACOS_CERTIFICATE_BASE64"
+            export CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD"
+            export APPLE_ID="$APPLE_ID_INPUT"
+            export APPLE_APP_SPECIFIC_PASSWORD="$APPLE_APP_SPECIFIC_PASSWORD_INPUT"
+            export APPLE_TEAM_ID="$APPLE_TEAM_ID_INPUT"
+          else
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+            echo "::warning title=Unsigned build::MACOS_CERTIFICATE_BASE64 is not set, so this build is unsigned and Gatekeeper will warn on first launch."
+          fi
+          pnpm run ${{ matrix.script }} -- --publish never
+
+      # latest*.yml is what electron-updater reads, so it is a release asset like
+      # any installer, not a build leftover.
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: spar-${{ matrix.platform }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist-release/*.dmg
+            apps/desktop/dist-release/*.zip
+            apps/desktop/dist-release/*.exe
+            apps/desktop/dist-release/*.AppImage
+            apps/desktop/dist-release/*.deb
+            apps/desktop/dist-release/*.yml
+            apps/desktop/dist-release/*.blockmap
+
+  publish:
+    name: Publish release
+    needs: [verify, package]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          ls -la release-assets
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release-assets/* --clobber
+          else
+            gh release create "$TAG" release-assets/* \
+              --title "Spar $TAG" \
+              --notes-file .github/release-notes/"$TAG".md \
+              --verify-tag
+          fi

@@ -1,6 +1,6 @@
 {
   "name": "@spar/desktop",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
@@ -11,8 +11,10 @@
     "test": "vitest run --passWithNoTests && ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run --config vitest.main.config.ts",
     "lint": "tsc --noEmit -p tsconfig.json",
     "build": "vite build && tsc -p tsconfig.main.json",
+    "icons": "node scripts/icon/generate-icons.mjs",
     "package": "electron-builder --mac",
-    "package:win": "electron-builder --win"
+    "package:win": "electron-builder --win",
+    "package:linux": "electron-builder --linux"
   },
   "dependencies": {
     "@ai-sdk/openai": "^2.0.0",
@@ -69,15 +71,31 @@
     "appId": "ai.spar.desktop",
     "productName": "Spar",
     "asar": true,
+    "directories": {
+      "output": "dist-release"
+    },
     "mac": {
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "icon": "build/icon.icns",
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ]
     },
     "protocols": [
@@ -97,12 +115,44 @@
       "dist/**/*",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "build/runtime-icons",
+        "to": "runtime-icons"
+      }
+    ],
     "asarUnpack": [
       "**/node_modules/electron-liquid-glass/**"
     ],
     "win": {
+      "icon": "build/icon.ico",
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build/icons",
+      "category": "Development",
+      "synopsis": "An adaptive coding gym",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
