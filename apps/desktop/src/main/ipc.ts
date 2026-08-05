@@ -3,7 +3,7 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
 import { runEvidence } from "../shared/testReport.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
 import type { AuthService } from "./auth.js";
@@ -324,7 +324,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        Giving up is the other way out, and it is the learner's decision. */
     if(outcome==="failed")return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"Some tests still fail. Keep going and submit again, or give up to move on."};
     append("attempt_completed",{outcome},"system");deps.store.completeAttempt(attemptId,outcome);void startAgentTurn(sessionId,`The learner solved attempt ${attemptId} — every visible and hidden test passes. They may have submitted several times before this one; every one of those is in the attempt's log. Replay attempt ${attemptId} first and read how they got here — which cases they fixed, which they never passed, which they broke, and when — then read its recorded evaluation, update the relevant ability document, commit exactly one next pedagogical action, and either ask the learner about a specific moment the replay could not explain or aim the next target and validated question. The verdict is already known; what you are looking for is the behaviour behind it. The new target and question must explicitly respond to this attempt without overreacting to it.`,"system","attempt-complete");return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"All visible and hidden tests passed."};});
-  ipcMain.handle(ipc.authPassword, async (_event, value) => { const input = value as { mode: "sign-in" | "sign-up"; email?: unknown; password?: unknown }; if ((input.mode !== "sign-in" && input.mode !== "sign-up") || typeof input.email !== "string" || typeof input.password !== "string") throw new Error("Email and password are required"); return deps.auth.password(input.mode, input.email, input.password); });
+  /* Validated here rather than trusted from the window: the renderer is the one
+     process in Spar that runs anybody's markdown, and this is the channel that
+     spends credentials. The union is the same one the form switches on. */
+  ipcMain.handle(ipc.authRequest, (_event, value) => deps.auth.request(authRequestInput.parse(value)));
   /* Suggestions are drafted, never stored: until the learner opens one it is not
      evidence about them, and the intake it came from is already on disk. */
   ipcMain.handle(ipc.sessionsSuggest, async () => {

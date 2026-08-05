@@ -1,18 +1,123 @@
 import keytar from "keytar";
+import type { AuthCodePurpose, AuthRequest, AuthResult } from "../shared/api.js";
 
 const service = "ai.spar.desktop";
+/** Where the session token lives. The fifteen-minute JWT this replaced was held
+ *  under "access-token"; that entry is cleared whenever a token is written or
+ *  dropped, so no install is left holding a credential nothing will accept. */
+const TOKEN = "session-token";
+const LEGACY_TOKEN = "access-token";
+
+type Account = { id: string; displayName: string; email: string };
+/** What Better Auth answers with. `token` is absent when a deployment wants an
+ *  address confirmed before it hands out a session. */
+type AuthPayload = { token?: string | null; user?: { id: string; email: string; name?: string | null }; message?: string; code?: string };
+
+/** Better Auth's error codes, said the way the window should say them. Anything
+ *  not listed falls back to the server's own message, which is written for a
+ *  developer but is at least accurate. */
+const REASON: Record<string, string> = {
+  INVALID_EMAIL_OR_PASSWORD: "That email and password do not match an account.",
+  INVALID_EMAIL: "Check the email address.",
+  USER_ALREADY_EXISTS: "An account already exists for this email — sign in instead.",
+  USER_NOT_FOUND: "There is no account for that email.",
+  PASSWORD_TOO_SHORT: "Passwords are at least 8 characters.",
+  PASSWORD_TOO_LONG: "That password is too long.",
+  INVALID_OTP: "That code is not right. Check it, or ask for a new one.",
+  OTP_EXPIRED: "That code has expired. Ask for a new one.",
+  TOO_MANY_ATTEMPTS: "Too many tries with that code. Ask for a new one.",
+};
+
 export class AuthService {
   constructor(private readonly apiOrigin: string) {}
-  async account() { const raw = await keytar.getPassword(service, "account"); return raw ? JSON.parse(raw) as { id: string; displayName: string; email: string } : null; }
-  async accessToken() { return keytar.getPassword(service, "access-token"); }
-  async password(mode: "sign-in" | "sign-up", email: string, password: string) {
-    const response = await fetch(`${this.apiOrigin}/v1/auth/password/${mode}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
-    const payload = await response.json() as { accessToken?: string; account?: { id: string; displayName: string; email: string }; error?: string };
-    if (!response.ok || !payload.accessToken || !payload.account) throw new Error(payload.error ?? `Authentication failed (${response.status})`);
-    await keytar.setPassword(service, "access-token", payload.accessToken); await keytar.setPassword(service, "account", JSON.stringify(payload.account));
-    return payload.account;
+  async account() { const raw = await keytar.getPassword(service, "account"); return raw ? JSON.parse(raw) as Account : null; }
+  /** The bearer token every authenticated request carries. */
+  async accessToken() { return keytar.getPassword(service, TOKEN); }
+
+  /** One entry point for every step of signing in. Each case is one call to
+   *  Better Auth and, on success, one of two outcomes: the device is signed in,
+   *  or a code is in the post. Nothing else is reported back — the window has no
+   *  business knowing which endpoint answered. */
+  async request(input: AuthRequest): Promise<AuthResult> {
+    switch (input.action) {
+      case "sign-up": {
+        const payload = await this.post("sign-up/email", { email: input.email, password: input.password, name: input.email.split("@")[0] ?? "Learner" });
+        /* No token means this deployment sends a code before it sends a session,
+           and Better Auth has already sent it as part of the sign-up. */
+        return payload.token ? this.persist(payload) : { status: "code-sent", purpose: "email-verification" };
+      }
+      case "sign-in": {
+        const payload = await this.post("sign-in/email", { email: input.email, password: input.password }).catch(async (error: unknown) => {
+          /* An unconfirmed address is not a failed sign-in, it is an unfinished
+             sign-up. Better Auth refuses the password without sending anything,
+             so the code is asked for here and the window moves to the step that
+             was skipped rather than showing a dead end. */
+          if (!(error instanceof AuthError) || error.code !== "EMAIL_NOT_VERIFIED") throw error;
+          await this.post("email-otp/send-verification-otp", { email: input.email, type: "email-verification" });
+          return null;
+        });
+        return payload ? this.persist(payload) : { status: "code-sent", purpose: "email-verification" };
+      }
+      case "send-code":
+        /* Answers the same way whether or not the address has an account, so this
+           is not a way to ask the server who has signed up. */
+        await this.post("email-otp/send-verification-otp", { email: input.email, type: input.purpose });
+        return { status: "code-sent", purpose: input.purpose };
+      case "verify-email":
+        return this.persist(await this.post("email-otp/verify-email", { email: input.email, otp: input.code }));
+      case "sign-in-code":
+        return this.persist(await this.post("sign-in/email-otp", { email: input.email, otp: input.code }));
+      case "reset-password":
+        /* Resetting revokes every other session server-side and hands back none,
+           so the new password is spent immediately on a fresh one — otherwise the
+           learner would type a new password and land back on the sign-in form. */
+        await this.post("email-otp/reset-password", { email: input.email, otp: input.code, password: input.password });
+        return this.persist(await this.post("sign-in/email", { email: input.email, password: input.password }));
+    }
   }
-  async signOut() { await keytar.deletePassword(service, "access-token"); await keytar.deletePassword(service, "account"); }
+
+  /** POSTs to Better Auth and normalises the failure. The token, when there is
+   *  one, comes off the `set-auth-token` header the bearer plugin sets. */
+  private async post(path: string, body: Record<string, unknown>): Promise<AuthPayload> {
+    let response: Response;
+    try {
+      response = await fetch(`${this.apiOrigin}/v1/auth/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    } catch {
+      /* A refused connection is the one failure that is not about the credentials,
+         and reporting it as one sends people to reset a password that was fine. */
+      throw new AuthError("Spar cannot reach its server. Check your connection and try again.", "UNREACHABLE");
+    }
+    /* `?? {}` because a failure is allowed to have no body at all, and JSON `null`
+       parses to null rather than to nothing — reading a code off that is how an
+       error about a password becomes an error about reading a property of null. */
+    const payload = (await response.json().catch(() => null) as AuthPayload | null) ?? {};
+    if (response.status === 429) throw new AuthError("Too many attempts. Wait a minute, then try again.", "RATE_LIMITED");
+    if (response.status >= 500) throw new AuthError("Spar's server could not complete that. Its log will say why.", "SERVER_ERROR");
+    if (!response.ok) throw new AuthError(REASON[payload.code ?? ""] ?? payload.message ?? `Sign-in failed (${response.status})`, payload.code);
+    return { ...payload, token: response.headers.get("set-auth-token") ?? payload.token ?? null };
+  }
+
+  /** Writes the credential to the keychain. The account is stored beside it
+   *  because the bootstrap reads it before anything has been online. */
+  private async persist(payload: AuthPayload): Promise<AuthResult> {
+    if (!payload.token || !payload.user) throw new AuthError("The server did not return a session. Try signing in again.");
+    const account: Account = { id: payload.user.id, email: payload.user.email, displayName: payload.user.name ?? payload.user.email.split("@")[0] ?? "Learner" };
+    await keytar.setPassword(service, TOKEN, payload.token);
+    await keytar.setPassword(service, "account", JSON.stringify(account));
+    await keytar.deletePassword(service, LEGACY_TOKEN).catch(() => undefined);
+    return { status: "signed-in" };
+  }
+
+  async signOut() {
+    /* Told to the server first, so the row goes with the keychain entry and a
+       stolen copy of the token is worth nothing. It is allowed to fail: signing
+       out of a device has to work on a plane. */
+    const token = await this.accessToken();
+    if (token) await fetch(`${this.apiOrigin}/v1/auth/sign-out`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+    await keytar.deletePassword(service, TOKEN);
+    await keytar.deletePassword(service, LEGACY_TOKEN).catch(() => undefined);
+    await keytar.deletePassword(service, "account");
+  }
   async deleteAccount() {
     const token = await this.accessToken();
     if (!token) throw new Error("Sign in before deleting your account");
@@ -38,4 +143,10 @@ export class AuthService {
     try { return JSON.parse(raw) as T; } catch { return null; }
   }
   deleteProviderOAuth(provider: string) { return keytar.deletePassword(service, `provider-oauth:${provider}`).then(() => undefined); }
+}
+
+/** A failure with a sentence in it that can be shown as-is, and the server's own
+ *  code kept alongside for the one case the flow branches on. */
+export class AuthError extends Error {
+  constructor(message: string, readonly code?: string) { super(message); this.name = "AuthError"; }
 }

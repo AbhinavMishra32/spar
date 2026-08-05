@@ -5,7 +5,7 @@ export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
   checkpointSave: "checkpoint:save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
-  authPassword: "auth:password", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
+  authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
@@ -19,6 +19,41 @@ export const ipc = {
   challengeRun: "challenges:run", challengeCheck: "challenges:check", challengeReset: "challenges:reset",
   conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start"
 } as const;
+
+/* ---- Signing in ---------------------------------------------------------
+   Every flow the window offers arrives on one channel. They all carry an email
+   and differ only in what else they carry, so a single validated union is what
+   keeps the main process from having to trust six different shapes — and it is
+   the same union the sign-in window switches on, which is why the two can never
+   disagree about what a flow needs.
+
+   The bounds mirror the API's own: eight characters of password, six digits of
+   code. Failing here is failing without a round trip. */
+const emailField = z.string().trim().toLowerCase().email();
+const passwordField = z.string().min(8).max(200);
+const codeField = z.string().trim().regex(/^\d{6}$/);
+/** Which email a code arrives in, and therefore what it can be spent on. */
+export const authCodePurposeSchema = z.enum(["sign-in", "email-verification", "forget-password"]);
+export type AuthCodePurpose = z.infer<typeof authCodePurposeSchema>;
+export const authRequestInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("sign-in"), email: emailField, password: passwordField }),
+  z.object({ action: z.literal("sign-up"), email: emailField, password: passwordField }),
+  /** Ask for a fresh code — the first one, or a replacement for one that expired. */
+  z.object({ action: z.literal("send-code"), email: emailField, purpose: authCodePurposeSchema }),
+  /** Confirm a new account's address. Signs in on success. */
+  z.object({ action: z.literal("verify-email"), email: emailField, code: codeField }),
+  /** Sign in with a code instead of a password. */
+  z.object({ action: z.literal("sign-in-code"), email: emailField, code: codeField }),
+  /** Spend a reset code on a new password, and sign in with it. */
+  z.object({ action: z.literal("reset-password"), email: emailField, code: codeField, password: passwordField }),
+]);
+export type AuthRequest = z.infer<typeof authRequestInput>;
+/** Where the window goes next. Only two things can happen: the device is signed
+ *  in, or an email is on its way and six digits are wanted. `purpose` says what
+ *  the code that arrives will do, which the window cannot always infer from what
+ *  it asked for — signing in with an unconfirmed address answers with a
+ *  confirmation code. */
+export type AuthResult = { status: "signed-in" } | { status: "code-sent"; purpose: AuthCodePurpose };
 
 export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000) });
 /* Sidebar housekeeping. Titles are capped where the generated one is capped, so a
@@ -204,7 +239,10 @@ export interface SparApi {
    *  caller can go straight there. Starting the turn is the point: practice that
    *  did not reach the agent would be a link, not a drill. */
   startPractice(input: z.infer<typeof practiceInput>): Promise<{ sessionId: string }>;
-  passwordAuth(mode: "sign-in" | "sign-up", email: string, password: string): Promise<void>;
+  /** Every step of signing in, creating an account and recovering one. The main
+   *  process owns the keychain and the API, so the window only ever learns which
+   *  of the two things happened — see `AuthResult`. */
+  auth(request: AuthRequest): Promise<AuthResult>;
   signOut(): Promise<void>;
   /** Finish onboarding; resolves with the stored profile. */
   saveProfile(input: z.infer<typeof profileInput>): Promise<LearnerProfile>;

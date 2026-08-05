@@ -157,6 +157,12 @@ export function installAuth(app: FastifyInstance, auth: SparAuth) {
           ...(request.method === "GET" || request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
         }),
       );
+      /* Better Auth answers a failure it could not classify with a 500 and an
+         empty body, which reaches the desktop app as "something went wrong" and
+         reaches the log as nothing at all. The reason is on the server — a
+         database that has not run its migrations, a mail provider refusing a
+         key — so it is said here, where it can be read. */
+      if (response.status >= 500) request.log.error({ authPath: url.pathname }, "Better Auth failed to handle a request");
       reply.status(response.status);
       response.headers.forEach((value, key) => void reply.header(key, value));
       return reply.send(response.body ? await response.text() : null);
