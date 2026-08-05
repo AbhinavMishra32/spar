@@ -39,9 +39,13 @@ else {
     const web = new WebSearchService(() => auth.readSecret("exa"));
     const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web));
     const sync=new CloudSyncService(store,auth,origin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
-    installIpc({ store, workspaces, auth, providers, runner, agent, agentRunSessions, sync, web, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow(); startUpdates(mainWindow);
+    /* Asked before the window exists so it can open at the size it belongs at.
+       Opening large and shrinking once the renderer reports in would read as the
+       app correcting a mistake in front of the learner. */
+    const stage = !(await auth.account()) ? "sign-in" as const : store.getProfile() ? "app" as const : "onboarding" as const;
+    installIpc({ store, workspaces, auth, providers, runner, agent, agentRunSessions, sync, web, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); startUpdates(mainWindow);
     app.on("before-quit", () => { sync.stop(); runner.stop(); agent.stop(); store.close(); });
-    app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(); });
+    app.on("activate", async () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow({ stage: !(await auth.account()) ? "sign-in" : store.getProfile() ? "app" : "onboarding" }); });
   });
 }
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

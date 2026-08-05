@@ -1141,6 +1141,27 @@
   }
 }
 
+/* One pass, and back to the mark. Both ends are the dot's own resting values
+   rather than a dimmed version of them, so the animation does not have to be
+   stopped — it arrives. Every other pattern here loops and is therefore always
+   interrupted; this one is for the mark the learner is looking at while they
+   wait, where the last thing they should see is the logo, drawn exactly as the
+   icon draws it. */
+@keyframes spar-dots-pass {
+  0% {
+    transform: scale(var(--dot-rest));
+    opacity: var(--dot-tone);
+  }
+  45% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(var(--dot-rest));
+    opacity: var(--dot-tone);
+  }
+}
+
 @keyframes spar-dots-pulse {
   0%,
   100% {
@@ -1153,7 +1174,64 @@
   }
 }
 
+/* The sign-in window's backdrop: the mark's grid, at the scale of the room
+   rather than of a glyph. Two layers of the same grid — one at rest, one bright
+   — and a diagonal band that drifts across the second, revealing it. Only the
+   band moves, so the grid stays pinned to the window like a printed texture
+   instead of sliding across it, and the whole thing is one animated mask rather
+   than four hundred animated dots.
+
+   Dots are drawn in `currentColor` so the field inherits the window's own text
+   colour and needs no separate light and dark values. */
+.auth-field {
+  --auth-dot-pitch: 22px;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /* Nothing behind the form and most of it out at the edges: this is the room
+     the window stands in, not a texture under the fields. */
+  mask-image: radial-gradient(118% 88% at 50% 42%, transparent 26%, black 76%);
+}
+.auth-field::before,
+.auth-field::after {
+  content: "";
+  position: absolute;
+  /* Overhung so the drifting band never reveals an edge of the grid. */
+  inset: -8%;
+  background-image: radial-gradient(circle at center, currentColor 1.1px, transparent 1.2px);
+  background-size: var(--auth-dot-pitch) var(--auth-dot-pitch);
+}
+.auth-field::before {
+  opacity: 0.14;
+}
+.auth-field::after {
+  opacity: 0.4;
+  mask-image: linear-gradient(135deg, transparent 43%, black 50%, transparent 57%);
+  mask-size: 280% 280%;
+  animation: auth-field-sweep 9s cubic-bezier(0.55, 0, 0.45, 1) infinite;
+}
+
+/* Corner to corner along the mark's own diagonal, then a long pause off-screen.
+   The pause is most of the point: a band that arrives every nine seconds reads
+   as the window breathing, and one that never stops reads as a progress bar. */
+@keyframes auth-field-sweep {
+  0% {
+    mask-position: 100% 100%;
+  }
+  58%,
+  100% {
+    mask-position: 0% 0%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  /* The grid stays; the pass across it does not. */
+  .auth-field::after {
+    animation: none;
+    opacity: 0.06;
+  }
+
   /* Collapse to the resting mark. A loading state that cannot move should still
      be the logo rather than nothing. */
   .spar-dots circle {

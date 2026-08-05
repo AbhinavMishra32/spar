@@ -17,6 +17,7 @@ const { AuthService, AuthError } = await import("./auth.js");
 type Handler = (body: Record<string, unknown>) => Response;
 let routes: Record<string, Handler>;
 let calls: string[];
+let origins: Array<string | undefined>;
 
 const json = (body: unknown, init: ResponseInit = {}) => new Response(JSON.stringify(body), { headers: { "content-type": "application/json" }, ...init });
 const session = (token: string) => json({ token, user: { id: "8f1c", email: "learner@example.com", name: "learner" } }, { headers: { "set-auth-token": `${token}.signature` } });
@@ -24,10 +25,12 @@ const session = (token: string) => json({ token, user: { id: "8f1c", email: "lea
 beforeEach(() => {
   keychain.clear();
   calls = [];
+  origins = [];
   routes = {};
   vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
     const path = String(url).replace("https://api.test/v1/auth/", "");
     calls.push(path);
+    origins.push((init.headers as Record<string, string> | undefined)?.origin);
     const handler = routes[path];
     if (!handler) throw new Error(`unexpected request to ${path}`);
     return handler(JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>);
@@ -50,6 +53,17 @@ describe("signing in", () => {
     routes["sign-in/email"] = () => session("raw-token");
     await service().request({ action: "sign-in", email: "learner@example.com", password: "a-good-password" });
     expect(keychain.has("access-token")).toBe(false);
+  });
+
+  /* Node's fetch stamps `sec-fetch-mode: cors` on everything, which Better Auth
+     reads as a browser calling; without an Origin it answers every request with
+     MISSING_OR_NULL_ORIGIN, and the app cannot sign anyone in at all. */
+  it("names itself with the origin the API trusts", async () => {
+    routes["sign-in/email"] = () => session("raw-token");
+    routes["sign-out"] = () => json({ success: true });
+    await service().request({ action: "sign-in", email: "learner@example.com", password: "a-good-password" });
+    await service().signOut();
+    expect(origins).toEqual(["spar://desktop", "spar://desktop"]);
   });
 
   it("says what a rejected password means rather than repeating a status code", async () => {

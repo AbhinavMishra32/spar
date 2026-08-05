@@ -21,6 +21,17 @@ declare module "fastify" {
   }
 }
 
+/** The origin the desktop app signs in from, and the only one besides this API's
+ *  own that is trusted.
+ *
+ *  It has to send something. Node's fetch — which is what Electron's main process
+ *  has — stamps `sec-fetch-mode: cors` on every request it makes, and Better Auth
+ *  reads that as "a browser is calling" and then refuses a request with no Origin
+ *  to go with it. There is no browser and no page, so the app names itself with a
+ *  scheme that cannot belong to one. Kept in step with `DESKTOP_ORIGIN` in
+ *  apps/desktop/src/main/auth.ts. */
+const DESKTOP_ORIGIN = "spar://desktop";
+
 /** How long a code lasts. Long enough to switch to a mail client, find the
  *  message and come back; short enough that a code read over someone's shoulder
  *  is worth nothing by the time they could use it. */
@@ -55,6 +66,7 @@ export function createAuth(db: Database, env: Env, mailer: Mailer) {
        still posts to /v1/auth/password/* gets its 404 from the same prefix rather
        than a confusing 200 from a different one. */
     basePath: "/v1/auth",
+    trustedOrigins: [DESKTOP_ORIGIN],
     database: drizzleAdapter(db, {
       provider: "pg",
       /* Better Auth's four models onto Spar's tables. `user` is Spar's own

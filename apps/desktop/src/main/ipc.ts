@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
 import { apiOriginIsUnconfigured } from "./apiOrigin.js";
+import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
@@ -327,7 +328,15 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   /* Validated here rather than trusted from the window: the renderer is the one
      process in Spar that runs anybody's markdown, and this is the channel that
      spends credentials. The union is the same one the form switches on. */
-  ipcMain.handle(ipc.authRequest, (_event, value) => deps.auth.request(authRequestInput.parse(value)));
+  ipcMain.handle(ipc.authRequest, async (_event, value) => {
+    const result = await deps.auth.request(authRequestInput.parse(value));
+    /* The window grows to whatever comes next — the intake for a new account, the
+       app for one that has already done it. Done here rather than from the
+       renderer because the size of the window is not the renderer's to decide,
+       and this is where signing in is known to have actually happened. */
+    if (result.status === "signed-in") fitWindowTo(deps.window(), deps.store.getProfile() ? "app" : "onboarding");
+    return result;
+  });
   /* Suggestions are drafted, never stored: until the learner opens one it is not
      evidence about them, and the intake it came from is already on disk. */
   ipcMain.handle(ipc.sessionsSuggest, async () => {
@@ -347,7 +356,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       return { source: "starter" as const, suggestions: starterSuggestions(profile) };
     }
   });
-  ipcMain.handle(ipc.profileSave, (_event, value) => { const input = profileInput.parse(value); const profile = { ...input, completedAt: new Date().toISOString() }; deps.store.saveProfile(profile); return profile; });
+  /* The end of the intake is the moment Spar becomes a workspace rather than a
+     card, so it is where the window opens out. */
+  ipcMain.handle(ipc.profileSave, (_event, value) => { const input = profileInput.parse(value); const profile = { ...input, completedAt: new Date().toISOString() }; deps.store.saveProfile(profile); fitWindowTo(deps.window(), "app"); return profile; });
   ipcMain.handle(ipc.profileLanguage, (_event, value) => { deps.store.setPreferredLanguage(languageSchema.parse(value)); });
   /* Signing out empties the device, not just the keychain. The local store has no
      account column — every read is device-wide — so anything left behind would be
@@ -359,8 +370,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     await deps.auth.signOut();
     deps.store.clearAccountData();
     await deps.workspaces.clear();
+    fitWindowTo(deps.window(), "sign-in");
   });
-  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); deps.store.clearAccountData(); await deps.workspaces.clear(); });
+  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); deps.store.clearAccountData(); await deps.workspaces.clear(); fitWindowTo(deps.window(), "sign-in"); });
   ipcMain.handle(ipc.settingsSaveSecret, async (_event, value) => {
     const input = providerSettingsInput.parse(value);
     await deps.providers.saveCredential(input);

@@ -8,6 +8,16 @@ const service = "ai.spar.desktop";
 const TOKEN = "session-token";
 const LEGACY_TOKEN = "access-token";
 
+/** What this app calls itself when it talks to the API.
+ *
+ *  Node's fetch stamps `sec-fetch-mode: cors` on everything it sends, and Better
+ *  Auth reads that as a browser calling and then refuses a request that brings no
+ *  Origin with it. So the app sends one. The scheme is deliberately not http:
+ *  nothing can serve a page from it, which means the value cannot be forged by
+ *  one. The API trusts exactly this string — see `DESKTOP_ORIGIN` in
+ *  apps/api/src/auth.ts, and change neither without the other. */
+const DESKTOP_ORIGIN = "spar://desktop";
+
 type Account = { id: string; displayName: string; email: string };
 /** What Better Auth answers with. `token` is absent when a deployment wants an
  *  address confirmed before it hands out a session. */
@@ -81,7 +91,7 @@ export class AuthService {
   private async post(path: string, body: Record<string, unknown>): Promise<AuthPayload> {
     let response: Response;
     try {
-      response = await fetch(`${this.apiOrigin}/v1/auth/${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      response = await fetch(`${this.apiOrigin}/v1/auth/${path}`, { method: "POST", headers: { "content-type": "application/json", origin: DESKTOP_ORIGIN }, body: JSON.stringify(body) });
     } catch {
       /* A refused connection is the one failure that is not about the credentials,
          and reporting it as one sends people to reset a password that was fine. */
@@ -113,7 +123,7 @@ export class AuthService {
        stolen copy of the token is worth nothing. It is allowed to fail: signing
        out of a device has to work on a plane. */
     const token = await this.accessToken();
-    if (token) await fetch(`${this.apiOrigin}/v1/auth/sign-out`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: "{}" }).catch(() => undefined);
+    if (token) await fetch(`${this.apiOrigin}/v1/auth/sign-out`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", origin: DESKTOP_ORIGIN }, body: "{}" }).catch(() => undefined);
     await keytar.deletePassword(service, TOKEN);
     await keytar.deletePassword(service, LEGACY_TOKEN).catch(() => undefined);
     await keytar.deletePassword(service, "account");

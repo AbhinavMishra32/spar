@@ -1,12 +1,28 @@
-import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Eye, EyeOff, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRight, Eye, EyeOff } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import type { AuthCodePurpose, AuthRequest, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
+import { PASS_MS, SparDots } from "../common/SparDots";
 import { SparWordmark } from "../common/SparWordmark";
 import { CodeField } from "../auth/CodeField";
+import { PasswordStrength } from "../auth/PasswordStrength";
+
+/** The window's own easing, matching the sheets and disclosures elsewhere. */
+const EASE = [0.32, 0.72, 0, 1] as const;
+/** Resizing the panel around a step that changed size. Slower than the content
+ *  crossfade, because a box that snaps while its contents fade reads as two
+ *  separate events rather than one. */
+const PANEL = { duration: 0.28, ease: EASE };
+const STEP = { duration: 0.18, ease: EASE };
+/** A line of copy or a label being replaced by another. Short enough to feel
+ *  like the same element saying something new. */
+const TEXT = { duration: 0.14, ease: EASE };
+/** A row opening or closing on its own height, under the panel's own resize. */
+const LINKS = { duration: 0.22, ease: EASE };
 
 type Mode = "sign-in" | "sign-up";
 /** Which of the four things the window is currently asking for. Everything else
@@ -37,20 +53,24 @@ function problemWith(step: Step, email: string, password: string, code: string):
 }
 
 /** What each step is called and what it says about itself. Kept out of the render
- *  so the four flows can be read side by side. */
+ *  so the four flows can be read side by side.
+ *
+ *  The address is set in the window's own text colour wherever it appears: it is
+ *  the one word on these screens someone has to actually check, because a code
+ *  that never arrives is nearly always a code that went somewhere else. */
 function copyFor(step: Step, email: string) {
-  const at = email.trim() || "your email";
+  const at = <span className="whitespace-nowrap text-foreground">{email.trim() || "your email"}</span>;
   switch (step.name) {
     case "credentials":
       return { title: null, caption: step.mode === "sign-in" ? "Sign in to pick up where you left off." : "Create an account and start sparring.", action: step.mode === "sign-in" ? "Sign in" : "Create account", busy: step.mode === "sign-in" ? "Signing in…" : "Creating account…" };
     case "code":
       return step.purpose === "email-verification"
-        ? { title: "Confirm your email", caption: `We sent a six-digit code to ${at}.`, action: "Confirm and sign in", busy: "Confirming…" }
-        : { title: "Check your email", caption: `A sign-in code is on its way to ${at}.`, action: "Sign in", busy: "Signing in…" };
+        ? { title: "Confirm your email", caption: <>We sent a six-digit code to {at}.</>, action: "Confirm and sign in", busy: "Confirming…" }
+        : { title: "Check your email", caption: <>A sign-in code is on its way to {at}.</>, action: "Sign in", busy: "Signing in…" };
     case "forgot":
       return { title: "Reset your password", caption: "We will email you a code to set a new one.", action: "Email me a code", busy: "Sending…" };
     case "reset":
-      return { title: "Choose a new password", caption: `Enter the code we sent to ${at}, and the password you want.`, action: "Save and sign in", busy: "Saving…" };
+      return { title: "Choose a new password", caption: <>Enter the code we sent to {at}, and the password you want.</>, action: "Save and sign in", busy: "Saving…" };
   }
 }
 
@@ -93,9 +113,36 @@ export function AuthPage({
      the next attempt, so it never sits under an error explaining the opposite. */
   const [sent, setSent] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
+  /* One pass of the mark for every choice the learner makes — sign in or create,
+     submitting, stepping back — and another for each pass-length a request is
+     still in flight. The count is the animation's identity: bumping it remounts
+     the dots, which is what restarts a run-once animation from its first frame
+     instead of leaving it finished. */
+  const [pass, setPass] = useState(0);
+  const [awake, setAwake] = useState(false);
+  const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const passwordRef = useRef<HTMLInputElement>(null);
+  const rouse = useCallback(() => {
+    setPass((count) => count + 1);
+    setAwake(true);
+    clearTimeout(settle.current);
+    /* Never shortened, only extended: a pass cut off halfway is the snap back to
+       the resting grid that `pattern="pass"` exists to avoid. */
+    settle.current = setTimeout(() => setAwake(false), PASS_MS);
+  }, []);
+  useEffect(() => () => clearTimeout(settle.current), []);
+  /* A request that outlasts one pass gets another, so the mark keeps moving for
+     as long as Spar is actually doing something. */
+  useEffect(() => {
+    if (!busy) return;
+    const timer = setInterval(rouse, PASS_MS);
+    return () => clearInterval(timer);
+  }, [busy, rouse]);
 
   const copy = copyFor(step, email);
+  /* What the window is currently saying, as opposed to which step it is on:
+     signing in and creating an account are one step in two voices. */
+  const voice = step.name === "credentials" ? step.mode : step.name;
   const problem = attempted ? problemWith(step, email, password, code) : null;
   /* A build with nowhere to sign in cannot be fixed by trying again, so it is said
      before the attempt rather than reported as its failure — otherwise the learner
@@ -112,6 +159,7 @@ export function AuthPage({
   }, [cooldown]);
 
   const go = (next: Step) => {
+    rouse();
     setStep(next);
     setAttempted(false);
     setSent(null);
@@ -154,6 +202,7 @@ export function AuthPage({
   /** The current step's own request. Reached from the button and, on the code
    *  steps, from the sixth digit landing. */
   const attempt = () => {
+    rouse();
     setAttempted(true);
     if (!api || busy || problemWith(step, email, password, code)) return;
     const address = email.trim();
@@ -227,70 +276,122 @@ export function AuthPage({
     </div>
   );
 
+  /* Whether the password on screen is one being chosen. A strength reading is
+     help while you invent a password and a verdict you cannot act on while you
+     recall one. */
+  const choosing = step.name === "reset" || (step.name === "credentials" && step.mode === "sign-up");
+
   return (
-    <div className="app-drag app-pane grid h-full place-items-center px-6">
-      <div className="app-no-drag w-full max-w-[20.5rem] pb-[var(--titlebar-height)]">
-        <SparWordmark className="block text-center text-[2.1rem] leading-none text-foreground" />
+    <div className="app-drag app-pane relative grid h-full place-items-center overflow-hidden px-6">
+      {/* The mark's own grid at the scale of the room — see `.auth-field` in
+          theme.css. Behind everything, absent under the form, and carrying one
+          slow diagonal pass so the window is never quite still. */}
+      <div aria-hidden className="auth-field text-foreground" />
 
-        {copy.title ? (
-          <div className="mt-6 text-center">
-            <h1 className="text-content font-medium text-foreground">{copy.title}</h1>
-            <p className="mx-auto mt-1 max-w-[17rem] text-ui text-muted-foreground">{copy.caption}</p>
-          </div>
-        ) : (
-          <p className="mt-2.5 text-center text-ui text-muted-foreground">{copy.caption}</p>
-        )}
+      <motion.div className="app-no-drag relative w-full max-w-[20.5rem] pb-[var(--titlebar-height)]" layout transition={PANEL}>
+        {/* Mark and wordmark on one line, the way the lockup is set everywhere
+            else. Stacked, they eat a third of a window that is deliberately small
+            while nobody is signed in. */}
+        <motion.div className="flex items-center justify-center gap-2.5" layout="position" transition={PANEL}>
+          {/* The mark wakes up while a request is in flight. It is the only
+              spinner on this window: a second one inside the button would be two
+              things saying the same thing, half an inch apart. */}
+          <SparDots key={pass} pattern={awake ? "pass" : "still"} size={30} {...(busy ? { label: copy.busy } : {})} />
+          <SparWordmark className="block text-[2rem] leading-none text-foreground" />
+        </motion.div>
 
-        {step.name === "credentials" && (
-          <Segmented<Mode>
-            ariaLabel="Sign in or create an account"
-            className="mt-5 w-full"
-            disabled={busy}
-            onChange={(mode) => go({ name: "credentials", mode })}
-            options={[
-              { value: "sign-in", label: "Sign in" },
-              { value: "sign-up", label: "Create account" },
-            ]}
-            value={step.mode}
-          />
-        )}
+        {/* One step at a time: `wait` lets the outgoing step leave before the
+            panel resizes and the next arrives. Crossfading them instead puts two
+            forms on top of each other for a fifth of a second, which is exactly
+            long enough to read as a glitch. */}
+        <AnimatePresence initial={false} mode="wait">
+          <motion.div
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            initial={{ opacity: 0, y: 6 }}
+            key={step.name}
+            transition={STEP}
+          >
+            {/* Keyed on the voice rather than the step, so switching between
+                signing in and creating an account fades the one line that
+                actually changed instead of swapping it mid-sentence.
 
-        <form className="mt-3" onSubmit={submit} noValidate>
-          {step.name === "credentials" && (
-            <div className={group}>
-              {emailInput}
-              <div className="border-t border-border">{passwordInput("Password", step.mode === "sign-up" ? "new-password" : "current-password")}</div>
-            </div>
-          )}
-          {step.name === "forgot" && <div className={group}>{emailInput}</div>}
-          {step.name === "code" && <CodeField autoFocus disabled={busy} invalid={problem?.field === "code"} onChange={setCode} onComplete={attempt} value={code} />}
-          {step.name === "reset" && (
-            <div className="space-y-2.5">
-              {/* A finished code moves on to the password rather than submitting:
-                  the code is half of this step, and the learner is about to type
-                  the other half anyway. */}
-              <CodeField autoFocus disabled={busy} invalid={problem?.field === "code"} onChange={setCode} onComplete={() => passwordRef.current?.focus()} value={code} />
-              <div className={group}>{passwordInput("New password", "new-password")}</div>
-            </div>
-          )}
+                Deliberately not an `AnimatePresence`: there is nothing to watch
+                leave, the two lines occupy the same slot, and a swap that has to
+                wait for an exit to finish is a swap that can be left half-done if
+                the exit is interrupted — which, on a form someone is typing into,
+                it will be. */}
+            <motion.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} key={voice} transition={TEXT}>
+              {copy.title ? (
+                <div className="mt-5 text-center">
+                  <h1 className="text-content font-medium text-foreground">{copy.title}</h1>
+                  <p className="mx-auto mt-1 max-w-[17.5rem] text-ui text-muted-foreground">{copy.caption}</p>
+                </div>
+              ) : (
+                <p className="mt-2 text-center text-ui text-muted-foreground">{copy.caption}</p>
+              )}
+            </motion.div>
 
-          {/* The size is written out rather than reached for through `text-content`:
-              tailwind-merge reads that token as a colour and drops the button's own
-              `text-primary-foreground`, leaving the label unreadable on the fill. */}
-          <Button className="mt-3 h-11 w-full text-[0.8125rem]" disabled={busy} size="lg" type="submit">
-            {busy ? (
-              <>
-                <Loader2 className="animate-spin" />
-                {copy.busy}
-              </>
-            ) : (
-              <>
-                {copy.action}
-                <ArrowRight data-icon="inline-end" />
-              </>
+            {step.name === "credentials" && (
+              <Segmented<Mode>
+                ariaLabel="Sign in or create an account"
+                className="mt-4 w-full"
+                disabled={busy}
+                onChange={(mode) => go({ name: "credentials", mode })}
+                options={[
+                  { value: "sign-in", label: "Sign in" },
+                  { value: "sign-up", label: "Create account" },
+                ]}
+                value={step.mode}
+              />
             )}
-          </Button>
-        </form>
+
+            <form className="mt-3" onSubmit={submit} noValidate>
+              {step.name === "credentials" && (
+                <div className={group}>
+                  {emailInput}
+                  <div className="border-t border-border">{passwordInput("Password", step.mode === "sign-up" ? "new-password" : "current-password")}</div>
+                </div>
+              )}
+              {step.name === "forgot" && <div className={group}>{emailInput}</div>}
+              {step.name === "code" && <CodeField autoFocus disabled={busy} invalid={problem?.field === "code"} onChange={setCode} onComplete={attempt} value={code} />}
+              {step.name === "reset" && (
+                <div className="space-y-2.5">
+                  {/* A finished code moves on to the password rather than
+                      submitting: the code is half of this step, and the learner
+                      is about to type the other half anyway. */}
+                  <CodeField autoFocus disabled={busy} invalid={problem?.field === "code"} onChange={setCode} onComplete={() => passwordRef.current?.focus()} value={code} />
+                  <div className={group}>{passwordInput("New password", "new-password")}</div>
+                </div>
+              )}
+
+              {/* Only once there is something to say about. An empty bar under an
+                  empty field is a requirement nobody has been given yet, and it
+                  opens rather than appears so the button below it slides. */}
+              {choosing && password.length > 0 && (
+                <motion.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} transition={TEXT}>
+                  <PasswordStrength className="px-0.5 pt-2" password={password} />
+                </motion.div>
+              )}
+
+              {/* The size is written out rather than reached for through
+                  `text-content`: tailwind-merge reads that token as a colour and
+                  drops the button's own `text-primary-foreground`, leaving the
+                  label unreadable on the fill. */}
+              <Button className="mt-3 h-11 w-full text-[0.8125rem]" disabled={busy} size="lg" type="submit">
+                <motion.span
+                  animate={{ opacity: 1 }}
+                  className="inline-flex items-center gap-1.5"
+                  initial={{ opacity: 0 }}
+                  key={busy ? copy.busy : copy.action}
+                  transition={TEXT}
+                >
+                  {busy ? copy.busy : <>{copy.action}<ArrowRight data-icon="inline-end" /></>}
+                </motion.span>
+              </Button>
+            </form>
+          </motion.div>
+        </AnimatePresence>
 
         {/* Reserved whether or not it is filled: the block below the button must
             not shift the form up and down as messages come and go. */}
@@ -299,32 +400,39 @@ export function AuthPage({
           className={cn("mt-2.5 min-h-4 text-center text-ui", notice ? "text-destructive" : "text-muted-foreground/70")}
           role="status"
         >
-          {notice ?? sent ?? (step.name === "credentials" && step.mode === "sign-up" ? "At least 8 characters." : "")}
+          {notice ?? sent ?? (choosing && !password ? "At least 8 characters." : "")}
         </p>
 
         {/* The ways out of the current step. Every one of them is a link rather
-            than a button: there is one action on this window, and it is above. */}
-        <div className="mt-3 flex flex-col items-center gap-1.5 text-ui">
+            than a button: there is one action on this window, and it is above.
+            Each opens and closes on its own height, so switching to creating an
+            account — which has no way out but the segment above — closes the pair
+            below instead of dropping them and letting the card jump. */}
+        <motion.div className="mt-3 flex flex-col items-center gap-1.5 text-ui" layout transition={LINKS}>
           {step.name === "credentials" && step.mode === "sign-in" && (
-            <>
-              <Link disabled={busy} onClick={() => { go({ name: "forgot" }); }}>Forgot your password?</Link>
+            <motion.div animate={{ opacity: 1 }} className="flex flex-col items-center gap-1.5" initial={{ opacity: 0 }} key="recover" transition={TEXT}>
+              <Link disabled={busy} onClick={() => go({ name: "forgot" })}>Forgot your password?</Link>
               <Link disabled={busy || !/^\S+@\S+\.\S+$/.test(email.trim())} onClick={() => send({ action: "send-code", email: email.trim(), purpose: "sign-in" })}>
                 Email me a code instead
               </Link>
-            </>
+            </motion.div>
           )}
           {(step.name === "code" || step.name === "reset") && (
-            <Link disabled={busy || cooldown > 0} onClick={resend}>
-              {cooldown > 0 ? `Send another code in ${cooldown}s` : "Send another code"}
-            </Link>
+            <motion.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} key="resend" transition={TEXT}>
+              <Link disabled={busy || cooldown > 0} onClick={resend}>
+                {cooldown > 0 ? `Send another code in ${cooldown}s` : "Send another code"}
+              </Link>
+            </motion.div>
           )}
           {step.name !== "credentials" && (
-            <Link disabled={busy} onClick={() => go({ name: "credentials", mode: "sign-in" })}>
-              Back to sign in
-            </Link>
+            <motion.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} key="back" transition={TEXT}>
+              <Link disabled={busy} onClick={() => go({ name: "credentials", mode: "sign-in" })}>
+                Back to sign in
+              </Link>
+            </motion.div>
           )}
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }
