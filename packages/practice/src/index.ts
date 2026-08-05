@@ -14,11 +14,17 @@
  * - `harness` turns a problem into a workspace the local runner can grade, for
  *   when the source cannot grade it itself — and defines the marker contract that
  *   keeps the learner's file submittable.
+ * - `gateway` is the seam every consumer talks to a source through: the MCP
+ *   server, the desktop host and the stdio binary all take one of these.
  * - `leetcode/*` is the one implementation, and it is where every fact about
  *   LeetCode's API lives.
+ *
+ * The MCP surface is a separate entry point (`@spar/practice/mcp`) so that
+ * importing the types does not pull the protocol SDK in behind them.
  */
 export * from "./types.js";
 export * from "./sources.js";
+export * from "./gateway.js";
 export * from "./concepts.js";
 export * from "./harness.js";
 export { LeetCodeClient } from "./leetcode/client.js";
