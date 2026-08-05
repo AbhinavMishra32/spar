@@ -4,6 +4,6 @@
   "type": "module",
   "exports": { ".": { "types": "./src/index.ts", "development": "./src/index.ts", "default": "./dist/index.js" } },
   "scripts": { "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput", "typecheck": "tsc --noEmit", "test": "vitest run --passWithNoTests", "lint": "tsc --noEmit", "build": "tsc -p tsconfig.build.json", "db:generate": "drizzle-kit generate", "db:migrate": "drizzle-kit migrate", "db:studio": "drizzle-kit studio" },
-  "dependencies": { "drizzle-orm": "^0.44.3", "postgres": "^3.4.7" },
+  "dependencies": { "drizzle-orm": "^0.45.2", "postgres": "^3.4.7" },
   "devDependencies": { "@types/node":"^22.15.30", "drizzle-kit": "^0.31.4", "typescript": "^5.8.3", "vitest": "^3.2.4" }
 }
