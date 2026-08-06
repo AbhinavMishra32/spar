@@ -17,7 +17,14 @@ export const ipc = {
   sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
   challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
   challengeRun: "challenges:run", challengeCheck: "challenges:check", challengeReset: "challenges:reset",
-  conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start"
+  conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start",
+  /* Practice sources: where real problems come from. Distinct from `practiceStart`
+     above, which is Spar's own word for drilling an ability — an unfortunate
+     collision, kept because renaming a channel the renderer already calls is a
+     worse trade than a comment. */
+  sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
+  sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
+  sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
 } as const;
 
 /* ---- Signing in ---------------------------------------------------------
@@ -153,7 +160,79 @@ export type ProviderOAuthEvent = {
   allowEmpty?: boolean;
 };
 
-export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+/* ---- Practice sources ----------------------------------------------------
+   A source of real problems, as the renderer sees it. The shapes live here
+   rather than in the main process so that neither side can drift: Settings
+   draws exactly what `PracticeService.inventory` returns. */
+
+export const sourceRegionSchema = z.enum(["global", "cn"]);
+export const sourceJudgeSchema = z.enum(["source", "local"]);
+export type SourceJudgePreference = z.infer<typeof sourceJudgeSchema>;
+export const sourceSearchInput = z.object({
+  query: z.string().trim().max(200).default(""),
+  concepts: z.array(z.string().trim().min(1).max(60)).max(5).default([]),
+  difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+  status: z.enum(["any", "todo", "attempted", "solved"]).default("any"),
+  limit: z.number().int().min(1).max(25).default(10),
+});
+export const sourceSlugInput = z.object({ slug: z.string().trim().min(1).max(120) });
+/** Starting a session on a specific problem the learner picked themselves. */
+export const sourceStartInput = sourceSlugInput.extend({ language: languageSchema.optional() });
+export const sourceRunInput = z.object({ sessionId: z.string().uuid(), attemptId: z.string().uuid() });
+
+export type PracticeSourceState = "connected" | "expired" | "disconnected";
+export type PracticeSourceAccount = {
+  username: string;
+  premium: boolean;
+  avatarUrl: string;
+  solved: { total: number; easy: number; medium: number; hard: number };
+  available: { total: number; easy: number; medium: number; hard: number };
+  skills: Array<{ slug: string; name: string; solved: number; band: "fundamental" | "intermediate" | "advanced" }>;
+  streak: number;
+};
+export type PracticeInventory = {
+  source: "leetcode";
+  name: string;
+  description: string;
+  /** What the learner is told before they hand an app their session. */
+  authNote: string;
+  region: z.infer<typeof sourceRegionSchema>;
+  regions: Array<{ id: z.infer<typeof sourceRegionSchema>; label: string }>;
+  state: PracticeSourceState;
+  capabilities: { remoteJudge: boolean; officialTestcases: boolean; search: boolean; progress: boolean; submissionHistory: boolean };
+  account: PracticeSourceAccount | null;
+  judgePreference: SourceJudgePreference;
+  /** The connection state and the preference, resolved into the one fact the UI
+   *  needs: will a solve be judged by the source or on this machine. */
+  judgesSubmissions: boolean;
+  problem?: string;
+};
+export type PracticeSearchHit = {
+  slug: string;
+  displayId: string;
+  title: string;
+  difficulty: "easy" | "medium" | "hard";
+  paidOnly: boolean;
+  acceptanceRate: number | null;
+  concepts: string[];
+  status: "solved" | "attempted" | "todo" | "unknown";
+};
+/** A judged run at the source, as the result panel reads it. */
+export type SourceRunReport = {
+  outcome: "passed" | "failed" | "errored";
+  status: string;
+  passedCases: number;
+  totalCases: number;
+  runtime: string;
+  memory: string;
+  message: string;
+  failedCase: { input: string; expected: string; actual: string; stdout: string } | null;
+  url: string;
+};
+/** Emitted whenever a source's connection changes under the app's feet. */
+export type PracticeSourceEvent = { source: "leetcode"; state: PracticeSourceState; message: string };
+
+export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** True when this is a packaged build with no Spar server configured, so
    *  sign-in can say that rather than reporting a refused connection at
    *  localhost that reads as the app being broken. */
@@ -239,6 +318,23 @@ export interface SparApi {
    *  caller can go straight there. Starting the turn is the point: practice that
    *  did not reach the agent would be a link, not a drill. */
   startPractice(input: z.infer<typeof practiceInput>): Promise<{ sessionId: string }>;
+  /* ---- Practice sources --------------------------------------------------
+     Connecting one is a sign-in on the source's own page, driven entirely by
+     the main process: the renderer asks for it and is told what happened, and
+     the session cookie never crosses this boundary. */
+  practiceSource(): Promise<PracticeInventory>;
+  connectPracticeSource(): Promise<{ status: "connected"; username: string } | { status: "cancelled" } | { status: "failed"; message: string }>;
+  disconnectPracticeSource(): Promise<void>;
+  setPracticeRegion(region: z.infer<typeof sourceRegionSchema>): Promise<void>;
+  /** Where solves are judged: at the source, or on this machine. */
+  setPracticeJudge(preference: SourceJudgePreference): Promise<void>;
+  searchPracticeProblems(input: z.infer<typeof sourceSearchInput>): Promise<{ total: number; problems: PracticeSearchHit[] }>;
+  /** Opens a session on one specific problem the learner chose. */
+  startPracticeProblem(input: z.infer<typeof sourceStartInput>): Promise<{ sessionId: string }>;
+  /** A scratch run of the open challenge at its source. Records a test run as
+   *  evidence, but nothing on the learner's account there. */
+  runAtSource(input: z.infer<typeof sourceRunInput>): Promise<SourceRunReport>;
+  onPracticeSourceEvent(listener: (event: PracticeSourceEvent) => void): () => void;
   /** Every step of signing in, creating an account and recovering one. The main
    *  process owns the keychain and the API, so the window only ever learns which
    *  of the two things happened — see `AuthResult`. */

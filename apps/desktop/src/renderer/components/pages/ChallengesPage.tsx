@@ -5,6 +5,7 @@ import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/format";
 import { ConceptChips } from "../concepts/ConceptChip";
+import { SourceBadge } from "../common/SourceBadge";
 import { EmptyState } from "../common/EmptyState";
 import { CodePlate } from "../common/CodePeek";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
@@ -105,6 +106,10 @@ function ChallengeCard({
           <div className="flex min-w-0 items-center gap-2">
             <span className="min-w-0 truncate text-content font-semibold tracking-[-0.01em]">{item.title}</span>
             <DifficultyPill difficulty={item.difficulty} />
+            {/* Where it came from, next to what it was worth: a history that mixes
+                problems Spar wrote with problems the world asks has to say which
+                is which, and who graded each one. */}
+            {item.source && <SourceBadge size="compact" source={item.source} />}
             <OutcomeChip outcome={item.lastOutcome} />
             <span
               className="ml-auto shrink-0 text-muted-foreground/60"
@@ -213,7 +218,7 @@ export function ChallengesPage({
       if (!matches(item, filter)) return false;
       if (!needle) return true;
       const concepts = item.concepts.map((concept) => concept.title).join(" ");
-      return `${item.title} ${item.sessionTitle} ${item.language} ${item.difficulty} ${concepts}`.toLowerCase().includes(needle);
+      return `${item.title} ${item.sessionTitle} ${item.language} ${item.difficulty} ${concepts} ${item.source ? `${item.source.source} ${item.source.displayId} ${item.source.difficulty}` : ""}`.toLowerCase().includes(needle);
     });
   }, [challenges, filter, query]);
 

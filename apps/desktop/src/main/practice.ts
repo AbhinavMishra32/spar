@@ -236,6 +236,25 @@ export class PracticeService {
     return this.store.practiceProblemLinks("leetcode", this.region(), slug);
   }
 
+  /** Search, for the learner browsing rather than the agent choosing. Same call
+   *  underneath, so a problem they find and a problem it finds are the same
+   *  object with the same tags. */
+  search(input: { query?: string; concepts?: string[]; difficulty?: "easy" | "medium" | "hard" | undefined; status?: "any" | "todo" | "attempted" | "solved"; limit?: number }) {
+    return this.gateway().search({
+      query: input.query ?? "",
+      tags: [],
+      ...(input.difficulty ? { difficulty: input.difficulty } : {}),
+      status: input.status ?? "any",
+      limit: input.limit ?? 10,
+      offset: 0,
+      ...(input.concepts?.length ? { concepts: input.concepts } : {}),
+    });
+  }
+
+  sourceName(): string {
+    return practiceSource("leetcode").name;
+  }
+
   /* ---- Mounting a problem as a challenge ---------------------------------- */
 
   /**

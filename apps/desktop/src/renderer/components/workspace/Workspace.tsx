@@ -10,6 +10,7 @@ import { fileName, languageFor, message } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { Toolbar } from "../shell/Toolbar";
 import { FileGlyph } from "../common/LanguageGlyph";
+import { SourceGlyph } from "../common/SourceGlyph";
 import type { AgentRun } from "../agent/agentRun";
 import { AgentPanel } from "./AgentPanel";
 import { PaneHandle } from "./PaneHandle";
@@ -18,6 +19,10 @@ import { FloatingFileTree } from "./FloatingFileTree";
 import { ChallengeIntro } from "./ChallengeIntro";
 import { AttemptClock } from "./AttemptClock";
 import { ResultPanel, type ResultTab, type RunOutcome } from "./ResultPanel";
+
+/** Named here rather than derived, so the buttons say "LeetCode" instead of
+ *  "leetcode" and a second source is one line rather than a search. */
+const SOURCE_NAME: Record<"leetcode", string> = { leetcode: "LeetCode" };
 
 export function Workspace({
   detail,
@@ -180,6 +185,48 @@ export function Workspace({
     }
   };
 
+  /**
+   * Running the open challenge at its own source.
+   *
+   * Offered only for a sourced challenge with a judge behind it, and separate
+   * from Run for a reason worth stating: Run is instant, free and local, and this
+   * one crosses the network to somebody else's queue. Keeping them as two buttons
+   * means the learner always knows which one they pressed — and it is the only
+   * way to try a problem whose shape Spar cannot build a local harness for.
+   */
+  const runAtSource = async () => {
+    if (!api || !question.source || running || submitting) return;
+    try {
+      setRunning(true);
+      setOutcome(null);
+      setResultTab("result");
+      dock.current?.expand();
+      await save();
+      terminalRef.current = `$ run on ${SOURCE_NAME[question.source.source]}\n`;
+      setTerminal(terminalRef.current);
+      const report = await api.runAtSource({ sessionId: detail.summary.id, attemptId: question.attemptId });
+      const lines = [
+        `# ${report.status}`,
+        report.totalCases ? `# cases ${report.passedCases}/${report.totalCases}` : "",
+        report.runtime ? `# runtime ${report.runtime}` : "",
+        ...(report.failedCase
+          ? ["", "not ok 1 - the first case that failed", `  input: ${report.failedCase.input}`, `  expected: ${report.failedCase.expected}`, `  actual: ${report.failedCase.actual}`]
+          : []),
+        "",
+        report.message,
+      ].filter(Boolean);
+      terminalRef.current = `${terminalRef.current}${lines.join("\n")}\n`;
+      setTerminal(terminalRef.current);
+      /* An errored run is the source failing, not the learner: it is reported and
+         deliberately not shown as a verdict. */
+      setOutcome(report.outcome === "errored" ? null : { kind: report.outcome, summary: report.message });
+    } catch (error) {
+      onError(message(error));
+    } finally {
+      setRunning(false);
+    }
+  };
+
   const submit = async () => {
     if (!api || running || submitting || question.attemptCompletedAt) return;
     try {
@@ -329,6 +376,18 @@ export function Workspace({
               Run
               <kbd className="font-sans text-ui-sm text-muted-foreground/70">⌘↵</kbd>
             </button>
+            {question.source?.remoteJudge && (
+              <button
+                className="inline-flex h-6 items-center gap-1.5 rounded-md border border-border px-2 text-ui transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
+                disabled={running || submitting}
+                onClick={() => void runAtSource()}
+                title={`Runs your solution on ${SOURCE_NAME[question.source.source]} against the problem's published cases. Nothing is recorded on your account there.`}
+                type="button"
+              >
+                <SourceGlyph className="size-3" source={question.source.source} />
+                Run there
+              </button>
+            )}
             <button
               /* The default button, not a green one. `--success` is a muted green
                  in light mode and a *light* one in dark, so hard-coded white text
@@ -340,7 +399,11 @@ export function Workspace({
               className="inline-flex h-6 items-center gap-1.5 rounded-md bg-primary px-2 text-ui font-medium text-primary-foreground shadow-[var(--app-shadow-card)] transition-colors hover:bg-primary/85 active:translate-y-px disabled:pointer-events-none disabled:opacity-45"
               disabled={running || submitting || graded}
               onClick={() => void submit()}
-              title={graded ? "Solved. Spar is setting up what comes next." : "Runs the visible and hidden cases. If any still fail you can fix them and submit again."}
+              title={graded
+                ? "Solved. Spar is setting up what comes next."
+                : question.source?.remoteJudge
+                  ? `Sends your solution to ${SOURCE_NAME[question.source.source]}, which runs every hidden case it has. It counts on your account there.`
+                  : "Runs the visible and hidden cases. If any still fail you can fix them and submit again."}
               type="button"
             >
               {submitting ? <Loader2 className="size-3 animate-spin" /> : graded ? <Check className="size-3" /> : <Send className="size-3" />}
@@ -363,6 +426,7 @@ export function Workspace({
             detail={detail}
             draft={draft}
             onDraft={setDraft}
+            onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSettings={onOpenSettings}
             onSend={() => void send()}
             question={question}

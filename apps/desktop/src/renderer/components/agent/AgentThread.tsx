@@ -4,7 +4,7 @@ import { ThinkingOrb } from "thinking-orbs";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { ActivityGroup, ChallengePublished, Reasoning, RunFailure, SolveRead } from "./ActivityRow";
+import { ChallengePublished, LINKED_GAP, PROSE_GAP, Reasoning, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
 import { SystemEvent } from "./SystemEvent";
 import { groupParts, type AgentRun, type RunPart } from "./agentRun";
 
@@ -12,35 +12,45 @@ type Message = SessionDetail["messages"][number];
 
 function LiveRun({ run }: { run: AgentRun }) {
   return (
-    <div className="min-w-0 space-y-1.5">
+    <div className="min-w-0">
       <Rows parts={run.parts} />
-      {run.status === "streaming" && <WaitingLine parts={run.parts} />}
+      {run.status === "streaming" && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={run.parts} /></div>}
     </div>
   );
 }
 
-/** Every row of a turn, live or read back from storage, in the order it happened. */
+/**
+ * Every row of a turn, live or read back from storage, in the order it happened.
+ *
+ * Spacing is per-row rather than one gap between all of them. A uniform
+ * `space-y` set every step the same distance from its neighbour, which spread a
+ * run of calls down the page as far apart as the sentences around them — and the
+ * reference this is matched against does the opposite: consecutive calls sit
+ * tight as one cluster, and the prose is what gets the room. That contrast is
+ * what makes a turn scannable, because the shape of the page tells you where the
+ * agent was working and where it was talking to you before you read a word.
+ */
 function Rows({ parts }: { parts: RunPart[] }) {
+  const rows = groupParts(parts);
   return (
     <>
-      {groupParts(parts).map((part) => {
-        if (part.kind === "text") {
-          return (
-            <div key={part.id} className="min-w-0 px-1.5 text-foreground">
-              <Markdown source={part.body} />
-            </div>
-          );
-        }
-        if (part.kind === "reasoning") return <Reasoning key={part.id} part={part} />;
-        if (part.kind === "activity-group") return <ActivityGroup key={part.id} parts={part.parts} />;
-        if (part.kind === "challenge") return <ChallengePublished key={part.id} part={part.part} />;
-        if (part.kind === "solve-read") return <SolveRead key={part.id} part={part.part} />;
-        if (part.kind === "error") return <RunFailure key={part.id} body={part.body} />;
-        return (
-          <div key={part.id} className="min-w-0 truncate px-1.5 text-ui-sm text-muted-foreground/70">
-            {part.body}
-          </div>
+      {rows.map((part, index) => {
+        const previous = rows[index - 1];
+        /* Steps in the same run of work. Kept tight, and joined by a rule through
+           the icon gutter so the cluster reads as one sequence. */
+        const linked = part.kind === "tool-row" && previous?.kind === "tool-row";
+        const gap = index === 0 ? undefined : linked ? LINKED_GAP : part.kind === "text" ? PROSE_GAP : STEP_GAP;
+        const wrap = (node: React.ReactNode) => (
+          <div key={part.id} className="min-w-0" {...(gap ? { style: { marginTop: gap } } : {})}>{node}</div>
         );
+
+        if (part.kind === "text") return wrap(<div className="px-1.5 text-foreground"><Markdown source={part.body} /></div>);
+        if (part.kind === "reasoning") return wrap(<Reasoning part={part} />);
+        if (part.kind === "tool-row") return wrap(<ToolRow linked={linked} part={part.part} />);
+        if (part.kind === "challenge") return wrap(<ChallengePublished part={part.part} />);
+        if (part.kind === "solve-read") return wrap(<SolveRead part={part.part} />);
+        if (part.kind === "error") return wrap(<RunFailure body={part.body} />);
+        return wrap(<div className="truncate px-1.5 text-ui-sm text-muted-foreground/70">{part.body}</div>);
       })}
     </>
   );
@@ -112,9 +122,12 @@ function storedPart(step: AgentActivityStep, index: number): RunPart {
     id: `stored-${index}-${step.tool}`,
     tool: step.tool,
     label: step.label,
+    actionTitle: step.actionTitle,
     detail: step.detail,
     phase: step.ok ? "done" : "error",
     files: [],
+    input: step.input,
+    output: step.output,
     startedAt: 0,
   };
 }

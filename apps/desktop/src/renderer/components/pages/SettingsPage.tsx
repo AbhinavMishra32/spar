@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Ellipsis, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, Ellipsis, Globe, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
 import type { Language } from "@spar/domain";
 import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
 import { SparWordmark } from "../common/SparWordmark";
 import { AboutSpar } from "../settings/AboutSpar";
+import { PracticeSourceGroup } from "../settings/PracticeSource";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
@@ -40,6 +41,78 @@ const KIND_LABEL: Record<Provider["kind"], string> = {
 
 /** Ordered so the connect menu groups read the way the list itself does. */
 const KIND_ORDER: Array<Provider["kind"]> = ["subscription", "api-key", "local", "custom"];
+
+/**
+ * The Exa key that lets the agent reach the web.
+ *
+ * Write-only, like every other credential here: the field takes a key and the
+ * main process never hands one back, so what this row can report is whether one
+ * is set and where it came from. A key supplied through `EXA_API_KEY` says so
+ * rather than showing an empty box that mysteriously works.
+ */
+function WebSearchRow({ api }: { api: SparApi | undefined }) {
+  const [source, setSource] = useState<"keychain" | "env" | "none" | "loading">("loading");
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState("");
+
+  const read = useCallback(async () => {
+    if (!api) return;
+    setSource((await api.webSearchStatus()).source);
+  }, [api]);
+
+  useEffect(() => { void read().catch(() => setSource("none")); }, [read]);
+
+  const act = async (run: () => Promise<void>) => {
+    setBusy(true);
+    setFailure("");
+    try { await run(); setDraft(""); await read(); }
+    catch (cause) { setFailure(message(cause)); }
+    finally { setBusy(false); }
+  };
+
+  const detail = source === "loading"
+    ? "Checking…"
+    : source === "keychain"
+      ? `Connected. The key is stored in ${credentialStore}.`
+      : source === "env"
+        ? "Connected through the EXA_API_KEY environment variable."
+        : "Not set up. Without a key the agent works entirely from your own record.";
+
+  return (
+    <Row className="flex-col items-stretch gap-2.5 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="grid size-6 shrink-0 place-items-center text-foreground/85"><Globe className="size-[1.15rem]" /></span>
+        <div className="min-w-0 flex-1">
+          <p className="text-content font-medium">Exa API key</p>
+          <p className="mt-0.5 text-ui text-muted-foreground">{detail}</p>
+        </div>
+        {source === "keychain" && (
+          <Button disabled={busy} onClick={() => void act(async () => api?.clearWebSearchKey())} size="sm" variant="ghost">
+            Remove
+          </Button>
+        )}
+        <Button onClick={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")} size="sm" variant="ghost">
+          <ExternalLink className="size-3.5" />Get a key
+        </Button>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 pl-9">
+        <Input
+          autoComplete="off"
+          className="min-w-0 flex-1 font-mono text-ui"
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={source === "keychain" ? "Replace the stored key…" : "Paste your Exa API key…"}
+          type="password"
+          value={draft}
+        />
+        <Button disabled={busy || !draft.trim()} onClick={() => void act(async () => api?.saveWebSearchKey(draft.trim()))} size="sm">
+          {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
+        </Button>
+      </div>
+      {failure && <p className="pl-9 text-ui text-destructive">{failure}</p>}
+    </Row>
+  );
+}
 
 /** A labelled stack of rows. The label sits above the card, not inside it — the
  *  card is then one uninterrupted surface instead of a header plus a body. */
@@ -482,6 +555,19 @@ export function SettingsPage({
             </Row>
           </Group>
         )}
+
+        {/* Not under Providers, and deliberately above Web search: this is where
+            the problems come from, which is a bigger fact about how Spar behaves
+            than either of the things below it. */}
+        <Group label="Practice sources">
+          <PracticeSourceGroup api={api} />
+        </Group>
+
+        {/* Its own group rather than a row under Providers: this is not a model,
+            and grouping it with them would imply the agent could run on it. */}
+        <Group label="Web search">
+          <WebSearchRow api={api} />
+        </Group>
 
         <Group label="Runtime boundary">
           <Boundary

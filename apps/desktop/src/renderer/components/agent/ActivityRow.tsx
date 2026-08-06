@@ -1,15 +1,15 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { BookOpen, Brain, Check, ChevronDown, CircleAlert, FilePenLine, History, Search } from "lucide-react";
+import { BookOpen, Check, ChevronDown, CircleAlert, FilePenLine, Globe, History, Link2, Search } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { activityGroupLabel, diffTotals, safeToolLabel, type RunPart } from "./agentRun";
+import { diffTotals, toolRowTitle, type RunPart } from "./agentRun";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
 function orbFor(tool: string): OrbState {
-  if (tool.startsWith("search_") || tool.startsWith("read_") || tool.startsWith("inspect_") || tool === "replay_attempt") return "searching";
+  if (tool.startsWith("search_") || tool.startsWith("read_") || tool.startsWith("inspect_") || tool === "replay_attempt" || tool.startsWith("web_")) return "searching";
   if (tool === "create_question" || tool === "replace_current_question") return "shaping";
   if (tool === "evaluate_attempt") return "solving";
   if (tool === "ask_user_question") return "listening";
@@ -20,10 +20,257 @@ function orbFor(tool: string): OrbState {
 function ToolIcon({ part }: { part: ToolPart }) {
   if (part.phase === "running") return <ThinkingOrb aria-label="Working" size={20} state={orbFor(part.tool)} style={{ width: 15, height: 15 }} />;
   if (part.phase === "error") return <CircleAlert className="size-3.5 text-[var(--warning)]" />;
+  /* Going out to the web gets its own mark. Every other row in the transcript is
+     the agent reading the learner's own record, and a globe is the one-glance
+     difference between "it looked at your attempts" and "it looked outside". */
+  if (part.tool === "web_search") return <Globe className="size-3.5" />;
+  if (part.tool === "web_fetch") return <Link2 className="size-3.5" />;
   if (part.tool.startsWith("search_")) return <Search className="size-3.5" />;
   if (part.tool.startsWith("read_") || part.tool.startsWith("inspect_")) return <BookOpen className="size-3.5" />;
   if (part.tool === "create_question" || part.tool === "replace_current_question" || part.tool.startsWith("set_") || part.tool.startsWith("propose_") || part.tool.startsWith("commit_") || part.tool === "upsert_ability") return <FilePenLine className="size-3.5" />;
   return <Check className="size-3.5" />;
+}
+
+/** What the call did, as one word, in the corner of its panel. */
+function StatusPill({ part }: { part: ToolPart }) {
+  const rejected = part.phase === "error" && (part.tool === "create_question" || part.tool === "replace_current_question" || part.tool === "create_fallback_question");
+  const [text, tone] = part.phase === "running"
+    ? ["Running", "text-muted-foreground"]
+    : rejected
+      ? ["Rejected", "text-[var(--warning)]"]
+      : part.phase === "error"
+        ? ["Failed", "text-destructive"]
+        : ["Success", "text-[var(--success)]"];
+  return (
+    <span className={cn("shrink-0 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-ui-sm font-medium", tone)}>{text}</span>
+  );
+}
+
+/**
+ * A fixed-height scroll box whose ends fade toward whatever is out of view.
+ *
+ * One primitive for the two kinds of unbounded content in a transcript row — the
+ * model's thinking and a tool's payload — so both live in the same amount of
+ * space, and a thought that streamed inside 1.5in does not suddenly become a
+ * screenful the instant it settles.
+ *
+ * `follow` keeps the newest line in view while content is still arriving. It sets
+ * `scrollTop` rather than calling `scrollIntoView`, which looks like the same
+ * thing and is not: `scrollIntoView` scrolls every ancestor that can scroll, so
+ * each delta also aimed the thread's viewport at this box, the thread's own
+ * auto-follow undid it, and the transcript juddered for as long as the model was
+ * thinking. A layout effect, so the tail is never painted at the old offset.
+ */
+function FadedScroll({
+  children,
+  className,
+  follow = false,
+  watch,
+  uncapped = false,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  follow?: boolean;
+  /** Changes that mean the content grew, so the fades are re-measured. */
+  watch?: unknown;
+  /** Released once the reader has asked for the whole thing. */
+  uncapped?: boolean;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [fade, setFade] = useState<"none" | "top" | "bottom" | "both">("none");
+
+  const measure = useCallback(() => {
+    const node = box.current;
+    if (!node) return;
+    // A rounding slack: a box scrolled to the end is routinely a fraction of a
+    // pixel short of it, and a fade that never quite clears reads as a bug.
+    const above = node.scrollTop > 1;
+    const below = node.scrollTop + node.clientHeight < node.scrollHeight - 1;
+    setFade(above && below ? "both" : above ? "top" : below ? "bottom" : "none");
+  }, []);
+
+  useLayoutEffect(() => {
+    const node = box.current;
+    if (!node) return;
+    if (follow) node.scrollTop = node.scrollHeight;
+    measure();
+  }, [follow, measure, watch, uncapped]);
+
+  return (
+    <div
+      className={cn("agent-scroll app-scroll min-w-0", className)}
+      data-fade={fade}
+      onScroll={measure}
+      ref={box}
+      {...(uncapped ? { style: { maxHeight: "none" } } : {})}
+    >
+      {children}
+    </div>
+  );
+}
+
+/**
+ * One labelled block of JSON — what went in, or what came back.
+ *
+ * Capped like everything else in a row, with the way out being explicit: a
+ * payload longer than the box says so and offers the whole thing, rather than
+ * leaving the reader to guess from a scrollbar whether there are three more lines
+ * or three hundred.
+ */
+function Payload({ title, body }: { title: string; body: string }) {
+  const [full, setFull] = useState(false);
+  const trimmed = body.trim();
+  if (!trimmed) return null;
+  const lines = trimmed.split("\n").length;
+  return (
+    <div className="min-w-0">
+      <p className="px-2.5 pt-2 pb-1 text-ui-sm font-medium tracking-wide text-muted-foreground/70 uppercase">{title}</p>
+      <FadedScroll uncapped={full} watch={body}>
+        <pre className="px-2.5 pb-2 font-mono text-ui-sm leading-[1.5] whitespace-pre text-muted-foreground/90">{trimmed}</pre>
+      </FadedScroll>
+      {lines > 8 && (
+        <button
+          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 font-mono text-ui-sm text-muted-foreground transition-colors hover:text-foreground"
+          onClick={() => setFull((value) => !value)}
+          type="button"
+        >
+          {full ? "Collapse output" : `Show full output · ${lines} lines`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The call, opened up: its arguments and its result.
+ *
+ * The transcript used to name each call and stop there — deliberately, on the
+ * grounds that arguments are raw internals. But a tutor that says "searched your
+ * history" and will not say what for is asking to be taken on faith, and the
+ * learner is the one whose record it searched. Everything is shown except the
+ * parts of a challenge design that are its answer, which the worker has already
+ * replaced with a note saying so before this ever sees them.
+ */
+export function ToolRow({ part, linked = false }: { part: ToolPart; linked?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const hasPayload = Boolean(part.input.trim() || part.output.trim());
+  const totals = diffTotals(part.files);
+  const running = part.phase === "running";
+
+  const row = (
+    <>
+      {/* Joins this step to the one above it, up the middle of the icon column.
+          Without it a tight cluster is just rows that happen to be near each
+          other; with it, it reads as one sequence of work. Sized to exactly the
+          margin above the row, so it can never reach over the text either side. */}
+      {linked && (
+        <span
+          aria-hidden
+          className="absolute w-px bg-border/60"
+          style={{ left: ICON_CENTER, top: `-${LINKED_GAP}`, height: LINKED_GAP }}
+        />
+      )}
+      <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/70"><ToolIcon part={part} /></span>
+      <span className={cn("min-w-0 truncate", running && "thinking-shimmer text-foreground")}>
+        {toolRowTitle(part)}
+        {took(part) && <span className="ml-1.5 tabular-nums text-muted-foreground/50">{took(part)}</span>}
+      </span>
+      <DiffStat added={totals.added} removed={totals.removed} />
+      {/* Only when it did not simply work. A row of green "Success" badges down a
+          transcript is noise; the one that says Error is the one worth seeing. */}
+      {part.phase === "error" && <StatusPill part={part} />}
+      {hasPayload && <Caret open={open} />}
+    </>
+  );
+
+  if (!hasPayload) return <div className={cn(ROW, "text-muted-foreground")}>{row}</div>;
+
+  return (
+    <Collapsible onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className={cn(ROW, TRIGGER)}>{row}</CollapsibleTrigger>
+      <CollapsibleContent>
+        {/* A rule from the row down past the panel, and the panel indented off it.
+            The line is what ties an opened call to the row that opened it once the
+            card is tall enough that they are no longer adjacent on screen. */}
+        <div className="flex min-w-0 gap-2.5 pb-1" style={{ paddingLeft: ROW_INSET }}>
+          <span aria-hidden className="w-px shrink-0 bg-border/70" />
+          <div className="min-w-0 flex-1 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-[var(--color-background-elevated-secondary,var(--card))]">
+            <Payload body={part.input} title="Input" />
+            {part.input.trim() && part.output.trim() && <div className="mx-2.5 border-t border-border/60" />}
+            <Payload body={part.output} title="Result" />
+          </div>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/**
+ * A disclosure row, and the mark that opens it.
+ *
+ * Both exist because these rows are not buttons. They were built as full-width
+ * targets with a hover fill and the chevron pinned to the far right, which turns
+ * every step of the agent's work into a control the eye has to dismiss — and put
+ * the chevron so far from the words it belonged to that it read as page furniture.
+ * A line of text with a caret tucked against its end is the whole affordance:
+ * `inline-flex` and no `flex-1` are what keep the row as wide as its content
+ * instead of as wide as the thread.
+ */
+/* One row of the transcript, at the reference's rhythm: a ~26px row box, so two
+   clustered steps land on a 32px pitch once the joining gap is added. The padding
+   is small on purpose — the space between steps is what separates them, and paying
+   for it twice is what spread a run of five calls over half a screen. */
+const ROW = "relative inline-flex w-fit min-w-0 max-w-full items-center gap-2.5 px-1.5 py-[3px] text-left text-ui";
+/* `cursor-default` for the same reason the sidebar sets it: AppKit shows the arrow
+   over a list of rows, never the hand, and the pointer cursor is the clearest tell
+   that a desktop app was built in a browser. These rows are a list, not controls. */
+const TRIGGER = "group/row cursor-default rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground";
+/** The row's own horizontal inset, which anything hanging beneath a row aligns to. */
+const ROW_INSET = "0.375rem";
+/** Down the middle of the icon column: the row's inset plus half an icon. Where the
+ *  rule joining one step to the next is drawn. */
+export const ICON_CENTER = "0.875rem";
+/** The gap between two steps of the same run of work, and therefore exactly the
+ *  height of the rule that joins them. Exported so the row that sets the margin
+ *  and the rule that fills it cannot drift apart. */
+export const LINKED_GAP = "0.375rem";
+/** A step that opens a new run of work, and a paragraph of prose. Prose gets the
+ *  most room of anything in a turn: the contrast between a tight cluster of steps
+ *  and a sentence with air around it is what makes a long turn scannable. */
+export const STEP_GAP = "0.5rem";
+export const PROSE_GAP = "0.875rem";
+/** Exactly where a row's label starts: the inset, plus the icon, plus the gap
+ *  after it. A note under a row uses this so it lines up with the words it belongs
+ *  to rather than nearly lining up with them. */
+const UNDER_LABEL = "1.9375rem";
+
+/**
+ * The mark that opens a row, kept out of the way until it is wanted.
+ *
+ * Hidden at rest: a transcript is a dozen of these down the page, and a caret on
+ * every line is a dozen pieces of furniture around the words that matter. It fades
+ * in under the cursor, and stays up while the row is open or focused — an open row
+ * with no caret has nothing to say how it closes, and a keyboard user never
+ * generates the hover that would reveal it.
+ *
+ * Faded rather than removed from the layout, because the row is only as wide as its
+ * content: taking the caret out of the flow would resize the row on hover.
+ *
+ * The negative margin pulls it back in from the row's own gap. That gap is set for
+ * the distance between an icon and a sentence, which is far too much between a
+ * sentence and the small mark that belongs to it.
+ */
+function Caret({ open }: { open: boolean }) {
+  return (
+    <ChevronDown
+      className={cn(
+        "-ml-1.5 size-3.5 shrink-0 text-muted-foreground/50 opacity-0 transition-[transform,opacity] duration-200",
+        "group-hover/row:opacity-100 group-focus-visible/row:opacity-100",
+        open && "opacity-100",
+        !open && "-rotate-90",
+      )}
+    />
+  );
 }
 
 /** How long a settled call took. Absent for a stored row, which does not keep
@@ -55,69 +302,9 @@ function StepDetail({ detail }: { detail: string }) {
   const trimmed = detail.replace(/^status invalid · /, "").trim();
   if (!trimmed) return null;
   return (
-    <p className="min-w-0 break-words pl-6 text-ui-sm leading-[1.55] text-muted-foreground/65">
+    <p className="min-w-0 break-words text-ui-sm leading-[1.55] text-muted-foreground/65" style={{ paddingLeft: UNDER_LABEL }}>
       {trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed}
     </p>
-  );
-}
-
-/** Compact, collapsible operation group — one per phase of the agent's work. */
-export function ActivityGroup({ parts }: { parts: ToolPart[] }) {
-  const [open, setOpen] = useState(false);
-  const running = parts.some((part) => part.phase === "running");
-  const failed = parts.some((part) => part.phase === "error");
-  const compacted = parts.reduce<Array<{ part: ToolPart; count: number }>>((rows, part) => {
-    const previous = rows.at(-1);
-    if (previous?.part.tool === part.tool && previous.part.phase === part.phase) {
-      previous.part = part;
-      previous.count += 1;
-    } else rows.push({ part, count: 1 });
-    return rows;
-  }, []);
-
-  return (
-    <Collapsible onOpenChange={setOpen} open={open || running}>
-      <CollapsibleTrigger className="group/activity flex w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-left text-ui transition-colors hover:bg-accent/50">
-        <span className="grid size-4 shrink-0 place-items-center text-muted-foreground">
-          {running ? (
-            <ThinkingOrb aria-label="Working" size={20} state="working" style={{ width: 15, height: 15 }} />
-          ) : failed ? (
-            <CircleAlert className="size-3.5 text-muted-foreground/70" />
-          ) : (
-            <Check className="size-3.5 text-muted-foreground/70" />
-          )}
-        </span>
-        <span className={cn("min-w-0 flex-1 truncate", running ? "thinking-shimmer text-foreground" : "text-muted-foreground")}>
-          {activityGroupLabel(parts)}
-        </span>
-        <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-200", !(open || running) && "-rotate-90")} />
-      </CollapsibleTrigger>
-
-      {/* Flush with the trigger on purpose: the rows are the same work seen
-          closer up, not a nested structure, so nothing is indented and every
-          icon stays in the one gutter the whole transcript aligns to. */}
-      <CollapsibleContent>
-        <div className="flex min-w-0 flex-col gap-px pt-0.5 pb-1">
-          {compacted.map(({ part, count }) => {
-            const totals = diffTotals(part.files);
-            return (
-              <div key={part.id} className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2 px-1.5 py-[3px] text-ui text-muted-foreground">
-                  <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/70"><ToolIcon part={part} /></span>
-                  <span className="min-w-0 flex-1 truncate">
-                    {safeToolLabel(part.tool, part.phase === "running", part.phase === "error")}
-                    {count > 1 && <span className="ml-1 tabular-nums text-muted-foreground/60">×{count}</span>}
-                    {took(part) && <span className="ml-1.5 tabular-nums text-muted-foreground/50">{took(part)}</span>}
-                  </span>
-                  <DiffStat added={totals.added} removed={totals.removed} />
-                </div>
-                {part.phase === "error" && <StepDetail detail={part.detail} />}
-              </div>
-            );
-          })}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
 
@@ -135,25 +322,13 @@ export function ActivityGroup({ parts }: { parts: ToolPart[] }) {
  * being dropped as protocol noise before they reached the transcript.
  */
 export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning" }> }) {
-  const excerpt = useRef<HTMLDivElement>(null);
   const sections = thoughts(part.body);
-
-  /* Its own box, by hand. `scrollIntoView` on a tail element looks like the same
-     thing and is not: it scrolls every ancestor that can scroll, so each delta
-     also aimed the thread's viewport at this block — which the thread's own
-     auto-follow immediately undid, and the transcript juddered up and down for
-     as long as the model was thinking. Setting scrollTop touches this box alone.
-     Layout effect, so the tail is never painted at the old offset first. */
-  useLayoutEffect(() => {
-    const node = excerpt.current;
-    if (part.open && node) node.scrollTop = node.scrollHeight;
-  }, [part.body, part.open]);
-
   const seconds = Math.max(1, Math.round(((part.endedAt ?? Date.now()) - part.startedAt) / 1_000));
 
   /* Live: the heading the model is under right now, with its prose following it.
      Only the tail is shown, because the point while it runs is watching where the
-     thinking has got to rather than reading all of it. */
+     thinking has got to rather than reading all of it — and it is shown inside the
+     same box the settled thought will use, so nothing reflows when it closes. */
   if (part.open) {
     const current = sections.at(-1);
     return (
@@ -163,11 +338,11 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
           <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">{current?.title ?? "Thinking"}</span>
         </div>
         {current?.body && (
-          <div className="app-scroll max-h-20 overflow-y-auto" ref={excerpt}>
+          <FadedScroll follow watch={part.body}>
             <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/70">
               {current.body}
             </p>
-          </div>
+          </FadedScroll>
         )}
       </div>
     );
@@ -180,39 +355,41 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
   return (
     <div className="min-w-0">
       {sections.map((section, index) => (
-        <Thought
-          key={`${part.id}-${index}`}
-          body={section.body}
-          title={section.title ?? `Thought for ${seconds}s`}
-        />
+        <div key={`${part.id}-${index}`} className="min-w-0" {...(index > 0 ? { style: { marginTop: LINKED_GAP } } : {})}>
+          {/* Several headings from one block of thinking are one cluster, spaced
+              like consecutive steps rather than like separate paragraphs. */}
+          <Thought body={section.body} title={section.title ?? `Thought for ${seconds}s`} />
+        </div>
       ))}
     </div>
   );
 }
 
+/**
+ * A settled thought: its own heading, and the thinking behind it.
+ *
+ * No icon, and no space held where one used to be. A brain glyph on every one of
+ * these was decoration — the row already says "Thought for 9s" — but removing it
+ * and keeping its gutter was worse than either: the text sat indented under a
+ * blank column, which reads as a nested child of the row above rather than as a
+ * step beside it. The thought starts at the margin.
+ */
 function Thought({ title, body }: { title: string; body: string }) {
   const [open, setOpen] = useState(false);
-  if (!body) {
-    return (
-      <div className="flex min-w-0 items-center gap-2 px-1.5 py-1 text-ui text-muted-foreground">
-        <span className="grid size-4 shrink-0 place-items-center"><Brain className="size-3.5 text-muted-foreground/70" /></span>
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-      </div>
-    );
-  }
+  if (!body) return <div className={cn(ROW, "text-muted-foreground")}><span className="min-w-0 truncate">{title}</span></div>;
   return (
     <Collapsible onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className="flex w-full min-w-0 items-center gap-2 rounded-lg px-1.5 py-1 text-left text-ui text-muted-foreground transition-colors hover:bg-accent/50">
-        <span className="grid size-4 shrink-0 place-items-center">
-          <Brain className="size-3.5 text-muted-foreground/70" />
-        </span>
-        <span className="min-w-0 flex-1 truncate">{title}</span>
-        <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground/50 transition-transform duration-200", !open && "-rotate-90")} />
+      <CollapsibleTrigger className={cn(ROW, TRIGGER)}>
+        <span className="min-w-0 truncate">{title}</span>
+        <Caret open={open} />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <p className="mx-1.5 mb-1 border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/75">
-          {body}
-        </p>
+        {/* Same height it had while it streamed. A thought that filled 1.5in and
+            then expanded to a screenful on settling would reflow the thread under
+            the reader at the exact moment they started reading it. */}
+        <FadedScroll className="mx-1.5 mb-1">
+          <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/75">{body}</p>
+        </FadedScroll>
       </CollapsibleContent>
     </Collapsible>
   );
@@ -264,93 +441,53 @@ function clean(value: string): string {
  */
 export function SolveRead({ part }: { part: ToolPart }) {
   const running = part.phase === "running";
-  const looked = part.label ? part.label.split(" — ") : [];
   return (
-    <motion.div
-      animate={{ opacity: 1, y: 0 }}
-      className="relative my-1 min-w-0 overflow-hidden rounded-[var(--radius-xl)] border border-border bg-[var(--color-background-elevated-secondary,var(--card))] px-3 py-2.5"
-      initial={{ opacity: 0, y: 8 }}
-      transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-    >
-      <div className="flex min-w-0 items-start gap-2.5">
-        <span className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-accent text-muted-foreground">
-          {running ? (
-            <ThinkingOrb aria-label="Reading your solve" size={20} state="searching" style={{ width: 14, height: 14 }} />
-          ) : (
-            <History className="size-3.5" />
-          )}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-ui-sm font-medium tracking-wide text-muted-foreground/80 uppercase">
-            {running ? "Reading your solve" : "Read your solve"}
-          </p>
-          {looked.length > 0 && (
-            <div className="mt-1 flex min-w-0 flex-wrap gap-1">
-              {looked.map((chip) => (
-                <span
-                  key={chip}
-                  className="rounded-md bg-accent px-1.5 py-0.5 text-ui-sm text-muted-foreground"
-                >
-                  {chip}
-                </span>
-              ))}
-            </div>
-          )}
-          {!running && part.detail && (
-            <p className="mt-1.5 min-w-0 break-words text-ui leading-[1.55] text-foreground/85">{part.detail}</p>
-          )}
-        </div>
-      </div>
-    </motion.div>
+    <div className={cn(ROW, "text-muted-foreground")}>
+      <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/70">
+        {running
+          ? <ThinkingOrb aria-label="Reading your solve" size={20} state="searching" style={{ width: 15, height: 15 }} />
+          : <History className="size-3.5" />}
+      </span>
+      <span className={cn("min-w-0 truncate", running && "thinking-shimmer text-foreground")}>
+        {running ? "Reading your solve" : "Read your solve"}
+      </span>
+      {/* What the replay found, on the same line. It used to be a stack of chips
+          built by splitting the label on an em dash — a shape that broke the day
+          that field started carrying the agent's own title for the step. */}
+      {!running && part.detail && (
+        <span className="min-w-0 truncate text-muted-foreground/60">{part.detail}</span>
+      )}
+    </div>
   );
 }
 
 /**
- * The moment the session exists to reach. A compiled, validated challenge is
- * the agent's whole output, and it used to land as one grey line among the
- * retrieval steps that produced it — so it gets its own arrival instead.
+ * The moment the session exists to reach.
+ *
+ * Still the one row that is allowed to draw the eye, because it is the turn's
+ * output rather than a step toward it — but a row, not a panel. It was a bordered
+ * green card with an uppercase kicker, a chip, a spring-scaled badge and a light
+ * sweep across it, which was defensible when the rows around it were dense grey
+ * lines and is not now that they are a clean list: it read as a component from a
+ * different application that had been pasted into the transcript. The colour on
+ * the check and the weight on the title carry it.
  */
 export function ChallengePublished({ part }: { part: ToolPart }) {
-  const totals = diffTotals(part.files);
   const replaced = part.tool === "replace_current_question";
   return (
     <motion.div
-      animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-      className="relative my-1 min-w-0 overflow-hidden rounded-[var(--radius-xl)] border border-[var(--success)]/25 bg-[var(--success)]/[0.06] px-3 py-2.5"
-      initial={{ opacity: 0, y: 10, filter: "blur(6px)" }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(ROW, "text-muted-foreground")}
+      initial={{ opacity: 0, y: 4 }}
+      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
     >
-      {/* One sweep across the card as it lands, then gone. The arrival is worth
-          marking; a permanently animated panel would just be noise. */}
-      <motion.span
-        animate={{ x: "180%" }}
-        className="pointer-events-none absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-[var(--success)]/15 to-transparent"
-        initial={{ x: "-120%" }}
-        transition={{ duration: 1.1, ease: "easeOut", delay: 0.15 }}
-      />
-      <div className="relative flex min-w-0 items-start gap-2.5">
-        <motion.span
-          animate={{ scale: 1 }}
-          className="mt-px grid size-5 shrink-0 place-items-center rounded-full bg-[var(--success)]/15 text-[var(--success)]"
-          initial={{ scale: 0.4 }}
-          transition={{ type: "spring", stiffness: 420, damping: 18, delay: 0.1 }}
-        >
-          <Check className="size-3.5" />
-        </motion.span>
-        <div className="min-w-0 flex-1">
-          <p className="text-ui-sm font-medium tracking-wide text-[var(--success)] uppercase">
-            {replaced ? "Challenge replaced" : "Challenge ready"}
-          </p>
-          <p className="mt-0.5 min-w-0 truncate text-content font-medium text-foreground">
-            {part.label || "Your next challenge is set"}
-          </p>
-          <p className="mt-0.5 text-ui text-muted-foreground">
-            Validated against its own tests
-            {part.files.length > 0 && ` · ${part.files.length} file${part.files.length === 1 ? "" : "s"}`}
-            {totals.added > 0 && ` · ${totals.added} lines`}
-          </p>
-        </div>
-      </div>
+      <span className="grid size-4 shrink-0 place-items-center text-[var(--success)]">
+        <Check className="size-3.5" />
+      </span>
+      <span className="min-w-0 truncate">
+        <span className="font-medium text-foreground">{part.label || (replaced ? "Challenge replaced" : "Challenge ready")}</span>
+        <span className="ml-1.5 text-muted-foreground/60">{replaced ? "· replaced · validated" : "· validated"}</span>
+      </span>
     </motion.div>
   );
 }

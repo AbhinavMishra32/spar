@@ -6,6 +6,7 @@ import { declaredCases } from "@/lib/testCases";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { ProblemStatement } from "./ProblemStatement";
 import { ConceptChip } from "../concepts/ConceptChip";
+import { SourceBadge } from "../common/SourceBadge";
 
 /**
  * The challenge on its own terms: statement, the cases it will be graded
@@ -13,9 +14,12 @@ import { ConceptChip } from "../concepts/ConceptChip";
  * push the problem out of reach when you need to re-read it mid-attempt.
  */
 export function ProblemView({
+  onOpenExternal,
   question,
   testFiles,
 }: {
+  /** Opens the problem at its source in the real browser. */
+  onOpenExternal?: ((url: string) => void) | undefined;
   question: ActiveQuestion;
   testFiles: Record<string, string>;
 }) {
@@ -33,10 +37,21 @@ export function ProblemView({
       <div className="mx-auto w-full max-w-[46rem] px-4 pb-8 pt-4">
         <div className="mb-4 flex items-center gap-2.5">
           <ChallengeEmblem className="shrink-0" question={question} size={38} />
-          <div className="min-w-0">
-            <p className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">CHALLENGE SET FOR YOU</p>
+          <div className="min-w-0 flex-1">
+            {/* A sourced challenge is not "set for you" in the same sense: it is a
+                real problem the world already asks, chosen for you. Saying the
+                same words over both would overclaim one and undersell the other. */}
+            <p className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">
+              {question.source ? "CHOSEN FOR YOU" : "CHALLENGE SET FOR YOU"}
+            </p>
             <p className="truncate text-content font-medium">{question.abilityTitle}</p>
           </div>
+          {question.source && (
+            <SourceBadge
+              source={question.source}
+              {...(onOpenExternal ? { onOpen: onOpenExternal } : {})}
+            />
+          )}
         </div>
 
         {/* What it is training, while it is still being worked on. No hover card

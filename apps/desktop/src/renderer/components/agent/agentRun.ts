@@ -13,9 +13,15 @@ export type RunPart =
       id: string;
       tool: string;
       label: string;
+      /** The agent's own name for this step. Empty when it gave none. */
+      actionTitle: string;
       detail: string;
       phase: ToolPhase;
       files: AgentActivityFile[];
+      /** The call's arguments, and its result once it settles, as formatted JSON.
+       *  Redacted in the worker, so what is here is what may be shown. */
+      input: string;
+      output: string;
       startedAt: number;
       endedAt?: number;
     }
@@ -96,6 +102,11 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
           phase: event.ok === false ? "error" : "done",
           detail: event.detail ?? existing.detail,
           ...(event.files ? { files: event.files } : {}),
+          /* The start event already carried the arguments, so an end event that
+             omits them must not blank the panel the learner may have open. */
+          ...(event.actionTitle ? { actionTitle: event.actionTitle } : {}),
+          ...(event.input ? { input: event.input } : {}),
+          output: event.output ?? existing.output,
           endedAt: Date.now(),
         };
         return { ...run, parts };
@@ -107,9 +118,12 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
         id,
         tool,
         label: event.label ?? "",
+        actionTitle: event.actionTitle ?? "",
         detail: event.detail ?? "",
         phase: "running",
         files: event.files ?? [],
+        input: event.input ?? "",
+        output: event.output ?? "",
         startedAt: Date.now(),
       });
       return { ...run, parts, status: "streaming" };
@@ -151,11 +165,12 @@ function closeReasoning(parts: RunPart[], inPlace = false): RunPart[] {
 
 export type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
-/** A transcript row: either one part, or a run of consecutive tool calls shown as
- *  one collapsible group. */
+/** A transcript row. Every tool call is one, since each carries the agent's own
+ *  account of what it was for; the two that are outcomes rather than steps —
+ *  a published challenge, a solve being read — get their own shape. */
 export type GroupedPart =
   | Exclude<RunPart, { kind: "tool" }>
-  | { kind: "activity-group"; id: string; parts: ToolPart[] }
+  | { kind: "tool-row"; id: string; part: ToolPart }
   | { kind: "challenge"; id: string; part: ToolPart }
   | { kind: "solve-read"; id: string; part: ToolPart };
 
@@ -169,16 +184,21 @@ export type GroupedPart =
 export function groupParts(parts: RunPart[]): GroupedPart[] {
   const grouped: GroupedPart[] = [];
   for (const part of parts) {
-    const previous = grouped.at(-1);
-    // A published challenge leaves the group it was produced in. It is the
-    // outcome of the turn rather than another step toward it, and folding it
-    // back in among the retrieval rows is what made it disappear.
+    // A published challenge is the outcome of the turn rather than another step
+    // toward it, and leaving it among the retrieval rows is what made it vanish.
     if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
-    // Reading the solve leaves the group for the same reason: it is what the
-    // rest of the turn is a response to.
+    // Reading the solve is set apart for the same reason: it is what the rest of
+    // the turn is a response to.
     else if (part.kind === "tool" && part.tool === "replay_attempt" && part.phase !== "error") grouped.push({ kind: "solve-read", id: `solve-${part.id}`, part });
-    else if (part.kind === "tool" && previous?.kind === "activity-group") previous.parts.push(part);
-    else if (part.kind === "tool") grouped.push({ kind: "activity-group", id: `group-${part.id}`, parts: [part] });
+    /* Every other call is its own row.
+       Consecutive calls used to be folded into one collapsed group under a
+       synthesized summary — "Reviewed past attempts, checked concept evidence, and
+       2 more". That was the right shape when the host was naming the rows, because
+       a stack of interchangeable table labels is worth hiding. Now each call
+       carries the agent's own account of what it was for, and a summary that
+       replaces four specific sentences with one generic one is throwing away the
+       only part worth reading. */
+    else if (part.kind === "tool") grouped.push({ kind: "tool-row", id: `tool-${part.id}`, part });
     else grouped.push(part);
   }
   return grouped;
@@ -209,6 +229,8 @@ const TOOL_VERBS: Record<string, string> = {
   evaluate_attempt: "Evaluated your attempt",
   propose_ability_update: "Updated ability document",
   commit_session_decision: "Committed next action",
+  web_search: "Searched the web",
+  web_fetch: "Read a web page",
 };
 
 /** Present tense while a call is open, past tense once it settles. */
@@ -255,6 +277,11 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   replace_current_question: ["Build replacement challenge", "Built replacement challenge"],
   create_fallback_question: ["Set a standard challenge", "Set a standard challenge"],
   ask_user_question: ["Prepare a question", "Prepared a question"],
+  /* The two that leave the learner's own record. Named for the fact of going out
+     to the web, because that is the part worth noticing in a transcript that is
+     otherwise entirely about them. */
+  web_search: ["Search the web", "Searched the web"],
+  web_fetch: ["Read a web page", "Read a web page"],
 };
 
 /** Transcript-safe labels never expose tool arguments, database IDs, or queries. */
@@ -270,41 +297,17 @@ export function safeToolLabel(tool: string, running: boolean, failed = false): s
   return running ? "Use a tool" : "Used a tool";
 }
 
-export function activityGroupLabel(parts: Array<Extract<RunPart, { kind: "tool" }>>): string {
-  const latestByTool = new Map<string, Extract<RunPart, { kind: "tool" }>>();
-  for (const part of parts) latestByTool.set(part.tool, part);
-  const unique = [...latestByTool.values()];
-  const active = unique.find((part) => part.phase === "running");
-  if (active) {
-    const completed = unique.filter((part) => part !== active).map((part) => gerund(safeToolLabel(part.tool, false)));
-    return completed.length ? `${safeToolLabel(active.tool, true)} after ${joinLabels(completed)}` : safeToolLabel(active.tool, true);
-  }
-  const labels = unique.map((part) => safeToolLabel(part.tool, false, part.phase === "error"));
-  if (labels.length <= 1) return labels[0] ?? "Completed work";
-  const visible = labels.slice(0, 3).map((label, index) => index === 0 ? label : label.replace(/^./, (value) => value.toLowerCase()));
-  if (visible.length === 2) return `${visible[0]} and ${visible[1]}`;
-  const summary = `${visible.slice(0, -1).join(", ")}, and ${visible.at(-1)}`;
-  return labels.length > 3 ? `${summary} · ${labels.length - 3} more` : summary;
-}
-
-function gerund(label: string): string {
-  return label
-    .replace(/^Read\b/, "reading")
-    .replace(/^Searched\b/, "searching")
-    .replace(/^Reviewed\b/, "reviewing")
-    .replace(/^Inspected\b/, "inspecting")
-    .replace(/^Evaluated\b/, "evaluating")
-    .replace(/^Updated\b/, "updating")
-    .replace(/^Prepared\b/, "preparing")
-    .replace(/^Chose\b/, "choosing")
-    .replace(/^Built\b/, "building")
-    .replace(/^Used\b/, "using");
-}
-
-function joinLabels(labels: string[]): string {
-  if (labels.length <= 1) return labels[0] ?? "earlier work";
-  if (labels.length === 2) return `${labels[0]} and ${labels[1]}`;
-  return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
+/**
+ * What this row says it is.
+ *
+ * The agent's own title for the step when it gave one, and the fixed table only as
+ * a fallback. The table can say "Searched attempt history" and nothing more; the
+ * agent can say what it was looking for and why, which is the difference between a
+ * transcript you can follow and a list of tool names. A stored row from before
+ * titles existed, and any turn where the model omitted one, still reads correctly.
+ */
+export function toolRowTitle(part: Extract<RunPart, { kind: "tool" }>): string {
+  return part.actionTitle.trim() || safeToolLabel(part.tool, part.phase === "running", part.phase === "error");
 }
 
 const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "create_fallback_question"];

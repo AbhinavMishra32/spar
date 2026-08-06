@@ -4,7 +4,8 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceJudgeSchema, sourceRegionSchema, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
+import type { PracticeVerdict } from "@spar/practice";
 import { runEvidence } from "../shared/testReport.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
 import type { AuthService } from "./auth.js";
@@ -296,6 +297,73 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return challengeDetail(input.challengeId);
   });
 
+  /* ---- Practice sources ---------------------------------------------------
+     Connecting is a sign-in on the source's own page, run by the main process.
+     Nothing here ever hands the renderer a session cookie: it asks for a state
+     change and is told the state. */
+  ipcMain.handle(ipc.sourceInventory, () => deps.practice.inventory());
+  ipcMain.handle(ipc.sourceConnect, () => deps.practice.connect());
+  ipcMain.handle(ipc.sourceDisconnect, () => deps.practice.disconnect());
+  ipcMain.handle(ipc.sourceRegion, async (_event, value) => { await deps.practice.setRegion(sourceRegionSchema.parse(value)); });
+  ipcMain.handle(ipc.sourceJudge, (_event, value) => { deps.practice.setJudgePreference(sourceJudgeSchema.parse(value)); });
+  ipcMain.handle(ipc.sourceSearch, async (_event, value) => {
+    const input = sourceSearchInput.parse(value);
+    const found = await deps.practice.search(input);
+    return { total: found.total, problems: found.problems.map((problem) => ({ slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
+  });
+  ipcMain.handle(ipc.sourceProblem, async (_event, value) => (await deps.practice.problem(sourceSlugInput.parse(value).slug)).problem);
+  /**
+   * The learner picking a problem themselves.
+   *
+   * A real session, with the agent told plainly that the choice was not its own:
+   * the problem is fixed, and its job is to aim the target at what this problem
+   * will show rather than to go looking for a different one. Deliberately not a
+   * shortcut past the provider guard — a session with no model behind it is a
+   * dead row in the sidebar whoever created it.
+   */
+  ipcMain.handle(ipc.sourceStart, async (_event, value) => {
+    const input = sourceStartInput.parse(value);
+    if (!await deps.providers.available()) throw new Error(NO_PROVIDER);
+    const bundle = await deps.practice.problem(input.slug, { fresh: true });
+    const problem = bundle.problem;
+    const created = deps.store.createSession(`I want to solve ${problem.title} on ${deps.practice.sourceName()}.`);
+    await startAgentTurn(
+      created.sessionId,
+      [
+        `The learner chose this problem themselves: ${problem.title} (${deps.practice.sourceName()} ${problem.displayId}, ${problem.difficulty}, slug "${problem.slug}").`,
+        `Do not look for a different problem. Read it with read_practice_problem, set one training target aimed at what solving it will actually show about them, and assign it with assign_practice_problem using that exact slug.`,
+        problem.status === "solved" ? "They have solved this one before at the source, so treat this as a re-attempt and aim the target at what a second solve would prove." : "",
+      ].filter(Boolean).join(" "),
+      "learner",
+      "session-start",
+    );
+    return created;
+  });
+  /**
+   * Running the open challenge at its source, without submitting it.
+   *
+   * Recorded as a test run, because it is one: the source ran the learner's code
+   * against the problem's published cases and said what happened. It is not
+   * recorded as a submission, and it does not complete the attempt — nothing here
+   * touches their record at the source.
+   */
+  ipcMain.handle(ipc.sourceRun, async (_event, value) => {
+    const input = sourceRunInput.parse(value);
+    const bundle = deps.store.submissionBundle(input.attemptId);
+    if (!bundle || bundle.session_id !== input.sessionId) throw new Error("That attempt is no longer open.");
+    const source = deps.store.readSession(input.sessionId)?.question?.source;
+    if (!source) throw new Error("This challenge did not come from a practice source, so there is nowhere to run it.");
+    const code = await deps.workspaces.read(input.sessionId, solutionPath(bundle.design)).catch(() => "");
+    if (!code.trim()) throw new Error("There is nothing to run yet.");
+    const verdict = await deps.practice.run({ source, code, language: bundle.language });
+    deps.store.appendNextEvent({
+      id: randomUUID(), attemptId: input.attemptId, type: "test_run", occurredAt: new Date().toISOString(),
+      payload: { scope: "source-run", judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed", status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases },
+      source: "runner", schemaVersion: 1,
+    });
+    return sourceRunReport(verdict, deps.practice.sourceName());
+  });
+
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
     const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
     clearAutoResume(sessionId);
@@ -315,11 +383,66 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
     return startAgentTurn(sessionId,input.message.trim(),"learner",turnKind);
   });
+  /**
+   * A submission judged by the source that wrote the problem.
+   *
+   * The same shape as the local path and the same events, so nothing downstream —
+   * the replay, the ability update, the next turn — needs to know which judge
+   * answered. What differs is only what is true: the hidden cases are the
+   * source's, the verdict is the source's, and a pass here means the problem was
+   * actually solved rather than that Spar's copy of two examples was satisfied.
+   *
+   * A judge that fails is recorded as nothing at all. `errored` is not a failed
+   * submission — it is LeetCode being down or rate-limiting — and writing it into
+   * the attempt would put an outage into the learner's evidence.
+   */
+  const submitToSource = async (input: { sessionId: string; attemptId: string; bundle: NonNullable<ReturnType<LocalStore["submissionBundle"]>>; source: NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"] }) => {
+    const { sessionId, attemptId, bundle } = input;
+    const source = input.source!;
+    const path = solutionPath(bundle.design);
+    const code = await deps.workspaces.read(sessionId, path).catch(() => "");
+    if (!code.trim()) throw new Error("There is nothing to submit yet.");
+    const verdict = await deps.practice.submit({ source, code, language: bundle.language });
+    const append = (type: "submission_created" | "test_run" | "submission_evaluated" | "attempt_completed", payload: Record<string, unknown>, from: "learner" | "runner" | "system") =>
+      deps.store.appendNextEvent({ id: randomUUID(), attemptId, type, occurredAt: new Date().toISOString(), payload, source: from, schemaVersion: 1 });
+    const name = deps.practice.sourceName();
+    if (verdict.outcome === "errored") {
+      /* Not recorded. The learner is told plainly and their attempt is exactly
+         where it was, because an outage is not something they did. */
+      return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output: verdict.status, summary: `${name} could not judge that submission (${verdict.status}). Nothing was recorded — try again in a moment.` };
+    }
+    append("submission_created", { questionId: bundle.question_id, judge: source.source, url: verdict.submissionUrl }, "learner");
+    append("test_run", {
+      scope: "source-submission", judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed",
+      status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases,
+      ...(verdict.failedCase ? { failedCase: verdict.failedCase } : {}),
+      ...(verdict.runtime ? { runtime: verdict.runtime } : {}),
+      ...(verdict.memory ? { memory: verdict.memory } : {}),
+    }, "runner");
+    append("submission_evaluated", { outcome: verdict.outcome, judge: source.source, status: verdict.status, url: verdict.submissionUrl }, "system");
+    const output = sourceSubmissionOutput(verdict, name);
+    if (verdict.outcome === "failed") {
+      return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output, summary: `${name} says ${verdict.status}${verdict.totalCases ? ` — ${verdict.passedCases} of ${verdict.totalCases} cases passed` : ""}. Keep going and submit again, or give up to move on.` };
+    }
+    append("attempt_completed", { outcome: "passed", judge: source.source }, "system");
+    deps.store.completeAttempt(attemptId, "passed");
+    void startAgentTurn(sessionId, `The learner solved attempt ${attemptId} — ${name} accepted their submission against every hidden case it has (${verdict.status}${verdict.runtime ? `, ${verdict.runtime}` : ""}). This was a real problem from ${name}, not one you wrote, so the verdict is theirs and it is stronger evidence than a local pass. Replay attempt ${attemptId} first and read how they got here, then read its recorded evaluation, update the relevant ability document, commit exactly one next pedagogical action, and either ask about a specific moment the replay could not explain or aim the next target and challenge. Prefer another real problem when one fits the target.`, "system", "attempt-complete");
+    return { outcome: "passed" as const, exitCode: 0, durationMs: 0, output, summary: `${name} accepted it${verdict.runtime ? ` — ${verdict.runtime}` : ""}. Every hidden case passed.` };
+  };
+
   ipcMain.handle(ipc.attemptSubmit,async(_event,value)=>{const input=value as {sessionId?:unknown;attemptId?:unknown};const sessionId=zUuid(input.sessionId);const attemptId=zUuid(input.attemptId);const bundle=deps.store.submissionBundle(attemptId);
     /* Only an active attempt can be submitted, and submitting completes it — so
        the ordinary way to arrive here twice is a second submission of an attempt
        that already has its verdict. Said as that, rather than as a lookup miss. */
-    if(!bundle||bundle.session_id!==sessionId)throw new Error(deps.store.attemptSubject(attemptId)?"This attempt has already been graded. Spar is preparing what comes next.":"That attempt no longer exists.");const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
+    if(!bundle||bundle.session_id!==sessionId)throw new Error(deps.store.attemptSubject(attemptId)?"This attempt has already been graded. Spar is preparing what comes next.":"That attempt no longer exists.");
+    /* A challenge from a source with a judge behind it is graded there, by the
+       people who wrote the hidden cases. Everything after the verdict is the same
+       either way — the same events, the same completion, the same turn — because
+       the ability ledger must not be able to tell where a pass came from beyond
+       what the evidence itself says. */
+    const submissionSource=deps.store.readSession(sessionId)?.question?.source;
+    if(submissionSource?.remoteJudge)return submitToSource({sessionId,attemptId,bundle,source:submissionSource});
+    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
     /* A failed submission leaves the attempt open. Solving it is the point, so a
        wrong answer is a step in the attempt rather than the end of it: the learner
        keeps working and submits again, every submission is recorded as evidence,
@@ -478,6 +601,69 @@ function runOutput(stdout: string, stderr: string) {
   return combined.length > MAX_SUBMIT_OUTPUT
     ? `${combined.slice(0, MAX_SUBMIT_OUTPUT)}\n…output truncated.\n`
     : combined;
+}
+
+/**
+ * The one file a sourced challenge's solution lives in.
+ *
+ * A mounted problem has exactly one starter file by construction — the source
+ * publishes one function to write — so this is a lookup rather than a guess. It
+ * falls back to the first starter file for the same reason `submittableCode`
+ * falls back to the whole file: the learner's work has to reach the judge even
+ * when the layout is not what was expected.
+ */
+function solutionPath(design: { starterFiles: Record<string, string> }): string {
+  const paths = Object.keys(design.starterFiles);
+  return paths.find((path) => /(^|\/)src\//.test(path)) ?? paths[0] ?? "src/solution.js";
+}
+
+/** A judged run at the source, as the result panel reads it. */
+function sourceRunReport(verdict: PracticeVerdict, sourceName: string): SourceRunReport {
+  return {
+    outcome: verdict.outcome,
+    status: verdict.status,
+    passedCases: verdict.passedCases,
+    totalCases: verdict.totalCases,
+    runtime: verdict.runtime,
+    memory: verdict.memory,
+    failedCase: verdict.failedCase,
+    url: verdict.submissionUrl,
+    message: verdict.outcome === "errored"
+      ? `${sourceName} could not run that (${verdict.status}). Nothing was recorded.`
+      : verdict.outcome === "passed"
+        ? `${sourceName} ran it against the published cases and they all passed. Submit to run it against every hidden case.`
+        : `${sourceName} says ${verdict.status}${verdict.totalCases ? ` — ${verdict.passedCases} of ${verdict.totalCases} cases passed` : ""}.`,
+  };
+}
+
+/**
+ * The source's verdict, as the text the result panel already knows how to read.
+ *
+ * Written in the shape a test runner would produce rather than as prose, because
+ * everything downstream — the panel, the replay, the evidence extractor — parses
+ * runner output, and a second format would mean a second parser.
+ */
+function sourceSubmissionOutput(verdict: PracticeVerdict, sourceName: string): string {
+  const lines = [
+    `# ${sourceName}: ${verdict.status}`,
+    verdict.totalCases ? `# cases ${verdict.passedCases}/${verdict.totalCases}` : "",
+    verdict.runtime ? `# runtime ${verdict.runtime}${verdict.runtimePercentile !== null ? ` (beats ${verdict.runtimePercentile.toFixed(1)}%)` : ""}` : "",
+    verdict.memory ? `# memory ${verdict.memory}${verdict.memoryPercentile !== null ? ` (beats ${verdict.memoryPercentile.toFixed(1)}%)` : ""}` : "",
+    verdict.compileError ? `\n${verdict.compileError}` : "",
+    verdict.runtimeError ? `\n${verdict.runtimeError}` : "",
+  ].filter(Boolean);
+  if (verdict.failedCase) {
+    lines.push(
+      "",
+      "not ok 1 - the first case that failed",
+      `  input: ${verdict.failedCase.input}`,
+      `  expected: ${verdict.failedCase.expected}`,
+      `  actual: ${verdict.failedCase.actual}`,
+      ...(verdict.failedCase.stdout ? [`  stdout: ${verdict.failedCase.stdout}`] : []),
+    );
+  }
+  if (verdict.submissionUrl) lines.push("", `# ${verdict.submissionUrl}`);
+  return `${lines.join("\n")}\n`;
 }
 
 /**

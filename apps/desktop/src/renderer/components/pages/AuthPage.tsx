@@ -1,28 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import type { AuthCodePurpose, AuthRequest, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
-import { PASS_MS, SparDots } from "../common/SparDots";
+import { SparDots } from "../common/SparDots";
 import { SparWordmark } from "../common/SparWordmark";
 import { CodeField } from "../auth/CodeField";
+import { LINKS, PANEL, STEP, TEXT, useMarkPass } from "../auth/arrival";
 import { PasswordStrength } from "../auth/PasswordStrength";
-
-/** The window's own easing, matching the sheets and disclosures elsewhere. */
-const EASE = [0.32, 0.72, 0, 1] as const;
-/** Resizing the panel around a step that changed size. Slower than the content
- *  crossfade, because a box that snaps while its contents fade reads as two
- *  separate events rather than one. */
-const PANEL = { duration: 0.28, ease: EASE };
-const STEP = { duration: 0.18, ease: EASE };
-/** A line of copy or a label being replaced by another. Short enough to feel
- *  like the same element saying something new. */
-const TEXT = { duration: 0.14, ease: EASE };
-/** A row opening or closing on its own height, under the panel's own resize. */
-const LINKS = { duration: 0.22, ease: EASE };
 
 type Mode = "sign-in" | "sign-up";
 /** Which of the four things the window is currently asking for. Everything else
@@ -113,32 +101,10 @@ export function AuthPage({
      the next attempt, so it never sits under an error explaining the opposite. */
   const [sent, setSent] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
-  /* One pass of the mark for every choice the learner makes — sign in or create,
-     submitting, stepping back — and another for each pass-length a request is
-     still in flight. The count is the animation's identity: bumping it remounts
-     the dots, which is what restarts a run-once animation from its first frame
-     instead of leaving it finished. */
-  const [pass, setPass] = useState(0);
-  const [awake, setAwake] = useState(false);
-  const settle = useRef<ReturnType<typeof setTimeout>>(undefined);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const rouse = useCallback(() => {
-    setPass((count) => count + 1);
-    setAwake(true);
-    clearTimeout(settle.current);
-    /* Never shortened, only extended: a pass cut off halfway is the snap back to
-       the resting grid that `pattern="pass"` exists to avoid. */
-    settle.current = setTimeout(() => setAwake(false), PASS_MS);
-  }, []);
-  useEffect(() => () => clearTimeout(settle.current), []);
-  /* A request that outlasts one pass gets another, so the mark keeps moving for
-     as long as Spar is actually doing something. */
-  useEffect(() => {
-    if (!busy) return;
-    const timer = setInterval(rouse, PASS_MS);
-    return () => clearInterval(timer);
-  }, [busy, rouse]);
-
+  /* The mark runs one pass for every choice the learner makes, and keeps passing
+     while a request is in flight. */
+  const { pass, awake, rouse } = useMarkPass(busy);
   const copy = copyFor(step, email);
   /* What the window is currently saying, as opposed to which step it is on:
      signing in and creating an account are one step in two voices. */
@@ -300,18 +266,18 @@ export function AuthPage({
           <SparWordmark className="block text-[2rem] leading-none text-foreground" />
         </motion.div>
 
-        {/* One step at a time: `wait` lets the outgoing step leave before the
-            panel resizes and the next arrives. Crossfading them instead puts two
-            forms on top of each other for a fifth of a second, which is exactly
-            long enough to read as a glitch. */}
-        <AnimatePresence initial={false} mode="wait">
-          <motion.div
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            initial={{ opacity: 0, y: 6 }}
-            key={step.name}
-            transition={STEP}
-          >
+        {/* One step replaces another: the outgoing one is gone the moment the
+            learner has moved on, the panel resizes around what is left, and the
+            new step rises into it. Deliberately no exit animation — a step that
+            has to finish leaving before the next can arrive is a step that can be
+            left half-gone if anything interrupts it, and on a form someone is
+            typing into, something always does. */}
+        <motion.div
+          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0, y: 6 }}
+          key={step.name}
+          transition={STEP}
+        >
             {/* Keyed on the voice rather than the step, so switching between
                 signing in and creating an account fades the one line that
                 actually changed instead of swapping it mid-sentence.
@@ -390,8 +356,7 @@ export function AuthPage({
                 </motion.span>
               </Button>
             </form>
-          </motion.div>
-        </AnimatePresence>
+        </motion.div>
 
         {/* Reserved whether or not it is filled: the block below the button must
             not shift the form up and down as messages come and go. */}

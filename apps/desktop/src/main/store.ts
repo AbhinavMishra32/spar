@@ -316,7 +316,10 @@ export class LocalStore {
   readCachedPracticeProblem(source:string,region:string,slug:string,maxAgeMs?:number){
     const row=this.db.prepare("SELECT payload,cached_at FROM practice_problems WHERE source=? AND region=? AND slug=?").get(source,region,slug) as {payload:string;cached_at:string}|undefined;
     if(!row)return null;
-    if(maxAgeMs!==undefined&&Date.now()-Date.parse(row.cached_at)>maxAgeMs)return null;
+    /* `>=`, so a max age of zero means "nothing cached will do". With `>` a
+       caller asking for a guaranteed-fresh read got the copy written in the same
+       millisecond — which is exactly the read that must not be served stale. */
+    if(maxAgeMs!==undefined&&Date.now()-Date.parse(row.cached_at)>=maxAgeMs)return null;
     try{return {payload:JSON.parse(row.payload) as unknown,cachedAt:row.cached_at};}catch{return null;}
   }
 

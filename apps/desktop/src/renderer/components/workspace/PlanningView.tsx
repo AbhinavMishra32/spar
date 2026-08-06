@@ -20,12 +20,22 @@ function planningOrbState(run: AgentRun | null): OrbState {
   return "composing";
 }
 
+/**
+ * The card only speaks when it has something specific to say.
+ *
+ * It used to open every turn with "Deciding the next verified step" over "Only a
+ * sandbox-verified challenge will be published" — a fixed pair of sentences that
+ * were there before any work had happened, so a new chat began with boilerplate
+ * about the pipeline instead of the session. With no live call to name there is
+ * nothing to report, and the transcript below already shows the turn.
+ */
 function PlanningPresence({ run }: { run: AgentRun }) {
   const state = planningOrbState(run);
   const active = [...run.parts].reverse().find((part) => part.kind === "tool" && part.phase === "running");
-  const label = active?.kind === "tool"
-    ? active.tool === "create_question" || active.tool === "replace_current_question" ? "Compiling and testing a challenge" : "Working through your learning evidence"
-    : "Deciding the next verified step";
+  if (active?.kind !== "tool") return null;
+  const label = active.tool === "create_question" || active.tool === "replace_current_question"
+    ? "Compiling and testing a challenge"
+    : "Working through your learning evidence";
   return (
     <div className="relative mb-3 overflow-hidden rounded-xl border border-border/80 bg-card/75 px-3.5 py-3 shadow-[var(--app-shadow-soft)] backdrop-blur-xl">
       <div className="pointer-events-none absolute -left-10 -top-14 size-36 rounded-full bg-[var(--accent)]/8 blur-3xl" />
@@ -38,7 +48,6 @@ function PlanningPresence({ run }: { run: AgentRun }) {
         </div>
         <div className="min-w-0">
           <p className="text-ui font-medium text-foreground">{label}</p>
-          <p className="mt-0.5 text-ui-sm text-muted-foreground">Only a sandbox-verified challenge will be published.</p>
         </div>
         <span className="ml-auto hidden shrink-0 rounded-full border border-border bg-background/55 px-2 py-1 text-ui-sm text-muted-foreground sm:inline">Live agent</span>
       </div>

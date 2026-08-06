@@ -106,6 +106,17 @@
   --text-ui-sm--line-height: 1rem;
   --text-content: 0.8125rem;
   --text-content--line-height: 1.375rem;
+
+  /* The source list runs a step above the rest of the chrome, and deliberately.
+     A sidebar is read at a glance and from further away than a toolbar — it is
+     the one surface you navigate by shape rather than by reading — so its labels
+     are set at the size the platform's own source lists use rather than at the
+     dense size that suits a row of controls. Every sidebar text size comes from
+     this pair; nothing in there is set in `--text-ui`. */
+  --text-source: 0.875rem;
+  --text-source--line-height: 1.25rem;
+  --text-source-sm: 0.8125rem;
+  --text-source-sm--line-height: 1.125rem;
 }
 
 :root {
@@ -194,6 +205,13 @@
   --app-shadow-sheet:
     0 1px 2px oklch(0% 0 0 / 4%),
     0 8px 20px -12px oklch(0% 0 0 / 13%);
+  /* Cast leading-edge-only: the pane is full height, so a shadow with any
+     vertical offset would just fall off the window. The contact pass sharpens
+     the hairline into an edge with depth behind it; the ambient pass is wide and
+     shallow so it dies out well before the sidebar's rows. */
+  --app-shadow-pane:
+    -1px 0 2px -1px oklch(0% 0 0 / 5%),
+    -10px 0 20px -10px oklch(0% 0 0 / 9%);
   --sheet-edge: color-mix(in oklab, var(--foreground) 16%, transparent);
 
   /* Glass. In light the rim is a near-white specular edge; the sheen brightens
@@ -282,6 +300,16 @@
   --app-shadow-sheet:
     0 1px 2px oklch(0% 0 0 / 26%),
     0 10px 26px -14px oklch(0% 0 0 / 55%);
+  /* Dark separates with light, not with shadow. Black on a dark sidebar has
+     almost nothing left to darken — it turns the seam into a grey smear and takes
+     the glass down with it — so the first pass here is a *lit* edge instead: a 1px
+     white line offset one pixel out from the pane, which lands on the sidebar and
+     traces the pane's corner as it goes, the way the leading edge of a raised
+     surface catches the light. The dark pass stays, but only just: enough that the
+     line reads as an edge with air behind it rather than as drawn-on trim. */
+  --app-shadow-pane:
+    -1px 0 0 0 oklch(100% 0 0 / 11%),
+    -12px 0 24px -16px oklch(0% 0 0 / 22%);
   /* No edge in dark. The sheet is already darker than the canvas it sits in, so
      the value step does the separating and a ring on top of it only reads as a
      drawn outline. Light mode needs the line because the two are nearly the
@@ -486,11 +514,19 @@
      leading edge, top and bottom, so the glass appears to continue behind it. The
      hairline is drawn as an inset ring rather than a border so it follows the
      curve, and overflow is clipped so toolbars and editors cannot square the
-     corners off from the inside. */
+     corners off from the inside.
+
+     The outer shadow is what actually separates the two: the pane and the
+     sidebar are close in value by design, so the hairline alone reads as a drawn
+     line rather than as one surface lying over another. It comes with the class,
+     which means it is there only while the sidebar is — collapsed, the pane
+     meets the window edge square and has nothing to cast onto. */
   .app-content-pane {
     border-start-start-radius: var(--radius-2xl);
     border-end-start-radius: var(--radius-2xl);
-    box-shadow: inset 0 0 0 0.5px var(--sidebar-border);
+    box-shadow:
+      inset 0 0 0 0.5px var(--sidebar-border),
+      var(--app-shadow-pane);
     overflow: hidden;
   }
 
@@ -516,8 +552,10 @@
      behind it, and would be wrong on every wallpaper but one. */
   .sidebar-title {
     /* In px, not rem, because the marquee below has to travel exactly this far
-       to clear the fade and reads the same number out of TypeScript. */
-    --sidebar-title-fade: 22px;
+       to clear the fade and reads the same number out of TypeScript. Scaled with
+       the label: a fade has to be about two characters wide to read as a fade
+       rather than as a cut, and a character got wider. */
+    --sidebar-title-fade: 26px;
     min-width: 0;
     flex: 1;
     overflow: hidden;
@@ -1185,6 +1223,11 @@
    colour and needs no separate light and dark values. */
 .auth-field {
   --auth-dot-pitch: 22px;
+  /* Both tones are set per scheme rather than shared: the same alpha over a
+     near-white pane and a near-black one does not read as the same texture, and
+     the grid has to be legible as a grid in both. */
+  --auth-dot-rest: 0.26;
+  --auth-dot-lit: 0.72;
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -1202,11 +1245,17 @@
   background-image: radial-gradient(circle at center, currentColor 1.1px, transparent 1.2px);
   background-size: var(--auth-dot-pitch) var(--auth-dot-pitch);
 }
+.dark .auth-field {
+  /* Light dots on a dark pane lose more to the surround than dark ones do on a
+     light pane, so they are carried a little further. */
+  --auth-dot-rest: 0.32;
+  --auth-dot-lit: 0.85;
+}
 .auth-field::before {
-  opacity: 0.14;
+  opacity: var(--auth-dot-rest);
 }
 .auth-field::after {
-  opacity: 0.4;
+  opacity: var(--auth-dot-lit);
   mask-image: linear-gradient(135deg, transparent 43%, black 50%, transparent 57%);
   mask-size: 280% 280%;
   animation: auth-field-sweep 9s cubic-bezier(0.55, 0, 0.45, 1) infinite;
@@ -1229,7 +1278,7 @@
   /* The grid stays; the pass across it does not. */
   .auth-field::after {
     animation: none;
-    opacity: 0.06;
+    opacity: 0;
   }
 
   /* Collapse to the resting mark. A loading state that cannot move should still

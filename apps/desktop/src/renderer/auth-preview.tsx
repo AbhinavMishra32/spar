@@ -2,11 +2,12 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { AuthRequest, AuthResult, SparApi } from "../shared/api";
 import { AuthPage } from "./components/pages/AuthPage";
+import { OnboardingPage } from "./components/pages/OnboardingPage";
 import "./theme.css";
 
-/* A harness for looking at the sign-in window in a browser. Not shipped: it is
-   here so the four flows can be walked through without an API, an Electron
-   window or a real account. Delete freely. */
+/* A harness for looking at the two screens someone arrives through, in a browser
+   and without an API, an Electron window or a real account. Not shipped; it is
+   here for the same reason harness.html is. */
 
 const api = {
   async auth(request: AuthRequest): Promise<AuthResult> {
@@ -18,24 +19,69 @@ const api = {
     if ("code" in request && request.code !== "123456") throw new Error("That code is not right. Check it, or ask for a new one.");
     return { status: "signed-in" };
   },
+  async listProviders() {
+    return {
+      providers: [
+        { id: "openai-codex", name: "ChatGPT", description: "", kind: "subscription", state: "disconnected", selectedModel: "gpt-5", baseUrl: "", models: [] },
+        { id: "claude-code", name: "Claude Code", description: "", kind: "subscription", state: "disconnected", selectedModel: "opus", baseUrl: "", models: [] },
+        { id: "anthropic", name: "Anthropic", description: "", kind: "api-key", state: "connected", selectedModel: "opus", baseUrl: "", models: [] },
+      ],
+      ready: true,
+      defaultModel: { provider: "anthropic", model: "opus", reasoningEffort: "medium" },
+    };
+  },
+  async saveProfile(input: unknown) {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return { ...(input as object), completedAt: new Date().toISOString() };
+  },
+  async suggestSessions() {
+    await new Promise((resolve) => setTimeout(resolve, 4_000));
+    return {
+      source: "agent",
+      suggestions: [
+        { title: "Restore an invariant under mutation", why: "You said you get stuck knowing what needs awaiting; this starts one level below that.", goal: "..." },
+        { title: "Cancel work that is already in flight", why: "The next thing that breaks after the first one is understood.", goal: "..." },
+        { title: "Read a stack trace back to its cause", why: "Cheap to practise, and it makes every later session faster.", goal: "..." },
+      ],
+    };
+  },
+  onProviderOAuthEvent: () => () => undefined,
+  onAgentEvent: () => () => undefined,
+  onRunnerEvent: () => () => undefined,
+  onMenuCommand: () => () => undefined,
+  onNativeSurface: () => () => undefined,
+  onSyncState: () => () => undefined,
+  chrome: { platform: "darwin", surface: "none", controls: "left" },
 } as unknown as SparApi;
+
+(window as unknown as { spar: SparApi }).spar = api;
 
 function Harness() {
   const [error, setError] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
+  const [page, setPage] = useState<"auth" | "onboarding">("auth");
   document.documentElement.classList.toggle("dark", dark);
   return (
     <div className="h-screen w-screen">
-      <button className="fixed top-3 right-3 z-50 rounded border border-border px-2 py-1 text-ui" onClick={() => setDark((value) => !value)} type="button">
-        {dark ? "Light" : "Dark"}
-      </button>
-      <AuthPage
-        api={api}
-        error={error}
-        onAuthenticated={async () => setError("→ signed in (harness stops here)")}
-        onError={(value) => setError(value || null)}
-        serverConfigured
-      />
+      <div className="fixed top-3 right-3 z-50 flex gap-1.5">
+        <button className="rounded border border-border bg-background px-2 py-1 text-ui" onClick={() => setPage((value) => (value === "auth" ? "onboarding" : "auth"))} type="button">
+          {page === "auth" ? "Onboarding" : "Sign in"}
+        </button>
+        <button className="rounded border border-border bg-background px-2 py-1 text-ui" onClick={() => setDark((value) => !value)} type="button">
+          {dark ? "Light" : "Dark"}
+        </button>
+      </div>
+      {page === "auth" ? (
+        <AuthPage
+          api={api}
+          error={error}
+          onAuthenticated={async () => setError("→ signed in (harness stops here)")}
+          onError={(value) => setError(value || null)}
+          serverConfigured
+        />
+      ) : (
+        <OnboardingPage api={api} displayName="abhinav" onDone={async () => undefined} onStartSession={async () => undefined} />
+      )}
     </div>
   );
 }
