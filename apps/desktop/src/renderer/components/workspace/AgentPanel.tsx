@@ -28,6 +28,7 @@ export function AgentPanel({
   onDraft,
   onSend,
   onOpenSettings,
+  onOpenExternal,
   testFiles,
 }: {
   detail: SessionDetail;
@@ -37,6 +38,8 @@ export function AgentPanel({
   onDraft(value: string): void;
   onSend(): void;
   onOpenSettings?: (() => void) | undefined;
+  /** Opens a sourced challenge's problem page in the real browser. */
+  onOpenExternal?: ((url: string) => void) | undefined;
   testFiles: Record<string, string>;
 }) {
   const [view, setView] = useState<View>("problem");
@@ -122,7 +125,7 @@ export function AgentPanel({
             }}
           >
             {view === "problem" ? (
-              <ProblemView question={question} testFiles={testFiles} />
+              <ProblemView onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
             ) : (
               <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} run={run} />
             )}

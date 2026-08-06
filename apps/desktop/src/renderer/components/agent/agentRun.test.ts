@@ -1,30 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { activityGroupLabel, reduceRun, runActivity, safeToolLabel, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
 
 const tool = (name: string): Extract<RunPart, { kind: "tool" }> => ({
-  kind: "tool", id: name, tool: name, label: "90403a67-bb35-41c4-a01c-8b10b9a55d67", detail: "raw query", phase: "done", files: [], startedAt: 0,
+  kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", startedAt: 0,
 });
 
 const run = (parts: RunPart[], status: AgentRun["status"] = "streaming"): AgentRun => ({ runId: "run", parts, status, startedAt: 0 });
 
-describe("Codex-style agent activity", () => {
-  it("uses semantic labels without raw arguments", () => {
+describe("what a tool row is called", () => {
+  it("prefers the title the agent wrote for this particular call", () => {
+    const part = { ...tool("search_attempt_history"), actionTitle: "Checking whether arrays have ever been tested" };
+    expect(toolRowTitle(part)).toBe("Checking whether arrays have ever been tested");
+  });
+
+  it("falls back to the fixed label when the agent gave no title", () => {
+    expect(toolRowTitle(tool("search_learner_model"))).toBe("Searched learning history");
     expect(safeToolLabel("inspect_current_attempt", false)).toBe("Inspected current attempt");
-    expect(safeToolLabel("search_learner_model", false)).toBe("Searched learning history");
   });
 
-  it("summarizes a tool phase into one compact activity heading", () => {
-    const label = activityGroupLabel([tool("inspect_current_attempt"), tool("read_ability"), tool("search_learner_model")]);
-    expect(label).toBe("Inspected current attempt, read ability context, and searched learning history");
-    expect(label).not.toMatch(/90403a67|raw query/);
+  /* `label` is the host's own summary — a challenge's title, a replay's sections —
+     and is what the challenge row shows. It is never the caption for a step, so a
+     row whose agent title is missing must not fall through to it. */
+  it("never mistakes the host's summary for the agent's caption", () => {
+    const part = { ...tool("create_question"), label: "Fix the window that stops shrinking too early" };
+    expect(toolRowTitle(part)).toBe("Built challenge");
+  });
+});
+
+describe("transcript rows", () => {
+  it("gives every tool call its own row rather than one synthesized summary", () => {
+    const rows = groupParts([tool("search_learner_model"), tool("read_ability"), tool("read_concept_graph")]);
+    expect(rows.map((row) => row.kind)).toEqual(["tool-row", "tool-row", "tool-row"]);
   });
 
-  it("deduplicates retries and leads with the currently active operation", () => {
-    const failed = { ...tool("replace_current_question"), id: "failed", phase: "error" as const };
-    const reading = tool("read_challenge");
-    const running = { ...tool("replace_current_question"), id: "running", phase: "running" as const };
-    expect(activityGroupLabel([failed, failed, reading, running])).toBe("Build replacement challenge after reading challenge context");
-    expect(safeToolLabel("replace_current_question", false, true)).toBe("Replacement candidate rejected");
+  it("still lifts the two outcomes out of the run of steps", () => {
+    const published = { ...tool("create_question"), phase: "done" as const };
+    const rows = groupParts([tool("search_learner_model"), tool("replay_attempt"), published]);
+    expect(rows.map((row) => row.kind)).toEqual(["tool-row", "solve-read", "challenge"]);
   });
 });
 

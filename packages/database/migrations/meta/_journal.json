@@ -29,6 +29,13 @@
       "when": 1785601108429,
       "tag": "0003_account_deletion_cascades",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785937884173,
+      "tag": "0004_better_auth",
+      "breakpoints": true
     }
   ]
 }

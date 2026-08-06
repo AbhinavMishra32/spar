@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { buildHarness, type PracticeProblem } from "@spar/practice";
+import { parseTestOutput } from "../shared/testReport.js";
 import { planCppBuild } from "./cppBuild.js";
 
 /** The layout a model actually writes: header beside the implementation in src/, tests under tests/. */
@@ -41,6 +43,74 @@ async function runPlan(root: string, files: Record<string, string>, command: "te
   }
   return { exitCode: 0, output };
 }
+
+/** A sourced problem, cut down to what the harness generator reads. */
+const PROBLEM = {
+  source: "leetcode",
+  region: "global",
+  slug: "best-time-to-buy-and-sell-stock",
+  externalId: "121",
+  displayId: "121",
+  title: "Best Time to Buy and Sell Stock",
+  url: "https://leetcode.com/problems/best-time-to-buy-and-sell-stock/",
+  difficulty: "easy",
+  paidOnly: false,
+  statement: "",
+  hints: [],
+  topicTags: [],
+  concepts: [],
+  references: [],
+  languages: [{ language: "cpp", slug: "cpp", starter: "class Solution {\npublic:\n    int maxProfit(vector<int>& prices) {\n        \n    }\n};" }],
+  signature: { name: "maxProfit", params: [{ name: "prices", type: "integer[]" }], returnType: "integer", classBased: false },
+  examples: [],
+  sampleTestcases: [],
+  acceptanceRate: 55,
+  status: "todo",
+} as unknown as PracticeProblem;
+
+const CASES = [
+  { name: "Example 1", input: ["[7,1,5,3,6,4]"], expected: "5", origin: "statement" as const },
+  { name: "Example 2", input: ["[7,6,4,3,1]"], expected: "0", origin: "statement" as const },
+];
+
+describe("the generated C++ harness", () => {
+  /**
+   * Generator to compiler to result panel, in one test, on a real toolchain.
+   *
+   * The three are written in three different packages and the seam between them
+   * is a text format, so nothing type-checks it: a harness that stops emitting
+   * TAP compiles, runs, grades correctly, and quietly turns the whole result
+   * panel into a log — which is exactly what happened. This is the only place
+   * that holds them together.
+   */
+  it("prints per-case results the result panel reads back as cases", async () => {
+    const harness = buildHarness({ problem: PROBLEM, language: "cpp", cases: CASES });
+    if (!harness.supported) throw new Error(harness.reason);
+    /* A wrong solution on purpose: a passing run proves the parser reads points,
+       and a failing one proves it reads the diagnostic block underneath them. */
+    const files = {
+      ...harness.files,
+      [harness.entryPath]: harness.files[harness.entryPath]!.replace(
+        /\/\/ spar:solution:start[\s\S]*\/\/ spar:solution:end/,
+        "// spar:solution:start\nclass Solution {\npublic:\n    int maxProfit(vector<int>& prices) {\n        return prices.empty() ? 0 : prices[0];\n    }\n};\n// spar:solution:end",
+      ),
+    };
+    const root = await materialize(files);
+    try {
+      const run = await runPlan(root, files);
+      const report = parseTestOutput(run.output);
+
+      expect(report.parsed).toBe(true);
+      expect(report.cases.map((item) => item.status)).toEqual(["failed", "failed"]);
+      expect(report.cases[0]).toMatchObject({ ordinal: 1, name: "Example 1 (statement)" });
+      expect(report.cases[0]?.failure).toMatchObject({ expected: "5", actual: "7" });
+      // The exit code is the verdict and the printed cases are how it is read; they must agree.
+      expect(run.exitCode).not.toBe(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+});
 
 describe("C++ build planning", () => {
   it("gives each test file its own binary so visible and hidden tests never collide", () => {

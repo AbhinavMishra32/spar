@@ -51,7 +51,10 @@ export function Toolbar({
         </button>
       )}
       <div className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate text-ui font-medium">{title}</span>
+        {/* Set with the sidebar, not with the toolbar's controls: this is the name
+            of the page the nav row points at, and a heading smaller than the row
+            that leads to it inverts the hierarchy. */}
+        <span className="truncate text-source font-medium">{title}</span>
         {subtitle && <span className="truncate text-ui-sm text-muted-foreground/80">{subtitle}</span>}
       </div>
       <div className="app-no-drag ml-auto flex shrink-0 items-center gap-1">{actions}</div>

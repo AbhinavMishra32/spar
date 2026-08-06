@@ -2,11 +2,11 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { codePreview } from "./challengeFiles.js";
-import { askUserQuestionRequestSchema, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type ChallengeHistorySummary, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerProfile, type QuestionDesign, type SessionCheckpoint, type SessionDetail, type SessionSummary, type TrainingTarget } from "@spar/domain";
+import { askUserQuestionRequestSchema, challengeSourceSchema, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerProfile, type QuestionDesign, type SessionCheckpoint, type SessionDetail, type SessionSummary, type TrainingTarget } from "@spar/domain";
 
 type SessionRow = { id:string; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null };
 const SESSION_COLUMNS="id,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at";
-type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:"javascript"|"typescript"|"cpp"; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; replaces_question_id:string|null; created_at:string };
+type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:"javascript"|"typescript"|"cpp"; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; replaces_question_id:string|null; source_ref:string|null; created_at:string };
 type ConceptRow = { id:string; slug:string; title:string; kind:string; parent_slug:string|null; description:string };
 /** One concept tag as the agent hands it over. Only the slug is load-bearing —
  *  the rest fills in a concept Spar has not met before. */
@@ -61,8 +61,26 @@ export class LocalStore {
       CREATE TABLE IF NOT EXISTS ability_concepts (ability_id TEXT NOT NULL REFERENCES ability_documents(id) ON DELETE CASCADE, concept_id TEXT NOT NULL REFERENCES concepts(id), PRIMARY KEY (ability_id, concept_id));
       CREATE INDEX IF NOT EXISTS question_concepts_concept_idx ON question_concepts(concept_id);
       CREATE INDEX IF NOT EXISTS concepts_parent_idx ON concepts(parent_slug);
+      /* Problems read from a practice source, kept so that opening a challenge,
+         re-reading it a week later and working offline do not each cost a round
+         trip to somebody else's service. Keyed on (source, region, slug) because
+         the same slug is a different problem on the two LeetCodes.
+
+         The payload holds this learner's status at the source, which makes it
+         account data rather than a public cache — so it goes on sign-out with
+         everything else of theirs. */
+      CREATE TABLE IF NOT EXISTS practice_problems (source TEXT NOT NULL, region TEXT NOT NULL, slug TEXT NOT NULL, title TEXT NOT NULL, difficulty TEXT NOT NULL, payload TEXT NOT NULL, cached_at TEXT NOT NULL, PRIMARY KEY (source, region, slug));
+      /* What the source says a problem is related to. Its own table rather than a
+         field on the payload because it is a graph and gets asked graph
+         questions: what is this a variation of, what leads into it, what should
+         someone who just failed it try next. */
+      CREATE TABLE IF NOT EXISTS practice_problem_links (source TEXT NOT NULL, region TEXT NOT NULL, from_slug TEXT NOT NULL, to_slug TEXT NOT NULL, relation TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', difficulty TEXT, PRIMARY KEY (source, region, from_slug, to_slug, relation));
+      CREATE INDEX IF NOT EXISTS practice_problem_links_to_idx ON practice_problem_links(source, region, to_slug);
     `);
     this.ensureColumn("questions", "replaces_question_id", "TEXT");
+    /* Where a challenge came from, as one JSON column rather than eight. Null for
+       everything Spar wrote, which is every row that existed before this. */
+    this.ensureColumn("questions", "source_ref", "TEXT");
     this.ensureColumn("ability_documents", "evidence_ids", "TEXT NOT NULL DEFAULT '[]'");
     /* An ability is something the learner can be told they have, so it carries
        its own one-line claim, the drills for going deeper, and the moment
@@ -100,7 +118,7 @@ export class LocalStore {
     let active: SessionDetail["question"]=null; let events:SessionDetail["events"]=[];
     // An abandoned challenge stops being the session's live question, which is
     // what returns the app to general chat until the learner asks for another.
-    if(question&&question.status!=="abandoned"){const target=this.db.prepare("SELECT * FROM training_targets WHERE id=?").get(question.training_target_id) as Record<string,unknown>;const attempt=this.db.prepare("SELECT * FROM attempts WHERE question_id=? ORDER BY started_at DESC LIMIT 1").get(question.id) as {id:string;latest_event_sequence:number;started_at:string;completed_at:string|null}|undefined;const design=JSON.parse(question.design) as QuestionDesign;if(attempt)events=(this.db.prepare("SELECT id,sequence,type,occurred_at,payload,source FROM attempt_events WHERE attempt_id=? ORDER BY sequence").all(attempt.id) as Array<{id:string;sequence:number;type:string;occurred_at:string;payload:string;source:string}>).map(e=>({...e,occurredAt:e.occurred_at,payload:JSON.parse(e.payload)}));if(attempt)active={id:question.id,sessionId:id,trainingTargetId:question.training_target_id,ordinal:question.ordinal,title:question.title,statement:question.statement,language:question.language,kind:question.kind,status:question.status,difficulty:question.difficulty,replacesQuestionId:question.replaces_question_id,createdAt:question.created_at,abilityId:String(target.ability_id),abilityTitle:String(target.ability_title),specificGap:String(target.specific_gap),desiredEvidence:String(target.desired_evidence),avoidTesting:JSON.parse(String(target.avoid_testing)) as string[],files:Object.keys({...design.starterFiles,...design.visibleTests}).sort().map(path=>({path,language:languageFor(path),readOnly:path.startsWith("tests/")})),visibleTestFiles:Object.keys(design.visibleTests),concepts:this.questionConcepts(question.id),attemptId:attempt.id,attemptStartedAt:attempt.started_at,attemptCompletedAt:attempt.completed_at,latestEventSequence:attempt.latest_event_sequence};}
+    if(question&&question.status!=="abandoned"){const target=this.db.prepare("SELECT * FROM training_targets WHERE id=?").get(question.training_target_id) as Record<string,unknown>;const attempt=this.db.prepare("SELECT * FROM attempts WHERE question_id=? ORDER BY started_at DESC LIMIT 1").get(question.id) as {id:string;latest_event_sequence:number;started_at:string;completed_at:string|null}|undefined;const design=JSON.parse(question.design) as QuestionDesign;if(attempt)events=(this.db.prepare("SELECT id,sequence,type,occurred_at,payload,source FROM attempt_events WHERE attempt_id=? ORDER BY sequence").all(attempt.id) as Array<{id:string;sequence:number;type:string;occurred_at:string;payload:string;source:string}>).map(e=>({...e,occurredAt:e.occurred_at,payload:JSON.parse(e.payload)}));if(attempt)active={id:question.id,sessionId:id,trainingTargetId:question.training_target_id,ordinal:question.ordinal,title:question.title,statement:question.statement,language:question.language,kind:question.kind,status:question.status,difficulty:question.difficulty,replacesQuestionId:question.replaces_question_id,createdAt:question.created_at,abilityId:String(target.ability_id),abilityTitle:String(target.ability_title),specificGap:String(target.specific_gap),desiredEvidence:String(target.desired_evidence),avoidTesting:JSON.parse(String(target.avoid_testing)) as string[],files:Object.keys({...design.starterFiles,...design.visibleTests}).sort().map(path=>({path,language:languageFor(path),readOnly:path.startsWith("tests/")})),visibleTestFiles:Object.keys(design.visibleTests),concepts:this.questionConcepts(question.id),source:parseSourceRef(question.source_ref),attemptId:attempt.id,attemptStartedAt:attempt.started_at,attemptCompletedAt:attempt.completed_at,latestEventSequence:attempt.latest_event_sequence};}
     const messages=(this.db.prepare("SELECT id,role,body,created_at,activity FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string;activity:string|null}>).map(m=>({id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity)}));
     return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
@@ -120,13 +138,13 @@ export class LocalStore {
     const id=randomUUID();const existing=this.db.prepare("SELECT id FROM ability_documents WHERE lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(input.ability) as {id:string}|undefined;const abilityId=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO training_targets VALUES (?,?,?,?,?,?,?,?,?)").run(id,sessionId,abilityId,input.ability,input.specificGap,input.desiredEvidence,avoidTesting,action,now);this.db.prepare("UPDATE sessions SET current_focus=?,updated_at=? WHERE id=?").run(JSON.stringify([input.ability]),now,sessionId);return{id,sessionId,abilityId,abilityTitle:input.ability,specificGap:input.specificGap,desiredEvidence:input.desiredEvidence,avoidTesting:input.avoidTesting,action,createdAt:now};
   }
   latestTarget(sessionId:string){return this.db.prepare("SELECT * FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string,unknown>|undefined;}
-  createQuestion(sessionId:string,design:QuestionDesign,report:unknown,options:{replacesQuestionId?:string|null;concepts?:ConceptTagInput[]}={}){const target=this.latestTarget(sessionId);if(!target)throw new Error("A persisted training target is required before question creation");const id=randomUUID();const attemptId=randomUUID();const now=new Date().toISOString();const ordinal=(this.db.prepare("SELECT COALESCE(MAX(ordinal),0)+1 value FROM questions WHERE session_id=?").get(sessionId) as {value:number}).value;const tagged=this.db.transaction(()=>{this.db.prepare("INSERT INTO questions (id,session_id,training_target_id,ordinal,title,statement,language,kind,status,difficulty,design,validation_report,created_at,replaces_question_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id,sessionId,String(target.id),ordinal,design.title,design.statement,design.language,design.kind,"active",design.difficulty??"developing",JSON.stringify(design),JSON.stringify(report),now,options.replacesQuestionId??null);this.db.prepare("INSERT INTO attempts VALUES (?,?,?,?,?,?,NULL)").run(attemptId,id,sessionId,"active",0,now);const event={id:randomUUID(),attemptId,sequence:0,type:"attempt_started",occurredAt:now,payload:{questionId:id,...(options.replacesQuestionId?{replacesQuestionId:options.replacesQuestionId}:{})},source:"system",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);
+  createQuestion(sessionId:string,design:QuestionDesign,report:unknown,options:{replacesQuestionId?:string|null;concepts?:ConceptTagInput[];source?:ChallengeSource|null}={}){const target=this.latestTarget(sessionId);if(!target)throw new Error("A persisted training target is required before question creation");const id=randomUUID();const attemptId=randomUUID();const now=new Date().toISOString();const ordinal=(this.db.prepare("SELECT COALESCE(MAX(ordinal),0)+1 value FROM questions WHERE session_id=?").get(sessionId) as {value:number}).value;const tagged=this.db.transaction(()=>{this.db.prepare("INSERT INTO questions (id,session_id,training_target_id,ordinal,title,statement,language,kind,status,difficulty,design,validation_report,created_at,replaces_question_id,source_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id,sessionId,String(target.id),ordinal,design.title,design.statement,design.language,design.kind,"active",design.difficulty??"developing",JSON.stringify(design),JSON.stringify(report),now,options.replacesQuestionId??null,options.source?JSON.stringify(options.source):null);this.db.prepare("INSERT INTO attempts VALUES (?,?,?,?,?,?,NULL)").run(attemptId,id,sessionId,"active",0,now);const event={id:randomUUID(),attemptId,sequence:0,type:"attempt_started",occurredAt:now,payload:{questionId:id,...(options.replacesQuestionId?{replacesQuestionId:options.replacesQuestionId}:{})},source:"system",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);
     // Tagged inside the same transaction as the challenge it describes: an
     // untagged challenge is invisible to every concept rollup, so a challenge
     // that exists without its concepts is worse than neither existing.
     const concepts=options.concepts?.length?this.tagQuestion(id,options.concepts):[];
-    this.db.prepare("UPDATE sessions SET status='active',updated_at=? WHERE id=?").run(now,sessionId);this.enqueue("question-create",{sessionId,questionId:id,attemptId,design,report,concepts,target:normalizeTarget(target),replacesQuestionId:options.replacesQuestionId??null,createdAt:now});return concepts;})();return{id,attemptId,ordinal,concepts:tagged};}
-  replaceQuestion(sessionId:string,design:QuestionDesign,report:unknown,reason:string,concepts?:ConceptTagInput[]){const active=this.db.prepare("SELECT q.id,a.id attempt_id FROM questions q JOIN attempts a ON a.question_id=q.id WHERE q.session_id=? AND q.status='active' AND a.status='active' ORDER BY q.ordinal DESC LIMIT 1").get(sessionId) as {id:string;attempt_id:string}|undefined;if(!active)throw new Error("No active challenge exists to replace");this.abandonAttempt(active.attempt_id,reason,"agent","replaced");return this.createQuestion(sessionId,design,report,{replacesQuestionId:active.id,...(concepts?{concepts}:{})});}
+    this.db.prepare("UPDATE sessions SET status='active',updated_at=? WHERE id=?").run(now,sessionId);this.enqueue("question-create",{sessionId,questionId:id,attemptId,design,report,concepts,target:normalizeTarget(target),replacesQuestionId:options.replacesQuestionId??null,source:options.source??null,createdAt:now});return concepts;})();return{id,attemptId,ordinal,concepts:tagged};}
+  replaceQuestion(sessionId:string,design:QuestionDesign,report:unknown,reason:string,concepts?:ConceptTagInput[],source?:ChallengeSource|null){const active=this.db.prepare("SELECT q.id,a.id attempt_id FROM questions q JOIN attempts a ON a.question_id=q.id WHERE q.session_id=? AND q.status='active' AND a.status='active' ORDER BY q.ordinal DESC LIMIT 1").get(sessionId) as {id:string;attempt_id:string}|undefined;if(!active)throw new Error("No active challenge exists to replace");this.abandonAttempt(active.attempt_id,reason,"agent","replaced");return this.createQuestion(sessionId,design,report,{replacesQuestionId:active.id,...(concepts?{concepts}:{}),...(source!==undefined?{source}:{})});}
   /** Returns null when the session is gone: a turn can outlive the session the
    *  learner deleted under it, and it has nowhere left to record. */
   addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[]){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity));return value;}
@@ -235,7 +253,7 @@ export class LocalStore {
     return grouped;
   }
   private toAbility(row:AbilityRow,concepts:ConceptTag[]):AbilityHistorySummary{return {id:row.id,title:row.title,markdown:row.markdown,summary:row.summary,version:row.version,status:row.status,evidenceCount:(JSON.parse(row.evidence_ids) as string[]).length,concepts,practice:JSON.parse(row.practice) as string[],earnedAt:row.earned_at,updatedAt:row.updated_at};}
-  listChallenges():ChallengeHistorySummary[]{const tags=this.conceptTagRows("",[]);const rows=this.db.prepare(`SELECT q.id,q.session_id,s.title session_title,q.ordinal,q.title,q.language,q.difficulty,q.status,q.replaces_question_id,parent.title replaces_question_title,child.id replaced_by_question_id,child.title replaced_by_question_title,q.created_at,COALESCE(MAX(a.completed_at),q.created_at) updated_at,COUNT(DISTINCT a.id) attempt_count,(SELECT COUNT(*) FROM attempt_events te JOIN attempts ta ON ta.id=te.attempt_id WHERE ta.question_id=q.id AND te.type='test_run') test_run_count,(SELECT json_extract(te.payload,'$.outcome') FROM attempt_events te JOIN attempts ta ON ta.id=te.attempt_id WHERE ta.question_id=q.id AND te.type='attempt_completed' ORDER BY te.occurred_at DESC LIMIT 1) last_outcome FROM questions q JOIN sessions s ON s.id=q.session_id LEFT JOIN questions parent ON parent.id=q.replaces_question_id LEFT JOIN questions child ON child.replaces_question_id=q.id LEFT JOIN attempts a ON a.question_id=q.id GROUP BY q.id ORDER BY updated_at DESC`).all() as Array<Record<string,unknown>>;return rows.map((row)=>({id:String(row.id),sessionId:String(row.session_id),sessionTitle:String(row.session_title),ordinal:Number(row.ordinal),title:String(row.title),language:String(row.language) as ChallengeHistorySummary["language"],difficulty:String(row.difficulty) as ChallengeHistorySummary["difficulty"],status:String(row.status) as ChallengeHistorySummary["status"],replacesQuestionId:row.replaces_question_id?String(row.replaces_question_id):null,replacesQuestionTitle:row.replaces_question_title?String(row.replaces_question_title):null,replacedByQuestionId:row.replaced_by_question_id?String(row.replaced_by_question_id):null,replacedByQuestionTitle:row.replaced_by_question_title?String(row.replaced_by_question_title):null,attemptCount:Number(row.attempt_count),testRunCount:Number(row.test_run_count),lastOutcome:row.last_outcome?String(row.last_outcome) as ChallengeHistorySummary["lastOutcome"]:null,concepts:tags.get(String(row.id))??[],createdAt:String(row.created_at),updatedAt:String(row.updated_at)}));}
+  listChallenges():ChallengeHistorySummary[]{const tags=this.conceptTagRows("",[]);const rows=this.db.prepare(`SELECT q.id,q.session_id,s.title session_title,q.ordinal,q.title,q.language,q.difficulty,q.status,q.replaces_question_id,q.source_ref,parent.title replaces_question_title,child.id replaced_by_question_id,child.title replaced_by_question_title,q.created_at,COALESCE(MAX(a.completed_at),q.created_at) updated_at,COUNT(DISTINCT a.id) attempt_count,(SELECT COUNT(*) FROM attempt_events te JOIN attempts ta ON ta.id=te.attempt_id WHERE ta.question_id=q.id AND te.type='test_run') test_run_count,(SELECT json_extract(te.payload,'$.outcome') FROM attempt_events te JOIN attempts ta ON ta.id=te.attempt_id WHERE ta.question_id=q.id AND te.type='attempt_completed' ORDER BY te.occurred_at DESC LIMIT 1) last_outcome FROM questions q JOIN sessions s ON s.id=q.session_id LEFT JOIN questions parent ON parent.id=q.replaces_question_id LEFT JOIN questions child ON child.replaces_question_id=q.id LEFT JOIN attempts a ON a.question_id=q.id GROUP BY q.id ORDER BY updated_at DESC`).all() as Array<Record<string,unknown>>;return rows.map((row)=>({id:String(row.id),sessionId:String(row.session_id),sessionTitle:String(row.session_title),ordinal:Number(row.ordinal),title:String(row.title),language:String(row.language) as ChallengeHistorySummary["language"],difficulty:String(row.difficulty) as ChallengeHistorySummary["difficulty"],status:String(row.status) as ChallengeHistorySummary["status"],replacesQuestionId:row.replaces_question_id?String(row.replaces_question_id):null,replacesQuestionTitle:row.replaces_question_title?String(row.replaces_question_title):null,replacedByQuestionId:row.replaced_by_question_id?String(row.replaced_by_question_id):null,replacedByQuestionTitle:row.replaced_by_question_title?String(row.replaced_by_question_title):null,attemptCount:Number(row.attempt_count),testRunCount:Number(row.test_run_count),lastOutcome:row.last_outcome?String(row.last_outcome) as ChallengeHistorySummary["lastOutcome"]:null,concepts:tags.get(String(row.id))??[],source:parseSourceRef(row.source_ref as string|null),createdAt:String(row.created_at),updatedAt:String(row.updated_at)}));}
   /** Concepts are part of what a challenge *is*, so they are searchable text: the
    *  agent looking for "sliding window" evidence has to find the challenges that
    *  were tagged with it even when the title never says the words. */
@@ -259,16 +277,73 @@ export class LocalStore {
    *  and every attempt at it in order. Read by the standalone challenge page,
    *  which practises against a sandbox and so never touches an attempt. */
   challengeRecord(id:string){
-    const row=this.db.prepare("SELECT q.id,q.session_id,q.training_target_id,q.statement,q.kind,q.design,s.original_goal,s.status session_status FROM questions q JOIN sessions s ON s.id=q.session_id WHERE q.id=?").get(id) as {id:string;session_id:string;training_target_id:string;statement:string;kind:QuestionRow["kind"];design:string;original_goal:string;session_status:SessionSummary["status"]}|undefined;
+    const row=this.db.prepare("SELECT q.id,q.session_id,q.training_target_id,q.statement,q.kind,q.design,q.source_ref,s.original_goal,s.status session_status FROM questions q JOIN sessions s ON s.id=q.session_id WHERE q.id=?").get(id) as {id:string;session_id:string;training_target_id:string;statement:string;kind:QuestionRow["kind"];design:string;source_ref:string|null;original_goal:string;session_status:SessionSummary["status"]}|undefined;
     if(!row)return null;
     const target=this.db.prepare("SELECT ability_title,specific_gap,desired_evidence,action FROM training_targets WHERE id=?").get(row.training_target_id) as {ability_title:string;specific_gap:string;desired_evidence:string;action:TrainingTarget["action"]}|undefined;
     const attempts=(this.db.prepare("SELECT id FROM attempts WHERE question_id=? ORDER BY started_at").all(id) as Array<{id:string}>).map((attempt,index)=>({ordinal:index+1,events:this.readAttempt(attempt.id)}));
-    return{sessionId:row.session_id,statement:row.statement,kind:row.kind,design:JSON.parse(row.design) as QuestionDesign,sessionGoal:row.original_goal,sessionStatus:row.session_status,abilityTitle:target?.ability_title??"",specificGap:target?.specific_gap??"",desiredEvidence:target?.desired_evidence??"",action:target?.action??null,attempts};
+    return{sessionId:row.session_id,statement:row.statement,kind:row.kind,design:JSON.parse(row.design) as QuestionDesign,source:parseSourceRef(row.source_ref),sessionGoal:row.original_goal,sessionStatus:row.session_status,abilityTitle:target?.ability_title??"",specificGap:target?.specific_gap??"",desiredEvidence:target?.desired_evidence??"",action:target?.action??null,attempts};
   }
   /** Every challenge's starter excerpt, keyed by id. Its own read rather than a
    *  column on the history row: bootstrap carries that row whether or not the
    *  learner ever opens the list, and code is too much to send on that path. */
   challengePreviews(){const rows=this.db.prepare("SELECT id,design FROM questions").all() as Array<{id:string;design:string}>;const previews:Record<string,ChallengeCodePreview>={};for(const row of rows){let preview:ChallengeCodePreview|null=null;try{preview=codePreview(JSON.parse(row.design) as QuestionDesign);}catch{preview=null;}if(preview)previews[row.id]=preview;}return previews;}
+
+  /* ---- Practice sources -----------------------------------------------------
+     A problem read from someone else's service, kept so that opening it,
+     re-reading it next week and working on a train do not each cost a request.
+     The cache is keyed on (source, region, slug) because the same slug is a
+     different problem on the two LeetCodes, and it stores the whole normalised
+     problem rather than a summary: the statement is the expensive part and the
+     part most often wanted again. */
+
+  cachePracticeProblem(input:{source:string;region:string;slug:string;title:string;difficulty:string;payload:unknown;references?:Array<{slug:string;title:string;difficulty:string|null;relation:string}>}){
+    const now=new Date().toISOString();
+    this.db.transaction(()=>{
+      this.db.prepare("INSERT INTO practice_problems (source,region,slug,title,difficulty,payload,cached_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(source,region,slug) DO UPDATE SET title=excluded.title,difficulty=excluded.difficulty,payload=excluded.payload,cached_at=excluded.cached_at").run(input.source,input.region,input.slug,input.title,input.difficulty,JSON.stringify(input.payload),now);
+      if(!input.references?.length)return;
+      /* Replaced rather than merged: the source's current answer about what a
+         problem relates to is the whole answer, and a link it has dropped should
+         stop being offered. */
+      this.db.prepare("DELETE FROM practice_problem_links WHERE source=? AND region=? AND from_slug=?").run(input.source,input.region,input.slug);
+      const link=this.db.prepare("INSERT OR IGNORE INTO practice_problem_links (source,region,from_slug,to_slug,relation,title,difficulty) VALUES (?,?,?,?,?,?,?)");
+      for(const reference of input.references.slice(0,24))link.run(input.source,input.region,input.slug,reference.slug,reference.relation,reference.title,reference.difficulty);
+    })();
+  }
+
+  /** A cached problem, or null when it was never read or has gone stale. Staleness
+   *  is the caller's call because it differs by use: a statement is good for
+   *  weeks, and the learner's solved status on it is good for minutes. */
+  readCachedPracticeProblem(source:string,region:string,slug:string,maxAgeMs?:number){
+    const row=this.db.prepare("SELECT payload,cached_at FROM practice_problems WHERE source=? AND region=? AND slug=?").get(source,region,slug) as {payload:string;cached_at:string}|undefined;
+    if(!row)return null;
+    /* `>=`, so a max age of zero means "nothing cached will do". With `>` a
+       caller asking for a guaranteed-fresh read got the copy written in the same
+       millisecond — which is exactly the read that must not be served stale. */
+    if(maxAgeMs!==undefined&&Date.now()-Date.parse(row.cached_at)>=maxAgeMs)return null;
+    try{return {payload:JSON.parse(row.payload) as unknown,cachedAt:row.cached_at};}catch{return null;}
+  }
+
+  /**
+   * What the source says a problem is related to, in both directions.
+   *
+   * Both directions on purpose. "This is a harder version of what you just
+   * failed" and "this is what that problem leads to" are the same edge read from
+   * opposite ends, and only one of them is ever stored — LeetCode publishes
+   * relations from the newer problem to the older one.
+   */
+  practiceProblemLinks(source:string,region:string,slug:string){
+    const outgoing=this.db.prepare("SELECT to_slug slug,relation,title,difficulty FROM practice_problem_links WHERE source=? AND region=? AND from_slug=?").all(source,region,slug) as Array<{slug:string;relation:string;title:string;difficulty:string|null}>;
+    const incoming=this.db.prepare("SELECT p.from_slug slug,p.relation,COALESCE(c.title,'') title,c.difficulty FROM practice_problem_links p LEFT JOIN practice_problems c ON c.source=p.source AND c.region=p.region AND c.slug=p.from_slug WHERE p.source=? AND p.region=? AND p.to_slug=?").all(source,region,slug) as Array<{slug:string;relation:string;title:string;difficulty:string|null}>;
+    return {outgoing,incoming};
+  }
+
+  /** Every sourced challenge the learner has been set, newest first. Read before
+   *  assigning one so the same problem is not set twice — and so a problem they
+   *  gave up on can be recognised when it comes round again. */
+  assignedPracticeProblems(limit=40){
+    return (this.db.prepare(`SELECT q.source_ref,q.title,q.status,ch.outcome,ch.updated_at FROM questions q JOIN (${CHALLENGE_OUTCOME_SQL}) ch ON ch.id=q.id WHERE q.source_ref IS NOT NULL ORDER BY ch.updated_at DESC LIMIT ?`).all(limit) as Array<{source_ref:string;title:string;status:string;outcome:string;updated_at:string}>)
+      .flatMap((row)=>{const source=parseSourceRef(row.source_ref);return source?[{slug:source.slug,source:source.source,region:source.region,title:row.title,outcome:row.outcome,assignedAt:row.updated_at}]:[];});
+  }
 
   /* ---- Concepts -------------------------------------------------------------
      A concept is what a challenge is about, and the unit evidence accumulates
@@ -488,7 +563,9 @@ export class LocalStore {
   acknowledgeSync(ids:string[]){const remove=this.db.prepare("DELETE FROM sync_outbox WHERE id=?");this.db.transaction(()=>ids.forEach(id=>remove.run(id)))();}
   markSyncFailed(id:string){this.db.prepare("UPDATE sync_outbox SET attempts=attempts+1 WHERE id=?").run(id);}
   /** Account-scoped learner state must not survive a permanent account deletion. Preferences stay device-scoped. */
-  clearAccountData(){this.db.transaction(()=>{for(const table of ["sync_outbox","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","ability_documents","learner_profile"])this.db.prepare(`DELETE FROM ${table}`).run();
+  /* The cached problems go too. Their statements are public, but the copy Spar
+     holds records whether *this* learner has solved each one, which is theirs. */
+  clearAccountData(){this.db.transaction(()=>{for(const table of ["sync_outbox","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","ability_documents","learner_profile","practice_problems","practice_problem_links"])this.db.prepare(`DELETE FROM ${table}`).run();
     /* Seeded concepts are shipped vocabulary and stay. A concept the agent
        invented is not: it names something this learner was working on, and
        serving it to whoever signs in next would leak that. */
@@ -517,7 +594,15 @@ function tokens(value:string){return value.toLowerCase().replace(/[^a-z0-9+#-]+/
 function searchTerms(query:string){return [...new Set(tokens(query).filter(term=>!SEARCH_STOP_WORDS.has(term)&&(term.length>2||["ai","js","c#","c++"].includes(term))))].slice(0,12);}
 function relevance(text:string,terms:string[]){const haystack=new Set(tokens(text));return terms.reduce((score,term)=>score+(haystack.has(term)?1:0),0);}
 function normalizeTarget(row:Record<string,unknown>){return{id:String(row.id),sessionId:String(row.session_id),abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),specificGap:String(row.specific_gap),desiredEvidence:String(row.desired_evidence),avoidTesting:JSON.parse(String(row.avoid_testing)) as string[],action:String(row.action),createdAt:String(row.created_at)};}
-function legacyQuestionRequest(question:string):AskUserQuestionRequest{return{id:randomUUID(),questions:[{header:"Placement",question,options:[{label:"New to this",description:"Start with prerequisites and establish the vocabulary."},{label:"Some experience",description:"Calibrate with an accessible applied question."},{label:"Comfortable",description:"Use an interview-style diagnostic without assuming mastery."}],multiple:false,custom:true}]};}
+function legacyQuestionRequest(question:string):AskUserQuestionRequest{return{id:randomUUID(),questions:[{header:"Placement",question,options:[{label:"New to this — start me from the prerequisites"},{label:"Some experience — calibrate with an applied question"},{label:"Comfortable — go straight to an interview-style diagnostic"}],multiple:false,custom:true}]};}
+/** A challenge's source, read back defensively. Null is the ordinary answer —
+ *  every challenge Spar wrote itself has none — and a row written by a build that
+ *  stored a shape this one no longer understands reads as "Spar wrote it" rather
+ *  than taking the challenge down with it. */
+function parseSourceRef(value:string|null|undefined):ChallengeSource|null{
+  if(!value)return null;
+  try{const parsed=challengeSourceSchema.safeParse(JSON.parse(value));return parsed.success?parsed.data:null;}catch{return null;}
+}
 /** Stored activity, read back defensively: a message written before this column
  *  existed has none, and a malformed row must not take the transcript with it. */
 function parseActivity(value:string|null):AgentActivityStep[]{if(!value)return[];try{const parsed=JSON.parse(value) as unknown;if(!Array.isArray(parsed))return[];return parsed.flatMap((entry)=>{const step=agentActivityStepSchema.safeParse(entry);return step.success?[step.data]:[];});}catch{return[];}}

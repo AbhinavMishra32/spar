@@ -5,20 +5,63 @@ export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
   checkpointSave: "checkpoint:save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
-  authPassword: "auth:password", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
+  authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
+  settingsWebSearchEnabled: "settings:web-search-enabled",
   attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
   sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
   challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
   challengeRun: "challenges:run", challengeCheck: "challenges:check", challengeReset: "challenges:reset",
-  conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start"
+  conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start",
+  /* Practice sources: where real problems come from. Distinct from `practiceStart`
+     above, which is Spar's own word for drilling an ability — an unfortunate
+     collision, kept because renaming a channel the renderer already calls is a
+     worse trade than a comment. */
+  sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
+  sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
+  sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
 } as const;
+
+/* ---- Signing in ---------------------------------------------------------
+   Every flow the window offers arrives on one channel. They all carry an email
+   and differ only in what else they carry, so a single validated union is what
+   keeps the main process from having to trust six different shapes — and it is
+   the same union the sign-in window switches on, which is why the two can never
+   disagree about what a flow needs.
+
+   The bounds mirror the API's own: eight characters of password, six digits of
+   code. Failing here is failing without a round trip. */
+const emailField = z.string().trim().toLowerCase().email();
+const passwordField = z.string().min(8).max(200);
+const codeField = z.string().trim().regex(/^\d{6}$/);
+/** Which email a code arrives in, and therefore what it can be spent on. */
+export const authCodePurposeSchema = z.enum(["sign-in", "email-verification", "forget-password"]);
+export type AuthCodePurpose = z.infer<typeof authCodePurposeSchema>;
+export const authRequestInput = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("sign-in"), email: emailField, password: passwordField }),
+  z.object({ action: z.literal("sign-up"), email: emailField, password: passwordField }),
+  /** Ask for a fresh code — the first one, or a replacement for one that expired. */
+  z.object({ action: z.literal("send-code"), email: emailField, purpose: authCodePurposeSchema }),
+  /** Confirm a new account's address. Signs in on success. */
+  z.object({ action: z.literal("verify-email"), email: emailField, code: codeField }),
+  /** Sign in with a code instead of a password. */
+  z.object({ action: z.literal("sign-in-code"), email: emailField, code: codeField }),
+  /** Spend a reset code on a new password, and sign in with it. */
+  z.object({ action: z.literal("reset-password"), email: emailField, code: codeField, password: passwordField }),
+]);
+export type AuthRequest = z.infer<typeof authRequestInput>;
+/** Where the window goes next. Only two things can happen: the device is signed
+ *  in, or an email is on its way and six digits are wanted. `purpose` says what
+ *  the code that arrives will do, which the window cannot always infer from what
+ *  it asked for — signing in with an unconfirmed address answers with a
+ *  confirmation code. */
+export type AuthResult = { status: "signed-in" } | { status: "code-sent"; purpose: AuthCodePurpose };
 
 export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000) });
 /* Sidebar housekeeping. Titles are capped where the generated one is capped, so a
@@ -46,7 +89,10 @@ export const practiceInput = z.object({
   drill: z.string().trim().min(3).max(400).optional(),
 }).refine((value) => Boolean(value.abilityId ?? value.conceptSlug), "A practice session needs an ability or a concept to aim at");
 export const workspaceWriteInput = workspacePathInput.extend({ content: z.string().max(2_000_000) });
-export const runInput = z.object({ sessionId: z.string().uuid(), language: z.enum(["javascript", "typescript", "cpp"]), command: z.enum(["test", "run"]), timeoutMs: z.number().int().min(100).max(20_000).default(8_000) });
+/** `timeoutMs` is optional and only ever lowers the budget: the main process sets
+ *  it from the language, because how long a toolchain needs is not something the
+ *  window can know. */
+export const runInput = z.object({ sessionId: z.string().uuid(), language: z.enum(["javascript", "typescript", "cpp"]), command: z.enum(["test", "run"]), timeoutMs: z.number().int().min(100).max(600_000).optional() });
 // Ordering belongs to the authoritative local event store. Renderer processes
 // supply event identity and content, but never a guessed stream sequence.
 export const attemptAppendInput = attemptEventSchema.omit({ sequence: true });
@@ -118,7 +164,85 @@ export type ProviderOAuthEvent = {
   allowEmpty?: boolean;
 };
 
-export type BootstrapData = { account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+/* ---- Practice sources ----------------------------------------------------
+   A source of real problems, as the renderer sees it. The shapes live here
+   rather than in the main process so that neither side can drift: Settings
+   draws exactly what `PracticeService.inventory` returns. */
+
+export const sourceRegionSchema = z.enum(["global", "cn"]);
+export const sourceJudgeSchema = z.enum(["source", "local"]);
+export type SourceJudgePreference = z.infer<typeof sourceJudgeSchema>;
+export const sourceSearchInput = z.object({
+  query: z.string().trim().max(200).default(""),
+  concepts: z.array(z.string().trim().min(1).max(60)).max(5).default([]),
+  difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+  status: z.enum(["any", "todo", "attempted", "solved"]).default("any"),
+  limit: z.number().int().min(1).max(25).default(10),
+});
+export const sourceSlugInput = z.object({ slug: z.string().trim().min(1).max(120) });
+/** Starting a session on a specific problem the learner picked themselves. */
+export const sourceStartInput = sourceSlugInput.extend({ language: languageSchema.optional() });
+export const sourceRunInput = z.object({ sessionId: z.string().uuid(), attemptId: z.string().uuid() });
+
+export type PracticeSourceState = "connected" | "expired" | "disconnected";
+export type PracticeSourceAccount = {
+  username: string;
+  premium: boolean;
+  avatarUrl: string;
+  solved: { total: number; easy: number; medium: number; hard: number };
+  available: { total: number; easy: number; medium: number; hard: number };
+  skills: Array<{ slug: string; name: string; solved: number; band: "fundamental" | "intermediate" | "advanced" }>;
+  streak: number;
+};
+export type PracticeInventory = {
+  source: "leetcode";
+  name: string;
+  description: string;
+  /** What the learner is told before they hand an app their session. */
+  authNote: string;
+  region: z.infer<typeof sourceRegionSchema>;
+  regions: Array<{ id: z.infer<typeof sourceRegionSchema>; label: string }>;
+  state: PracticeSourceState;
+  capabilities: { remoteJudge: boolean; officialTestcases: boolean; search: boolean; progress: boolean; submissionHistory: boolean };
+  account: PracticeSourceAccount | null;
+  judgePreference: SourceJudgePreference;
+  /** The connection state and the preference, resolved into the one fact the UI
+   *  needs: will a solve be judged by the source or on this machine. */
+  judgesSubmissions: boolean;
+  problem?: string;
+};
+export type PracticeSearchHit = {
+  slug: string;
+  displayId: string;
+  title: string;
+  difficulty: "easy" | "medium" | "hard";
+  paidOnly: boolean;
+  acceptanceRate: number | null;
+  concepts: string[];
+  status: "solved" | "attempted" | "todo" | "unknown";
+};
+/** A judged run at the source, as the result panel reads it. */
+export type SourceRunReport = {
+  outcome: "passed" | "failed" | "errored";
+  status: string;
+  passedCases: number;
+  totalCases: number;
+  runtime: string;
+  memory: string;
+  message: string;
+  failedCase: { input: string; expected: string; actual: string; stdout: string } | null;
+  /** Every case the source's judge answered, in order: what it was given, what it
+   *  expected, and what the learner's code returned. The result panel draws these
+   *  as cases, so a run at the source reads like a run here rather than like a log
+   *  of one. Empty on a submission, where the cases are the source's and stay
+   *  there. */
+  cases: Array<{ input: string; expected: string; actual: string; passed: boolean }>;
+  url: string;
+};
+/** Emitted whenever a source's connection changes under the app's feet. */
+export type PracticeSourceEvent = { source: "leetcode"; state: PracticeSourceState; message: string };
+
+export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** True when this is a packaged build with no Spar server configured, so
    *  sign-in can say that rather than reporting a refused connection at
    *  localhost that reads as the app being broken. */
@@ -204,7 +328,27 @@ export interface SparApi {
    *  caller can go straight there. Starting the turn is the point: practice that
    *  did not reach the agent would be a link, not a drill. */
   startPractice(input: z.infer<typeof practiceInput>): Promise<{ sessionId: string }>;
-  passwordAuth(mode: "sign-in" | "sign-up", email: string, password: string): Promise<void>;
+  /* ---- Practice sources --------------------------------------------------
+     Connecting one is a sign-in on the source's own page, driven entirely by
+     the main process: the renderer asks for it and is told what happened, and
+     the session cookie never crosses this boundary. */
+  practiceSource(): Promise<PracticeInventory>;
+  connectPracticeSource(): Promise<{ status: "connected"; username: string } | { status: "cancelled" } | { status: "failed"; message: string }>;
+  disconnectPracticeSource(): Promise<void>;
+  setPracticeRegion(region: z.infer<typeof sourceRegionSchema>): Promise<void>;
+  /** Where solves are judged: at the source, or on this machine. */
+  setPracticeJudge(preference: SourceJudgePreference): Promise<void>;
+  searchPracticeProblems(input: z.infer<typeof sourceSearchInput>): Promise<{ total: number; problems: PracticeSearchHit[] }>;
+  /** Opens a session on one specific problem the learner chose. */
+  startPracticeProblem(input: z.infer<typeof sourceStartInput>): Promise<{ sessionId: string }>;
+  /** A scratch run of the open challenge at its source. Records a test run as
+   *  evidence, but nothing on the learner's account there. */
+  runAtSource(input: z.infer<typeof sourceRunInput>): Promise<SourceRunReport>;
+  onPracticeSourceEvent(listener: (event: PracticeSourceEvent) => void): () => void;
+  /** Every step of signing in, creating an account and recovering one. The main
+   *  process owns the keychain and the API, so the window only ever learns which
+   *  of the two things happened — see `AuthResult`. */
+  auth(request: AuthRequest): Promise<AuthResult>;
   signOut(): Promise<void>;
   /** Finish onboarding; resolves with the stored profile. */
   saveProfile(input: z.infer<typeof profileInput>): Promise<LearnerProfile>;
@@ -225,9 +369,13 @@ export interface SparApi {
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
   /** Whether the agent can reach the web, and where its key came from. The key
    *  itself is never read back — Settings shows the state, not the secret. */
-  webSearchStatus(): Promise<{ source: "keychain" | "env" | "none" }>;
+  webSearchStatus(): Promise<{ source: "keychain" | "env" | "none"; enabled: boolean }>;
   saveWebSearchKey(key: string): Promise<void>;
   clearWebSearchKey(): Promise<void>;
+  /** Whether the agent may reach the web at all. Separate from holding a key:
+   *  someone can keep their key and still want a session that only reads their
+   *  own record. */
+  setWebSearchEnabled(enabled: boolean): Promise<void>;
   startProviderOAuth(provider: Extract<ProviderId, "openai-codex" | "claude-code" | "github-copilot">): Promise<{ flowId: string }>;
   submitProviderOAuth(flowId: string, value: string): Promise<void>;
   cancelProviderOAuth(flowId: string): Promise<void>;

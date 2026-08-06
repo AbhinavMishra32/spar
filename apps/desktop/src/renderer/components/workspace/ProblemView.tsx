@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { ArrowRight, ChevronDown, FlaskConical, Target } from "lucide-react";
 import type { ActiveQuestion } from "@spar/domain";
 import { cn } from "@/lib/utils";
-import { declaredCases } from "@/lib/testCases";
+import { declaredCases, sourcedCases } from "@/lib/testCases";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { ProblemStatement } from "./ProblemStatement";
 import { ConceptChip } from "../concepts/ConceptChip";
+import { SourceBadge } from "../common/SourceBadge";
+import { SourceGlyph } from "../common/SourceGlyph";
 
 /**
  * The challenge on its own terms: statement, the cases it will be graded
@@ -13,15 +15,24 @@ import { ConceptChip } from "../concepts/ConceptChip";
  * push the problem out of reach when you need to re-read it mid-attempt.
  */
 export function ProblemView({
+  onOpenExternal,
   question,
   testFiles,
 }: {
+  /** Opens the problem at its source in the real browser. */
+  onOpenExternal?: ((url: string) => void) | undefined;
   question: ActiveQuestion;
   testFiles: Record<string, string>;
 }) {
+  /* A sourced problem publishes its own cases, so they are read from the challenge
+     rather than lifted back out of the test file Spar generated from them. The
+     parser is for challenges written as `test(…)` blocks, which is every generated
+     one and no sourced one. */
   const declared = useMemo(
-    () => declaredCases(testFiles, question.visibleTestFiles),
-    [testFiles, question.visibleTestFiles],
+    () => (question.source?.cases.length
+      ? sourcedCases(question.source)
+      : declaredCases(testFiles, question.visibleTestFiles)),
+    [question.source, testFiles, question.visibleTestFiles],
   );
   const [selected, setSelected] = useState("");
   const [whyOpen, setWhyOpen] = useState(false);
@@ -33,10 +44,21 @@ export function ProblemView({
       <div className="mx-auto w-full max-w-[46rem] px-4 pb-8 pt-4">
         <div className="mb-4 flex items-center gap-2.5">
           <ChallengeEmblem className="shrink-0" question={question} size={38} />
-          <div className="min-w-0">
-            <p className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">CHALLENGE SET FOR YOU</p>
+          <div className="min-w-0 flex-1">
+            {/* A sourced challenge is not "set for you" in the same sense: it is a
+                real problem the world already asks, chosen for you. Saying the
+                same words over both would overclaim one and undersell the other. */}
+            <p className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">
+              {question.source ? "CHOSEN FOR YOU" : "CHALLENGE SET FOR YOU"}
+            </p>
             <p className="truncate text-content font-medium">{question.abilityTitle}</p>
           </div>
+          {question.source && (
+            <SourceBadge
+              source={question.source}
+              {...(onOpenExternal ? { onOpen: onOpenExternal } : {})}
+            />
+          )}
         </div>
 
         {/* What it is training, while it is still being worked on. No hover card
@@ -55,6 +77,17 @@ export function ProblemView({
             <p className="mb-2 flex items-center gap-1.5 text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">
               <FlaskConical className="size-3" />
               SAMPLE CASES
+              {/* Whose cases these are. A sourced problem's samples are published
+                  with it and are not the whole suite — the hidden ones stay at the
+                  source, and saying so here is what stops these reading as
+                  everything the submission will face. */}
+              {question.source && (
+                <span className="inline-flex items-center gap-1 font-normal normal-case tracking-normal">
+                  <span className="text-muted-foreground/50">·</span>
+                  <SourceGlyph className="size-3 shrink-0" source={question.source.source} />
+                  published with the problem
+                </span>
+              )}
             </p>
 
             {/* Chips rather than a list of every case expanded: the point is to
@@ -95,7 +128,9 @@ export function ProblemView({
                 </div>
               ) : (
                 <p className="px-3 py-2 text-ui text-muted-foreground">
-                  This case asserts something the reader cannot summarise — open {active.file} to read it in full.
+                  {active.file
+                    ? `This case asserts something the reader cannot summarise — open ${active.file} to read it in full.`
+                    : "This case published no expected value, so there is nothing to assert against here."}
                 </p>
               )}
             </div>

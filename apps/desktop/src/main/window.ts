@@ -1,10 +1,28 @@
-import { BrowserWindow, nativeTheme } from "electron";
+import { BrowserWindow, nativeTheme, screen } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildInfo } from "./build.js";
 import { applyNativeSurface, planSurface, syncWindowControls } from "./surface.js";
 
-export function createMainWindow() {
+/** How far into Spar this window has got. The window is sized to what it is
+ *  actually showing: one column of controls, one card of questions, or the app. */
+export type WindowStage = "sign-in" | "onboarding" | "app";
+
+/* Sign-in is one column about four hundred pixels wide, and a fifteen-hundred
+   pixel window around it is a large empty rectangle with a small form marooned in
+   the middle. The intake is a card and a list of options, so it wants room to
+   read but not a workspace. Only the app itself earns the whole screen. */
+const SIZE: Record<Exclude<WindowStage, "app">, { width: number; height: number }> = {
+  "sign-in": { width: 460, height: 640 },
+  onboarding: { width: 720, height: 780 },
+};
+/** Low enough not to fight either of the sizes above; restored the moment there
+ *  is an app behind the window again. */
+const SMALL_MINIMUM = { width: 380, height: 560 };
+const WORKING = { width: 1480, height: 940 };
+const WORKING_MINIMUM = { width: 1020, height: 660 };
+
+export function createMainWindow({ stage }: { stage: WindowStage }) {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
   // Which translucent material the OS can give us, and the window options and
   // window-button placement that follow from it. See main/surface.ts.
@@ -12,10 +30,13 @@ export function createMainWindow() {
   const build = buildInfo();
 
   const window = new BrowserWindow({
-    width: 1480,
-    height: 940,
-    minWidth: 1_020,
-    minHeight: 660,
+    /* Opened at whichever size the first screen wants, rather than opened large
+       and resized once the renderer reports in: a window that visibly shrinks on
+       launch looks like a bug in the app, not like a decision. */
+    ...(stage === "app" ? WORKING : SIZE[stage]),
+    ...(stage === "app"
+      ? { minWidth: WORKING_MINIMUM.width, minHeight: WORKING_MINIMUM.height }
+      : { minWidth: SMALL_MINIMUM.width, minHeight: SMALL_MINIMUM.height }),
     show: false,
     backgroundColor: nativeTheme.shouldUseDarkColors ? "#1b1b1b" : "#f9f9f8",
     // Spread last: the plan owns transparency, title-bar style and background,
@@ -66,4 +87,41 @@ export function createMainWindow() {
   });
 
   return window;
+}
+
+/** Moves the window to the size the stage it has reached wants, animated.
+ *
+ *  Signing in is not the moment Spar becomes a workspace — finishing the intake
+ *  is. So signing in grows the window by a card's worth, enough to hold the
+ *  questions, and only the finished profile opens it out to fill the screen.
+ *  Signing out returns it, because the alternative is a full screen of emptiness
+ *  around two fields.
+ *
+ *  The minimum is moved first in both directions. It is a floor, so a window
+ *  cannot be made smaller than a minimum that has not been lowered yet, and
+ *  raising it before growing would drag the window along with it. */
+export function fitWindowTo(window: BrowserWindow | null, stage: WindowStage) {
+  if (!window || window.isDestroyed() || window.isFullScreen()) return;
+  const { workArea } = screen.getDisplayMatching(window.getBounds());
+  if (stage === "app") {
+    window.setMinimumSize(WORKING_MINIMUM.width, WORKING_MINIMUM.height);
+    if (window.isMaximized()) return;
+    /* The work area, not the display: the menu bar and the Dock are not ours to
+       cover, and this is deliberately not `maximize()` — that is a state the
+       green button toggles, and being put into it by finishing an intake is a
+       surprise the learner then has to undo. */
+    window.setBounds(workArea, true);
+    return;
+  }
+  window.setMinimumSize(SMALL_MINIMUM.width, SMALL_MINIMUM.height);
+  const { width, height } = SIZE[stage];
+  window.setBounds(
+    {
+      width: Math.min(width, workArea.width),
+      height: Math.min(height, workArea.height),
+      x: Math.round(workArea.x + (workArea.width - Math.min(width, workArea.width)) / 2),
+      y: Math.round(workArea.y + (workArea.height - Math.min(height, workArea.height)) / 2),
+    },
+    true,
+  );
 }

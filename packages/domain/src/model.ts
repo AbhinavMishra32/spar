@@ -91,6 +91,63 @@ export const workspaceFileEntrySchema = z.object({
   readOnly: z.boolean().default(false)
 });
 
+/**
+ * Where a challenge came from, when it did not come from Spar.
+ *
+ * Null on every challenge Spar wrote, and present on every challenge taken from
+ * a practice source. Carried rather than looked up because two of its fields
+ * change what the app is allowed to say:
+ *
+ * `remoteJudge` decides who the grading authority is. When it is true, a
+ * submission goes to the source and the verdict is the source's; when it is
+ * false, Spar grades locally against `localCaseCount` published cases, and the
+ * UI and the agent must both say so rather than implying an acceptance.
+ *
+ * `judge` is that same fact as one sentence for the learner, written once by the
+ * source layer so that no screen has to compose it and get it subtly wrong.
+ */
+export const challengeSourceSchema = z.object({
+  source: z.literal("leetcode"),
+  region: z.enum(["global", "cn"]),
+  /** The source's URL slug — the identity every later read uses. */
+  slug: z.string().min(1),
+  /** The source's internal id, which a submission has to be posted with. Kept
+   *  distinct from `displayId`, the number the learner sees on the site. */
+  externalId: z.string().min(1),
+  displayId: z.string(),
+  url: z.string(),
+  difficulty: z.enum(["easy", "medium", "hard"]),
+  /** The source's language slug, so a submission is posted with the exact string
+   *  the source handed over rather than one Spar guessed. */
+  languageSlug: z.string(),
+  remoteJudge: z.boolean(),
+  localCaseCount: z.number().int().nonnegative(),
+  judge: z.string(),
+  /** The function the source's own starter declares, so a case can be shown as the
+   *  call it is rather than as a bare pair of values. */
+  entryName: z.string().default(""),
+  /**
+   * The examples published with the problem, as the source states them: one string
+   * per argument, and the answer it gives for them.
+   *
+   * Carried on the challenge rather than recovered from the generated test file.
+   * The generated test embeds its cases as JSON inside a loop, so the reader that
+   * lifts cases out of a hand-written `test(…)` block found nothing in it — a
+   * sourced problem showed no sample cases at all, on the one kind of challenge
+   * where the cases are published, structured, and known before anybody runs
+   * anything.
+   */
+  cases: z.array(z.object({
+    name: z.string(),
+    input: z.array(z.string()),
+    expected: z.string(),
+  })).default([]),
+  /** Related problems the source names, so a learner who has just failed one can
+   *  be sent to what it is a variation of. */
+  references: z.array(z.object({ slug: z.string(), title: z.string(), difficulty: z.string().nullable(), relation: z.string() })).default([]),
+});
+export type ChallengeSource = z.infer<typeof challengeSourceSchema>;
+
 export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visibleTests: true }).extend({
   replacesQuestionId: id.nullable(),
   abilityId: id,
@@ -103,6 +160,9 @@ export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visi
   /** What this challenge is training, so the learner can see it while they work
    *  rather than only afterwards in history. */
   concepts: z.array(conceptTagSchema),
+  /** Set when this challenge is a real problem from a practice source rather than
+   *  one Spar wrote. The workspace shows where it came from and who grades it. */
+  source: challengeSourceSchema.nullable().default(null),
   attemptId: id,
   /** When the clock started. The learner sees it running while they work, and it
    *  is the zero every offset in a solve replay is measured from. */
@@ -149,6 +209,9 @@ export const challengeHistorySummarySchema = z.object({
   /** What this challenge was about. Ordered primary first, so a row that only has
    *  room for one chip shows the one the challenge was actually aimed at. */
   concepts: z.array(conceptTagSchema),
+  /** Where it came from, so history can be read for what it is: a mix of problems
+   *  Spar wrote and problems the world already asks. */
+  source: challengeSourceSchema.nullable().default(null),
   createdAt: isoDate,
   updatedAt: isoDate,
 });
@@ -196,6 +259,7 @@ export const challengeDetailSchema = z.object({
   desiredEvidence: z.string(),
   action: pedagogicalActionSchema.nullable(),
   files: z.array(challengeFileSchema),
+  source: challengeSourceSchema.nullable().default(null),
   /** Cases the learner cannot read. Checking runs them; practising never does. */
   hiddenTestCount: z.number().int().nonnegative(),
   /** Whether the practice sandbox holds edits, so the page can offer a reset. */
@@ -247,11 +311,20 @@ export const abilityDetailSchema = z.object({
 });
 export type AbilityDetail = z.infer<typeof abilityDetailSchema>;
 
+/**
+ * An option is its own sentence and nothing else.
+ *
+ * It used to carry a `description` under the label, which made every choice a
+ * two-line paragraph and the card a page of prose to read before answering. One
+ * self-contained line per option says the same thing and can be scanned. Options
+ * stay objects rather than bare strings so that an intake stored under the old
+ * shape still parses — zod drops the extra key instead of rejecting the row.
+ */
 export const askUserQuestionInputSchema = z.object({
   questions: z.array(z.object({
     header: z.string().trim().min(1).max(40),
     question: z.string().trim().min(3).max(1000),
-    options: z.array(z.object({ label: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(300) })).min(2).max(3),
+    options: z.array(z.object({ label: z.string().trim().min(1).max(120) })).min(2).max(3),
     multiple: z.boolean().default(false),
     custom: z.boolean().default(true),
   })).min(1).max(3),

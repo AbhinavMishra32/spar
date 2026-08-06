@@ -20,13 +20,36 @@ export type ToolStage = { activeTools: string[]; toolChoice: "required" | "auto"
  *  for a tool that can only answer "not set up". */
 export const WEB_TOOLS = ["web_search", "web_fetch"];
 
-export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false, webSearch = false): Set<string> {
+/**
+ * Reading a practice source, and setting one of its problems.
+ *
+ * Split into reads and the one write for the same reason the MCP server splits
+ * them: the agent may learn anything the source knows and may set the learner a
+ * problem from it, but it may never run or submit code there. Those two tools
+ * exist and are deliberately not in this list.
+ *
+ * Withheld entirely when no source is configured, so a learner who has connected
+ * nothing does not pay a round trip per session for tools that can only answer
+ * "not connected".
+ */
+export const SOURCE_READ_TOOLS = ["search_practice_problems", "read_practice_problem", "read_practice_source", "read_practice_progress", "read_practice_submissions"];
+export const SOURCE_TOOLS = [...SOURCE_READ_TOOLS, "assign_practice_problem"];
+
+export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false, webSearch = false, practiceSource = false): Set<string> {
   const web = webSearch ? WEB_TOOLS : [];
+  const source = practiceSource ? SOURCE_TOOLS : [];
   if (turnKind === "cold-start") return new Set(["search_learner_model", "search_attempt_history", "ask_user_question"]);
-  if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...web]);
-  if (turnKind === "attempt-complete") return new Set(["replay_attempt", "inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...web]);
-  if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question"]);
-  return new Set(["read_session", ...(hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
+  if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
+  if (turnKind === "attempt-complete") return new Set(["replay_attempt", "inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
+  /* Both ways of changing the challenge, because "give me a real problem instead"
+     is a revision request like any other. Withholding the assignment here was a
+     dead end with one exit: the agent could not hand over the LeetCode problem the
+     learner asked for, so it wrote its own challenge, named it after that problem,
+     and had it graded locally — a counterfeit of the thing that was available all
+     along. A sourced problem supersedes rather than edits, which the store already
+     records as a replacement. */
+  if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question", ...source]);
+  return new Set(["read_session", ...(hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), ...source, "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
 }
 
 /**
@@ -42,9 +65,25 @@ export function phaseExecutionKey(name: string, inputSignature: string): string 
  * Deterministic controller policy. The model supplies arguments for the one
  * action exposed by a stage; it never chooses the stage sequence itself.
  */
-export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unknown[]>, challengeCompilationLimit = 15, context: { hasActiveQuestion?: boolean; webSearch?: boolean } = {}): ToolStage {
+export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unknown[]>, challengeCompilationLimit = 15, context: { hasActiveQuestion?: boolean; webSearch?: boolean; practiceSource?: boolean } = {}): ToolStage {
   const completed = (name: string) => (outcomes.get(name)?.length ?? 0) > 0;
-  const questionAttempts = [...(outcomes.get("create_question") ?? []),...(outcomes.get("replace_current_question") ?? [])];
+  /* An assignment counts as an attempt at setting the challenge, exactly like a
+     compilation. Without this a source that keeps refusing — every candidate
+     already solved, every problem subscription-only — would loop past the budget
+     that exists to stop precisely that. */
+  const questionAttempts = [...(outcomes.get("create_question") ?? []),...(outcomes.get("replace_current_question") ?? []),...(outcomes.get("assign_practice_problem") ?? [])];
+  /**
+   * The stage that sets the challenge.
+   *
+   * Both ways of doing it are offered together, `required`, so the model has to
+   * pick one and cannot answer in prose. This is the whole mechanism behind
+   * "prefer a real problem when one fits": a turn cannot end without either
+   * setting a real problem or consciously writing one instead, and it has just
+   * been made to look at what the source has.
+   */
+  const challengeStage = (): ToolStage => context.practiceSource
+    ? { activeTools: ["assign_practice_problem", "create_question"], toolChoice: "required" }
+    : { activeTools: ["create_question"], toolChoice: "required" };
   const playableQuestion = questionAttempts.some((value) => value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "playable");
   // Exhausting the budget is a fact for the controller to act on, not a reason
   // to end the turn. Throwing here left the learner with a compiler error and
@@ -61,14 +100,32 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     if (playableQuestion) return { activeTools: [], toolChoice: "none" };
     if (!completed("replay_attempt")) return { activeTools: ["replay_attempt"], toolChoice: "required" };
     if (!completed("set_training_target")) return { activeTools: ["set_training_target"], toolChoice: "required" };
-    return { activeTools: ["replace_current_question"], toolChoice: "required" };
+    /* One optional look at what the source has before the swap is written, for the
+       same reason the session-start path takes one: the learner asking for a
+       different challenge is the likeliest moment for a real problem to be the
+       right answer, and it cannot be chosen without being searched for. */
+    if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };
+    return context.practiceSource
+      ? { activeTools: ["assign_practice_problem", "replace_current_question"], toolChoice: "required" }
+      : { activeTools: ["replace_current_question"], toolChoice: "required" };
   }
 
   // The same agent handles conversation and mutations. `auto` lets ordinary
   // chat end in prose while real requests can inspect or change host state.
   if (turnKind === "learner-message" && playableQuestion) return { activeTools: [], toolChoice: "none" };
   if (turnKind === "learner-message") return {
-    activeTools: ["read_session", ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...(context.webSearch ? WEB_TOOLS : [])],
+    activeTools: [
+      "read_session",
+      ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]),
+      /* The source stays available in full even mid-challenge. The reads because
+         "is this like anything I have done?" is a question about the problem in
+         front of them; the assignment because "give me a real problem instead" is
+         a request this turn can actually carry out, and the tool refuses on its
+         own unless the agent says the learner asked to be moved. */
+      ...(context.practiceSource ? SOURCE_TOOLS : []),
+      "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability",
+      ...(context.webSearch ? WEB_TOOLS : []),
+    ],
     toolChoice: "auto",
   };
   if (turnKind === "cold-start") {
@@ -114,7 +171,14 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
       if (!completed("read_concept_graph")) return { activeTools: ["read_concept_graph"], toolChoice: "required" };
       return { activeTools: ["set_training_target"], toolChoice: "required" };
     }
-    return { activeTools: ["create_question"], toolChoice: "required" };
+    /* Look at what the world already asks before writing something. This stage is
+       the difference between a source the agent *may* use and one it actually
+       does: a real problem carries a real judge, a difficulty somebody
+       calibrated, and the learner's own history with it, and none of that is
+       available to a challenge invented on the spot. One search, once per turn —
+       then the agent is free to assign what it found or to write its own. */
+    if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };
+    return challengeStage();
   }
   /* A question asked of the learner suspends the turn where it is asked. The
      answer arrives as its own turn and carries the target and the next challenge
@@ -137,7 +201,8 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
      trace raised something only the learner can answer — and asking is a first
      class outcome of reading a replay rather than a failure to decide. */
   if (!completed("set_training_target")) return { activeTools: ["ask_user_question", "set_training_target"], toolChoice: "required" };
-  return { activeTools: ["create_question"], toolChoice: "required" };
+  if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };
+  return challengeStage();
 }
 
 function latestCompilationFailure(attempts: unknown[]): string {

@@ -6,8 +6,23 @@ export const sessionStatus = pgEnum("session_status", ["planning", "active", "pa
 export const questionStatus = pgEnum("question_status", ["generating", "validating", "playable", "active", "completed", "invalid", "abandoned"]);
 export const attemptStatus = pgEnum("attempt_status", ["active", "paused", "completed"]);
 
-export const users = pgTable("users", { id: uuid("id").primaryKey().defaultRandom(), email: text("email").notNull(), passwordHash: text("password_hash"), displayName: text("display_name"), avatarUrl: text("avatar_url"), ...timestamps }, (t) => [uniqueIndex("users_email_idx").on(t.email)]);
-export const authAccounts = pgTable("auth_accounts", { userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), provider: text("provider").notNull(), providerAccountId: text("provider_account_id").notNull(), ...timestamps }, (t) => [primaryKey({ columns: [t.provider, t.providerAccountId] }), index("auth_accounts_user_idx").on(t.userId)]);
+export const users = pgTable("users", { id: uuid("id").primaryKey().defaultRandom(), email: text("email").notNull(), emailVerified: boolean("email_verified").notNull().default(false), displayName: text("display_name"), avatarUrl: text("avatar_url"), ...timestamps }, (t) => [uniqueIndex("users_email_idx").on(t.email)]);
+/* The three tables below are Better Auth's, mapped onto Spar's names in
+   apps/api/src/auth.ts. They are declared here rather than left to Better Auth's
+   own migrator so that one drizzle history owns every table in the database —
+   two migration tools pointed at the same schema is how you end up with a
+   staging database nobody can reproduce.
+
+   `auth_accounts` holds the credential itself: Better Auth keeps a password on
+   the account row rather than on the user, because an account is per-provider
+   and a user can end up with a password and a Google sign-in side by side. */
+export const authAccounts = pgTable("auth_accounts", { id: uuid("id").primaryKey().defaultRandom(), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), accountId: text("account_id").notNull(), providerId: text("provider_id").notNull(), password: text("password"), accessToken: text("access_token"), refreshToken: text("refresh_token"), accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }), refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }), scope: text("scope"), idToken: text("id_token"), ...timestamps }, (t) => [uniqueIndex("auth_accounts_provider_idx").on(t.providerId, t.accountId), index("auth_accounts_user_idx").on(t.userId)]);
+/** One signed-in device. The desktop app holds `token` in the OS keychain and
+ *  sends it as a bearer token, so a session outliving the window is the point. */
+export const authSessions = pgTable("auth_sessions", { id: uuid("id").primaryKey().defaultRandom(), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), token: text("token").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(), ipAddress: text("ip_address"), userAgent: text("user_agent"), ...timestamps }, (t) => [uniqueIndex("auth_sessions_token_idx").on(t.token), index("auth_sessions_user_idx").on(t.userId)]);
+/** Short-lived one-time codes: email verification and password reset. Rows are
+ *  consumed on use and expire on their own, so this table is always near-empty. */
+export const authVerifications = pgTable("auth_verifications", { id: uuid("id").primaryKey().defaultRandom(), identifier: text("identifier").notNull(), value: text("value").notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(), ...timestamps }, (t) => [index("auth_verifications_identifier_idx").on(t.identifier)]);
 export const userSettings = pgTable("user_settings", { userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }), settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}), ...timestamps });
 
 export const sessions = pgTable("sessions", { id: uuid("id").primaryKey().defaultRandom(), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), title: text("title").notNull(), originalGoal: text("original_goal").notNull(), objective: text("objective").notNull().default(""), status: sessionStatus("status").notNull().default("planning"), totalSeconds: integer("total_seconds").notNull().default(0), ...timestamps }, (t) => [index("sessions_user_updated_idx").on(t.userId, t.updatedAt)]);

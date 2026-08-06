@@ -7,7 +7,7 @@
     "postinstall": "node scripts/ensure-native.mjs",
     "bootstrap": "node scripts/setup.mjs",
     "dev": "node scripts/dev.mjs",
-    "dev:apps": "turbo run dev --filter=@spar/domain --filter=@spar/database --filter=@spar/provider --filter=@spar/training --filter=@spar/api --filter=@spar/desktop --parallel --ui=stream",
+    "dev:apps": "turbo run dev --filter=@spar/domain --filter=@spar/database --filter=@spar/provider --filter=@spar/practice --filter=@spar/training --filter=@spar/api --filter=@spar/desktop --parallel --ui=stream",
     "dev:api": "node scripts/run-with-env.mjs pnpm --filter @spar/api dev",
     "dev:desktop": "node scripts/run-with-env.mjs pnpm --filter @spar/desktop dev",
     "cloud:configure": "node scripts/configure-cloud.mjs",

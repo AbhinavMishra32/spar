@@ -23,6 +23,30 @@ export type DeclaredCases = { parsed: boolean; cases: DeclaredCase[] };
 const TEST_BLOCK = /\b(?:test|it)\s*\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`([^`]*)`)/g;
 const ASSERTION = /\bassert\s*\.\s*(strictEqual|deepStrictEqual|equal|deepEqual|notStrictEqual|ok|match|throws)\s*\(/g;
 
+/**
+ * The cases a sourced problem publishes, in the same shape the parser produces.
+ *
+ * No parsing: they arrived structured from the source and travel on the challenge.
+ * Rendered as the call the source's own starter declares — `maxProfit([7,1,5,3,6,4])`
+ * — because that is how the problem page states it and how the learner will type
+ * it. When the source published no signature there is no call to write, so the
+ * arguments stand on their own.
+ */
+export function sourcedCases(source: { entryName: string; slug: string; cases: Array<{ name: string; input: string[]; expected: string }> }): DeclaredCases {
+  const cases = source.cases.map((item, index) => ({
+    id: `${source.slug}:${index + 1}`,
+    ordinal: index + 1,
+    name: item.name,
+    file: "",
+    assertions: [{
+      method: "deepStrictEqual",
+      call: source.entryName ? `${source.entryName}(${item.input.join(", ")})` : item.input.join(", "),
+      expected: item.expected,
+    }],
+  }));
+  return { parsed: cases.length > 0, cases };
+}
+
 export function declaredCases(files: Record<string, string>, order: string[]): DeclaredCases {
   const cases: DeclaredCase[] = [];
   let ordinal = 0;
@@ -32,6 +56,17 @@ export function declaredCases(files: Record<string, string>, order: string[]): D
     if (!source) continue;
 
     const blocks = [...source.matchAll(TEST_BLOCK)];
+    /* No `test(…)` blocks: this is a C++ suite, which declares its cases as
+       `check(…)` calls instead. Read those rather than falling through to showing
+       the file — a C++ challenge's cases are as structured as a JavaScript one's,
+       and the panel was showing source code to anyone working in C++. */
+    if (!blocks.length) {
+      for (const item of cppCases(source)) {
+        ordinal += 1;
+        cases.push({ ...item, id: `${file}:${ordinal}`, ordinal, file });
+      }
+      continue;
+    }
     for (const [index, block] of blocks.entries()) {
       const name = block[1] ?? block[2] ?? block[3] ?? "";
       const start = block.index ?? 0;
@@ -48,6 +83,64 @@ export function declaredCases(files: Record<string, string>, order: string[]): D
   }
 
   return { parsed: cases.length > 0, cases };
+}
+
+/**
+ * The cases in a generated C++ suite.
+ *
+ * Every one is a `check("name", spar::render(solution.entry(arg0, …)), "expected")`
+ * call preceded by the declarations of the arguments it passes, because a C++
+ * signature takes its containers by reference and a temporary will not bind to
+ * one. So the call as written names locals, and reading the case means putting
+ * their values back into it — `maxProfit({7, 1, 5, 3, 6, 4})` is the case, and
+ * `solution.maxProfit(arg0)` is only how it had to be spelled.
+ */
+const CHECK_CALL = /\bcheck\s*\(/g;
+const ARGUMENT = /^\s*(?:[\w:]+(?:\s*<[^;]*>)?[\s&*]+)(arg\d+)\s*=\s*([\s\S]*?);\s*$/gm;
+
+function cppCases(source: string): Array<Pick<DeclaredCase, "name" | "assertions">> {
+  const found: Array<Pick<DeclaredCase, "name" | "assertions">> = [];
+  CHECK_CALL.lastIndex = 0;
+  let previousEnd = 0;
+
+  for (let match = CHECK_CALL.exec(source); match; match = CHECK_CALL.exec(source)) {
+    const open = match.index + match[0].length;
+    const parsed = splitArguments(source, open);
+    if (!parsed) continue;
+    CHECK_CALL.lastIndex = parsed.end + 1;
+    const [name, actual, expected] = parsed.arguments;
+    /* The name is always a literal in a generated suite, which is also what tells
+       a call apart from the declaration of `check` itself — that one is in every
+       file and names its parameters, not a case. */
+    if (!name?.trim().startsWith('"') || !actual) continue;
+
+    // The arguments this case builds are declared between the previous case and this one.
+    const preamble = source.slice(previousEnd, match.index);
+    const values = new Map<string, string>();
+    ARGUMENT.lastIndex = 0;
+    for (let argument = ARGUMENT.exec(preamble); argument; argument = ARGUMENT.exec(preamble)) {
+      values.set(argument[1] ?? "", compact(argument[2] ?? ""));
+    }
+    previousEnd = parsed.end;
+
+    const call = compact(actual)
+      .replace(/^spar::render\s*\(/, "")
+      .replace(/\)$/, "")
+      .replace(/^solution\./, "")
+      .replace(/\barg\d+\b/g, (argument) => values.get(argument) ?? argument);
+    found.push({
+      name: literal(name) || `Case ${found.length + 1}`,
+      assertions: [{ method: "deepStrictEqual", call, expected: literal(expected ?? "") }],
+    });
+  }
+  return found;
+}
+
+/** A C++ string literal as its text. Anything else — a named constant, an
+ *  expression — is shown as written, because that is what the case says. */
+function literal(value: string): string {
+  const text = value.trim();
+  return /^".*"$/s.test(text) ? unescape(text.slice(1, -1)) : text;
 }
 
 function assertionsIn(body: string): CaseAssertion[] {

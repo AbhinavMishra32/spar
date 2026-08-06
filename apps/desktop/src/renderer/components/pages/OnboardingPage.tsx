@@ -1,47 +1,68 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Loader2 } from "lucide-react";
-import { ThinkingOrb } from "thinking-orbs";
+import { ArrowRight, Check } from "lucide-react";
 import type { Language, LearnerProfile, SessionSuggestion } from "@spar/domain";
-import type { SparApi } from "../../../shared/api";
+import type { PracticeSourceAccount, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
+import { Meter, MeterKey, type MeterBand } from "@/components/ui/meter";
 import { Textarea } from "@/components/ui/textarea";
 import { message } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
+import { CodeChefGlyph, CodeforcesGlyph, HackerRankGlyph, LeetCodeGlyph } from "../common/SourceGlyph";
+import { SparDots, SparDotsLine } from "../common/SparDots";
+import { PANEL, STEP, TEXT, useMarkPass } from "../auth/arrival";
 import { SparWordmark } from "../common/SparWordmark";
 import { ProviderConnectDialog, type Provider } from "../settings/ProviderConnectDialog";
 
-type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider";
+type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider" | "source";
 
 type Step = {
   id: StepId;
+  /** What the answer is called when it is read back. */
   header: string;
   question: string;
+  /** One line under the question, where a question needs a reason. */
+  caption?: string;
   /** Free-text steps open straight into the field; the rest list options. */
-  kind: "text" | "one" | "many" | "provider";
+  kind: "text" | "one" | "many" | "provider" | "source";
   placeholder?: string;
   optional?: boolean;
 };
 
+/* The labels are the subject of the question, not a category the answer was
+   filed under: "Name", read back beside `abhinav`, says what it is. The one-word
+   abstractions this replaced — Identity, Standing, Direction, Runtime — read as a
+   form's internal field names leaking onto the screen.
+
+   The questions themselves are asked the way a person would ask them. Spar is
+   about to spend an hour on someone's weakest work; opening with career-ladder
+   vocabulary sets the wrong tone for that. */
 const STEPS: Step[] = [
-  { id: "name", header: "Identity", question: "What should Spar call you?", kind: "text", placeholder: "Your name" },
-  { id: "experience", header: "Standing", question: "Where are you in your career?", kind: "one" },
-  { id: "focus", header: "Direction", question: "What do you want to get better at?", kind: "many", optional: true },
-  { id: "weakness", header: "Weak spot", question: "Where do you get stuck?", kind: "text", placeholder: "I can read async code but I never know what actually needs awaiting…", optional: true },
-  { id: "language", header: "Language", question: "Which language should challenges use?", kind: "one" },
+  { id: "name", header: "Name", question: "What should we call you?", caption: "It is how Spar addresses you, nothing more.", kind: "text", placeholder: "Your name" },
+  { id: "experience", header: "Experience", question: "How long have you been writing code?", kind: "one" },
+  { id: "focus", header: "Focus", question: "What would you like to get sharper at?", caption: "Pick as many as you like, or none — Spar works it out from your attempts either way.", kind: "many", optional: true },
+  { id: "weakness", header: "Sticking point", question: "Where do you usually get stuck?", caption: "In your own words. This is the single most useful thing you can tell Spar.", kind: "text", placeholder: "I can read async code, but I never know what actually needs awaiting…", optional: true },
+  { id: "language", header: "Language", question: "Which language should challenges be in?", caption: "You can change this per session later.", kind: "one" },
   /* Not optional, and last on purpose. Spar is the agent — an intake that ends
      with no model behind it produces an account that can answer nothing, and
      the learner finds that out at their first question instead of here. */
-  { id: "provider", header: "Runtime", question: "Which model should the agent run on?", kind: "provider" },
+  { id: "provider", header: "Model", question: "Which model should Spar run on?", kind: "provider" },
+  /* Optional, and after the model, because it changes what Spar can offer rather
+     than whether it works at all. Asked here rather than left to Settings for one
+     reason: someone who already grinds LeetCode should find their history waiting
+     for them on the first session, not discover three weeks later that Spar could
+     have been using it. Skipping is a real answer and costs nothing — every
+     challenge is then one Spar writes. */
+  { id: "source", header: "Problems", question: "Connect a problem provider?", caption: "Optional. Spar writes its own challenges either way.", kind: "source", optional: true },
 ];
 
-const EXPERIENCE: Array<{ value: LearnerProfile["experience"]; label: string }> = [
-  { value: "new", label: "Learning to program, or a year or so in" },
-  { value: "working", label: "Shipping code most days" },
-  { value: "senior", label: "Designing systems and reviewing others' work" },
+const EXPERIENCE: Array<{ value: LearnerProfile["experience"]; label: string; hint: string }> = [
+  { value: "new", label: "Getting started", hint: "Learning to program, or a year or so in" },
+  { value: "working", label: "Shipping regularly", hint: "Writing code most days" },
+  { value: "senior", label: "Designing and reviewing", hint: "Shaping systems and other people's work" },
 ];
 
 /** Kinds of reasoning, not frameworks: Spar trains judgement, and a framework
@@ -61,58 +82,71 @@ const FOCUS = [
 
 const LANGUAGES: Language[] = ["javascript", "typescript", "cpp"];
 
-/** One answered question, as the record shows it back. Reads as the start of the
- *  evidence trace rather than as a completed form field — the same quiet
- *  label-then-value line the activity rows use inside a session. */
-function Settled({ label, value, onEdit }: { label: string; value: string; onEdit?: (() => void) | undefined }) {
-  return (
-    <motion.button
-      animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        "flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 text-left transition-colors",
-        onEdit ? "hover:bg-accent/40" : "cursor-default",
-      )}
-      disabled={!onEdit}
-      initial={{ opacity: 0, y: -4 }}
-      onClick={onEdit}
-      transition={{ duration: 0.2 }}
-      type="button"
-    >
-      <Check className="size-3 shrink-0 text-muted-foreground/60" />
-      <span className="w-[5.5rem] shrink-0 text-ui text-muted-foreground">{label}</span>
-      <span className="min-w-0 flex-1 truncate text-ui text-foreground/90">{value}</span>
-    </motion.button>
-  );
+/** The judges Spar could set problems from. Only LeetCode is wired up; the rest
+ *  are listed anyway, because someone who lives on Codeforces needs to see that
+ *  Spar knows the name and has not got there yet — a list of one reads as a
+ *  product that only ever intends to speak LeetCode. */
+const SOURCES = [
+  { id: "leetcode", name: "LeetCode", Glyph: LeetCodeGlyph, soon: false },
+  { id: "codeforces", name: "Codeforces", Glyph: CodeforcesGlyph, soon: true },
+  { id: "hackerrank", name: "HackerRank", Glyph: HackerRankGlyph, soon: true },
+  { id: "codechef", name: "CodeChef", Glyph: CodeChefGlyph, soon: true },
+] as const;
+
+/** Their record at the source, in the app's own difficulty tones. Same bands as
+ *  the Settings panel draws, so the two readings are one picture. */
+function solvedBands(account: PracticeSourceAccount): MeterBand[] {
+  return [
+    { key: "easy", value: account.solved.easy, className: "bg-success", label: "Easy" },
+    { key: "medium", value: account.solved.medium, className: "bg-warning", label: "Medium" },
+    { key: "hard", value: account.solved.hard, className: "bg-destructive", label: "Hard" },
+  ];
 }
 
-/** A numbered option row. The number is not decoration — it is the key that
- *  picks it, the way the agent's own questions are answered mid-session. */
+/** The sunken group the sign-in window puts its fields in, reused for a list of
+ *  choices: one container, hairlines between the rows, and the selection filling
+ *  a row rather than outlining it. The intake is the same arrival as sign-in, so
+ *  it is built out of the same two shapes rather than out of cards. */
+const GROUP = "overflow-hidden rounded-xl bg-[var(--color-background-elevated-secondary)] shadow-[inset_0_0_0_0.5px_var(--border-strong)]";
+
+/** One choice. The number is not decoration — it is the key that picks it, the
+ *  way the agent's own questions are answered mid-session. */
 function OptionRow({
   index,
   selected,
   children,
+  hint,
   onClick,
   trailing,
 }: {
   index: number;
   selected: boolean;
   children: React.ReactNode;
+  /** The line under the label, where the choice needs explaining. */
+  hint?: string;
   onClick(): void;
   trailing?: React.ReactNode;
 }) {
   return (
-    <Button
+    <button
       aria-pressed={selected}
-      className={cn("h-auto min-h-8 w-full justify-start gap-2.5 px-3 py-2 text-left ring-0", selected && "bg-accent text-accent-foreground")}
+      className={cn(
+        "flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors not-first:border-t not-first:border-border",
+        selected ? "bg-[color-mix(in_oklab,var(--foreground)_7%,transparent)]" : "hover:bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]",
+      )}
       onClick={onClick}
       type="button"
-      variant="ghost"
     >
-      <span className="w-4 shrink-0 text-sm leading-none font-medium tabular-nums text-muted-foreground">{index}.</span>
-      <span className="min-w-0 flex-1 truncate">{children}</span>
+      {index > 0 && (
+        <span className={cn("w-3 shrink-0 text-ui tabular-nums transition-colors", selected ? "text-foreground/70" : "text-muted-foreground/55")}>{index}</span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-content text-foreground">{children}</span>
+        {hint && <span className="mt-0.5 block truncate text-ui text-muted-foreground">{hint}</span>}
+      </span>
       {trailing}
-      {selected && <Check data-icon="inline-end" />}
-    </Button>
+      <Check className={cn("size-3.5 shrink-0 transition-opacity", selected ? "opacity-70" : "opacity-0")} />
+    </button>
   );
 }
 
@@ -128,20 +162,35 @@ function Reading() {
     return () => clearInterval(timer);
   }, []);
   return (
-    <div className="flex items-center gap-2.5 px-3.5 py-6">
-      <ThinkingOrb aria-label="Working" size={20} state="shaping" style={{ width: 16, height: 16 }} />
-      <AnimatePresence initial={false} mode="wait">
+    /* Centred in the same box the drafted sessions will fill, so the wait and the
+       answer are one object changing rather than two things in different places.
+       The mark is the app's own, not a generic orb: this is Spar reading. */
+    <div className="flex items-center justify-center gap-2.5 px-4 py-5">
+      <SparDots pattern="wave" size={18} />
+      <motion.span animate={{ opacity: 1 }} className="thinking-shimmer text-content" initial={{ opacity: 0 }} key={line} transition={{ duration: 0.28 }}>
+        {READING[line]}
+      </motion.span>
+    </div>
+  );
+}
+
+/** Where the intake has got to. Six ticks rather than "3/6": the count is the
+ *  same information, and a row of ticks says it without asking anyone to read a
+ *  fraction while they are thinking about the question above it. */
+function Progress({ index, total }: { index: number; total: number }) {
+  return (
+    <div aria-hidden className="flex items-center justify-center gap-1.5">
+      {Array.from({ length: total }, (_, position) => (
         <motion.span
-          animate={{ opacity: 1, y: 0 }}
-          className="thinking-shimmer text-content"
-          exit={{ opacity: 0, y: -4 }}
-          initial={{ opacity: 0, y: 4 }}
-          key={line}
-          transition={{ duration: 0.28 }}
-        >
-          {READING[line]}
-        </motion.span>
-      </AnimatePresence>
+          animate={{ width: position === index ? 18 : 6 }}
+          className={cn(
+            "h-1 rounded-full transition-colors duration-300",
+            position < index ? "bg-[color-mix(in_oklab,var(--foreground)_40%,transparent)]" : position === index ? "bg-foreground" : "bg-[color-mix(in_oklab,var(--foreground)_12%,transparent)]",
+          )}
+          key={position}
+          transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+        />
+      ))}
     </div>
   );
 }
@@ -176,6 +225,7 @@ export function OnboardingPage({
   const [picked, setPicked] = useState<number | null>(null);
   const [saved, setSaved] = useState<LearnerProfile | null>(null);
 
+  const { pass, awake, rouse } = useMarkPass(busy);
   const step = STEPS[index]!;
   const providers = inventory?.providers ?? [];
   const connected = providers.filter((provider) => provider.state !== "disconnected");
@@ -186,12 +236,64 @@ export function OnboardingPage({
 
   useEffect(() => { if (step.kind === "text") field.current?.focus(); }, [step.id, step.kind]);
 
+  /* The practice source, asked for once during intake and otherwise left alone.
+     Held here rather than read from an inventory hook because there is exactly
+     one question being answered — is it connected, and as whom — and the sign-in
+     window is the only thing that can change it.
+
+     The username lands with the credential and the record takes another round
+     trip, so the two are held apart: the row can confirm itself the moment the
+     window closes and fill in the numbers a beat later. */
+  const [source, setSource] = useState<{ username: string; account: PracticeSourceAccount | null } | null>(null);
+  const [sourceBusy, setSourceBusy] = useState<"connect" | "disconnect" | null>(null);
+  const [sourceError, setSourceError] = useState("");
+  const readSource = async () => {
+    const inventory = await api?.practiceSource().catch(() => null);
+    if (!inventory) return;
+    setSource(inventory.state === "connected" ? { username: inventory.account?.username ?? inventory.name, account: inventory.account } : null);
+  };
+  // Once, when the api arrives. `readSource` is rebuilt every render and is not
+  // a dependency of anything but itself.
+  useEffect(() => { void readSource(); }, [api]);
+  const connectSource = async () => {
+    if (!api || sourceBusy || source) return;
+    setSourceBusy("connect");
+    setSourceError("");
+    try {
+      const result = await api.connectPracticeSource();
+      if (result.status === "connected") {
+        setSource({ username: result.username, account: null });
+        await readSource();
+      /* Cancelling is a decision, not an error: the step is optional and the
+         learner closing the window has answered it. */
+      } else if (result.status === "failed") setSourceError(result.message);
+    } catch (cause) {
+      setSourceError(message(cause));
+    } finally {
+      setSourceBusy(null);
+    }
+  };
+  const disconnectSource = async () => {
+    if (!api || sourceBusy) return;
+    setSourceBusy("disconnect");
+    setSourceError("");
+    try {
+      await api.disconnectPracticeSource();
+      setSource(null);
+    } catch (cause) {
+      setSourceError(message(cause));
+    } finally {
+      setSourceBusy(null);
+    }
+  };
+
   const answered = (id: StepId): string | null => {
     if (id === "name") return name.trim() || null;
     if (id === "experience") return EXPERIENCE.find((item) => item.value === experience)?.label ?? null;
     if (id === "focus") return focus.length ? focus.join(", ") : null;
     if (id === "weakness") return weakness.trim() || null;
     if (id === "language") return language ? LANGUAGE_LABEL[language] : null;
+    if (id === "source") return source?.username ?? null;
     if (!runnable) return null;
     return connected.length ? connected.map((provider) => provider.name).join(", ") : "Ready";
   };
@@ -237,6 +339,7 @@ export function OnboardingPage({
 
   const proceed = () => {
     if (!canAdvance || busy) return;
+    rouse();
     if (last) return void finish();
     setIndex((value) => Math.min(STEPS.length - 1, value + 1));
   };
@@ -246,6 +349,9 @@ export function OnboardingPage({
   const options = step.kind === "one" && step.id === "experience" ? EXPERIENCE.length
     : step.kind === "one" ? LANGUAGES.length
     : step.kind === "many" ? FOCUS.length
+    /* No numbers on the provider list: those rows lead with a brand mark, and a
+       digit in front of it turns four logos into a numbered form. */
+    : step.kind === "source" ? 0
     : step.kind === "provider" ? offered.length
     : 0;
 
@@ -285,130 +391,120 @@ export function OnboardingPage({
     return () => removeEventListener("keydown", listener);
   }, [drafted.length, phase]);
 
+  /** The one action, and the quiet ways around it — the same two rows the
+   *  sign-in window ends on. */
+  const footer = (
+    <>
+      <Button className="mt-3 h-11 w-full text-[0.8125rem]" disabled={busy || !canAdvance} onClick={proceed} size="lg" type="button">
+        <motion.span animate={{ opacity: 1 }} className="inline-flex items-center gap-1.5" initial={{ opacity: 0 }} key={last ? "begin" : "next"} transition={TEXT}>
+          {last ? (busy ? "Reading your intake…" : "Begin") : step.optional && !answered(step.id) ? "Skip for now" : "Continue"}
+          {!busy && <ArrowRight data-icon="inline-end" />}
+        </motion.span>
+      </Button>
+      {/* One status line for the step, and `||` rather than `??` — these are
+          empty strings, not nulls, so the nullish form printed a blank line and
+          silently ate every hint under every question. */}
+      <p aria-live="polite" className={cn("mt-2.5 min-h-4 text-center text-ui", error || (step.id === "source" && sourceError) ? "text-destructive" : "text-muted-foreground/70")} role="status">
+        {error ||
+          (step.id === "source" ? sourceError : "") ||
+          (step.id === "provider" && !runnable
+            ? inventory ? "Connect a provider to continue" : ""
+            : step.kind === "text"
+              ? "Return to continue"
+              : options
+                ? `Press 1–${options} to choose${step.kind === "many" ? ", or several" : ""}`
+                : "")}
+      </p>
+      {index > 0 && (
+        <div className="mt-1 flex justify-center text-ui">
+          <button className="rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-45" disabled={busy} onClick={() => setIndex((value) => value - 1)} type="button">
+            Back to {STEPS[index - 1]!.header.toLowerCase()}
+          </button>
+        </div>
+      )}
+    </>
+  );
+
   return (
-    <div className="app-drag app-pane grid h-full place-items-center overflow-y-auto px-6 py-10">
-      <div className="app-no-drag w-full max-w-[34rem]">
-        <div className="flex items-baseline gap-2 px-1.5 pb-3">
-          <SparWordmark className="text-[1rem] text-foreground/90" />
-          <span className="text-ui text-muted-foreground/70">{phase === "intake" ? "intake" : "sparring"}</span>
-        </div>
+    <div className="app-drag app-pane relative grid h-full place-items-center overflow-y-auto px-6 py-10">
+      {/* The same grid the sign-in window stands in. The intake is the second
+          room of one arrival, not a different building — which is also why there
+          is no card here: the question sits on the pane exactly as the sign-in
+          fields do. */}
+      <div aria-hidden className="auth-field text-foreground" />
 
-        {/* The answers stay on screen as they settle. Nothing about this app is a
-            form you fill and submit; it is a record that accumulates, and the
-            intake is simply its first few lines. */}
-        <div className="mb-2.5">
-          {STEPS.slice(0, phase === "intake" ? index : STEPS.length).map((earlier, position) => {
-            const value = answered(earlier.id);
-            return (
-              <Settled
-                key={earlier.id}
-                label={earlier.header}
-                onEdit={phase === "intake" ? () => setIndex(position) : undefined}
-                value={value ?? "Skipped"}
-              />
-            );
-          })}
-        </div>
+      <motion.div className="app-no-drag relative w-full max-w-[23rem]" layout transition={PANEL}>
+        <motion.div className="flex flex-col items-center gap-3.5" layout="position" transition={PANEL}>
+          <div className="flex items-center justify-center gap-2.5">
+            <SparDots key={pass} pattern={awake ? "pass" : "still"} size={26} />
+            <SparWordmark className="text-[1.75rem] leading-none text-foreground" />
+          </div>
+          {phase === "intake" && <Progress index={index} total={STEPS.length} />}
+        </motion.div>
 
-        <AnimatePresence initial={false} mode="wait">
-          {phase !== "intake" ? (
-            <motion.div
-              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-              className="overflow-hidden rounded-xl bg-card shadow-[var(--app-shadow-overlay)] ring-[0.5px] ring-[var(--border-strong)]"
-              initial={{ opacity: 0, y: 8, filter: "blur(4px)" }}
-              key="sparring"
-              transition={{ duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
-            >
-              <div className="flex items-center justify-between gap-2 px-3.5 pt-2.5">
-                <p className="text-ui-sm font-medium text-muted-foreground">Today's focus</p>
-                {suggestions?.source === "starter" && drafted.length > 0 && (
-                  <span className="text-ui-sm text-muted-foreground/70">Starting points</span>
-                )}
-              </div>
-              <h1 className="px-3.5 pb-2.5 pt-1.5 text-base font-medium leading-snug">
-                {phase === "reading" ? `One moment, ${name.trim().split(" ")[0] || "there"}.` : drafted.length ? "Where do you want to start sparring?" : "Start a session in your own words."}
+        {/* One step replaces another, with no exit to wait on — see the note in
+            AuthPage: an interrupted exit leaves a half-gone form on screen. */}
+        <motion.div
+          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0, y: 6 }}
+          key={phase === "intake" ? step.id : phase}
+          transition={STEP}
+        >
+            <div className="mt-6 text-center">
+              <h1 className="text-[1.0625rem] font-medium leading-snug tracking-[-0.01em] text-foreground">
+                {phase === "intake"
+                  ? step.question
+                  : phase === "reading"
+                    ? `One moment, ${name.trim().split(" ")[0] || "there"}.`
+                    : drafted.length
+                      ? "Where would you like to start?"
+                      : "Start a session in your own words."}
               </h1>
+              <p className="mx-auto mt-1.5 max-w-[19rem] text-ui leading-[1.6] text-muted-foreground">
+                {phase === "intake"
+                  ? step.caption ?? ""
+                  : phase === "reading"
+                    ? "Spar is reading what you told it and drafting a few places to begin."
+                    : drafted.length
+                      ? suggestions?.source === "starter"
+                        ? "Starting points, until Spar has watched you work."
+                        : "Drafted from your intake. Pick one, or write your own once you are inside."
+                      : "Spar could not reach a provider to draft sessions — describe what you want to get better at once you are inside."}
+              </p>
+            </div>
 
-              {phase === "reading" ? (
-                <Reading />
-              ) : (
-                <div className="px-2.5 pb-1.5">
-                  {/* Staggered, not dealt out one at a time: they were drafted together
-                      and arriving together is the honest reading of that. */}
-                  {drafted.map((suggestion, position) => (
-                    <motion.div
-                      animate={{ opacity: 1, y: 0 }}
-                      initial={{ opacity: 0, y: 6 }}
-                      key={suggestion.title}
-                      transition={{ delay: 0.06 * position, duration: 0.32, ease: [0.32, 0.72, 0, 1] }}
-                    >
-                      <Button
-                        aria-pressed={picked === position}
-                        className={cn("h-auto w-full items-start justify-start gap-2.5 px-3 py-2.5 text-left ring-0", picked === position && "bg-accent text-accent-foreground")}
-                        onClick={() => setPicked(position)}
-                        type="button"
-                        variant="ghost"
-                      >
-                        <span className="w-4 shrink-0 pt-px text-sm leading-none font-medium tabular-nums text-muted-foreground">{position + 1}.</span>
-                        <span className="min-w-0 flex-1 whitespace-normal">
-                          <span className="block truncate text-content font-medium">{suggestion.title}</span>
-                          <span className="mt-0.5 block text-ui leading-[1.5] text-muted-foreground">{suggestion.why}</span>
-                        </span>
-                        {language && <LanguageGlyph className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" language={language} />}
-                        {picked === position && <Check className="mt-0.5 size-3.5 shrink-0" />}
-                      </Button>
-                    </motion.div>
-                  ))}
-                  {!drafted.length && (
-                    <p className="px-3 py-2 text-ui leading-[1.6] text-muted-foreground">
-                      Spar could not reach a provider to draft sessions. Open Spar and describe what you want to get better at — the agent reads your intake either way.
-                    </p>
-                  )}
+            <div className="mt-4">
+              {phase === "reading" && (
+                <div className={GROUP}>
+                  <Reading />
                 </div>
               )}
 
-              {error && <p className="px-3.5 pb-1 text-ui text-destructive">{error}</p>}
+              {phase === "sparring" && drafted.length > 0 && (
+                <div className={GROUP}>
+                  {/* Staggered, not dealt out one at a time: they were drafted
+                      together and arriving together is the honest reading of that. */}
+                  {drafted.map((suggestion, position) => (
+                    <motion.div animate={{ opacity: 1 }} initial={{ opacity: 0 }} key={suggestion.title} transition={{ delay: 0.06 * position, duration: 0.3 }}>
+                      <OptionRow
+                        hint={suggestion.why}
+                        index={position + 1}
+                        onClick={() => setPicked(position)}
+                        selected={picked === position}
+                        trailing={language ? <LanguageGlyph className="size-3.5 shrink-0 text-muted-foreground" language={language} /> : undefined}
+                      >
+                        {suggestion.title}
+                      </OptionRow>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
 
-              <div className="flex items-center gap-2 p-3 pt-1.5">
-                <span className="min-w-0 flex-1 truncate px-0.5 text-ui text-muted-foreground/65">
-                  {phase === "sparring" && drafted.length ? `Press 1–${drafted.length} to choose` : null}
-                </span>
-                {phase === "sparring" && (
-                  <>
-                    <Button disabled={busy} onClick={() => void leave()} type="button" variant="outline">
-                      {drafted.length ? "I'll write my own" : "Open Spar"}
-                    </Button>
-                    {drafted.length > 0 && (
-                      <Button disabled={busy || picked === null} onClick={() => void leave(drafted[picked ?? 0]?.goal)} type="button">
-                        {busy && <Loader2 data-icon="inline-start" className="animate-spin" />}
-                        Start a session
-                      </Button>
-                    )}
-                  </>
-                )}
-              </div>
-            </motion.div>
-          ) : (
-          <motion.div
-            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            className="overflow-hidden rounded-xl bg-card shadow-[var(--app-shadow-overlay)] ring-[0.5px] ring-[var(--border-strong)]"
-            exit={{ opacity: 0, y: -6, filter: "blur(4px)" }}
-            initial={{ opacity: 0, y: 8, filter: "blur(4px)" }}
-            key={step.id}
-            transition={{ duration: 0.24, ease: [0.32, 0.72, 0, 1] }}
-          >
-            <div className="flex items-center justify-between gap-2 px-3.5 pt-2.5">
-              <p className="text-ui-sm font-medium text-muted-foreground">{step.header}</p>
-              <span className="text-ui-sm font-medium tabular-nums text-muted-foreground">{index + 1}/{STEPS.length}</span>
-            </div>
-            <h1 className="px-3.5 pb-2.5 pt-1.5 text-base font-medium leading-snug">{step.question}</h1>
-
-            <div className="px-2.5 pb-1.5">
-              {step.kind === "text" && (
-                <div className="rounded-md bg-secondary px-3 py-2">
+              {phase === "intake" && step.kind === "text" && (
+                <div className={cn(GROUP, "px-3.5 py-3 transition-shadow focus-within:shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_26%,transparent)]")}>
                   <Textarea
                     ref={field}
-                    className="field-sizing-content min-h-5 resize-none rounded-none border-0 bg-transparent p-0 text-sm leading-5 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
+                    className="field-sizing-content min-h-6 resize-none rounded-none border-0 bg-transparent p-0 text-content leading-6 shadow-none focus-visible:border-transparent focus-visible:ring-0 dark:bg-transparent"
                     maxLength={step.id === "name" ? 60 : 600}
                     onChange={(event) => (step.id === "name" ? setName(event.target.value) : setWeakness(event.target.value))}
                     onKeyDown={(event) => {
@@ -423,104 +519,204 @@ export function OnboardingPage({
                 </div>
               )}
 
-              {step.id === "experience" && EXPERIENCE.map((option, position) => (
-                <OptionRow
-                  index={position + 1}
-                  key={option.value}
-                  onClick={() => setExperience(option.value)}
-                  selected={experience === option.value}
-                >
-                  {option.label}
-                </OptionRow>
-              ))}
-
-              {step.id === "focus" && FOCUS.map((option, position) => (
-                <OptionRow
-                  index={position + 1}
-                  key={option}
-                  onClick={() => setFocus((current) => (current.includes(option) ? current.filter((value) => value !== option) : [...current, option]))}
-                  selected={focus.includes(option)}
-                >
-                  {option}
-                </OptionRow>
-              ))}
-
-              {step.id === "language" && LANGUAGES.map((option, position) => (
-                <OptionRow
-                  index={position + 1}
-                  key={option}
-                  onClick={() => setLanguage(option)}
-                  selected={language === option}
-                  trailing={<LanguageGlyph className="size-3.5 shrink-0 text-muted-foreground" language={option} />}
-                >
-                  {LANGUAGE_LABEL[option]}
-                </OptionRow>
-              ))}
-
-              {step.id === "provider" && (
-                <>
-                  {/* Said before the list, not after a failed Begin: connecting
-                      one of these is the step, and the sentence is what makes
-                      the disabled button read as a requirement rather than a bug. */}
-                  {!runnable && (
-                    <p className="px-3 pb-1.5 pt-0.5 text-ui leading-[1.6] text-muted-foreground">
-                      Spar runs the agent on your own subscription or API key — nothing is proxied through us. Connect one
-                      to finish; you can add or change providers later in Settings.
-                    </p>
-                  )}
-                  {connected.map((provider) => (
-                    <OptionRow
-                      index={0}
-                      key={provider.id}
-                      onClick={() => setConnecting(provider)}
-                      selected
-                      trailing={<ProviderGlyph className="size-3.5 shrink-0 text-muted-foreground" provider={provider.id} />}
-                    >
-                      {provider.name}
+              {phase === "intake" && step.id === "experience" && (
+                <div className={GROUP}>
+                  {EXPERIENCE.map((option, position) => (
+                    <OptionRow hint={option.hint} index={position + 1} key={option.value} onClick={() => setExperience(option.value)} selected={experience === option.value}>
+                      {option.label}
                     </OptionRow>
                   ))}
-                  {offered.map((provider, position) => (
+                </div>
+              )}
+
+              {/* Ten of these, and none of them needs a row of its own: as chips
+                  they read as a palette to pick from rather than as a checklist
+                  somebody has to work down. */}
+              {phase === "intake" && step.id === "focus" && (
+                <div className="flex flex-wrap justify-center gap-1.5">
+                  {FOCUS.map((option) => {
+                    const on = focus.includes(option);
+                    return (
+                      <button
+                        aria-pressed={on}
+                        className={cn(
+                          "rounded-full px-3 py-1.5 text-ui transition-colors",
+                          on
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-[var(--color-background-elevated-secondary)] text-muted-foreground shadow-[inset_0_0_0_0.5px_var(--border-strong)] hover:text-foreground",
+                        )}
+                        key={option}
+                        onClick={() => setFocus((current) => (current.includes(option) ? current.filter((value) => value !== option) : [...current, option]))}
+                        type="button"
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {phase === "intake" && step.id === "language" && (
+                <div className={GROUP}>
+                  {LANGUAGES.map((option, position) => (
                     <OptionRow
                       index={position + 1}
-                      key={provider.id}
-                      onClick={() => setConnecting(provider)}
-                      selected={false}
-                      trailing={<ProviderGlyph className="size-3.5 shrink-0 text-muted-foreground" provider={provider.id} />}
+                      key={option}
+                      onClick={() => setLanguage(option)}
+                      selected={language === option}
+                      trailing={<LanguageGlyph className="size-3.5 shrink-0 text-muted-foreground" language={option} />}
                     >
-                      {provider.name}
+                      {LANGUAGE_LABEL[option]}
                     </OptionRow>
                   ))}
-                  {!inventory && (
-                    <p className="flex items-center gap-2 px-3 py-2 text-ui text-muted-foreground">
-                      <Loader2 className="size-3.5 animate-spin" />Reading the provider inventory…
+                </div>
+              )}
+
+              {/* The judges, as a list of judges — brand first, the way the model
+                  step lists providers. What this replaced was a lone Connect
+                  button under three paragraphs of prose, which said nothing about
+                  what Spar can talk to and made the one live integration look
+                  like the whole story.
+
+                  A connected row grows its record rather than a sentence about
+                  one. Three counts and a bar is what "Spar knows where you are"
+                  looks like; "Spar can read what you have solved" is only a
+                  promise that it will. */}
+              {phase === "intake" && step.id === "source" && (
+                <div className={GROUP}>
+                  {SOURCES.map(({ id, name, Glyph, soon }) => {
+                    const connected = id === "leetcode" && source !== null;
+                    const bands = source?.account ? solvedBands(source.account) : [];
+                    /* Only a row you can act on is a button. A connected one owns
+                       a Disconnect of its own, and a button inside a button is
+                       neither valid nor operable from the keyboard. */
+                    const head = (
+                      <>
+                        <Glyph className="size-[1.15rem] shrink-0 text-foreground/85" />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate text-content text-foreground">{name}</span>
+                            {connected && <Check className="size-3 shrink-0 text-[var(--success)]" />}
+                          </span>
+                          {connected && <span className="mt-0.5 block truncate text-ui text-muted-foreground">{source.username}</span>}
+                        </span>
+                      </>
+                    );
+                    const headClass = "flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors";
+                    return (
+                      <div className={cn("not-first:border-t not-first:border-border", soon && "opacity-45")} key={id}>
+                        {connected || soon ? (
+                          <div className={headClass}>
+                            {head}
+                            {soon
+                              ? <span className="shrink-0 text-ui text-muted-foreground">Soon</span>
+                              : (
+                                <button
+                                  className="shrink-0 rounded text-ui text-muted-foreground transition-colors hover:text-destructive disabled:opacity-45"
+                                  disabled={sourceBusy !== null}
+                                  onClick={() => void disconnectSource()}
+                                  type="button"
+                                >
+                                  {sourceBusy === "disconnect" ? "Disconnecting…" : "Disconnect"}
+                                </button>
+                              )}
+                          </div>
+                        ) : (
+                          <button
+                            className={cn(headClass, "hover:bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]")}
+                            disabled={sourceBusy !== null}
+                            onClick={() => void connectSource()}
+                            type="button"
+                          >
+                            {head}
+                            {sourceBusy === "connect"
+                              ? <SparDots pattern="pulse" size={16} />
+                              : <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/60" />}
+                          </button>
+                        )}
+
+                        {connected && (
+                          <div className="px-3.5 pb-3">
+                            {source.account
+                              ? (
+                                <>
+                                  {/* The mix, not the fraction of the catalogue:
+                                      412 of 3,600 draws a sliver nobody can read,
+                                      and what is worth seeing at a glance here is
+                                      how the solves are spread across the three
+                                      difficulties. The count says the rest. */}
+                                  <Meter animate bands={bands} height="0.3125rem" />
+                                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    {bands.filter((band) => band.value > 0).map((band) => <MeterKey band={band} key={band.key} />)}
+                                    <span className="ml-auto shrink-0 text-ui tabular-nums text-muted-foreground">
+                                      <span className="text-foreground/80">{source.account.solved.total.toLocaleString()}</span> solved
+                                      {source.account.streak > 0 && ` · ${source.account.streak}-day streak`}
+                                    </span>
+                                  </div>
+                                </>
+                              )
+                              : <SparDotsLine pattern="pulse" size={14}>Reading your record…</SparDotsLine>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {phase === "intake" && step.id === "provider" && (
+                <>
+                  {/* Said before the list, not after a failed Begin: connecting one
+                      of these is the step, and the sentence is what makes the
+                      disabled button read as a requirement rather than a bug. */}
+                  {!runnable && (
+                    <p className="mx-auto -mt-1 mb-3 max-w-[20rem] text-center text-ui leading-[1.6] text-muted-foreground">
+                      Spar runs on your own subscription or API key — nothing is proxied through us.
                     </p>
                   )}
+                  <div className={GROUP}>
+                    {connected.map((provider) => (
+                      <OptionRow index={0} key={provider.id} onClick={() => setConnecting(provider)} selected trailing={<ProviderGlyph className="size-3.5 shrink-0 text-muted-foreground" provider={provider.id} />}>
+                        {provider.name}
+                      </OptionRow>
+                    ))}
+                    {offered.map((provider, position) => (
+                      <OptionRow index={position + 1} key={provider.id} onClick={() => setConnecting(provider)} selected={false} trailing={<ProviderGlyph className="size-3.5 shrink-0 text-muted-foreground" provider={provider.id} />}>
+                        {provider.name}
+                      </OptionRow>
+                    ))}
+                    {!inventory && (
+                      <p className="flex items-center gap-2.5 px-3.5 py-3 text-ui text-muted-foreground">
+                        <SparDots pattern="pulse" size={16} />Reading the provider inventory…
+                      </p>
+                    )}
+                  </div>
                 </>
               )}
             </div>
 
-            {error && <p className="px-3.5 pb-1 text-ui text-destructive">{error}</p>}
-
-            <div className="flex items-center gap-2 p-3 pt-1.5">
-              <span className="min-w-0 flex-1 truncate px-0.5 text-ui text-muted-foreground/65">
-                {step.id === "provider" && !runnable
-                  ? inventory ? "Connect a provider to continue" : null
-                  : step.kind === "text"
-                    ? "Return to continue"
-                    : options
-                      ? `Press 1–${options} to choose${step.kind === "many" ? ", or several" : ""}`
-                      : null}
-              </span>
-              {index > 0 && <Button disabled={busy} onClick={() => setIndex((value) => value - 1)} type="button" variant="outline">Back</Button>}
-              <Button disabled={busy || !canAdvance} onClick={proceed} type="button">
-                {busy && <Loader2 data-icon="inline-start" className="animate-spin" />}
-                {last ? (busy ? "Reading…" : "Begin") : step.optional && !answered(step.id) ? "Skip" : "Next"}
-              </Button>
-            </div>
+            {phase === "intake" ? (
+              footer
+            ) : phase === "sparring" ? (
+              <>
+                <Button className="mt-3 h-11 w-full text-[0.8125rem]" disabled={busy || (drafted.length > 0 && picked === null)} onClick={() => void leave(drafted.length ? drafted[picked ?? 0]?.goal : undefined)} size="lg" type="button">
+                  {busy ? "Opening Spar…" : drafted.length ? "Start sparring" : "Open Spar"}
+                  {!busy && <ArrowRight data-icon="inline-end" />}
+                </Button>
+                <p aria-live="polite" className={cn("mt-2.5 min-h-4 text-center text-ui", error ? "text-destructive" : "text-muted-foreground/70")} role="status">
+                  {error || (drafted.length ? `Press 1–${drafted.length} to choose` : "")}
+                </p>
+                {drafted.length > 0 && (
+                  <div className="mt-1 flex justify-center text-ui">
+                    <button className="rounded text-muted-foreground transition-colors hover:text-foreground disabled:opacity-45" disabled={busy} onClick={() => void leave()} type="button">
+                      I'll write my own
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : null}
           </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
+      </motion.div>
 
       <ProviderConnectDialog
         api={api}

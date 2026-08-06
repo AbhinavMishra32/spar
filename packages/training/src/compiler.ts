@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { questionDesignSchema, type QuestionDesign } from "@spar/domain";
+import { runLimits } from "./limits.js";
 
 export type ValidationRun = { exitCode: number; stdout: string; stderr: string; durationMs: number };
 export type ValidationRunner = (files: Record<string,string>, command: string, limits: { timeoutMs: number; memoryMb: number }) => Promise<ValidationRun>;
@@ -25,17 +26,17 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
     differentialDiagnostics = differential.diagnostics;
   }
   const checks: ValidationReport["checks"] = [...structural];
-  const reference = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+  const reference = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
   checks.push({ name: "reference solution", passed: reference.exitCode === 0, detail: summarize(reference) });
   // Whether each misconception replaces the implementation was already settled
   // structurally, so this loop only measures behaviour.
   for (const [index, incorrect] of design.knownIncorrectFiles.entries()) {
-    const visibleResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+    const visibleResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language));
     checks.push({ name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : summarize(visibleResult) });
-    const hiddenResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+    const hiddenResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
     checks.push({ name: `known incorrect ${index + 1} fails hidden`, passed: hiddenResult.exitCode !== 0, detail: hiddenResult.exitCode !== 0 ? "Targeted hidden tests rejected the misconception" : differentialDiagnostics[index] ?? "Incorrect implementation passed visible and hidden tests" });
   }
-  const visibleOnly = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+  const visibleOnly = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, runLimits(design.language));
   checks.push({ name: "visible test agreement", passed: visibleOnly.exitCode === 0, detail: summarize(visibleOnly) });
   checks.push({ name: "targeted hidden coverage", passed: design.hiddenTests && Object.keys(design.hiddenTests).length > 0 && design.expectedFailureSignatures.length > 0, detail: `${Object.keys(design.hiddenTests).length} hidden files cover ${design.expectedFailureSignatures.length} expected signatures` });
   checks.push({ name: "accidental difficulty budget", passed: design.accidentalDifficulty.length <= 3, detail: design.accidentalDifficulty.join(", ") || "No incidental complexity declared" });
@@ -67,6 +68,16 @@ export function diagnose(run: ValidationRun): string {
     .map((line) => line.trimEnd())
     .filter((line) => line.trim().length > 0);
   if (!lines.length) return "the test command failed without output";
+
+  /* A killed run outranks everything else in the log, because whatever is below it
+     was cut off mid-sentence. It also has to be named for what it is: the agent
+     that read `Process stopped after 8000ms` as an ordinary failure went looking
+     for the infinite loop in a correct three-line scan and rewrote it until its
+     retry budget was gone. The only two things it can mean are said here. */
+  const stopped = lines.find((line) => /^Process stopped after \d+ms/.test(line.trim()));
+  if (stopped) {
+    return `${stopped.trim()} The command was killed at the time limit, so no test result came back. That is either a program that does not terminate on some input, or a build slower than the limit — check for the non-terminating case first, and do not redesign a candidate whose logic the earlier runs already agreed with.`;
+  }
 
   const compiler = lines.filter((line) => /\b(?:fatal error|error):/i.test(line) || /^\s*(?:Undefined symbols|ld:|clang|duplicate symbol)/.test(line));
   if (compiler.length) {
@@ -248,7 +259,7 @@ async function materializeJavascriptOracles(design: QuestionDesign, run: Validat
       if (!calls.length) return [file, source] as const;
       const instrumented = rewriteAssertions(source, calls, calls.map((call, index) => `globalThis.__sparOracle(${index}, (${call.arguments[0]}))`));
       const oracleSource = `globalThis.__sparOracle = (index, actual) => console.log("__SPAR_ORACLE__" + JSON.stringify({ index, actual }));\n${instrumented}`;
-      const result = await run({ ...design.starterFiles, ...design.referenceFiles, [file]: oracleSource }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+      const result = await run({ ...design.starterFiles, ...design.referenceFiles, [file]: oracleSource }, design.runCommand, runLimits(design.language));
       if (result.exitCode !== 0) return [file, source] as const;
       const actualByIndex = new Map<number, unknown>();
       for (const match of result.stdout.matchAll(/__SPAR_ORACLE__(\{[^\r\n]*\})/g)) {
@@ -358,16 +369,16 @@ async function materializeDifferentialHiddenTests(design: QuestionDesign, run: V
     for (let candidateIndex = 0; candidateIndex < candidateSources.length; candidateIndex += 1) {
       const candidateSource = candidateSources[candidateIndex];
       if (!candidateSource) continue;
-      const visible = await run({ ...design.starterFiles, [implementationPath]: candidateSource, ...design.visibleTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+      const visible = await run({ ...design.starterFiles, [implementationPath]: candidateSource, ...design.visibleTests }, design.runCommand, runLimits(design.language));
       if (candidateIndex === 0) candidateSources.push(...synthesizeTargetedMutants(referenceSource, visible.exitCode !== 0));
       if (visible.exitCode !== 0) continue;
-      const existingHidden = await run({ ...design.starterFiles, [implementationPath]: candidateSource, ...design.visibleTests, ...hiddenTests }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+      const existingHidden = await run({ ...design.starterFiles, [implementationPath]: candidateSource, ...design.visibleTests, ...hiddenTests }, design.runCommand, runLimits(design.language));
       if (existingHidden.exitCode !== 0) {
         knownIncorrectFiles[index] = { ...incorrect, [implementationPath]: candidateSource };
         foundCounterexample = true;
         break;
       }
-      const discovery = await run({ ...design.starterFiles, ...design.referenceFiles, [incorrectPath]: candidateSource, [harnessPath]: harness }, design.runCommand, { timeoutMs: 8_000, memoryMb: 512 });
+      const discovery = await run({ ...design.starterFiles, ...design.referenceFiles, [incorrectPath]: candidateSource, [harnessPath]: harness }, design.runCommand, runLimits(design.language));
       if (discovery.exitCode !== 0) continue;
       const marker = discovery.stdout.match(/__SPAR_COUNTEREXAMPLE__(\{[^\r\n]*\})/)?.[1];
       if (!marker) continue;

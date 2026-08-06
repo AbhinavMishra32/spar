@@ -28,6 +28,16 @@ export type DotPattern =
   /** The whole grid breathing, diagonal intact. For reading and thinking, where
    *  there is no progress to imply. */
   | "pulse"
+  /** One band, corner to corner, that begins and ends on the resting mark.
+   *
+   *  The three above loop, which means they are only ever *interrupted*: stop one
+   *  and every dot snaps from wherever the cycle had it to its resting size. That
+   *  is fine under a spinner nobody watches finish, and wrong for a mark that is
+   *  woken by a click and then has to settle back into the logo in front of the
+   *  person who clicked. So this one runs exactly once, is staggered forwards
+   *  rather than backwards, and its first and last keyframes are the resting
+   *  values themselves — when it ends there is nothing to snap back to. */
+  | "pass"
   /** The resting mark. What reduced-motion collapses to, and usable on its own
    *  as a small brand glyph. */
   | "still";
@@ -66,10 +76,16 @@ const DURATION: Record<Exclude<DotPattern, "still">, number> = {
   wave: 1.5,
   sweep: 2.2,
   pulse: 1.8,
+  /** What one dot spends rising and falling. The band's travel is on top of it. */
+  pass: 0.62,
 };
 /** How much of the cycle the travel occupies. The rest is the band off-screen,
  *  which is what separates one pass from the next. */
 const TRAVEL = 0.55;
+/** How long the single pass takes to cross the grid, corner to corner. */
+const PASS_TRAVEL = 0.62;
+/** Wall-clock length of one `pass`, for callers timing anything against it. */
+export const PASS_MS = (DURATION.pass + PASS_TRAVEL) * 1000;
 
 export function SparDots({
   pattern = "wave",
@@ -104,13 +120,26 @@ export function SparDots({
               opacity: dot.restTone,
               ...(pattern === "still"
                 ? {}
-                : {
-                    animationName: `spar-dots-${pattern}`,
-                    animationDuration: `${DURATION[pattern]}s`,
-                    animationIterationCount: "infinite",
-                    animationTimingFunction: "ease-in-out",
-                    animationDelay: `${-DURATION[pattern] * (1 - TRAVEL * dot.along)}s`,
-                  }),
+                : pattern === "pass"
+                  ? {
+                      animationName: "spar-dots-pass",
+                      animationDuration: `${DURATION.pass}s`,
+                      animationIterationCount: 1,
+                      animationTimingFunction: "ease-in-out",
+                      /* Forwards, so the band starts at the top-left corner and
+                         arrives at the bottom-right — and `both` so a dot holds
+                         its resting values before its turn and after it, which is
+                         what makes the grid a logo again the moment it lands. */
+                      animationDelay: `${PASS_TRAVEL * dot.along}s`,
+                      animationFillMode: "both",
+                    }
+                  : {
+                      animationName: `spar-dots-${pattern}`,
+                      animationDuration: `${DURATION[pattern]}s`,
+                      animationIterationCount: "infinite",
+                      animationTimingFunction: "ease-in-out",
+                      animationDelay: `${-DURATION[pattern] * (1 - TRAVEL * dot.along)}s`,
+                    }),
               // Read by the keyframes so each dot departs from and returns to its
               // own resting values, instead of the grid collapsing to a uniform
               // one every cycle.

@@ -12,7 +12,7 @@ import {
 import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/format";
-import { declaredCases } from "@/lib/testCases";
+import { declaredCases, sourcedCases, type DeclaredCase } from "@/lib/testCases";
 import { SparDots } from "@/components/common/SparDots";
 import { EMPTY_REPORT, headline, parseTestOutput, type CaseStatus, type TestCaseResult } from "../../../shared/testReport";
 import { AttemptsPanel } from "./AttemptsPanel";
@@ -125,8 +125,10 @@ export function ResultPanel({
   /* Only the visible test files are read here, and a challenge re-opened from
      history has those without having a live attempt behind it. Narrowed to what
      is used so the practice page can mount this panel without inventing an
-     attempt id it has no business holding. */
-  question: Pick<ActiveQuestion, "visibleTestFiles">;
+     attempt id it has no business holding. `source` comes with it because a
+     sourced problem publishes its cases and they are the cases — the generated
+     test file is downstream of them. */
+  question: Pick<ActiveQuestion, "visibleTestFiles"> & Partial<Pick<ActiveQuestion, "source">>;
   tab: ResultTab;
   onTab(tab: ResultTab): void;
   testFiles: Record<string, string>;
@@ -144,12 +146,25 @@ export function ResultPanel({
   onClearTerminal(): void;
   onCollapse(): void;
 }) {
-  const declared = useMemo(() => declaredCases(testFiles, question.visibleTestFiles), [testFiles, question.visibleTestFiles]);
+  /* A sourced problem's cases travel on the challenge, already structured. The
+     file parser is for challenges written as `test(…)` blocks — every generated
+     one, and no sourced one — so reading a mounted C++ problem through it showed
+     the learner a dump of a .cpp file where its published cases should have been. */
+  const declared = useMemo(
+    () => (question.source?.cases.length
+      ? sourcedCases(question.source)
+      : declaredCases(testFiles, question.visibleTestFiles)),
+    [question.source, testFiles, question.visibleTestFiles],
+  );
   const report = useMemo(() => (running ? EMPTY_REPORT : parseTestOutput(terminal)), [terminal, running]);
 
   const [selectedDeclared, setSelectedDeclared] = useState("");
   const [selectedResult, setSelectedResult] = useState("");
-  const [rawOpen, setRawOpen] = useState(false);
+  /* Null until the learner touches it, so the default can depend on the run: a
+     graded run says everything in its cases and the log is noise, while an
+     ungraded one keeps the reason it did not run in the output itself — which is
+     the one thing they need and must not be a click away. */
+  const [rawOpen, setRawOpen] = useState<boolean | null>(null);
   const rawEnd = useRef<HTMLDivElement>(null);
 
   const activeDeclared = declared.cases.find((item) => item.id === selectedDeclared) ?? declared.cases[0];
@@ -158,14 +173,16 @@ export function ResultPanel({
   const activeResult =
     report.cases.find((item) => item.id === selectedResult) ?? firstFailure ?? report.cases[0];
 
+  const rawShown = rawOpen ?? !report.parsed;
+
   useEffect(() => {
     setSelectedResult("");
-    setRawOpen(false);
+    setRawOpen(null);
   }, [terminal === ""]);
 
   useEffect(() => {
-    if (rawOpen) rawEnd.current?.scrollIntoView({ block: "end" });
-  }, [terminal, rawOpen]);
+    if (rawShown) rawEnd.current?.scrollIntoView({ block: "end" });
+  }, [terminal, rawShown]);
 
   return (
     <div className="flex h-full flex-col bg-[var(--color-background-surface-under)]">
@@ -227,36 +244,21 @@ export function ResultPanel({
 
       {/* ---- Testcase: the contract, before you run anything --------------- */}
       {tab === "testcase" &&
-        (question.visibleTestFiles.length === 0 ? (
-          <div className="flex flex-1 items-center gap-2 px-3 py-3 text-ui text-muted-foreground">
-            <CircleSlash className="size-3.5 shrink-0" />
-            This challenge exposes no visible cases — submitting runs the hidden suite.
-          </div>
-        ) : declared.parsed && activeDeclared ? (
+        /* Cases first, wherever they came from. A sourced problem publishes them
+           even when it exposes no local test file at all, and saying "no visible
+           cases" over a problem whose examples are printed on its own page is
+           false. */
+        (declared.parsed && activeDeclared ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <CaseRail cases={declared.cases} activeId={activeDeclared.id} onSelect={setSelectedDeclared} />
             <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-              <p className="text-content font-medium">{activeDeclared.name}</p>
-              <p className="mt-0.5 font-mono text-ui-sm text-muted-foreground/70">{fileName(activeDeclared.file)}</p>
-              {activeDeclared.assertions.length ? (
-                <div className="mt-2.5 space-y-2.5">
-                  {activeDeclared.assertions.map((assertion, index) => (
-                    <div className="grid grid-cols-2 gap-2" key={index}>
-                      <ValueBlock label="Call" value={assertion.call} />
-                      <ValueBlock
-                        label={assertion.method === "throws" ? "Throws" : "Expected"}
-                        value={assertion.expected || "—"}
-                      />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-ui text-muted-foreground">
-                  This case asserts through a helper, so its inputs are not shown inline. Open the test file in the editor to
-                  read it in full.
-                </p>
-              )}
+              <DeclaredDetail item={activeDeclared} source={question.source ?? null} />
             </div>
+          </div>
+        ) : question.visibleTestFiles.length === 0 ? (
+          <div className="flex flex-1 items-center gap-2 px-3 py-3 text-ui text-muted-foreground">
+            <CircleSlash className="size-3.5 shrink-0" />
+            This challenge exposes no visible cases — submitting runs the hidden suite.
           </div>
         ) : (
           <div className="app-scroll min-h-0 flex-1 overflow-auto px-3 py-2">
@@ -296,7 +298,11 @@ export function ResultPanel({
                       {report.failed ? "Wrong Answer" : "Accepted"}
                     </span>
                     <span className="text-ui text-muted-foreground tabular-nums">
-                      {report.passed}/{report.cases.length} passed
+                      {/* Counted from the totals, not from the rows on screen. A
+                          submission judged at the source reports 9 of 212 while
+                          naming only the one case it rejected, and "9/1 passed" is
+                          not a thing that can be true. */}
+                      {report.passed}/{report.passed + report.failed + report.skipped || report.cases.length} passed
                       {report.skipped ? ` · ${report.skipped} skipped` : ""}
                     </span>
                     {report.durationMs !== undefined && (
@@ -328,15 +334,31 @@ export function ResultPanel({
                   />
                   <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
                     <CaseDetail result={activeResult} />
-                    <RawOutput open={rawOpen} onToggle={() => setRawOpen((value) => !value)} terminal={terminal} endRef={rawEnd} />
+                    <RawOutput open={rawShown} onToggle={() => setRawOpen(!rawShown)} terminal={terminal} endRef={rawEnd} />
+                  </div>
+                </>
+              ) : declared.parsed && activeDeclared ? (
+                /* Nothing was graded — a compile error, a killed run, a judge that
+                   refused the request. The cases are still known, so they are still
+                   drawn: the panel says which case it is showing and that it did not
+                   run, rather than replacing the whole contract with a log. */
+                <>
+                  <CaseRail cases={declared.cases} activeId={activeDeclared.id} onSelect={setSelectedDeclared} />
+                  <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+                    <p className="mb-2 flex items-start gap-1.5 text-ui-sm leading-[1.55] text-muted-foreground/80">
+                      <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+                      {ungradedReason(terminal, true)}
+                    </p>
+                    <DeclaredDetail item={activeDeclared} source={question.source ?? null} />
+                    <RawOutput open={rawShown} onToggle={() => setRawOpen(!rawShown)} terminal={terminal} endRef={rawEnd} />
                   </div>
                 </>
               ) : (
-                // C++ challenges and crashed runs have no TAP to read.
+                // No cases anywhere: nothing was graded and nothing is known to draw.
                 <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3 py-2">
                   <p className="mb-1.5 flex items-center gap-1.5 text-ui-sm text-muted-foreground/70">
                     <AlertTriangle className="size-3" />
-                    No structured cases in this run — showing raw output.
+                    {ungradedReason(terminal, false)}
                   </p>
                   <pre className="whitespace-pre-wrap break-words font-mono text-ui-sm leading-[1.65] text-foreground/85">
                     {terminal}
@@ -355,6 +377,66 @@ export function ResultPanel({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Why a run produced no verdicts, in the learner's terms.
+ *
+ * Three different things end up here and they mean different things to whoever
+ * is reading: a run that was killed never reached the cases, a build that failed
+ * never produced a program, and a judge that refused the request never ran
+ * anything at all. "No structured cases" covered all three and told them apart
+ * for none of them, which sends you looking at your own code for a fault that is
+ * not there.
+ */
+function ungradedReason(output: string, hasCases: boolean): string {
+  const stopped = stoppedAt(output);
+  if (stopped) return `The run was stopped at ${stopped}, so nothing was graded — this is the output up to that point, not a verdict on your code.`;
+  if (/^.*\berror:/im.test(output)) return "The run never reached the cases — it failed before they could be checked. The output says why.";
+  return hasCases
+    ? "No verdicts came back from this run, so these cases are shown as they stand — what was going to be checked, not what was."
+    : "No case results came back from this run — showing its raw output.";
+}
+
+/** The time limit a run was killed at, when it was killed, as the runner writes it. */
+function stoppedAt(output: string): string {
+  const match = /Process stopped after (\d+)ms/.exec(output);
+  const ms = Number(match?.[1]);
+  if (!Number.isFinite(ms)) return "";
+  return ms >= 1_000 ? `${Math.round(ms / 1_000)}s` : `${ms}ms`;
+}
+
+/**
+ * A case as it was written, before anything ran it: the call and the answer it
+ * is expected to give. Shown on the Testcase tab always, and on Test Result
+ * whenever a run came back with no verdicts to put against it.
+ */
+function DeclaredDetail({ item, source }: { item: DeclaredCase; source: ActiveQuestion["source"] | null }) {
+  return (
+    <>
+      <p className="text-content font-medium">{item.name}</p>
+      <p className="mt-0.5 font-mono text-ui-sm text-muted-foreground/70">
+        {/* A sourced case has no file behind it — it is published with the problem
+            — so it is attributed to where it actually came from. */}
+        {item.file ? fileName(item.file) : source ? `published with ${source.displayId}` : ""}
+      </p>
+      {item.assertions.length ? (
+        <div className="mt-2.5 space-y-2.5">
+          {item.assertions.map((assertion, index) => (
+            <div className="grid grid-cols-2 gap-2" key={index}>
+              <ValueBlock label="Call" value={assertion.call} />
+              <ValueBlock label={assertion.method === "throws" ? "Throws" : "Expected"} value={assertion.expected || "—"} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-ui text-muted-foreground">
+          This case asserts through a helper, so its inputs are not shown inline. Open the test file in the editor to read it
+          in full.
+        </p>
+      )}
+    </>
   );
 }
 

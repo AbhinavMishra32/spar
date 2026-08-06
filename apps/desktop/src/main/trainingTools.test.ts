@@ -15,8 +15,8 @@ describe("Training Agent learner suspension", () => {
           header: "Experience",
           question: "How much Python and machine-learning experience do you have?",
           options: [
-            { label: "New to both", description: "Start with programming and ML prerequisites." },
-            { label: "Some experience", description: "Calibrate with a small applied task." },
+            { label: "New to both — start with the programming and ML prerequisites" },
+            { label: "Some experience — calibrate with a small applied task" },
           ],
           multiple: false,
           custom: true,

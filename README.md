@@ -226,6 +226,44 @@ dropping it. Each row carries the session it came from, the concepts it exercise
 how many times you ran the tests, and a peek at the file. Open any of them to read
 it again, or to practise it without touching the session it belongs to.
 
+### Real problems, when a real problem fits
+
+Spar writes most of your challenges. It does not have to write all of them.
+
+Connect LeetCode in Settings and the agent can set you real problems alongside
+the ones it invents — chosen against the same target, tagged into the same
+ability ledger, and sitting in the same history. You sign in on LeetCode's own
+page; Spar never sees your password, and every method that page offers works.
+
+The agent is *made* to look. On any turn that sets a challenge it searches the
+source first, and then has to either assign what it found or consciously write
+its own. That is a property of the controller rather than a line in a prompt: it
+cannot skip the search, and it cannot end the turn without setting something.
+
+Which one it picks is a judgement, and both directions are real. A LeetCode
+problem brings a difficulty other people calibrated, hidden cases nobody in Spar
+wrote, and your own history with it. A challenge written for your specific
+misconception brings something no library has. Spar is told to prefer the real
+problem when it genuinely lands on the target — and not to hand you a contest
+problem to test an off-by-one.
+
+**Solving one counts where you'd expect it to.** Submit, and it goes to LeetCode's
+judge and runs against every hidden case that problem has. The verdict is theirs,
+and it appears on your LeetCode account like any other submission. There is a
+**Run there** button for trying it without spending a submission, and the ordinary
+**Run** stays local and instant.
+
+Not connected, or you would rather your code stayed on your machine? Both are
+fine, and Spar says which is happening rather than blurring it. Locally-graded
+problems are checked against the examples published with the problem — real, and
+weaker than an acceptance — and Spar will never describe one as accepted. A
+problem it can neither judge nor run is refused rather than set.
+
+It also reads what you have already done there: what you solved, and more
+usefully what you attempted and walked away from. That is treated as evidence of
+exposure, not of understanding — the ability ledger still decides what you can
+do, on your own attempts.
+
 ### Bring your own model
 
 Spar is a client for whatever model you want to drive it with.
@@ -262,7 +300,10 @@ so the app tells you which one you are in.
 
 Being straight about the edges:
 
-- **Three languages.** JavaScript, TypeScript, and C++. That's it for now.
+- **Three languages.** JavaScript, TypeScript, and C++. That's it for now — and
+  a LeetCode problem is mounted in one of those three or not at all.
+- **One practice source.** LeetCode. The abstraction behind it is built for
+  more, and there is only one.
 - **Hosting is yours to set up.** There is no Spar-operated service; you deploy the API or run it locally, as described above.
 - **Unsigned builds.** Your OS will complain on first launch.
 - **macOS is the polished one.** The Windows and Linux builds are real, but the
@@ -300,6 +341,8 @@ deterministic challenge compiler.
   why the renderer is treated as untrusted
 - [`docs/threat-model.md`](docs/threat-model.md) — what runs untrusted code and
   what contains it
+- [`docs/practice-sources.md`](docs/practice-sources.md) — how a source of real
+  problems is plugged in, who grades what, and the MCP surface it is served over
 - [`docs/hosting.md`](docs/hosting.md) — deploying the API, and how a build
   learns which one to talk to
 - [`docs/releasing.md`](docs/releasing.md) — how a release is cut

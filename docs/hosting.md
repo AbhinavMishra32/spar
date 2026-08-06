@@ -58,8 +58,26 @@ requests:
 | --- | --- |
 | `DATABASE_URL` | **Use the pooled connection string**, not the direct one — see below |
 | `AUTH_SECRET` | 32+ characters. Reuse the one already signing your tokens, or every existing session is invalidated |
+| `AUTH_BASE_URL` | The origin the desktop app calls, e.g. `https://spar-api.vercel.app`. Better Auth checks requests against it |
+| `RESEND_API_KEY` | Required in production. Sends the verification and password-reset codes — see below |
+| `EMAIL_FROM` | The sender, e.g. `Spar <no-reply@yourdomain.com>`. Must be an address on a domain verified with Resend |
 | `SUPABASE_URL` and `SUPABASE_SECRET_KEY` | For Supabase Storage |
 | `OBJECT_STORAGE_*` | Instead of the Supabase pair, if using another S3-compatible provider |
+
+**Email.** Creating an account asks for a six-digit code, and so does resetting a
+password, so a deployment that cannot send email cannot let anyone in — the API
+refuses to start in production without `RESEND_API_KEY` and `EMAIL_FROM`. Resend's
+free plan sends 3,000 messages a month, 100 a day, which is a great deal more
+sign-ups than a self-hosted Spar is going to have. Create a key at
+[resend.com/api-keys](https://resend.com/api-keys) with **Sending access** only,
+and verify the domain you send from at
+[resend.com/domains](https://resend.com/domains) — an unverified domain can only
+send to the address that owns the Resend account, which is fine while you are the
+only learner and a silent failure the moment you are not.
+
+Running from source with no key set is supported and needs no provider: the code
+is written to the API's own log instead of being sent, and confirming an address
+becomes optional. That is a development affordance, not a mode to deploy.
 
 Add them interactively so no secret is typed into a shell that records history:
 

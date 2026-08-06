@@ -13,6 +13,7 @@ import { startUpdates } from "./updates.js";
 import { executeTrainingTool } from "./trainingTools.js";
 import { WebSearchService } from "./webSearch.js";
 import { recordAgentActivity } from "./agentActivity.js";
+import { PracticeService } from "./practice.js";
 import { ProviderService } from "./provider.js";
 import { createMainWindow } from "./window.js";
 import { WorkspaceService } from "./workspaces.js";
@@ -27,6 +28,10 @@ else {
     const root = path.join(app.getPath("userData"), "spar"); await mkdir(path.join(root, "workspaces"), { recursive: true });
     store = new LocalStore(path.join(root, "state.sqlite3")); nativeTheme.themeSource = themePreferenceSchema.catch("system").parse(store.getSetting("theme", "system")); const origin = apiOrigin(); const auth = new AuthService(origin); const workspaces = new WorkspaceService(path.join(root, "workspaces"));
     const providers = new ProviderService(auth, store, (event) => mainWindow?.webContents.send("provider:oauth-event", event));
+    /* Where real problems come from. Holds the source's session in the keychain,
+       mounts one of its problems as a challenge, and is the only thing in the app
+       that knows LeetCode exists. */
+    const practice = new PracticeService(auth, store, () => mainWindow, (event) => mainWindow?.webContents.send("practice:event", event));
     const runner = new UtilityClient("runner", (event) => mainWindow?.webContents.send("runner:event", { id: event.requestId, stream: event.stream, data: event.data, exitCode: event.exitCode }));
     /* Which session each in-flight run belongs to. The agent worker reports only
        its own request id, so the routing that lets an unopened session card show
@@ -37,11 +42,15 @@ else {
        keychain access, and a key that crossed into it would also cross into every
        payload the worker serialises. */
     const web = new WebSearchService(() => auth.readSecret("exa"));
-    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web));
+    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice));
     const sync=new CloudSyncService(store,auth,origin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
-    installIpc({ store, workspaces, auth, providers, runner, agent, agentRunSessions, sync, web, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow(); startUpdates(mainWindow);
+    /* Asked before the window exists so it can open at the size it belongs at.
+       Opening large and shrinking once the renderer reports in would read as the
+       app correcting a mistake in front of the learner. */
+    const stage = !(await auth.account()) ? "sign-in" as const : store.getProfile() ? "app" as const : "onboarding" as const;
+    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, web, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); startUpdates(mainWindow);
     app.on("before-quit", () => { sync.stop(); runner.stop(); agent.stop(); store.close(); });
-    app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow(); });
+    app.on("activate", async () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow({ stage: !(await auth.account()) ? "sign-in" : store.getProfile() ? "app" : "onboarding" }); });
   });
 }
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
