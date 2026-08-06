@@ -123,7 +123,7 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
       {connected && account && (
         <Row className="gap-4">
           <div className="min-w-0 flex-1">
-            <p className="text-content font-medium">Your record there</p>
+            <p className="text-content font-medium">Solved on LeetCode</p>
             <p className="mt-0.5 truncate text-ui text-muted-foreground">
               {`Easy ${account.solved.easy} · Medium ${account.solved.medium} · Hard ${account.solved.hard}`}
               {topSkills(account) ? ` · most solved ${topSkills(account)}` : ""}
@@ -137,7 +137,7 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
 
       <Row className="gap-4">
         <div className="min-w-0 flex-1">
-          <p className="text-content font-medium">Who judges your solutions</p>
+          <p className="text-content font-medium">Grading</p>
           <p className="mt-0.5 text-ui text-muted-foreground">
             {inventory.judgesSubmissions
               ? `Submitting runs every hidden case ${name} has and records the result on your account.`
@@ -147,7 +147,7 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
           </p>
         </div>
         <Segmented
-          ariaLabel="Who judges your solutions"
+          ariaLabel="Grading"
           disabled={busy !== null || !connected}
           onChange={(value) => void act("judge", async () => api?.setPracticeJudge(value as SourceJudgePreference))}
           options={[{ value: "source", label: name, icon: Gavel }, { value: "local", label: "This Mac", icon: Laptop }]}
@@ -158,11 +158,11 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
       {inventory.regions.length > 1 && (
         <Row className="gap-4">
           <div className="min-w-0 flex-1">
-            <p className="text-content font-medium">Which {name}</p>
-            <p className="mt-0.5 text-ui text-muted-foreground">Separate accounts and separate problem numbering. Switching disconnects the other.</p>
+            <p className="text-content font-medium">{name} site</p>
+            <p className="mt-0.5 text-ui text-muted-foreground">leetcode.com and leetcode.cn are separate services, with separate accounts and separate problem numbers. Switching disconnects the other.</p>
           </div>
           <Segmented
-            ariaLabel={`Which ${name}`}
+            ariaLabel={`${name} site`}
             disabled={busy !== null}
             onChange={(value) => void act("region", async () => api?.setPracticeRegion(value as "global" | "cn"))}
             options={inventory.regions.map((region) => ({ value: region.id, label: region.label }))}
