@@ -2,12 +2,31 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { codePreview } from "./challengeFiles.js";
-import { askUserQuestionRequestSchema, challengeSourceSchema, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerProfile, type QuestionDesign, type SessionCheckpoint, type SessionDetail, type SessionSummary, type TrainingTarget } from "@spar/domain";
+import { askUserQuestionRequestSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, sessionCheckpointSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerProfile, type QuestionDesign, type SessionCheckpoint, type SessionDetail, type SessionSummary, type TrainingTarget } from "@spar/domain";
 
 type SessionRow = { id:string; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null };
 const SESSION_COLUMNS="id,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at";
 type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:"javascript"|"typescript"|"cpp"; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; replaces_question_id:string|null; source_ref:string|null; created_at:string };
 type ConceptRow = { id:string; slug:string; title:string; kind:string; parent_slug:string|null; description:string };
+
+/* ---- What a restore arrives as ------------------------------------------
+   The shapes the API's `/v1/restore/*` routes answer with, named here because
+   this is the file that writes them to disk. Dates are whatever JSON carried —
+   Postgres timestamps serialise as ISO strings, but `iso()` below is defensive
+   about it rather than trusting the wire. */
+export type RestoredAccount = {
+  profile:LearnerProfile|null;
+  concepts:Array<{slug:string;title:string;kind:string;parentSlug:string|null;description:string}>;
+  abilities:Array<{id:string;title:string;markdown:string;summary:string;practice:string[];earnedAt:string|null;conceptSlugs:string[];status:string;version:number;updatedAt:string;evidenceEventIds?:string[]}>;
+};
+export type RestoredSession = {
+  session:{id:string;title:string;originalGoal:string;objective:string;status:string;totalSeconds:number|null;currentFocus:string[]|null;pinnedAt:string|null;archivedAt:string|null;createdAt:string;updatedAt:string};
+  targets:Array<{id:string;abilityDocumentId:string|null;action:string;specificGap:string;desiredEvidence:string;avoidTesting:string[]|null;createdAt:string}>;
+  questions:Array<{id:string;trainingTargetId:string;ordinal:number;title:string;statement:string;language:string;kind:string;status:string;difficulty:string;replacesQuestionId:string|null;sourceRef:unknown;concepts:Array<{slug:string;role:string}>|null;createdAt:string;design:unknown;report:unknown}>;
+  attempts:Array<{id:string;questionId:string;status:string;latestEventSequence:number;startedAt:string;completedAt:string|null;events:Array<{id:string;sequence:number;type:string;source:string;payload:unknown;schemaVersion:number|null;occurredAt:string}>}>;
+  messages:Array<{id:string;role:string;body:string;activity:unknown[]|null;createdAt:string}>;
+  checkpoint:unknown;
+};
 /** One concept tag as the agent hands it over. Only the slug is load-bearing —
  *  the rest fills in a concept Spar has not met before. */
 export type ConceptTagInput = { slug:string; title?:string; kind?:string; parentSlug?:string|null; description?:string; role?:string };
@@ -147,7 +166,10 @@ export class LocalStore {
   replaceQuestion(sessionId:string,design:QuestionDesign,report:unknown,reason:string,concepts?:ConceptTagInput[],source?:ChallengeSource|null){const active=this.db.prepare("SELECT q.id,a.id attempt_id FROM questions q JOIN attempts a ON a.question_id=q.id WHERE q.session_id=? AND q.status='active' AND a.status='active' ORDER BY q.ordinal DESC LIMIT 1").get(sessionId) as {id:string;attempt_id:string}|undefined;if(!active)throw new Error("No active challenge exists to replace");this.abandonAttempt(active.attempt_id,reason,"agent","replaced");return this.createQuestion(sessionId,design,report,{replacesQuestionId:active.id,...(concepts?{concepts}:{}),...(source!==undefined?{source}:{})});}
   /** Returns null when the session is gone: a turn can outlive the session the
    *  learner deleted under it, and it has nowhere left to record. */
-  addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[]){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity));return value;}
+  /* The transcript syncs. Everything else the cloud holds is what Spar concluded;
+     this is what was actually said, and a session restored without its thread
+     reads as amnesia rather than as history. */
+  addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[]){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity));this.enqueue("agent-message",{sessionId,messages:[value]});return value;}
   hasLearnerEvidence(){const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents").get() as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts WHERE status='completed'").get() as {count:number}).count;return abilities>0||completed>0;}
   hasRelevantLearnerEvidence(goal:string){return this.searchLearner(goal,1).length>0||this.searchAttempts(goal,1).length>0;}
   setPendingIntake(sessionId:string,input:AskUserQuestionInput){const existing=this.db.prepare("SELECT question,status,answer FROM session_intake WHERE session_id=?").get(sessionId) as {question:string;status:string;answer:string|null}|undefined;if(existing?.status==="answered"){let request:AskUserQuestionRequest;try{request=askUserQuestionRequestSchema.parse(JSON.parse(existing.question));}catch{request=legacyQuestionRequest(existing.question);}return{request,status:"answered" as const,answer:existing.answer};}const now=new Date().toISOString();const request=askUserQuestionRequestSchema.parse({id:randomUUID(),...input});this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,JSON.stringify(request),now);return{request,status:"pending" as const};}
@@ -187,9 +209,11 @@ export class LocalStore {
      list is not work on the goal — bumping it would shuffle everything the
      learner just organised back to the top. */
   renameSession(sessionId:string,title:string){const value=title.trim().slice(0,80);if(!value)throw new Error("A session title is required");const result=this.db.prepare("UPDATE sessions SET title=? WHERE id=?").run(value,sessionId);if(result.changes!==1)throw new Error("Session not found");this.enqueue("session-rename",{sessionId,title:value});return{title:value};}
-  setSessionPinned(sessionId:string,pinned:boolean){this.db.prepare("UPDATE sessions SET pinned_at=? WHERE id=?").run(pinned?new Date().toISOString():null,sessionId);}
+  /* Filing syncs too. Pinning is a statement about what matters, not a window
+     preference, so a session pinned on one machine is pinned on the next. */
+  setSessionPinned(sessionId:string,pinned:boolean){const pinnedAt=pinned?new Date().toISOString():null;this.db.prepare("UPDATE sessions SET pinned_at=? WHERE id=?").run(pinnedAt,sessionId);this.enqueue("session-flags",{sessionId,pinnedAt});}
   /** Archiving also unpins: a session cannot be both put away and held at the top. */
-  setSessionArchived(sessionId:string,archived:boolean){this.db.prepare("UPDATE sessions SET archived_at=?,pinned_at=CASE WHEN ? THEN NULL ELSE pinned_at END WHERE id=?").run(archived?new Date().toISOString():null,archived?1:0,sessionId);}
+  setSessionArchived(sessionId:string,archived:boolean){const archivedAt=archived?new Date().toISOString():null;this.db.prepare("UPDATE sessions SET archived_at=?,pinned_at=CASE WHEN ? THEN NULL ELSE pinned_at END WHERE id=?").run(archivedAt,archived?1:0,sessionId);this.enqueue("session-flags",{sessionId,archivedAt,...(archived?{pinnedAt:null}:{})});}
   /* Permanent, and the learner is told so before it runs. Cascades cover the
      session's own children; attempt events and checkpoints are keyed on ids
      rather than declared as foreign keys, so they are removed by hand. */
@@ -377,6 +401,11 @@ export class LocalStore {
     }
     const row:ConceptRow={id:randomUUID(),slug,title:seed?.title??(input.title?.trim()||conceptTitleFromSlug(slug)),kind:seed?.kind??conceptKind(input.kind),parent_slug:parentSlug===slug?null:parentSlug,description:seed?.description??(input.description?.trim()??"")};
     this.db.prepare("INSERT INTO concepts (id,slug,title,kind,parent_slug,description,seeded,created_at) VALUES (?,?,?,?,?,?,?,?)").run(row.id,row.slug,row.title,row.kind,row.parent_slug,row.description,seed?1:0,new Date().toISOString());
+    /* Only what the agent invented is pushed. The shipped taxonomy reseeds itself
+       on any device from the binary, so syncing it would be uploading a constant
+       — and the ids differ per install, which is why the slug is the identity on
+       both sides. */
+    if(!seed)this.enqueue("concept-create",{concepts:[{slug:row.slug,title:row.title,kind:row.kind,parentSlug:row.parent_slug,description:row.description}]});
     return row;
   }
 
@@ -554,7 +583,11 @@ export class LocalStore {
    *  signed-in learner, and the row is dropped with the rest of the account's
    *  state on sign-out so the next person is asked for themselves. */
   getProfile():LearnerProfile|null{const row=this.db.prepare("SELECT payload FROM learner_profile WHERE id='self'").get() as {payload:string}|undefined;if(!row)return null;const parsed=learnerProfileSchema.safeParse(JSON.parse(row.payload));return parsed.success?parsed.data:null;}
-  saveProfile(value:LearnerProfile){this.db.prepare("INSERT INTO learner_profile VALUES ('self',?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at").run(JSON.stringify(value),new Date().toISOString());}
+  /* Pushed as well as written. The profile is the answer to "has this account
+     ever been onboarded", and holding that answer only on the device is what
+     sent an onboarded learner back through intake after every sign-out and on
+     every new machine. */
+  saveProfile(value:LearnerProfile){this.db.prepare("INSERT INTO learner_profile VALUES ('self',?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,updated_at=excluded.updated_at").run(JSON.stringify(value),new Date().toISOString());this.enqueue("profile-save",value);}
   /** The training language on its own: Settings changes it without reopening onboarding. */
   setPreferredLanguage(language:Language){const current=this.getProfile();if(!current)return;this.saveProfile({...current,language});}
   getSetting<T>(key:string,fallback:T):T{const row=this.db.prepare("SELECT value FROM settings WHERE key=?").get(key) as {value:string}|undefined;return row?JSON.parse(row.value) as T:fallback;}
@@ -562,6 +595,92 @@ export class LocalStore {
   pendingSync(limit=100){return this.db.prepare("SELECT id,kind,payload,attempts FROM sync_outbox ORDER BY created_at LIMIT ?").all(limit) as Array<{id:string;kind:string;payload:string;attempts:number}>;}
   acknowledgeSync(ids:string[]){const remove=this.db.prepare("DELETE FROM sync_outbox WHERE id=?");this.db.transaction(()=>ids.forEach(id=>remove.run(id)))();}
   markSyncFailed(id:string){this.db.prepare("UPDATE sync_outbox SET attempts=attempts+1 WHERE id=?").run(id);}
+  /* ---- Restore ------------------------------------------------------------
+     The pull half of sync. Everything here writes rows the cloud already has, so
+     it differs from every other insert path in this class in two ways that
+     matter: ids arrive in the payload instead of being generated, and nothing
+     enqueues — `restoring` sees to the second, and without it a fresh device
+     would spend its first minutes uploading the account back to itself.
+
+     `INSERT OR IGNORE` throughout, so a restore interrupted halfway is resumed
+     by running it again. Where a row could legitimately differ, local wins: the
+     device is where the learner has been working, and a cloud copy is at best as
+     fresh as the last flush. */
+  private inRestore<T>(work:()=>T):T{this.restoring=true;try{return this.db.transaction(work)();}finally{this.restoring=false;}}
+
+  /** True when this device already holds this session at or beyond the cloud's
+   *  version of it, and the bundle can be skipped without fetching it. */
+  sessionIsCurrent(sessionId:string,updatedAt:string){const row=this.db.prepare("SELECT updated_at FROM sessions WHERE id=?").get(sessionId) as {updated_at:string}|undefined;return row?Date.parse(row.updated_at)>=Date.parse(updatedAt):false;}
+
+  /** The account-wide half: who the learner is, the vocabulary the agent invented
+   *  for them, and their abilities. Written before any session, because a
+   *  session's targets and tags point at all three. */
+  restoreAccount(input:RestoredAccount){
+    return this.inRestore(()=>{
+      for(const concept of input.concepts)
+        /* Ensured by slug rather than inserted by id: concept ids are per-install
+           and the slug is the identity on both sides, so a concept this device
+           already seeded is matched rather than duplicated. */
+        try{this.ensureConcept({slug:concept.slug,title:concept.title,kind:concept.kind as ConceptKind,parentSlug:concept.parentSlug,description:concept.description});}catch{/* A slug this build no longer understands is skipped rather than fatal. */}
+      const insertAbility=this.db.prepare("INSERT OR IGNORE INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at) VALUES (?,?,?,?,?,?,?,?,?,?)");
+      const linkConcept=this.db.prepare("INSERT OR IGNORE INTO ability_concepts (ability_id,concept_id) VALUES (?,?)");
+      for(const ability of input.abilities){
+        insertAbility.run(ability.id,ability.title,ability.markdown,ability.version,ability.status,ability.updatedAt,JSON.stringify(ability.evidenceEventIds??[]),ability.summary,JSON.stringify(ability.practice),ability.earnedAt);
+        for(const slug of ability.conceptSlugs)
+          try{linkConcept.run(ability.id,this.ensureConcept({slug}).id);}catch{/* as above */}
+      }
+      /* Last, and only when the device has none: a profile edited offline is the
+         newer statement of who the learner is, and the flush will carry it up. */
+      if(input.profile&&!this.getProfile())this.db.prepare("INSERT OR IGNORE INTO learner_profile VALUES ('self',?,?)").run(JSON.stringify(input.profile),new Date().toISOString());
+    });
+  }
+
+  /** One batch of sessions, each with its targets, challenges, attempts, events,
+   *  transcript and latest checkpoint. Insert order is forced by the foreign keys
+   *  declared at the top of this class. */
+  restoreSessions(bundles:RestoredSession[]){
+    return this.inRestore(()=>{
+      const insertSession=this.db.prepare("INSERT OR IGNORE INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,pinned_at,archived_at) VALUES (?,?,?,?,?,?,'[]',?,?,?,?,?)");
+      const insertTarget=this.db.prepare("INSERT OR IGNORE INTO training_targets (id,session_id,ability_id,ability_title,specific_gap,desired_evidence,avoid_testing,action,created_at) VALUES (?,?,?,?,?,?,?,?,?)");
+      const insertQuestion=this.db.prepare("INSERT OR IGNORE INTO questions (id,session_id,training_target_id,ordinal,title,statement,language,kind,status,difficulty,design,validation_report,created_at,replaces_question_id,source_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+      const insertAttempt=this.db.prepare("INSERT OR IGNORE INTO attempts (id,question_id,session_id,status,latest_event_sequence,started_at,completed_at) VALUES (?,?,?,?,?,?,?)");
+      const insertEvent=this.db.prepare("INSERT OR IGNORE INTO attempt_events VALUES (?,?,?,?,?,?,?,?)");
+      const insertMessage=this.db.prepare("INSERT OR IGNORE INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)");
+      const insertCheckpoint=this.db.prepare("INSERT OR IGNORE INTO checkpoints VALUES (?,?,?,?,?,?)");
+      const tagQuestion=this.db.prepare("INSERT OR IGNORE INTO question_concepts (question_id,concept_id,role) VALUES (?,?,?)");
+      const abilityTitle=this.db.prepare("SELECT title FROM ability_documents WHERE id=?");
+      for(const bundle of bundles){
+        const session=bundle.session;
+        insertSession.run(session.id,session.title,session.originalGoal,session.objective,session.status,JSON.stringify(session.currentFocus??[]),session.totalSeconds??0,iso(session.createdAt),iso(session.updatedAt),session.pinnedAt?iso(session.pinnedAt):null,session.archivedAt?iso(session.archivedAt):null);
+        for(const target of bundle.targets){
+          /* The cloud's target names an ability document; the device's names the
+             ability's title too, because that is what the sidebar and the target
+             card read. Resolved from the abilities restored a moment ago. */
+          const title=(target.abilityDocumentId?(abilityTitle.get(target.abilityDocumentId) as {title:string}|undefined)?.title:undefined)??target.specificGap.slice(0,80)??"Observed ability";
+          insertTarget.run(target.id,session.id,target.abilityDocumentId??randomUUID(),title,target.specificGap,target.desiredEvidence,JSON.stringify(target.avoidTesting??[]),target.action,iso(target.createdAt));
+        }
+        for(const question of bundle.questions){
+          insertQuestion.run(question.id,session.id,question.trainingTargetId,question.ordinal,question.title,question.statement,question.language,question.kind,question.status,question.difficulty,JSON.stringify(question.design??{}),JSON.stringify(question.report??{}),iso(question.createdAt),question.replacesQuestionId??null,question.sourceRef?JSON.stringify(question.sourceRef):null);
+          for(const tag of question.concepts??[])
+            try{tagQuestion.run(question.id,this.ensureConcept({slug:tag.slug}).id,tag.role==="supporting"?"supporting":"primary");}catch{/* as above */}
+        }
+        for(const attempt of bundle.attempts){
+          insertAttempt.run(attempt.id,attempt.questionId,session.id,attempt.status,attempt.latestEventSequence,iso(attempt.startedAt),attempt.completedAt?iso(attempt.completedAt):null);
+          for(const event of attempt.events)insertEvent.run(event.id,attempt.id,event.sequence,event.type,iso(event.occurredAt),JSON.stringify(event.payload),event.source,event.schemaVersion??1);
+        }
+        for(const message of bundle.messages)insertMessage.run(message.id,session.id,message.role,message.body,iso(message.createdAt),JSON.stringify(message.activity??[]));
+        /* Reconciled rather than inserted blindly: a device that has been working
+           offline may hold a later checkpoint than the cloud, and the shared
+           chooser is the one place that decides which of two wins. */
+        const remote=sessionCheckpointSchema.safeParse(bundle.checkpoint);
+        if(remote.success){
+          const chosen=chooseCheckpoint(this.latestCheckpoint(session.id),remote.data);
+          if(chosen===remote.data)insertCheckpoint.run(remote.data.id,session.id,remote.data.version,remote.data.eventSequence,JSON.stringify(remote.data),remote.data.savedAt);
+        }
+      }
+    });
+  }
+
   /** Account-scoped learner state must not survive a permanent account deletion. Preferences stay device-scoped. */
   /* The cached problems go too. Their statements are public, but the copy Spar
      holds records whether *this* learner has solved each one, which is theirs. */
@@ -573,7 +692,13 @@ export class LocalStore {
   close(){this.db.close();}
   private insertEvent(event:AttemptEvent){this.db.prepare("INSERT INTO attempt_events VALUES (?,?,?,?,?,?,?,?)").run(event.id,event.attemptId,event.sequence,event.type,event.occurredAt,JSON.stringify(event.payload),event.source,event.schemaVersion);}
   private ensureColumn(table:string,column:string,declaration:string){const columns=this.db.pragma(`table_info(${table})`) as Array<{name:string}>;if(!columns.some((item)=>item.name===column))this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);}
-  private enqueue(kind:string,payload:unknown){this.db.prepare("INSERT INTO sync_outbox (id,kind,payload,created_at) VALUES (?,?,?,?)").run(randomUUID(),kind,JSON.stringify(payload),new Date().toISOString());}
+  /* Writes made while restoring are not news. Every insert path in this class
+     enqueues, which is right when the learner is the one causing it and wrong
+     when the cloud is: without this guard a restore would push every row it had
+     just pulled straight back, and a fresh device would spend its first minutes
+     uploading the account to itself. */
+  private restoring=false;
+  private enqueue(kind:string,payload:unknown){if(this.restoring)return;this.db.prepare("INSERT INTO sync_outbox (id,kind,payload,created_at) VALUES (?,?,?,?)").run(randomUUID(),kind,JSON.stringify(payload),new Date().toISOString());}
   private toSession(row:SessionRow):SessionSummary{const questions=this.db.prepare("SELECT id,title,status FROM questions WHERE session_id=? ORDER BY ordinal").all(row.id) as Array<{id:string;title:string;status:SessionSummary["questionTitles"][number]["status"]}>;const active=questions.find(q=>q.status==="active");const focus=(this.db.prepare("SELECT ability_title FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 3").all(row.id) as Array<{ability_title:string}>).map(v=>v.ability_title);return{id:row.id,title:row.title,originalGoal:row.original_goal,objective:row.objective,status:row.status,currentFocus:focus,completedQuestions:questions.filter(q=>q.status==="completed").length,activeQuestion:active?{id:active.id,title:active.title,ordinal:questions.indexOf(active)+1}:null,questionTitles:questions,totalSeconds:row.total_seconds,updatedAt:row.updated_at,pinnedAt:row.pinned_at,archivedAt:row.archived_at};}
 }
 
@@ -593,7 +718,9 @@ const SEARCH_STOP_WORDS=new Set(["a","an","and","day","days","for","from","have"
 function tokens(value:string){return value.toLowerCase().replace(/[^a-z0-9+#-]+/g," ").split(/\s+/).filter(Boolean);}
 function searchTerms(query:string){return [...new Set(tokens(query).filter(term=>!SEARCH_STOP_WORDS.has(term)&&(term.length>2||["ai","js","c#","c++"].includes(term))))].slice(0,12);}
 function relevance(text:string,terms:string[]){const haystack=new Set(tokens(text));return terms.reduce((score,term)=>score+(haystack.has(term)?1:0),0);}
-function normalizeTarget(row:Record<string,unknown>){return{id:String(row.id),sessionId:String(row.session_id),abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),specificGap:String(row.specific_gap),desiredEvidence:String(row.desired_evidence),avoidTesting:JSON.parse(String(row.avoid_testing)) as string[],action:String(row.action),createdAt:String(row.created_at)};}
+/** A `training_targets` row as the domain shape. Exported because a checkpoint
+ *  carries the session's target and is composed outside this file. */
+export function normalizeTarget(row:Record<string,unknown>){return{id:String(row.id),sessionId:String(row.session_id),abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),specificGap:String(row.specific_gap),desiredEvidence:String(row.desired_evidence),avoidTesting:JSON.parse(String(row.avoid_testing)) as string[],action:String(row.action),createdAt:String(row.created_at)};}
 function legacyQuestionRequest(question:string):AskUserQuestionRequest{return{id:randomUUID(),questions:[{header:"Placement",question,options:[{label:"New to this — start me from the prerequisites"},{label:"Some experience — calibrate with an applied question"},{label:"Comfortable — go straight to an interview-style diagnostic"}],multiple:false,custom:true}]};}
 /** A challenge's source, read back defensively. Null is the ordinary answer —
  *  every challenge Spar wrote itself has none — and a row written by a build that
@@ -603,6 +730,17 @@ function parseSourceRef(value:string|null|undefined):ChallengeSource|null{
   if(!value)return null;
   try{const parsed=challengeSourceSchema.safeParse(JSON.parse(value));return parsed.success?parsed.data:null;}catch{return null;}
 }
+/** A timestamp from the wire as the ISO string every local column stores. The
+ *  API answers with ISO already; this exists because a restore that writes
+ *  "Invalid Date" into `updated_at` silently reorders the learner's whole
+ *  sidebar, and falling back to now is a visible wrongness rather than a
+ *  poisoned sort key. */
+function iso(value:string|Date|null|undefined):string{
+  if(!value)return new Date().toISOString();
+  const date=value instanceof Date?value:new Date(value);
+  return Number.isNaN(date.getTime())?new Date().toISOString():date.toISOString();
+}
+
 /** Stored activity, read back defensively: a message written before this column
  *  existed has none, and a malformed row must not take the transcript with it. */
 function parseActivity(value:string|null):AgentActivityStep[]{if(!value)return[];try{const parsed=JSON.parse(value) as unknown;if(!Array.isArray(parsed))return[];return parsed.flatMap((entry)=>{const step=agentActivityStepSchema.safeParse(entry);return step.success?[step.data]:[];});}catch{return[];}}

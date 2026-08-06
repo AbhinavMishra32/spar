@@ -40,6 +40,15 @@ const REASON: Record<string, string> = {
 
 export class AuthService {
   constructor(private readonly apiOrigin: string) {}
+  /** Whether the account signed in on this run of the app was created on it.
+   *
+   *  It decides one thing: whether signing in waits for a restore before the
+   *  window moves on. A brand-new account has nothing in the cloud to pull, and
+   *  it cannot be recognised from the sign-in alone — with verification on, the
+   *  account is created by `sign-up` and the session arrives later from
+   *  `verify-email`, so the fact has to be remembered across the two calls. */
+  private freshAccount = false;
+  signedUpThisSession() { return this.freshAccount; }
   async account() { const raw = await keytar.getPassword(service, "account"); return raw ? JSON.parse(raw) as Account : null; }
   /** The bearer token every authenticated request carries. */
   async accessToken() { return keytar.getPassword(service, TOKEN); }
@@ -52,6 +61,10 @@ export class AuthService {
     switch (input.action) {
       case "sign-up": {
         const payload = await this.post("sign-up/email", { email: input.email, password: input.password, name: input.email.split("@")[0] ?? "Learner" });
+        /* Set only once the account exists — a failed sign-up throws above this
+           line, and claiming a fresh account there would make the next sign-in
+           skip the restore it needs. */
+        this.freshAccount = true;
         /* No token means this deployment sends a code before it sends a session,
            and Better Auth has already sent it as part of the sign-up. */
         return payload.token ? this.persist(payload) : { status: "code-sent", purpose: "email-verification" };
@@ -127,6 +140,9 @@ export class AuthService {
     await keytar.deletePassword(service, TOKEN);
     await keytar.deletePassword(service, LEGACY_TOKEN).catch(() => undefined);
     await keytar.deletePassword(service, "account");
+    /* Whoever signs in next is not the account that was just created here, so the
+       next sign-in must restore rather than assume there is nothing to pull. */
+    this.freshAccount = false;
   }
   async deleteAccount() {
     const token = await this.accessToken();

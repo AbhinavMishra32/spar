@@ -5,14 +5,22 @@ import { buildInfo } from "./build.js";
 import { applyNativeSurface, planSurface, syncWindowControls } from "./surface.js";
 
 /** How far into Spar this window has got. The window is sized to what it is
- *  actually showing: one column of controls, one card of questions, or the app. */
-export type WindowStage = "sign-in" | "onboarding" | "app";
+ *  actually showing: one column of controls, one card of questions, or the app.
+ *
+ *  "restoring" is an account being pulled back down from the cloud, and it takes
+ *  the app's size rather than a size of its own. Almost every device that reaches
+ *  it belongs to a learner who has done this before, so opening at the app's size
+ *  is right in the ordinary case and the exception — a genuinely new account —
+ *  resizes to the intake once the manifest says so. The alternative, opening
+ *  small and growing, would make the app appear to correct itself in front of
+ *  everyone who has ever signed in twice. */
+export type WindowStage = "sign-in" | "onboarding" | "app" | "restoring";
 
 /* Sign-in is one column about four hundred pixels wide, and a fifteen-hundred
    pixel window around it is a large empty rectangle with a small form marooned in
    the middle. The intake is a card and a list of options, so it wants room to
    read but not a workspace. Only the app itself earns the whole screen. */
-const SIZE: Record<Exclude<WindowStage, "app">, { width: number; height: number }> = {
+const SIZE: Record<Exclude<WindowStage, "app" | "restoring">, { width: number; height: number }> = {
   "sign-in": { width: 460, height: 640 },
   onboarding: { width: 720, height: 780 },
 };
@@ -21,6 +29,10 @@ const SIZE: Record<Exclude<WindowStage, "app">, { width: number; height: number 
 const SMALL_MINIMUM = { width: 380, height: 560 };
 const WORKING = { width: 1480, height: 940 };
 const WORKING_MINIMUM = { width: 1020, height: 660 };
+/** Stages that get the workspace's size. Restoring is one of them: it is the app
+ *  arriving, not a step on the way in, and sizing it like the intake would make
+ *  every ordinary sign-in on a new machine look like a window correcting itself. */
+const fillsScreen = (stage: WindowStage): stage is "app" | "restoring" => stage === "app" || stage === "restoring";
 
 export function createMainWindow({ stage }: { stage: WindowStage }) {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -33,8 +45,8 @@ export function createMainWindow({ stage }: { stage: WindowStage }) {
     /* Opened at whichever size the first screen wants, rather than opened large
        and resized once the renderer reports in: a window that visibly shrinks on
        launch looks like a bug in the app, not like a decision. */
-    ...(stage === "app" ? WORKING : SIZE[stage]),
-    ...(stage === "app"
+    ...(fillsScreen(stage) ? WORKING : SIZE[stage]),
+    ...(fillsScreen(stage)
       ? { minWidth: WORKING_MINIMUM.width, minHeight: WORKING_MINIMUM.height }
       : { minWidth: SMALL_MINIMUM.width, minHeight: SMALL_MINIMUM.height }),
     show: false,
@@ -103,7 +115,7 @@ export function createMainWindow({ stage }: { stage: WindowStage }) {
 export function fitWindowTo(window: BrowserWindow | null, stage: WindowStage) {
   if (!window || window.isDestroyed() || window.isFullScreen()) return;
   const { workArea } = screen.getDisplayMatching(window.getBounds());
-  if (stage === "app") {
+  if (fillsScreen(stage)) {
     window.setMinimumSize(WORKING_MINIMUM.width, WORKING_MINIMUM.height);
     if (window.isMaximized()) return;
     /* The work area, not the display: the menu bar and the Dock are not ours to

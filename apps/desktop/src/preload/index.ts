@@ -10,7 +10,7 @@ const api: SparApi = {
   bootstrap: () => ipcRenderer.invoke(ipc.bootstrap),
   createSession: (input) => ipcRenderer.invoke(ipc.sessionsCreate, input),
   openSession: (sessionId) => ipcRenderer.invoke(ipc.sessionsOpen, sessionId),
-  saveCheckpoint: (input) => ipcRenderer.invoke(ipc.checkpointSave, input),
+  saveWorkspaceState: (input) => ipcRenderer.invoke(ipc.workspaceStateSave, input),
   appendAttemptEvent: (input) => ipcRenderer.invoke(ipc.attemptAppend, input),
   readWorkspaceFile: (input) => ipcRenderer.invoke(ipc.workspaceRead, input),
   writeWorkspaceFile: (input) => ipcRenderer.invoke(ipc.workspaceWrite, input),
@@ -81,7 +81,9 @@ const api: SparApi = {
     packaged: launchFlag("spar-packaged", "0") === "1",
   },
   onNativeSurface: (listener) => subscribe("window:surface", listener),
-  onSyncState: (listener) => subscribe("sync:state", listener)
+  onSyncState: (listener) => subscribe("sync:state", listener),
+  onRestoreState: (listener) => subscribe("restore:state", listener),
+  retryRestore: () => ipcRenderer.invoke(ipc.restoreRetry)
 };
 function subscribe<T>(channel: string, listener: (value: T) => void) { const handler = (_event: Electron.IpcRendererEvent, value: T) => listener(value); ipcRenderer.on(channel, handler); return () => ipcRenderer.removeListener(channel, handler); }
 contextBridge.exposeInMainWorld("spar", api);

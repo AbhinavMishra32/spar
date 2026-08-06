@@ -24,6 +24,7 @@ import { ChatView } from "./components/workspace/ChatView";
 import { reduceRun, type AgentRun } from "./components/agent/agentRun";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
 import { SparDots } from "@/components/common/SparDots";
+import { Button } from "@/components/ui/button";
 
 const api: SparApi | undefined = window.spar;
 
@@ -53,6 +54,8 @@ export function App() {
      can both keep reporting live work on cards for sessions nobody has open. */
   const [runs, setRuns] = useState<Record<string, AgentRun>>({});
   const [palette, setPalette] = useState(false);
+  /** A retry of the cloud pull is in flight, so its button can say so. */
+  const [retrying, setRetrying] = useState(false);
   /* One concept sheet for the whole app rather than one per list. A chip appears
      in challenge history, on an ability, and inside the sheet itself, and every
      one of them has to open the same surface — nesting a second dialog inside the
@@ -142,6 +145,18 @@ export function App() {
     setPage("home");
     await refresh();
   }, [refresh]);
+
+  /* Asking for the pull again after it failed. The bootstrap is re-read either
+     way: a retry that succeeds has just written the account to disk, and one that
+     fails has updated nothing but the state that keeps this screen up. */
+  const retryRestore = useCallback(() => {
+    if (!api || retrying) return;
+    setRetrying(true);
+    void api.retryRestore()
+      .then(() => refresh())
+      .catch((cause) => setError(message(cause)))
+      .finally(() => setRetrying(false));
+  }, [refresh, retrying]);
 
   useEffect(() => {
     void refresh().catch((cause) => setError(message(cause)));
@@ -247,9 +262,31 @@ export function App() {
     return api.onSyncState((syncState) => setData((current) => (current ? { ...current, syncState } : current)));
   }, []);
 
+  /* The restore reports itself the same way. Re-reading the bootstrap when it
+     finishes is the point: the pull writes sessions, challenges and abilities
+     straight into the local store, and none of them are in the copy the shell is
+     currently rendering from. */
+  useEffect(() => {
+    if (!api) return;
+    return api.onRestoreState((restore) => {
+      setData((current) => (current ? { ...current, restore } : current));
+      if (restore === "done") void refresh().catch((cause) => setError(message(cause)));
+    });
+  }, [refresh]);
+
   if (error && !data) return <FatalError error={error} />;
   if (!data) return <BootShell />;
   if (!data.account) return <AuthPage api={api} error={error} serverConfigured={data.serverConfigured} onAuthenticated={signedIn} onError={setError} />;
+  /* Restore is checked before the profile, and the order is the whole fix for
+     "signing in sends me through onboarding again".
+
+     A signed-in device with no local profile has three possible explanations, and
+     only one of them is a new account: the pull may still be running, it may have
+     failed, or this really is someone's first time. Reading an empty
+     `learner_profile` as the third case is what asked returning learners for their
+     name, their weakest area and their language every time they signed in. */
+  if (!data.profile && data.restore === "pending") return <RestoringShell />;
+  if (!data.profile && data.restore === "failed") return <RestoreFailed busy={retrying} onRetry={retryRestore} />;
   /* Onboarding is a gate, not a page: until the profile exists the agent has no
      language, no stated weakness, and probably no provider, so there is nothing
      useful behind it. */
@@ -557,6 +594,47 @@ function BootShell() {
   return (
     <div aria-busy="true" className="app-drag app-pane grid h-full place-items-center" role="status">
       <SparWordmark className="boot-wordmark text-[3.5rem] leading-none" />
+    </div>
+  );
+}
+
+/** The account arriving from the cloud. Shown while the pull runs, which is the
+ *  first thing a new machine does after a sign-in and can take a moment on an
+ *  account with real history behind it. */
+function RestoringShell() {
+  return (
+    <div aria-busy="true" className="app-drag app-pane grid h-full place-items-center" role="status">
+      <div className="flex flex-col items-center gap-3">
+        <SparWordmark className="text-[2.5rem] leading-none text-foreground" />
+        <p className="flex items-center gap-2 text-ui text-muted-foreground">
+          <SparDots pattern="wave" size={16} />
+          Bringing your sessions back…
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/** Signed in, nothing local, and the server unreachable.
+ *
+ *  This screen exists so that the app never guesses. The device cannot tell an
+ *  account that has been onboarded from one that has not without asking the
+ *  server, and guessing "not onboarded" would walk an existing learner through
+ *  intake again and then overwrite the real profile with the answers. Saying so
+ *  and offering the retry is the honest move. */
+function RestoreFailed({ onRetry, busy }: { onRetry(): void; busy: boolean }) {
+  return (
+    <div className="app-drag app-pane grid h-full place-items-center px-8">
+      <div className="app-no-drag max-w-[26rem] text-center">
+        <SparWordmark className="text-[2.25rem] leading-none text-foreground" />
+        <p className="mt-4 text-content text-foreground">Spar cannot reach its server.</p>
+        <p className="mt-1.5 text-ui leading-[1.65] text-muted-foreground">
+          Your sessions and your profile live on your account, and this device has not got them yet. Reconnect and try again — nothing has been lost.
+        </p>
+        <Button className="mt-4 h-10 w-full text-[0.8125rem]" disabled={busy} onClick={onRetry} size="lg" type="button">
+          {busy ? "Trying again…" : "Try again"}
+        </Button>
+      </div>
     </div>
   );
 }
