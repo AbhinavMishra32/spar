@@ -11,6 +11,7 @@ import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
+import type { PracticeService } from "./practice.js";
 import type { ProviderService } from "./provider.js";
 import type { CloudSyncService } from "./sync.js";
 import type { WebSearchService } from "./webSearch.js";
@@ -18,7 +19,7 @@ import { requestsChallengeRevision } from "./agentIntent.js";
 import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; web: WebSearchService; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; web: WebSearchService; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
@@ -229,6 +230,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       desiredEvidence: record.desiredEvidence,
       action: record.action,
       files: challengeFiles(record.design, content),
+      source: record.source,
       hiddenTestCount: Object.keys(record.design.hiddenTests).length,
       practiceEdited,
       timeline: challengeTimeline(record.attempts),
@@ -370,9 +372,19 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     await deps.auth.signOut();
     deps.store.clearAccountData();
     await deps.workspaces.clear();
+    resetAppearance();
     fitWindowTo(deps.window(), "sign-in");
   });
-  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); deps.store.clearAccountData(); await deps.workspaces.clear(); fitWindowTo(deps.window(), "sign-in"); });
+  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); deps.store.clearAccountData(); await deps.workspaces.clear(); resetAppearance(); fitWindowTo(deps.window(), "sign-in"); });
+  /* Light or dark is a choice someone made for their account, and the device is
+     about to be handed to whoever signs in next — including, often enough, nobody.
+     So the window goes back to following the OS, which is what a Spar nobody has
+     signed into should look like. */
+  const resetAppearance = () => {
+    deps.store.setSetting("theme", "system");
+    nativeTheme.themeSource = "system";
+    deps.window()?.webContents.send("window:theme", "system");
+  };
   ipcMain.handle(ipc.settingsSaveSecret, async (_event, value) => {
     const input = providerSettingsInput.parse(value);
     await deps.providers.saveCredential(input);

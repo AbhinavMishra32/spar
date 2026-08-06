@@ -154,9 +154,9 @@ it("carries a challenge's concepts on its history row, primary first",()=>{const
    answer was a challenge rather than a sentence. */
 it("keeps a turn's activity with the reply it produced",()=>{const store=new LocalStore(":memory:");try{
   const{sessionId}=store.createSession("Practise sliding windows");
-  const tool=(tool:string,label:string,detail:string)=>({kind:"tool" as const,tool,label,detail,ok:true,text:"",seconds:0});
+  const tool=(tool:string,label:string,detail:string)=>({kind:"tool" as const,tool,label,actionTitle:"",detail,ok:true,text:"",seconds:0,input:"",output:""});
   store.addMessage(sessionId,"agent","Here is what I found.",[
-    {kind:"reasoning",tool:"",label:"",detail:"",ok:true,text:"The shrink case is the one that keeps breaking.",seconds:7},
+    {kind:"reasoning",tool:"",label:"",actionTitle:"",detail:"",ok:true,text:"The shrink case is the one that keeps breaking.",seconds:7,input:"",output:""},
     tool("replay_attempt","full log · case history","34m on it · 5 runs"),
     tool("search_concept_evidence","window-invariant-restoration","1 result"),
   ]);

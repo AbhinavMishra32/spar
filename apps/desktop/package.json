@@ -30,6 +30,7 @@
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.7",
     "@spar/domain": "workspace:*",
+    "@spar/practice": "workspace:*",
     "@spar/provider": "workspace:*",
     "@spar/training": "workspace:*",
     "@xterm/addon-fit": "^0.10.0",

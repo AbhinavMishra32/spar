@@ -138,9 +138,13 @@ export class AuthService {
     }
     await this.signOut();
     await Promise.all([
-      // `exa` is not a model provider, but it is a key held under the same prefix,
-      // and deleting the account has to empty the keychain rather than most of it.
+      // `exa` and the practice sessions are not model providers, but they are keys
+      // held under the same prefix, and deleting the account has to empty the
+      // keychain rather than most of it. A LeetCode session left behind would be a
+      // live credential for somebody else's account on a machine its owner
+      // believes they have wiped.
       "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai", "openrouter", "cline", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom", "exa",
+      "practice:leetcode:global", "practice:leetcode:cn",
     ].flatMap((provider) => [this.deleteSecret(provider), this.deleteProviderOAuth(provider)]));
   }
   saveSecret(account: string, secret: string) { return keytar.setPassword(service, `provider:${account}`, secret).then(() => undefined); }

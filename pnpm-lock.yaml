@@ -96,6 +96,9 @@ importers:
       '@spar/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@spar/practice':
+        specifier: workspace:*
+        version: link:../../packages/practice
       '@spar/provider':
         specifier: workspace:*
         version: link:../../packages/provider
