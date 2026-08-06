@@ -50,8 +50,9 @@ const HEADING: Record<SearchKind, string> = {
   place: "Go to",
 };
 
-/** The order the groups are offered in, which is also the order the keyboard
- *  walks them: what you can do, what you were doing, then where you can go. */
+/** The order the groups are offered in at rest, and the tie-break between two
+ *  groups that matched a query equally well: what you can do, what you were
+ *  doing, then where you can go. */
 const ORDER: SearchKind[] = ["action", "session", "challenge", "concept", "place"];
 
 /** Rows per group while there is a query. A palette that answers with thirty rows
@@ -108,11 +109,18 @@ function wordPrefix(haystack: string, needle: string): boolean {
 type Candidate = { hit: SearchHit; rank: number; tie: number };
 
 /**
- * Everything the query matches, grouped and capped.
+ * Everything the query matches, grouped, capped, and with the group holding the
+ * best match first.
  *
- * Ties are broken by how recently the learner touched the thing, not by the order
- * the bootstrap happened to hold it in: two equally good title matches means the
- * one worked on this morning is the one being looked for.
+ * Two orderings, and both matter. Inside a group, equal matches are settled by how
+ * recently the learner touched the thing rather than by the order the bootstrap
+ * held it in — two equally good title matches means the one worked on this morning
+ * is the one being looked for. Between groups, the best-ranked group leads: typing
+ * "two" turns up two sessions that merely mention two pointers in their goal and a
+ * challenge actually called Two Sum, and the challenge is what Return should open.
+ * Sorting the groups is how that happens, because the selected row is the first
+ * one drawn — asking for the highlight directly would be a fight with cmdk, which
+ * reclaims it every time the row that had it stops being rendered.
  */
 export function searchEverything(
   query: string,
@@ -169,13 +177,23 @@ export function searchEverything(
     add({ kind: "place", key: `place:${place.page}`, place }, place.label, place.keywords, -index),
   );
 
-  return ORDER.map((kind) => {
+  return ORDER.map((kind, index) => {
     const limit = resting ? RESTING[kind] : LIMIT[kind];
-    const hits = candidates
+    const shown = candidates
       .filter((candidate) => candidate.hit.kind === kind)
       .sort((a, b) => a.rank - b.rank || b.tie - a.tie)
-      .slice(0, limit)
-      .map((candidate) => candidate.hit);
-    return { key: kind, heading: HEADING[kind], hits };
-  }).filter((group) => group.hits.length > 0);
+      .slice(0, limit);
+    return { kind, index, shown };
+  })
+    .filter((group) => group.shown.length > 0)
+    /* Ranks compare across kinds; the tie-breaks do not — one is a timestamp, one
+       is a count — so an honest tie falls back to `ORDER` rather than to comparing
+       a date against a number. With nothing typed every rank is 0, which leaves
+       the resting panel in exactly `ORDER`. */
+    .sort((a, b) => a.shown[0]!.rank - b.shown[0]!.rank || a.index - b.index)
+    .map((group) => ({
+      key: group.kind,
+      heading: HEADING[group.kind],
+      hits: group.shown.map((candidate) => candidate.hit),
+    }));
 }

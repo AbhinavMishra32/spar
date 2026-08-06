@@ -187,6 +187,32 @@ describe("searchEverything", () => {
     expect(groups.map((group) => group.key)).toEqual(["place"]);
   });
 
+  /* What Return does, since the first row drawn is the row that is selected. The
+     sessions would come first at rest and matched only through their goal; the
+     challenge is the one actually called Two Sum. */
+  it("leads with the group holding the best match", () => {
+    const groups = searchEverything("two", {
+      ...EMPTY,
+      sessions: [session({ id: "s", title: "Interview prep", originalGoal: "two-pointer bounds" })],
+      challenges: [challenge({ id: "c", title: "Two Sum" })],
+      concepts: [concept({ slug: "two-pointers", title: "Two pointers" })],
+    });
+    expect(groups[0]!.hits[0]!.key).toBe("challenge:c");
+    expect(groups.map((group) => group.key)).toEqual(["challenge", "concept", "session"]);
+  });
+
+  it("leaves the resting panel in its declared order", () => {
+    const groups = searchEverything("", {
+      ...EMPTY,
+      sessions: [session({ id: "s", title: "Graphs", updatedAt: "2026-08-06T00:00:00.000Z" })],
+    });
+    expect(groups.map((group) => group.key)).toEqual(["action", "session", "place"]);
+  });
+
+  it("returns nothing when nothing matched", () => {
+    expect(searchEverything("nothing here matches", EMPTY)).toEqual([]);
+  });
+
   it("caps each group so the panel stays a list of picks", () => {
     const groups = searchEverything("drill", {
       ...EMPTY,

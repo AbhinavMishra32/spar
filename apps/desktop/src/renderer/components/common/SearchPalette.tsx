@@ -60,6 +60,9 @@ export function SearchPalette({
     if (open) setQuery("");
   }, [open]);
 
+  /* Groups arrive best-match-first, which is what puts the highlight in the right
+     place: cmdk selects the first row it is given, so the ranking has to be in the
+     order of the rows rather than asserted over the top of them. */
   const groups = useMemo(
     () => searchEverything(query, { sessions, challenges, concepts }),
     [challenges, concepts, query, sessions],
@@ -92,9 +95,13 @@ export function SearchPalette({
     <Dialog onOpenChange={onOpenChange} open={open}>
       {/* Overrides the centred sheet the dialog draws by default: pinned near the
           top, wider than a dialog, and with no padding of its own so the input row
-          and the list can own the panel's full width. */}
+          and the list can own the panel's full width.
+          A column rather than the dialog's grid, and paired with `min-w-0` on the
+          root below. A grid item will not shrink under its own min-content width,
+          and a result row's min-content is the longest title in the list — so the
+          panel kept its 37rem while the rows inside it grew past both edges. */}
       <DialogContent
-        className="top-[11vh] w-[min(37rem,calc(100vw-3rem))] max-w-none translate-y-0 gap-0 overflow-hidden rounded-2xl p-0 shadow-[var(--app-shadow-overlay)] sm:max-w-none"
+        className="top-[11vh] flex w-[min(37rem,calc(100vw-3rem))] max-w-none translate-y-0 flex-col gap-0 overflow-hidden rounded-2xl p-0 shadow-[var(--app-shadow-overlay)] sm:max-w-none"
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">Search</DialogTitle>
@@ -102,7 +109,7 @@ export function SearchPalette({
           Find a session, a challenge or a concept, or jump to a page.
         </DialogDescription>
 
-        <Command className="flex flex-col" label="Search Spar" loop shouldFilter={false}>
+        <Command className="flex min-w-0 flex-col" label="Search Spar" loop shouldFilter={false}>
           <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
             <Search className="size-4 shrink-0 text-muted-foreground" />
             <Command.Input
@@ -184,7 +191,7 @@ const PLACE_ICON: Record<PalettePlace["page"], React.ComponentType<{ className?:
  * always the parent, which is what the trailing column is for.
  */
 function Row({ hit, onSelect }: { hit: SearchHit; onSelect(): void }) {
-  const row = describe(hit);
+  const row = rowContent(hit);
 
   return (
     <Command.Item
@@ -208,7 +215,8 @@ function Row({ hit, onSelect }: { hit: SearchHit; onSelect(): void }) {
 
 const GLYPH = "size-3.5 text-foreground/70";
 
-function describe(hit: SearchHit): { icon: React.ReactNode; title: string; sub?: string; meta?: string } {
+/** What each kind of hit puts in the three columns of a row. */
+function rowContent(hit: SearchHit): { icon: React.ReactNode; title: string; sub?: string; meta?: string } {
   switch (hit.kind) {
     case "action":
       return { icon: <Plus className={GLYPH} />, title: hit.action.label, meta: "⌘N" };

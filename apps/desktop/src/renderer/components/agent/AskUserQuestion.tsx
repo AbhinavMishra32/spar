@@ -245,7 +245,7 @@ function Marker({ multiple, selected }: { multiple: boolean; selected: boolean }
         "grid size-3.5 shrink-0 place-items-center border transition-colors",
         multiple ? "rounded-[0.25rem]" : "rounded-full",
         selected
-          ? "border-foreground/80 bg-foreground/85 text-background"
+          ? "border-foreground bg-foreground text-background"
           : "border-[var(--border-strong)] group-hover/option:border-foreground/40",
       )}
     >
