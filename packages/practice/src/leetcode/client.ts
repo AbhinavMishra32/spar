@@ -67,11 +67,13 @@ export class LeetCodeClient {
       username: text(status.username) || text(status.userSlug),
       userId: text(status.userId) || text(status.userSlug),
       premium: status.isPremium === true,
+      /* Not asked for. `avatar` is decoration and asking for a field the schema
+         may not define fails the whole query — see the comment on the document. */
       /* CN omits `isVerified` for accounts verified by phone rather than email,
          so an absent flag is treated as verified. Refusing to work would strand
          a perfectly good account. */
       verified: status.isVerified !== false,
-      avatarUrl: text(status.avatar),
+      avatarUrl: "",
     };
   }
 

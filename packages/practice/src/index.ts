@@ -28,7 +28,7 @@ export * from "./gateway.js";
 export * from "./concepts.js";
 export * from "./harness.js";
 export { LeetCodeClient } from "./leetcode/client.js";
-export { LEETCODE_ORIGIN, leetCodeHeaders, parseLeetCodeCookie, type LeetCodeSession } from "./leetcode/session.js";
+export { LEETCODE_ORIGIN, leetCodeHeaders, parseLeetCodeCookie, verifyLeetCodeSession, type LeetCodeSession } from "./leetcode/session.js";
 export { casesForProblem, normalizeProblem, normalizeProblemSummary, SOURCE_LANGUAGE_SLUG } from "./leetcode/normalize.js";
 export { isJudgePending, normalizeLeetCodeVerdict } from "./leetcode/verdict.js";
 export { parseExamples, splitExampleInput, statementToMarkdown } from "./leetcode/statement.js";

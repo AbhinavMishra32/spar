@@ -166,19 +166,17 @@ export class PracticeService {
     });
     if (result.status !== "connected") return result;
 
+    /* The sign-in already asked LeetCode who is signed in and only finished when
+       it answered with a name — so the session is known good before it is stored,
+       and nothing here re-litigates that. Reading the solve counts is a separate,
+       optional step: they are decoration, and letting one of them decide whether
+       the sign-in worked is how a perfectly good session gets thrown away. */
     await this.saveSession(region, result.session);
     this.reset();
-    const identity = await this.gateway().account().catch(() => null);
-    if (!identity) {
-      await this.clearSession(region);
-      this.reset();
-      const message = `${practiceSource("leetcode").name} did not accept the session from that sign-in. Try again, and finish on a page that shows you signed in.`;
-      this.emit({ source: "leetcode", state: "disconnected", message });
-      return { status: "failed", message };
-    }
-    this.accountCache = { at: Date.now(), account: identity };
-    this.emit({ source: "leetcode", state: "connected", message: `Connected as ${identity.username}.` });
-    return { status: "connected", username: identity.username };
+    this.accountCache = null;
+    const account = await this.account().catch(() => null);
+    this.emit({ source: "leetcode", state: "connected", message: `Connected as ${result.username}.` });
+    return { status: "connected", username: account?.username ?? result.username };
   }
 
   async disconnect(): Promise<void> {

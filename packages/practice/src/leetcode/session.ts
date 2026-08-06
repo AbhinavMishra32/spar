@@ -37,6 +37,48 @@ export const LEETCODE_ORIGIN: Record<PracticeRegion, string> = {
 };
 
 /**
+ * Whether LeetCode considers this session signed in.
+ *
+ * The presence of the cookies proves nothing, and assuming otherwise is a real
+ * bug rather than a theoretical one: LeetCode issues `csrftoken` and
+ * `LEETCODE_SESSION` to anonymous visitors the moment the page loads. A sign-in
+ * flow that waits for those two names appears to succeed instantly — before the
+ * learner has typed anything — and then everything downstream fails with a
+ * session that is genuinely stored and genuinely nobody.
+ *
+ * So the only honest completion test is asking the service who it thinks is
+ * asking. Deliberately a bare function rather than a method on the client: it is
+ * used *during* sign-in, before any of the caching, expiry reporting or gateway
+ * machinery should exist.
+ */
+export async function verifyLeetCodeSession(
+  session: LeetCodeSession,
+  region: PracticeRegion,
+  fetcher: typeof fetch = fetch,
+): Promise<{ username: string; premium: boolean } | null> {
+  const query = region === "cn"
+    ? "query globalData { userStatus { username userSlug isSignedIn isPremium } }"
+    : "query globalData { userStatus { userId username isSignedIn isPremium } }";
+  try {
+    const response = await fetcher(`${LEETCODE_ORIGIN[region]}/graphql/`, {
+      method: "POST",
+      headers: leetCodeHeaders(session, region),
+      body: JSON.stringify({ query, variables: {} }),
+    });
+    if (!response.ok) return null;
+    const payload = await response.json() as { data?: { userStatus?: { isSignedIn?: boolean; username?: string; userSlug?: string; isPremium?: boolean } } };
+    const status = payload.data?.userStatus;
+    if (!status?.isSignedIn) return null;
+    const username = status.username || status.userSlug || "";
+    return username ? { username, premium: status.isPremium === true } : null;
+  } catch {
+    /* A network failure is not a signed-out answer. The caller is polling, so
+       returning null simply means "not yet" and the next tick asks again. */
+    return null;
+  }
+}
+
+/**
  * Reads a session out of a raw Cookie header.
  *
  * Tolerant on purpose: this is what the sign-in window produces and what a

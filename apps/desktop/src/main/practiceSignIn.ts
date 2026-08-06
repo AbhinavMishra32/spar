@@ -1,5 +1,5 @@
 import { BrowserWindow, session as electronSession, type Session } from "electron";
-import { parseLeetCodeCookie, practiceSource, type LeetCodeSession, type PracticeRegion } from "@spar/practice";
+import { parseLeetCodeCookie, practiceSource, verifyLeetCodeSession, type LeetCodeSession, type PracticeRegion } from "@spar/practice";
 
 /**
  * Signing in to a practice source.
@@ -12,8 +12,15 @@ import { parseLeetCodeCookie, practiceSource, type LeetCodeSession, type Practic
  * Spar therefore never sees a password, never types into the page, and never
  * needs to know which method was used: a password, Google, GitHub and a
  * passkey all work, because all of them are LeetCode's own flows running in
- * LeetCode's own page. What Spar does is watch its cookie jar and stop as soon as
- * the two cookies that constitute a session are there.
+ * LeetCode's own page. What Spar does is watch its cookie jar and ask LeetCode,
+ * each time the cookies change, whether it now considers this browser signed in.
+ *
+ * Asking is not optional. LeetCode issues both `csrftoken` and `LEETCODE_SESSION`
+ * to anonymous visitors as soon as the page loads, so a flow that waits for those
+ * two names finishes instantly — before the learner has typed anything — stores a
+ * session that belongs to nobody, and then fails everywhere downstream with an
+ * error about a sign-in that visibly worked. The cookies are necessary and prove
+ * nothing; `userStatus.isSignedIn` is the only completion test there is.
  *
  * The window is deliberately its own `persist:` partition rather than the app's
  * default session. Two reasons, and both matter:
@@ -43,7 +50,7 @@ const POLL_MS = 700;
 const TIMEOUT_MS = 10 * 60 * 1_000;
 
 export type PracticeSignInResult =
-  | { status: "connected"; session: LeetCodeSession }
+  | { status: "connected"; session: LeetCodeSession; username: string }
   | { status: "cancelled" }
   | { status: "failed"; message: string };
 
@@ -95,25 +102,42 @@ export async function signInToLeetCode(input: {
       resolve(result);
     };
 
-    const poll = setInterval(() => {
-      void readSession(partition, region).then((session) => {
-        if (session) {
-          onProgress?.(`Signed in to ${source.name}.`);
-          finish({ status: "connected", session });
-        }
-      }).catch(() => undefined);
-    }, POLL_MS);
+    /* The cookie jar is polled cheaply; LeetCode is asked only when the jar has
+       actually changed. Without that guard a sign-in page left open would ask the
+       service who is signed in every 700ms for ten minutes. */
+    let checkedCookie = "";
+    let checking = false;
+    const attempt = async (): Promise<boolean> => {
+      if (checking) return false;
+      const session = await readSession(partition, region).catch(() => null);
+      if (!session || session.cookie === checkedCookie) return false;
+      checking = true;
+      try {
+        const identity = await verifyLeetCodeSession(session, region);
+        /* Recorded only after the answer, so a cookie that changes while the
+           request is in flight is checked again rather than skipped. */
+        checkedCookie = session.cookie;
+        if (!identity) return false;
+        onProgress?.(`Signed in to ${source.name} as ${identity.username}.`);
+        finish({ status: "connected", session, username: identity.username });
+        return true;
+      } finally {
+        checking = false;
+      }
+    };
+
+    const poll = setInterval(() => { void attempt(); }, POLL_MS);
 
     const timer = setTimeout(() => finish({ status: "failed", message: `The ${source.name} sign-in window timed out after ten minutes.` }), TIMEOUT_MS);
 
     window.once("ready-to-show", () => window.show());
     window.on("closed", () => {
-      /* Closed by hand. Checked once more first: signing in often navigates to
-         the home page, and someone who closes the window at that point has in
-         fact finished. */
-      void readSession(partition, region)
-        .then((session) => finish(session ? { status: "connected", session } : { status: "cancelled" }))
-        .catch(() => finish({ status: "cancelled" }));
+      /* Closed by hand. Asked once more first: signing in often navigates to the
+         home page, and someone who closes the window at that point has in fact
+         finished — but the answer still has to come from LeetCode rather than
+         from the cookies being present. */
+      checkedCookie = "";
+      void attempt().then((done) => { if (!done) finish({ status: "cancelled" }); }).catch(() => finish({ status: "cancelled" }));
     });
     window.webContents.on("did-fail-load", (_event, code, description, url, isMainFrame) => {
       if (!isMainFrame || code === -3) return; // -3 is an aborted navigation, which every redirect produces.

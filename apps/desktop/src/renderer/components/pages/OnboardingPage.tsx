@@ -10,12 +10,13 @@ import { cn } from "@/lib/utils";
 import { useProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
+import { LeetCodeGlyph } from "../common/SourceGlyph";
 import { SparDots } from "../common/SparDots";
 import { PANEL, STEP, TEXT, useMarkPass } from "../auth/arrival";
 import { SparWordmark } from "../common/SparWordmark";
 import { ProviderConnectDialog, type Provider } from "../settings/ProviderConnectDialog";
 
-type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider";
+type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider" | "source";
 
 type Step = {
   id: StepId;
@@ -25,7 +26,7 @@ type Step = {
   /** One line under the question, where a question needs a reason. */
   caption?: string;
   /** Free-text steps open straight into the field; the rest list options. */
-  kind: "text" | "one" | "many" | "provider";
+  kind: "text" | "one" | "many" | "provider" | "source";
   placeholder?: string;
   optional?: boolean;
 };
@@ -48,6 +49,13 @@ const STEPS: Step[] = [
      with no model behind it produces an account that can answer nothing, and
      the learner finds that out at their first question instead of here. */
   { id: "provider", header: "Model", question: "Which model should Spar run on?", kind: "provider" },
+  /* Optional, and after the model, because it changes what Spar can offer rather
+     than whether it works at all. Asked here rather than left to Settings for one
+     reason: someone who already grinds LeetCode should find their history waiting
+     for them on the first session, not discover three weeks later that Spar could
+     have been using it. Skipping is a real answer and costs nothing — every
+     challenge is then one Spar writes. */
+  { id: "source", header: "LeetCode", question: "Practise real LeetCode problems too?", caption: "Optional. Connect it and Spar can set you real problems, judged by LeetCode, alongside the ones it writes for you.", kind: "source", optional: true },
 ];
 
 const EXPERIENCE: Array<{ value: LearnerProfile["experience"]; label: string; hint: string }> = [
@@ -206,12 +214,41 @@ export function OnboardingPage({
 
   useEffect(() => { if (step.kind === "text") field.current?.focus(); }, [step.id, step.kind]);
 
+  /* The practice source, asked for once during intake and otherwise left alone.
+     Held here rather than read from an inventory hook because there is exactly
+     one question being answered — is it connected, and as whom — and the sign-in
+     window is the only thing that can change it. */
+  const [sourceAccount, setSourceAccount] = useState<string | null>(null);
+  const [connectingSource, setConnectingSource] = useState(false);
+  const [sourceError, setSourceError] = useState("");
+  useEffect(() => {
+    if (!api) return;
+    void api.practiceSource().then((source) => setSourceAccount(source.state === "connected" ? source.account?.username ?? source.name : null)).catch(() => undefined);
+  }, [api]);
+  const connectSource = async () => {
+    if (!api || connectingSource) return;
+    setConnectingSource(true);
+    setSourceError("");
+    try {
+      const result = await api.connectPracticeSource();
+      if (result.status === "connected") setSourceAccount(result.username);
+      /* Cancelling is a decision, not an error: the step is optional and the
+         learner closing the window has answered it. */
+      else if (result.status === "failed") setSourceError(result.message);
+    } catch (cause) {
+      setSourceError(message(cause));
+    } finally {
+      setConnectingSource(false);
+    }
+  };
+
   const answered = (id: StepId): string | null => {
     if (id === "name") return name.trim() || null;
     if (id === "experience") return EXPERIENCE.find((item) => item.value === experience)?.label ?? null;
     if (id === "focus") return focus.length ? focus.join(", ") : null;
     if (id === "weakness") return weakness.trim() || null;
     if (id === "language") return language ? LANGUAGE_LABEL[language] : null;
+    if (id === "source") return sourceAccount;
     if (!runnable) return null;
     return connected.length ? connected.map((provider) => provider.name).join(", ") : "Ready";
   };
@@ -267,6 +304,7 @@ export function OnboardingPage({
   const options = step.kind === "one" && step.id === "experience" ? EXPERIENCE.length
     : step.kind === "one" ? LANGUAGES.length
     : step.kind === "many" ? FOCUS.length
+    : step.kind === "source" ? 0
     : step.kind === "provider" ? offered.length
     : 0;
 
@@ -481,6 +519,37 @@ export function OnboardingPage({
                     </OptionRow>
                   ))}
                 </div>
+              )}
+
+              {phase === "intake" && step.id === "source" && (
+                <>
+                  <div className={GROUP}>
+                    <button
+                      className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-accent/60 disabled:pointer-events-none disabled:opacity-60"
+                      disabled={connectingSource}
+                      onClick={() => void connectSource()}
+                      type="button"
+                    >
+                      <LeetCodeGlyph className="size-4 shrink-0 text-foreground/80" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-content">{sourceAccount ? `Connected as ${sourceAccount}` : "Connect LeetCode"}</span>
+                        <span className="mt-0.5 block text-ui text-muted-foreground">
+                          {sourceAccount
+                            ? "Spar can set you real problems and read what you have already solved."
+                            : "You sign in on LeetCode's own page. Spar never sees your password."}
+                        </span>
+                      </span>
+                      {connectingSource
+                        ? <SparDots pattern="pulse" size={16} />
+                        : sourceAccount
+                          ? <Check className="size-4 shrink-0 text-[var(--success)]" />
+                          : <ArrowRight className="size-4 shrink-0 text-muted-foreground/60" />}
+                    </button>
+                  </div>
+                  <p className="mx-auto mt-3 max-w-[22rem] text-center text-ui leading-[1.6] text-muted-foreground">
+                    {sourceError || "Skip this and every challenge is one Spar writes for you. You can connect it later in Settings."}
+                  </p>
+                </>
               )}
 
               {phase === "intake" && step.id === "provider" && (

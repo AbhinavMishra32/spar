@@ -15,6 +15,16 @@
 
 /** Who is asking. The one query that answers whether the stored cookie is still
  *  worth anything, which makes it the connection check as well. */
+/* Exactly the fields leetcode.nvim asks for and no more.
+ *
+ * GraphQL fails a query whole: one field the schema does not define and the
+ * response is an `errors` array with no data in it, which reads downstream as a
+ * session LeetCode refused rather than as a query Spar got wrong. That is
+ * precisely what asking for `avatar` and `activeSessionId` here produced — a
+ * sign-in that completed, stored a perfectly good cookie, and was then reported
+ * as not accepted. So this document is held to what a client that runs against
+ * the live service every day actually asks for, and nothing is added to it for
+ * decoration. */
 export const USER_STATUS_QUERY = `
 query globalData {
   userStatus {
@@ -23,8 +33,6 @@ query globalData {
     isSignedIn
     isPremium
     isVerified
-    activeSessionId
-    avatar
   }
 }`;
 
@@ -34,13 +42,11 @@ query globalData {
 export const USER_STATUS_QUERY_CN = `
 query globalData {
   userStatus {
-    username: username
+    username
     userSlug
     isSignedIn
     isPremium
     isVerified
-    activeSessionId
-    avatar
   }
 }`;
 
