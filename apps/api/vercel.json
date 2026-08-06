@@ -4,7 +4,7 @@
   "buildCommand": "cd ../.. && corepack pnpm turbo run build --filter=@spar/api...",
   "outputDirectory": "dist",
   "functions": {
-    "api/index.ts": {
+    "api/index.js": {
       "maxDuration": 30
     }
   },
