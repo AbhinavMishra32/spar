@@ -16,3 +16,4 @@ supabase/.temp/
 
 # Vercel project link, written by `vercel link`. Machine-local.
 .vercel/
+.vercel
