@@ -38,15 +38,36 @@ builds the Fastify instance once per warm instance and injects each request into
 it, rather than binding a port. `apps/api/src/server.ts` skips its own `listen`
 when `VERCEL` is set, so importing it under Vercel does not try to own a socket.
 
-Create the project once, from `apps/api` as the root directory:
+Create the project once, and link it from `apps/api`:
 
 ```bash
-vercel link --cwd apps/api
+vercel link --cwd apps/api --project spar-api
 ```
 
-`apps/api/vercel.json` already carries the install and build commands, which run
-from the repository root so the pnpm workspace resolves and `@spar/domain` and
+`apps/api/vercel.json` already carries the install and build commands, which begin
+with `cd ../..` so that the pnpm workspace resolves and `@spar/domain` and
 `@spar/database` are built before the API.
+
+**Two settings make that `cd ../..` work, and the deploy fails without them.**
+
+1. **Root Directory must be `apps/api`.** It is a project setting, in Vercel's
+   dashboard under Settings → Build and Deployment; there is no CLI flag for it.
+   With it set, the build runs in `/vercel/path0/apps/api` and `cd ../..` reaches
+   the repository root.
+2. **Deploy from Git, not by uploading `apps/api`.** Connect the repository:
+
+   ```bash
+   vercel git connect https://github.com/AbhinavMishra32/spar.git --cwd apps/api
+   ```
+
+   Vercel then clones the whole monorepo for each build, which is what the
+   workspace install needs. Running `vercel deploy` from `apps/api` instead
+   uploads only that directory, so `cd ../..` lands above it and pnpm reports
+   `No package.json found in /` — the deploy fails at install, before any of the
+   code runs. Run `vercel git connect` from the repository root and it will link
+   the root as its own project, which is not what you want either.
+
+After that, a push to `main` is a production deploy.
 
 ### Environment variables
 
