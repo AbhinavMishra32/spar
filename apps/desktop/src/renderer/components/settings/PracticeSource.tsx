@@ -3,6 +3,7 @@ import { Ellipsis, Gavel, Laptop, Loader2, RotateCw, Trash2 } from "lucide-react
 import type { PracticeInventory, SourceJudgePreference, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Meter, MeterKey, type MeterBand } from "@/components/ui/meter";
 import { Segmented } from "@/components/ui/segmented";
 import { SparDots } from "@/components/common/SparDots";
 import { message } from "@/lib/format";
@@ -118,20 +119,29 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
         </Row>
       )}
 
-      {/* Their record at the source, as one line. Labelled for what it is: the
-          ledger decides what they can do, and this says what they have met. */}
+      {/* Their record at the source, drawn rather than listed. Three numbers and
+          a total is a sentence you have to parse; the same thing as a bar is a
+          shape you read at a glance — and it is the same Meter the concept
+          sheets use, so the two readings look like one app. */}
       {connected && account && (
-        <Row className="gap-4">
-          <div className="min-w-0 flex-1">
+        <Row className="flex-col items-stretch gap-0 py-3">
+          <div className="mb-2 flex items-baseline gap-2">
             <p className="text-content font-medium">Solved on LeetCode</p>
-            <p className="mt-0.5 truncate text-ui text-muted-foreground">
-              {`Easy ${account.solved.easy} · Medium ${account.solved.medium} · Hard ${account.solved.hard}`}
-              {topSkills(account) ? ` · most solved ${topSkills(account)}` : ""}
-            </p>
+            <span className="ml-auto shrink-0 text-ui tabular-nums text-muted-foreground">
+              <span className="font-medium text-foreground">{account.solved.total}</span>
+              {account.available.total ? ` of ${account.available.total.toLocaleString()}` : " solved"}
+            </span>
           </div>
-          <span className="shrink-0 text-content tabular-nums text-muted-foreground">
-            <span className="font-medium text-foreground">{account.solved.total}</span> solved
-          </span>
+          <Meter bands={solvedBands(account)} height="0.375rem" />
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {solvedBands(account).filter((band) => band.value > 0).map((band) => <MeterKey band={band} key={band.key} />)}
+            {account.streak > 0 && <span className="text-ui text-muted-foreground">{account.streak}-day streak</span>}
+          </div>
+          {topSkills(account) && (
+            <p className="mt-2 truncate text-ui text-muted-foreground">
+              Most solved under {topSkills(account)}. Spar reads that as what you have met, not what you can do.
+            </p>
+          )}
         </Row>
       )}
 
@@ -172,6 +182,16 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
       )}
     </>
   );
+}
+
+/** The solve counts as bands, in LeetCode's own three tiers and the same three
+ *  tones the rest of the app gives difficulty. */
+function solvedBands(account: NonNullable<PracticeInventory["account"]>): MeterBand[] {
+  return [
+    { key: "easy", value: account.solved.easy, className: "bg-success", label: "Easy" },
+    { key: "medium", value: account.solved.medium, className: "bg-warning", label: "Medium" },
+    { key: "hard", value: account.solved.hard, className: "bg-destructive", label: "Hard" },
+  ];
 }
 
 /** The three tags they have solved most under, or nothing. Three because the

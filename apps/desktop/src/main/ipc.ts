@@ -89,7 +89,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       /* Resolved per turn rather than at startup: the learner can add or remove
          the key while the app is open, and the worker decides whether the web
          tools exist at all from this one flag. */
-      const webSearch=await deps.web.keySource()!=="none";
+      /* Two conditions, and both are the learner's: a key has to exist, and they
+         have to want the agent reaching outside their own record with it. */
+      const webSearch=deps.store.getSetting<boolean>("web-search-enabled",true)&&await deps.web.keySource()!=="none";
       /* Resolved per turn, like the web key: the learner can connect or drop a
          source while the app is open, and a session that expired mid-turn must
          stop offering tools that can only answer "not connected". */
@@ -537,7 +539,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   /* The key goes in and never comes back out. Settings needs to know whether one
      is set and where it came from, which is not the same as needing to read it —
      and a renderer that can read it is one XSS away from exfiltrating it. */
-  ipcMain.handle(ipc.settingsWebSearch, async () => ({ source: await deps.web.keySource() }));
+  ipcMain.handle(ipc.settingsWebSearch, async () => ({ source: await deps.web.keySource(), enabled: deps.store.getSetting<boolean>("web-search-enabled", true) }));
+  ipcMain.handle(ipc.settingsWebSearchEnabled, (_event, value) => { deps.store.setSetting("web-search-enabled", value === true); });
   ipcMain.handle(ipc.settingsWebSearchSave, async (_event, value) => {
     const key = typeof value === "string" ? value.trim() : "";
     if (!key) throw new Error("An Exa API key is required");

@@ -57,6 +57,7 @@ const api: SparApi = {
   webSearchStatus: () => ipcRenderer.invoke(ipc.settingsWebSearch),
   saveWebSearchKey: (key) => ipcRenderer.invoke(ipc.settingsWebSearchSave, key),
   clearWebSearchKey: () => ipcRenderer.invoke(ipc.settingsWebSearchClear),
+  setWebSearchEnabled: (enabled) => ipcRenderer.invoke(ipc.settingsWebSearchEnabled, enabled),
   startProviderOAuth: (provider) => ipcRenderer.invoke(ipc.settingsProviderOauthStart, provider),
   submitProviderOAuth: (flowId, value) => ipcRenderer.invoke(ipc.settingsProviderOauthSubmit, { flowId, value }),
   cancelProviderOAuth: (flowId) => ipcRenderer.invoke(ipc.settingsProviderOauthCancel, flowId),

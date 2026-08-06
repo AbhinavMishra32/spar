@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Ellipsis, Globe, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, Ellipsis, Globe, KeyRound, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
 import type { Language } from "@spar/domain";
 import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
+import { Switch } from "@/components/ui/switch";
 import { message } from "@/lib/format";
 import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
@@ -43,22 +44,32 @@ const KIND_LABEL: Record<Provider["kind"], string> = {
 const KIND_ORDER: Array<Provider["kind"]> = ["subscription", "api-key", "local", "custom"];
 
 /**
- * The Exa key that lets the agent reach the web.
+ * Whether the agent may reach the web, and the key that lets it.
+ *
+ * Two facts, so two rows. The switch is the setting — a learner who wants a
+ * session read only from their own record can have one without throwing their
+ * key away — and the key is a credential, which appears once it is relevant and
+ * gets out of the way once it is held. An input box sitting open under a key
+ * that is already stored is a form asking to be filled in for no reason.
  *
  * Write-only, like every other credential here: the field takes a key and the
- * main process never hands one back, so what this row can report is whether one
- * is set and where it came from. A key supplied through `EXA_API_KEY` says so
- * rather than showing an empty box that mysteriously works.
+ * main process never hands one back, so what these rows can report is whether
+ * one is set and where it came from. A key supplied through `EXA_API_KEY` says
+ * so rather than showing an empty box that mysteriously works.
  */
 function WebSearchRow({ api }: { api: SparApi | undefined }) {
   const [source, setSource] = useState<"keychain" | "env" | "none" | "loading">("loading");
+  const [enabled, setEnabled] = useState(true);
   const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState("");
 
   const read = useCallback(async () => {
     if (!api) return;
-    setSource((await api.webSearchStatus()).source);
+    const status = await api.webSearchStatus();
+    setSource(status.source);
+    setEnabled(status.enabled);
   }, [api]);
 
   useEffect(() => { void read().catch(() => setSource("none")); }, [read]);
@@ -66,51 +77,96 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
   const act = async (run: () => Promise<void>) => {
     setBusy(true);
     setFailure("");
-    try { await run(); setDraft(""); await read(); }
+    try { await run(); setDraft(""); setEditing(false); await read(); }
     catch (cause) { setFailure(message(cause)); }
     finally { setBusy(false); }
   };
 
-  const detail = source === "loading"
-    ? "Checking…"
-    : source === "keychain"
-      ? `Connected. The key is stored in ${credentialStore}.`
-      : source === "env"
-        ? "Connected through the EXA_API_KEY environment variable."
-        : "Not set up. Without a key the agent works entirely from your own record.";
+  const held = source === "keychain" || source === "env";
+  /* The switch reads the setting, but a key-less agent cannot search whatever the
+     setting says — so the row shows off, and says why, rather than showing on and
+     quietly doing nothing. */
+  const active = enabled && held;
 
   return (
-    <Row className="flex-col items-stretch gap-2.5 py-3">
-      <div className="flex min-w-0 items-center gap-3">
-        <span className="grid size-6 shrink-0 place-items-center text-foreground/85"><Globe className="size-[1.15rem]" /></span>
+    <>
+      <Row className="gap-4">
+        <span className={cn("grid size-6 shrink-0 place-items-center transition-colors", active ? "text-foreground/85" : "text-muted-foreground/50")}>
+          <Globe className="size-[1.15rem]" />
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="text-content font-medium">Exa API key</p>
-          <p className="mt-0.5 text-ui text-muted-foreground">{detail}</p>
+          <p className="text-content font-medium">Web search</p>
+          <p className="mt-0.5 text-ui text-muted-foreground">
+            {source === "loading"
+              ? "Checking…"
+              : !held
+                ? "Needs an Exa key. Without one the agent works entirely from your own record."
+                : enabled
+                  ? "The agent can look up what a company's interviews cover or what a library's current API is."
+                  : "Off. The agent works entirely from your own record."}
+          </p>
         </div>
-        {source === "keychain" && (
-          <Button disabled={busy} onClick={() => void act(async () => api?.clearWebSearchKey())} size="sm" variant="ghost">
-            Remove
-          </Button>
-        )}
-        <Button onClick={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")} size="sm" variant="ghost">
-          <ExternalLink className="size-3.5" />Get a key
-        </Button>
-      </div>
-      <div className="flex min-w-0 items-center gap-2 pl-9">
-        <Input
-          autoComplete="off"
-          className="min-w-0 flex-1 font-mono text-ui"
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder={source === "keychain" ? "Replace the stored key…" : "Paste your Exa API key…"}
-          type="password"
-          value={draft}
+        <Switch
+          aria-label="Web search"
+          checked={active}
+          disabled={busy || !held}
+          onCheckedChange={(next) => void act(async () => api?.setWebSearchEnabled(next))}
         />
-        <Button disabled={busy || !draft.trim()} onClick={() => void act(async () => api?.saveWebSearchKey(draft.trim()))} size="sm">
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
-        </Button>
-      </div>
-      {failure && <p className="pl-9 text-ui text-destructive">{failure}</p>}
-    </Row>
+      </Row>
+
+      {/* The key. Shown while there is none to hold, and folded away once there
+          is — replacing one is a deliberate act, not the default state. */}
+      {held && !editing ? (
+        <Row className="gap-3">
+          <span className="grid size-6 shrink-0 place-items-center text-muted-foreground/70"><KeyRound className="size-4" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-ui text-muted-foreground">
+              {source === "env" ? "Key supplied by the EXA_API_KEY environment variable." : `Key stored in ${credentialStore}.`}
+            </p>
+          </div>
+          {source === "keychain" && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                aria-label="Exa key options"
+                className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
+              >
+                {busy ? <Loader2 className="size-4 animate-spin" /> : <Ellipsis className="size-4" />}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setEditing(true)}><KeyRound />Replace key</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")}><ExternalLink />Exa dashboard</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => void act(async () => api?.clearWebSearchKey())} variant="destructive">
+                  <Trash2 />Remove key
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </Row>
+      ) : source !== "loading" && (source === "none" || editing) ? (
+        <Row className="gap-3">
+          <span className="grid size-6 shrink-0 place-items-center text-muted-foreground/70"><KeyRound className="size-4" /></span>
+          <Input
+            autoComplete="off"
+            autoFocus={editing}
+            className="min-w-0 flex-1 font-mono text-ui"
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => { if (event.key === "Enter" && draft.trim()) void act(async () => api?.saveWebSearchKey(draft.trim())); if (event.key === "Escape") { setEditing(false); setDraft(""); } }}
+            placeholder={editing ? "Paste the replacement key…" : "Paste your Exa API key…"}
+            type="password"
+            value={draft}
+          />
+          <Button disabled={busy || !draft.trim()} onClick={() => void act(async () => api?.saveWebSearchKey(draft.trim()))} size="sm">
+            {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
+          </Button>
+          {editing
+            ? <Button onClick={() => { setEditing(false); setDraft(""); }} size="sm" variant="ghost">Cancel</Button>
+            : <Button onClick={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")} size="sm" variant="ghost"><ExternalLink className="size-3.5" />Get one</Button>}
+        </Row>
+      ) : null}
+
+      {failure && <Row><p className="text-ui text-destructive">{failure}</p></Row>}
+    </>
   );
 }
 

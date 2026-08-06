@@ -11,6 +11,7 @@ export const ipc = {
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
+  settingsWebSearchEnabled: "settings:web-search-enabled",
   attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
@@ -359,9 +360,13 @@ export interface SparApi {
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
   /** Whether the agent can reach the web, and where its key came from. The key
    *  itself is never read back — Settings shows the state, not the secret. */
-  webSearchStatus(): Promise<{ source: "keychain" | "env" | "none" }>;
+  webSearchStatus(): Promise<{ source: "keychain" | "env" | "none"; enabled: boolean }>;
   saveWebSearchKey(key: string): Promise<void>;
   clearWebSearchKey(): Promise<void>;
+  /** Whether the agent may reach the web at all. Separate from holding a key:
+   *  someone can keep their key and still want a session that only reads their
+   *  own record. */
+  setWebSearchEnabled(enabled: boolean): Promise<void>;
   startProviderOAuth(provider: Extract<ProviderId, "openai-codex" | "claude-code" | "github-copilot">): Promise<{ flowId: string }>;
   submitProviderOAuth(flowId: string, value: string): Promise<void>;
   cancelProviderOAuth(flowId: string): Promise<void>;
