@@ -13,3 +13,7 @@ apps/desktop/.spar/
 apps/api/uploads/
 supabase/.temp/
 .DS_Store
+
+# Vercel project link, written by `vercel link`. Machine-local.
+.vercel/
+.vercel

@@ -176,3 +176,73 @@ it("keeps a turn's activity with the reply it produced",()=>{const store=new Loc
   store.addMessage(sessionId,"learner","thanks");
   expect(store.readSession(sessionId)?.messages.at(-1)?.activity).toEqual([]);
 }finally{store.close();}});
+
+/* ---- Restore --------------------------------------------------------------
+   The pull half of sync. These tests exist because the two ways this can go
+   wrong are both silent: a restore that enqueues turns a fresh device into a
+   machine that uploads the account back to itself in a loop, and a restore that
+   overwrites is a learner losing offline work to a staler cloud copy. */
+
+const restoredSession = (id: string, updatedAt: string) => ({
+  session: { id, title: "Sliding windows", originalGoal: "Get good at sliding windows", objective: "Restore the invariant every time", status: "active", totalSeconds: 1_200, currentFocus: ["Invariant restoration"], pinnedAt: null, archivedAt: null, createdAt: updatedAt, updatedAt },
+  targets: [{ id: randomUUID(), abilityDocumentId: null, action: "practise", specificGap: "Repeated restoration", desiredEvidence: "Loops until valid", avoidTesting: [], createdAt: updatedAt }],
+  questions: [] as never[],
+  attempts: [] as never[],
+  messages: [{ id: randomUUID(), role: "agent", body: "Let us start with the window.", activity: [], createdAt: updatedAt }],
+  checkpoint: null,
+});
+
+it("restores an account from the cloud without queueing it straight back",()=>{const store=new LocalStore(":memory:");try{
+  const profile={name:"Abhinav",experience:"working" as const,focus:["Async and concurrency"],weakness:"I never know what needs awaiting.",language:"typescript" as const,completedAt:new Date().toISOString()};
+  const abilityId=randomUUID();
+  const updatedAt=new Date().toISOString();
+  store.restoreAccount({
+    profile,
+    concepts:[{slug:"window-invariant-restoration",title:"Window invariant restoration",kind:"skill",parentSlug:null,description:"Restoring a window's invariant after a mutation."}],
+    abilities:[{id:abilityId,title:"Invariant restoration",markdown:"# Invariant restoration\n\nRecognizes the invariant.",summary:"Spots the invariant, repairs it once.",practice:["Restore after two mutations"],earnedAt:updatedAt,conceptSlugs:["window-invariant-restoration"],status:"developing",version:2,updatedAt,evidenceEventIds:[]}],
+  });
+  const sessionId=randomUUID();
+  store.restoreSessions([restoredSession(sessionId,updatedAt)]);
+
+  // The account is on the device, in the shapes the app reads back.
+  expect(store.getProfile()).toEqual(profile);
+  expect(store.listSessions().map((session)=>session.id)).toEqual([sessionId]);
+  expect(store.readAbility(abilityId)).toMatchObject({version:2,status:"developing",summary:"Spots the invariant, repairs it once."});
+  expect(store.readSession(sessionId)?.messages.map((message)=>message.body)).toEqual(["Let us start with the window."]);
+  expect(store.readSession(sessionId)?.summary.totalSeconds).toBe(1_200);
+
+  /* The point of the whole exercise. Every insert path in LocalStore enqueues,
+     which is right when the learner caused the write and catastrophic when the
+     cloud did — the device would push all of it back and do it again on the next
+     launch. */
+  expect(store.pendingSync()).toEqual([]);
+}finally{store.close();}});
+
+it("does not let a restore overwrite work done on this device",()=>{const store=new LocalStore(":memory:");try{
+  const {sessionId}=store.createSession("Practise sliding windows");
+  store.renameSession(sessionId,"My own title");
+  // The cloud's copy of the same session, as it was before the rename.
+  store.restoreSessions([restoredSession(sessionId,new Date(Date.now()-60_000).toISOString())]);
+  expect(store.listSessions()[0]?.title).toBe("My own title");
+  // And the device's own pending work is still queued to go up.
+  expect(store.pendingSync().map((item)=>item.kind)).toContain("session-rename");
+}finally{store.close();}});
+
+/* A device that already holds the session at or past the cloud's version must not
+   spend a round trip re-fetching it. This is what makes a reinstall on an account
+   with months of history cost one manifest rather than every session in it. */
+it("knows which sessions it can skip fetching",()=>{const store=new LocalStore(":memory:");try{
+  const {sessionId}=store.createSession("Practise sliding windows");
+  const mine=store.listSessions()[0]!.updatedAt;
+  expect(store.sessionIsCurrent(sessionId,mine)).toBe(true);
+  expect(store.sessionIsCurrent(sessionId,new Date(Date.parse(mine)-1_000).toISOString())).toBe(true);
+  expect(store.sessionIsCurrent(sessionId,new Date(Date.parse(mine)+1_000).toISOString())).toBe(false);
+  expect(store.sessionIsCurrent(randomUUID(),mine)).toBe(false);
+}finally{store.close();}});
+
+/* The profile is what the onboarding gate reads, so it is the one row whose
+   sync direction decides whether a returning learner is asked their name again. */
+it("pushes the onboarding profile so another machine can skip intake",()=>{const store=new LocalStore(":memory:");try{
+  store.saveProfile({name:"Abhinav",experience:"senior",focus:[],weakness:"",language:"cpp",completedAt:new Date().toISOString()});
+  expect(store.pendingSync().map((item)=>item.kind)).toContain("profile-save");
+}finally{store.close();}});

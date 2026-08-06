@@ -8,6 +8,8 @@ import { installIpc } from "./ipc.js";
 import { installMenu } from "./menu.js";
 import { LocalStore } from "./store.js";
 import { CloudSyncService } from "./sync.js";
+import { CheckpointService } from "./checkpoints.js";
+import { RestoreService } from "./restore.js";
 import { UtilityClient } from "./utilityClient.js";
 import { startUpdates } from "./updates.js";
 import { executeTrainingTool } from "./trainingTools.js";
@@ -15,7 +17,7 @@ import { WebSearchService } from "./webSearch.js";
 import { recordAgentActivity } from "./agentActivity.js";
 import { PracticeService } from "./practice.js";
 import { ProviderService } from "./provider.js";
-import { createMainWindow } from "./window.js";
+import { createMainWindow, fitWindowTo } from "./window.js";
 import { WorkspaceService } from "./workspaces.js";
 import { themePreferenceSchema } from "../shared/api.js";
 
@@ -44,13 +46,32 @@ else {
     const web = new WebSearchService(() => auth.readSecret("exa"));
     const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice));
     const sync=new CloudSyncService(store,auth,origin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
+    /* Writes the checkpoints that make a session resumable on another machine.
+       Nothing wrote them before, so `checkpoints` was empty on every install and
+       the cloud's copy was empty with it. */
+    const checkpoints=new CheckpointService(store,workspaces);
+    /* The pull half of sync. Sign-in drives it; this launch path is the resume
+       for a device that was interrupted partway through one. */
+    const restore=new RestoreService(store,workspaces,auth,origin,(state)=>mainWindow?.webContents.send("restore:state",state));
     /* Asked before the window exists so it can open at the size it belongs at.
        Opening large and shrinking once the renderer reports in would read as the
-       app correcting a mistake in front of the learner. */
-    const stage = !(await auth.account()) ? "sign-in" as const : store.getProfile() ? "app" as const : "onboarding" as const;
-    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, web, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); startUpdates(mainWindow);
-    app.on("before-quit", () => { sync.stop(); runner.stop(); agent.stop(); store.close(); });
-    app.on("activate", async () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow({ stage: !(await auth.account()) ? "sign-in" : store.getProfile() ? "app" : "onboarding" }); });
+       app correcting a mistake in front of the learner.
+
+       A signed-in device with no profile is not necessarily a new account — far
+       more often it is a machine that has not finished restoring one. So it opens
+       at "restoring" and the pull below settles which of the two it was. */
+    const signedIn = Boolean(await auth.account());
+    const needsRestore = signedIn && !store.getProfile();
+    const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : "app" as const;
+    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, checkpoints, restore, web, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); startUpdates(mainWindow);
+    /* Started after the window exists, so its progress has somewhere to be
+       reported. The renderer holds the restoring screen until this settles. */
+    if (needsRestore) void restore.run().then((state) => { if (state !== "failed") fitWindowTo(mainWindow, store.getProfile() ? "app" : "onboarding"); });
+    /* Checkpoints are flushed before the store closes: quitting is the one moment
+       there is no next debounce tick to wait for, and the session the learner just
+       closed the laptop on is exactly the one worth not losing. */
+    app.on("before-quit", () => { void checkpoints.flushAll().finally(() => { checkpoints.stop(); sync.stop(); runner.stop(); agent.stop(); store.close(); }); });
+    app.on("activate", async () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow({ stage: !(await auth.account()) ? "sign-in" : store.getProfile() ? "app" : "restoring" }); });
   });
 }
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

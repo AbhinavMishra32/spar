@@ -36,6 +36,13 @@
       "when": 1785937884173,
       "tag": "0004_better_auth",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786025217867,
+      "tag": "0005_stiff_paper_doll",
+      "breakpoints": true
     }
   ]
 }

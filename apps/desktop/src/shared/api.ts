@@ -3,7 +3,10 @@ import { attemptEventSchema, languageSchema, learnerProfileSchema, sessionCheckp
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
-  checkpointSave: "checkpoint:save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
+  /* The window reports its own state; the main process decides when that becomes
+     a checkpoint. Named for what it carries after "checkpoint:save" turned out to
+     be a channel nothing ever called — see CheckpointService. */
+  workspaceStateSave: "workspace:state-save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
@@ -26,6 +29,7 @@ export const ipc = {
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
+  restoreRetry: "restore:retry",
 } as const;
 
 /* ---- Signing in ---------------------------------------------------------
@@ -89,6 +93,17 @@ export const practiceInput = z.object({
   drill: z.string().trim().min(3).max(400).optional(),
 }).refine((value) => Boolean(value.abilityId ?? value.conceptSlug), "A practice session needs an ability or a concept to aim at");
 export const workspaceWriteInput = workspacePathInput.extend({ content: z.string().max(2_000_000) });
+/** How the window has this session arranged. Everything else in a checkpoint is
+ *  read from disk or from the store by the main process, so this is the whole of
+ *  the renderer's contribution to one. */
+export const workspaceStateInput = z.object({
+  sessionId: z.string().uuid(),
+  openFiles: z.array(z.string().min(1).max(500)).max(50).default([]),
+  activeFile: z.string().min(1).max(500).nullable().default(null),
+  layout: z.object({ sidebarWidth: z.number(), editorRatio: z.number(), bottomPanelHeight: z.number(), agentPanelOpen: z.boolean() }),
+  visibleTestRunIds: z.array(z.string()).max(50).default([]),
+  terminalRecipe: z.array(z.string().max(500)).max(20).default([]),
+});
 /** `timeoutMs` is optional and only ever lowers the budget: the main process sets
  *  it from the language, because how long a toolchain needs is not something the
  *  window can know. */
@@ -243,10 +258,16 @@ export type SourceRunReport = {
 export type PracticeSourceEvent = { source: "leetcode"; state: PracticeSourceState; message: string };
 
 export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+  /** How far the pull half of sync has got. The shell gates on this before it
+   *  gates on `profile`: a signed-in device with no local profile has either not
+   *  finished restoring or could not reach the server, and treating either as "no
+   *  profile" is what sent onboarded learners back through intake. */
+  restore: RestoreState;
   /** True when this is a packaged build with no Spar server configured, so
    *  sign-in can say that rather than reporting a refused connection at
    *  localhost that reads as the app being broken. */
   serverConfigured: boolean };
+export type RestoreState = "idle" | "pending" | "done" | "failed";
 /** One file a tool wrote, with the line counts the activity row reports. */
 export type AgentActivityFile = { path: string; added: number; removed: number };
 export type AgentStreamEvent = {
@@ -283,7 +304,10 @@ export interface SparApi {
   bootstrap(): Promise<BootstrapData>;
   createSession(input: z.infer<typeof createSessionInput>): Promise<{ sessionId: string }>;
   openSession(sessionId: string): Promise<SessionDetail | null>;
-  saveCheckpoint(input: z.infer<typeof sessionCheckpointSchema>): Promise<void>;
+  /** Tell the main process how this session's window is arranged. It folds this
+   *  into the checkpoint it writes on its own schedule, along with the workspace
+   *  files and the store state the renderer has no access to. */
+  saveWorkspaceState(input: z.infer<typeof workspaceStateInput>): Promise<void>;
   appendAttemptEvent(input: z.infer<typeof attemptAppendInput>): Promise<z.infer<typeof attemptEventSchema>>;
   readWorkspaceFile(input: z.infer<typeof workspacePathInput>): Promise<string>;
   writeWorkspaceFile(input: z.infer<typeof workspaceWriteInput>): Promise<void>;
@@ -391,4 +415,8 @@ export interface SparApi {
   build: BuildInfo;
   onNativeSurface(listener: (surface: NativeSurface) => void): () => void;
   onSyncState(listener: (state: SyncState) => void): () => void;
+  onRestoreState(listener: (state: RestoreState) => void): () => void;
+  /** Try the pull again after it failed — the button on the screen that failure
+   *  puts up. Resolves with wherever the retry landed. */
+  retryRestore(): Promise<RestoreState>;
 }

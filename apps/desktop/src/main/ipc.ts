@@ -4,7 +4,7 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceJudgeSchema, sourceRegionSchema, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceJudgeSchema, sourceRegionSchema, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -18,12 +18,14 @@ import type { WorkspaceService } from "./workspaces.js";
 import type { PracticeService } from "./practice.js";
 import type { ProviderService } from "./provider.js";
 import type { CloudSyncService } from "./sync.js";
+import type { CheckpointService } from "./checkpoints.js";
+import type { RestoreService } from "./restore.js";
 import type { WebSearchService } from "./webSearch.js";
 import { requestsChallengeRevision } from "./agentIntent.js";
 import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; web: WebSearchService; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
@@ -46,7 +48,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      seen the state and asked for it, so this is no longer a loop the app is
      driving by itself. */
   const clearAutoResume = (sessionId: string) => autoResumedPlanning.delete(sessionId);
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", serverConfigured: !apiOriginIsUnconfigured() }));
+  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() }));
+  ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
      to clean up to make the error go away. */
@@ -64,10 +67,12 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
     return detail;
   });
-  ipcMain.handle(ipc.checkpointSave, (_event, value) => deps.store.saveCheckpoint(sessionCheckpointSchema.parse(value)));
+  ipcMain.handle(ipc.workspaceStateSave, (_event, value) => { const { sessionId, ...state } = workspaceStateInput.parse(value); deps.checkpoints.remember(sessionId, state); });
   ipcMain.handle(ipc.attemptAppend, (_event, value) => deps.store.appendNextEvent(attemptAppendInput.parse(value)));
   ipcMain.handle(ipc.workspaceRead, (_event, value) => { const input = workspacePathInput.parse(value); return deps.workspaces.read(input.sessionId, input.path); });
-  ipcMain.handle(ipc.workspaceWrite, (_event, value) => { const input = workspaceWriteInput.parse(value); return deps.workspaces.write(input.sessionId, input.path, input.content); });
+  /* Every saved file is a reason to checkpoint. The service debounces, so a burst
+     of saves costs one row rather than one each. */
+  ipcMain.handle(ipc.workspaceWrite, async (_event, value) => { const input = workspaceWriteInput.parse(value); await deps.workspaces.write(input.sessionId, input.path, input.content); deps.checkpoints.note(input.sessionId); });
   /* How long a run may take is decided here, from the language, and never taken
      from the window. The renderer used to send the number — 8s, hard-coded beside
      the Run button — which is why pressing Run on a C++ challenge killed the
@@ -490,11 +495,26 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      spends credentials. The union is the same one the form switches on. */
   ipcMain.handle(ipc.authRequest, async (_event, value) => {
     const result = await deps.auth.request(authRequestInput.parse(value));
+    if (result.status !== "signed-in") return result;
+    /* An account that has signed in before has a profile and a history waiting on
+       the server, and this device may hold neither — it is a new machine, or the
+       same one after a sign-out, which empties it by design. So the pull happens
+       here, before the window is told anything: the sign-in button's spinner is
+       already built to wait across this call, and it is the only moment where
+       "does this account need onboarding" can be answered truthfully.
+
+       A brand-new account skips it. There is nothing to restore, and a round trip
+       to find that out would only delay the intake it is about to be shown. */
+    const restored = deps.auth.signedUpThisSession() ? "idle" as const : await deps.restore.run();
     /* The window grows to whatever comes next — the intake for a new account, the
        app for one that has already done it. Done here rather than from the
        renderer because the size of the window is not the renderer's to decide,
-       and this is where signing in is known to have actually happened. */
-    if (result.status === "signed-in") fitWindowTo(deps.window(), deps.store.getProfile() ? "app" : "onboarding");
+       and this is where signing in is known to have actually happened.
+
+       A failed restore is deliberately *not* sent to the intake. The device does
+       not know whether this account has been onboarded, and asking would overwrite
+       a real profile with a second answer to the same questions. */
+    fitWindowTo(deps.window(), deps.store.getProfile() || restored === "failed" ? "app" : "onboarding");
     return result;
   });
   /* Suggestions are drafted, never stored: until the learner opens one it is not

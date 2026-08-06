@@ -1,1 +1,1 @@
-{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"declaration":true,"outDir":"dist"}}
+{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"outDir":"dist"}}
