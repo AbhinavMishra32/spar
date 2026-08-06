@@ -90,13 +90,26 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          the key while the app is open, and the worker decides whether the web
          tools exist at all from this one flag. */
       const webSearch=await deps.web.keySource()!=="none";
-      const payload={sessionId,message,turnKind,webSearch,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),
+      /* Resolved per turn, like the web key: the learner can connect or drop a
+         source while the app is open, and a session that expired mid-turn must
+         stop offering tools that can only answer "not connected". */
+      const practiceState=await deps.practice.state().catch(()=>"disconnected" as const);
+      const practiceConnected=practiceState==="connected";
+      const practiceSummary=practiceConnected?{
+        name:deps.practice.sourceName(),
+        region:deps.practice.region(),
+        judgesSubmissions:await deps.practice.judgesSubmissions(),
+        /* What has already been set from the source, so the agent can see it has
+           asked for this problem before without spending a tool call to find out. */
+        alreadyAssigned:deps.store.assignedPracticeProblems(12),
+      }:null;
+      const payload={sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4),
         /* Carried unconditionally, unlike `relevantAbilitySummary`, which is
            scoped to the goal and so cannot show a topic the goal never mentions.
            Repetition across sessions is exactly the thing a goal-scoped view
            hides: the agent needs to see the last dozen challenges to know it has
            asked about the same concept twelve times. */
-        recentChallenges:deps.store.recentChallengeCoverage(12),accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
+        recentChallenges:deps.store.recentChallengeCoverage(12),practiceSource:practiceSummary,accountId:account.id,preferredLanguage:profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
       /* A run is claimed by its session for as long as it is in flight, in two
          places: `activeAgentRuns` guards against a second turn, and
          `agentRunSessions` is what lets the main process stamp a session id onto

@@ -4,6 +4,7 @@ import { Mastra } from "@mastra/core/mastra";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
 import { askUserQuestionInputSchema } from "@spar/domain";
+import { PRACTICE_READ_TOOLS } from "@spar/practice/mcp";
 import { createPiMastraModel, type PiProviderInput } from "./piMastraModel.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
 import { allowedTools, nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
@@ -15,7 +16,7 @@ const IDENTICAL_TOOL_CALL_LIMIT = 15;
 const AGENT_PHASE_TIMEOUT_MS = 180_000;
 const CHALLENGE_COMPILATION_LIMIT = 15;
 const PROTOCOL_RETRY_LIMIT = 15;
-type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { objective?: unknown; target?: unknown }; webSearch?: boolean; provider: PiProviderInput } };
+type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { objective?: unknown; target?: unknown }; webSearch?: boolean; practiceSource?: boolean; provider: PiProviderInput } };
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error("Spar must run inside an Electron utility process");
 const pendingTools = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
@@ -139,8 +140,39 @@ const toolDefinitions = {
   evaluate_attempt: ["Read the already-recorded deterministic runner outcome and evidence. Never judge correctness with the model.", z.object({ attemptId: z.string().uuid() })],
   propose_ability_update: ["Propose a versioned markdown ability change backed by evidence. Include summary, concepts and practice whenever the evidence now supports naming this as something the learner can do.", z.object({ abilityId: z.string().uuid(), markdown: z.string(), evidenceEventIds: z.array(z.string().uuid()), ...abilityClaimShape })],
   upsert_ability: ["Introduce an uncertain ability, or grant one: append an evidence-backed version and give it the summary, concepts and practice drills that make it something the learner can see and train.", z.object({title:z.string().min(2).max(120),markdown:z.string().min(20),evidenceEventIds:z.array(z.string().uuid()).default([]), ...abilityClaimShape})],
-  commit_session_decision: ["Commit exactly one next pedagogical action.", z.object({ action: z.enum(["diagnose", "teach", "practise", "transfer", "advance", "retain"]), reason: z.string() })]
+  commit_session_decision: ["Commit exactly one next pedagogical action.", z.object({ action: z.enum(["diagnose", "teach", "practise", "transfer", "advance", "retain"]), reason: z.string() })],
+  /**
+   * Setting a real problem instead of writing one.
+   *
+   * The counterpart to `create_question`, and the reason the source exists. What
+   * it takes is deliberately not the problem — the host reads that from the
+   * source itself — but the *aim*: which concept this is being set for and what
+   * the agent expects it to show. A slug alone would mount a problem with no
+   * statement about why, and the ledger would gain a challenge nobody can explain.
+   */
+  assign_practice_problem: [
+    "Set a real problem from the connected practice source as this session's challenge. Prefer this over create_question whenever a real problem genuinely lands on the target you have chosen: it carries the source's own judge, a difficulty real people calibrated, and the learner's own history with it. Read the problem first — the statement is the only way to know whether it exercises the gap. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe the problem's contents in your reply, because the learner is about to read it.",
+    z.object({
+      slug: z.string().min(1).max(120).describe("The problem's URL slug, exactly as the source gave it."),
+      concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and it must name the gap the target describes — not merely the topic the source files the problem under."),
+      why: z.string().min(20).max(400).describe("One or two sentences: why this specific problem discriminates what is still uncertain about this learner. This is stored with the challenge and is what a later turn reads to know what you were testing."),
+      language: z.enum(["javascript", "typescript", "cpp"]).optional().describe("Omit to use the learner's preferred language. Only name one when the problem demands it."),
+    }),
+  ],
 } as const;
+
+/**
+ * Tools that reach the practice source, declared from the MCP server's own
+ * schemas rather than restated here.
+ *
+ * Restating them is how a tool the agent can call with arguments the server
+ * rejects comes about — a turn that fails for a reason no log explains. The
+ * descriptions come from the same place, so what the agent is told a tool does is
+ * what the server documents it doing.
+ */
+const sourceToolDefinitions = Object.fromEntries(
+  PRACTICE_READ_TOOLS.map((tool) => [tool.name, [tool.description, z.object(tool.shape)] as const]),
+) as Record<string, readonly [string, z.ZodTypeAny]>;
 
 function hostTool(
   runId: string,
@@ -199,7 +231,7 @@ async function callHostTool(
     // Compilation rejection is an expected tool result rather than an IPC
     // error, but it must never be rendered as a successfully created
     // challenge. Only a playable result reaches durable question storage.
-    const published = !["create_question", "replace_current_question", "create_fallback_question"].includes(name) || isPlayableQuestion(value);
+    const published = !["create_question", "replace_current_question", "create_fallback_question", "assign_practice_problem"].includes(name) || isPlayableQuestion(value);
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...titled, ...payload, output: toolPayload(name, value) } });
     return value;
   } catch (error) {
@@ -300,7 +332,7 @@ function describeReplay(value: unknown): string {
 function describeToolResult(name: string, value: unknown): string {
   if (name === "replay_attempt") return describeReplay(value);
   const record = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-  if ((name === "create_question" || name === "replace_current_question") && typeof record.status === "string") {
+  if ((name === "create_question" || name === "replace_current_question" || name === "assign_practice_problem") && typeof record.status === "string") {
     // The transcript row only has one line to spare; the agent's own repair
     // feedback is built separately and is not clipped to fit a UI label.
     return [`status ${record.status}`, ...failedChecks(value)].join(" · ").slice(0, 320);
@@ -344,7 +376,11 @@ function withActionTitle(schema: z.ZodTypeAny): z.ZodTypeAny {
 async function run(request: Request) {
   const hasActiveQuestion=Boolean(request.payload.activeQuestion);
   const webSearch = request.payload.webSearch === true;
-  const allowed = allowedTools(request.payload.turnKind,hasActiveQuestion,webSearch);
+  /* Whether the learner has a practice source connected. Decided in the main
+     process — it owns the credential — and passed in, so the worker never has to
+     ask and a source that expired mid-session simply stops being offered. */
+  const practiceSource = request.payload.practiceSource === true;
+  const allowed = allowedTools(request.payload.turnKind,hasActiveQuestion,webSearch,practiceSource);
   const outcomes = new Map<string, unknown[]>();
   if (request.payload.resumeState?.objective) outcomes.set("set_session_objective", [request.payload.resumeState.objective]);
   if (request.payload.resumeState?.target && request.payload.turnKind !== "challenge-revision") outcomes.set("set_training_target", [request.payload.resumeState.target]);
@@ -357,7 +393,7 @@ async function run(request: Request) {
     callSignatures.push(`${name}:${stableJson(input)}`);
     assertNoExtremeToolLoop(callSignatures);
   };
-  const tools = Object.fromEntries(Object.entries(toolDefinitions).filter(([name]) => allowed.has(name)).map(([name, [description, schema]]) => [name, hostTool(request.id,request.payload.sessionId,name, description, withActionTitle(schema), record, () => currentPhase, phaseExecutions)]));
+  const tools = Object.fromEntries(Object.entries({ ...toolDefinitions, ...sourceToolDefinitions }).filter(([name]) => allowed.has(name)).map(([name, [description, schema]]) => [name, hostTool(request.id,request.payload.sessionId,name, description, withActionTitle(schema as z.ZodTypeAny), record, () => currentPhase, phaseExecutions)]));
   const model = createPiMastraModel(request.payload.provider);
   const agent = new Agent({ id: "spar-agent", name: "Spar", model, instructions: instructions().replaceAll("Training Agent","Spar"), tools, maxRetries: 1 });
   new Mastra({ agents: { training: agent }, logger: false });
@@ -367,7 +403,7 @@ async function run(request: Request) {
     let finishReason = "stop";
     for (let step = 0; step < AGENT_MAX_STEPS; step += 1) {
       currentPhase = step;
-      const stage = nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT,{hasActiveQuestion,webSearch});
+      const stage = nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT,{hasActiveQuestion,webSearch,practiceSource});
       if (stage.exhausted) {
         const value = await publishFallbackChallenge(request, outcomes, stage.exhausted);
         parentPort.postMessage({ kind: "result", id: request.id, ok: value.ok, ...(value.ok ? { value: { text: value.text, usage: sumUsage(usage), finishReason: "fallback-challenge", phaseSteps: step + 1 } } : { error: value.error }) });
@@ -460,7 +496,7 @@ function requestedLanguage(outcomes: Map<string, unknown[]>): "javascript" | "ty
 
 function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string) {
   const evidence = Object.fromEntries([...outcomes.entries()].map(([name, values]) => [name, values.at(-1)]));
-  const compilationFeedback = activeTools.some((tool)=>tool==="create_question"||tool==="replace_current_question") ? latestRejectedCompilationFeedback(outcomes) : "";
+  const compilationFeedback = activeTools.some((tool)=>tool==="create_question"||tool==="replace_current_question"||tool==="assign_practice_problem") ? latestRejectedCompilationFeedback(outcomes) : "";
   const phaseInstruction=protocolFailure
     ? `Your previous response did not produce a schema-valid host tool call: ${protocolFailure}. Call exactly one tool from ${activeTools.join(", ")} now. Correct only the tool-call JSON shape; do not answer in prose.`
     : activeTools.length?(request.payload.turnKind==="learner-message"?`${compilationFeedback?`The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Fix that exact failure before trying again. `:""}${request.payload.activeQuestion?`An active challenge exists (question ${request.payload.activeQuestion.id}, attempt ${request.payload.activeQuestion.attemptId}). create_question is intentionally unavailable. If the learner says the challenge is too difficult, asks to change it, or confirms "do it", inspect the current attempt if needed, adjust the target if needed, then call replace_current_question. Never answer that a replacement cannot be launched merely because a challenge is active; replacement is the supported operation. `:"No active challenge exists, so create_question is the supported creation operation. "}Respond to the learner's actual request. Use a tool whenever they ask you to inspect or change real tests, challenges, account history, or abilities. You may call one best tool now, or answer concisely if no tool is needed. Never claim a state change without its successful tool result.`:`${compilationFeedback ? `The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Revise the candidate to fix that exact failure. A known-incorrect implementation must pass every visible test and fail a hidden test; do not submit a placeholder or deliberately visible-failing implementation. ` : ""}Before the call, write one short sentence addressed to the learner saying what you are about to do and why it follows from what you just found — one sentence, present tense, no preamble and no restating this instruction. Then call the single best required next tool from this allowlist: ${activeTools.join(", ")}. Do not write anything else: the sentence and the call, nothing more.`):"All required durable operations succeeded. State what changed from the successful durable tool result. Do not repeat the superseded challenge as the current task.";
@@ -473,7 +509,7 @@ function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>,
  * to a label-sized budget is what made a rejection unactionable.
  */
 function latestRejectedCompilationFeedback(outcomes: Map<string, unknown[]>): string {
-  const latest = outcomes.get("replace_current_question")?.at(-1) ?? outcomes.get("create_question")?.at(-1);
+  const latest = outcomes.get("assign_practice_problem")?.at(-1) ?? outcomes.get("replace_current_question")?.at(-1) ?? outcomes.get("create_question")?.at(-1);
   if (!latest || typeof latest !== "object") return "";
   const result = (latest as { result?: unknown }).result;
   if (!result || typeof result !== "object" || (result as { status?: unknown }).status === "playable") return "";
@@ -518,7 +554,32 @@ function instructions() { return `You are the single Training Agent for a person
 
 ${replayDoctrine()}
 
-${conceptDoctrine()}`; }
+${conceptDoctrine()}
+
+${sourceDoctrine()}`; }
+
+/**
+ * Real problems, and when to reach for one.
+ *
+ * Stated as a preference with reasons rather than as a rule, because the failure
+ * modes run in both directions. An agent that never uses the source wastes the
+ * strongest thing available to it — a problem with a real judge, a real
+ * difficulty and the learner's own history attached. An agent that always uses
+ * it stops being a coding gym that watches you and becomes a problem shuffler,
+ * and it will hand someone a 200-line contest problem to test an off-by-one.
+ *
+ * The last paragraph is the one that matters most. Every honest thing Spar says
+ * about a verdict depends on the agent knowing which judge answered.
+ */
+function sourceDoctrine() {
+  return `When a practice source is connected you have real problems available, and a real problem is usually the better instrument. It was written and calibrated by people, its hidden cases are ones you did not write, its verdict comes from the source rather than from anything you or the host produced, and the learner's own history with it — solved, attempted and abandoned, in their account — is evidence you cannot get any other way. Search it before you set a challenge: you are made to, once per turn, and the search costs almost nothing. Read any candidate with read_practice_problem before assigning it, because the tags say what a problem is filed under and only the statement says what it actually asks.
+
+Assign one when it genuinely lands on your target. That means the problem exercises the specific gap the target names, not merely the same topic: "arrays" is not a target and a problem tagged Array is not evidence about index arithmetic. Set the primary concept to the gap you are testing rather than to the source's own tag, or the challenge will be filed under a shelf and disappear from the evidence for the thing you were actually checking. Prefer a problem they have not solved; assigning one they have solved is defensible only when the point is to compare against how they solved it before, and you must say so. Never assign a problem you have not read, and never describe its contents in your reply — they are about to read it themselves.
+
+Write your own instead whenever the source has nothing that fits. That is not a failure: a target aimed at a specific misconception, a repair challenge, a transfer into an unusual representation, or anything in a language or a shape the source does not carry is exactly what create_question is for. The source is a library, not a syllabus, and a challenge written for one learner's gap will often beat anything in it.
+
+Be exact about who graded what. A challenge from a source with its judge behind it is graded there, against every hidden case that problem has, and a pass means the problem was solved. A challenge graded locally is checked against the examples published with the problem and nothing more, and a pass means only that those examples passed — say that, and never call it accepted. The reply from every source tool tells you which of the two you are looking at; read it rather than assuming, because the learner may have connected the source, disconnected it, or chosen to keep their code on their own machine.`;
+}
 
 /**
  * The solve, as evidence.

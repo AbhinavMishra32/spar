@@ -11,12 +11,12 @@ const TURN_KINDS: AgentTurnKind[] = ["cold-start", "session-start", "attempt-com
  * turn. The settled result carries every shape the machine inspects at once, so
  * the ability branch and the compiler-retry branch are both reached.
  */
-function reachableStages(turnKind: AgentTurnKind, hasActiveQuestion: boolean, webSearch = false): Set<string> {
+function reachableStages(turnKind: AgentTurnKind, hasActiveQuestion: boolean, webSearch = false, practiceSource = false): Set<string> {
   const outcomes = new Map<string, unknown[]>();
   const seen = new Set<string>();
   const settled = { result: { ok: true, passages: [{ id: "ability" }], attempts: [], challenges: [], status: "invalid" } };
   for (let step = 0; step < 40; step += 1) {
-    const stage = nextToolStage(turnKind, outcomes, 3, { hasActiveQuestion, webSearch });
+    const stage = nextToolStage(turnKind, outcomes, 3, { hasActiveQuestion, webSearch, practiceSource });
     if (!stage.activeTools.length) break;
     for (const name of stage.activeTools) seen.add(name);
     const advance = stage.activeTools.at(-1)!;
@@ -71,9 +71,11 @@ describe("Training Agent controller policy", () => {
     for (const turnKind of TURN_KINDS) {
       for (const hasActiveQuestion of [false, true]) {
         for (const webSearch of [false, true]) {
-          const built = allowedTools(turnKind, hasActiveQuestion, webSearch);
-          const staged = [...reachableStages(turnKind, hasActiveQuestion, webSearch)];
-          expect(staged.filter((name) => !built.has(name)), `${turnKind} (activeQuestion=${hasActiveQuestion}, web=${webSearch})`).toEqual([]);
+          for (const practiceSource of [false, true]) {
+            const built = allowedTools(turnKind, hasActiveQuestion, webSearch, practiceSource);
+            const staged = [...reachableStages(turnKind, hasActiveQuestion, webSearch, practiceSource)];
+            expect(staged.filter((name) => !built.has(name)), `${turnKind} (activeQuestion=${hasActiveQuestion}, web=${webSearch}, source=${practiceSource})`).toEqual([]);
+          }
         }
       }
     }
@@ -169,5 +171,100 @@ describe("Training Agent controller policy", () => {
     expect(phaseExecutionKey("create_question", '{"title":"Count positives"}')).toBe("create_question");
     expect(phaseExecutionKey("create_question", '{"title":"Count values above a threshold"}')).toBe("create_question");
     expect(phaseExecutionKey("search_learner_model", '{"query":"arrays"}')).not.toBe(phaseExecutionKey("search_learner_model", '{"query":"loops"}'));
+  });
+});
+
+/**
+ * The practice source, as the controller sees it.
+ *
+ * These are the tests behind the claim that Spar "uses real problems when they
+ * fit". The claim is a property of the stage machine rather than of the prompt:
+ * the agent is made to look at the source before it decides, and then made to
+ * choose between assigning what it found and writing its own. A model that
+ * ignores its instructions cannot skip either step.
+ */
+describe("practice sources in the stage machine", () => {
+  const targeted = () => new Map<string, unknown[]>([
+    ["search_learner_model", [{ result: { passages: [] } }]],
+    ["search_attempt_history", [{ result: { attempts: [] } }]],
+    ["search_challenge_history", [{ result: { challenges: [] } }]],
+    ["set_session_objective", [{ result: { committed: true } }]],
+    ["read_concept_graph", [{ result: { concepts: [] } }]],
+    ["set_training_target", [{ result: { committed: true } }]],
+  ]);
+
+  it("makes a planning turn look at the source before it sets a challenge", () => {
+    expect(nextToolStage("session-start", targeted(), 15, { practiceSource: true })).toEqual({
+      activeTools: ["search_practice_problems"],
+      toolChoice: "required",
+    });
+  });
+
+  it("then makes it choose between a real problem and one of its own", () => {
+    const outcomes = targeted();
+    outcomes.set("search_practice_problems", [{ result: { problems: [{ slug: "two-sum" }] } }]);
+    const stage = nextToolStage("session-start", outcomes, 15, { practiceSource: true });
+    // Both, and required: the turn cannot end in prose, and it cannot write its
+    // own challenge without having seen what the source has.
+    expect(stage).toEqual({ activeTools: ["assign_practice_problem", "create_question"], toolChoice: "required" });
+  });
+
+  it("asks for neither when no source is connected", () => {
+    const stage = nextToolStage("session-start", targeted(), 15, {});
+    expect(stage).toEqual({ activeTools: ["create_question"], toolChoice: "required" });
+  });
+
+  it("ends the turn once a real problem is assigned", () => {
+    const outcomes = targeted();
+    outcomes.set("search_practice_problems", [{ result: { problems: [] } }]);
+    outcomes.set("assign_practice_problem", [{ result: { status: "playable" } }]);
+    expect(nextToolStage("session-start", outcomes, 15, { practiceSource: true })).toEqual({ activeTools: [], toolChoice: "none" });
+  });
+
+  it("counts a refused assignment against the same budget a rejected candidate spends", () => {
+    // A source that keeps refusing — every candidate already solved, every
+    // problem subscription-only — would otherwise loop past the budget that
+    // exists to stop exactly that.
+    const outcomes = targeted();
+    outcomes.set("search_practice_problems", [{ result: { problems: [] } }]);
+    outcomes.set("assign_practice_problem", [1, 2, 3].map(() => ({ result: { status: "invalid", report: { checks: [{ name: "adaptive progression", passed: false, detail: "already set" }] } } })));
+    const stage = nextToolStage("session-start", outcomes, 3, { practiceSource: true });
+    expect(stage.exhausted).toMatchObject({ attempts: 3 });
+    expect(stage.activeTools).toEqual([]);
+  });
+
+  it("makes an attempt-complete turn consult the source too, after it has read the solve", () => {
+    const outcomes = new Map<string, unknown[]>([
+      ["replay_attempt", [{ result: { report: "log" } }]],
+      ["evaluate_attempt", [{ result: {} }]],
+      ["read_ability", [{ result: {} }]],
+      ["propose_ability_update", [{ result: { committed: true } }]],
+      ["commit_session_decision", [{ result: { committed: true } }]],
+      ["search_learner_model", [{ result: { passages: [] } }]],
+      ["search_concept_evidence", [{ result: { concepts: [] } }]],
+      ["set_training_target", [{ result: { committed: true } }]],
+    ]);
+    expect(nextToolStage("attempt-complete", outcomes, 15, { practiceSource: true }).activeTools).toEqual(["search_practice_problems"]);
+    outcomes.set("search_practice_problems", [{ result: { problems: [] } }]);
+    expect(nextToolStage("attempt-complete", outcomes, 15, { practiceSource: true }).activeTools).toEqual(["assign_practice_problem", "create_question"]);
+  });
+
+  it("offers the source's reads mid-challenge but never a second assignment", () => {
+    // "Is this like anything I have done?" is a question about the problem in
+    // front of them. Setting another one while they are still on this one is not.
+    const stage = nextToolStage("learner-message", new Map(), 15, { hasActiveQuestion: true, practiceSource: true });
+    expect(stage.activeTools).toContain("read_practice_problem");
+    expect(stage.activeTools).toContain("read_practice_submissions");
+    expect(stage.activeTools).not.toContain("assign_practice_problem");
+  });
+
+  it("never offers the agent a tool that would run or submit on the learner's account", () => {
+    // The learner solves the problem and the learner decides when to submit it.
+    for (const turnKind of TURN_KINDS) {
+      for (const hasActiveQuestion of [false, true]) {
+        const built = allowedTools(turnKind, hasActiveQuestion, true, true);
+        expect([...built].filter((name) => name === "run_practice_code" || name === "submit_practice_solution"), turnKind).toEqual([]);
+      }
+    }
   });
 });

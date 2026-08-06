@@ -8,7 +8,7 @@
   "author": "Abhinav Mishra <AbhinavMishra32@users.noreply.github.com>",
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "concurrently -k --names renderer,main,electron --prefix-colors cyan,magenta,green \"vite\" \"node scripts/dev-main.mjs\" \"wait-on tcp:5173 file:dist/.main-ready file:../../packages/domain/dist/index.js && node scripts/dev-electron.mjs\"",
+    "dev": "concurrently -k --names renderer,main,electron --prefix-colors cyan,magenta,green \"vite\" \"node scripts/dev-main.mjs\" \"wait-on tcp:5173 file:dist/.main-ready file:../../packages/domain/dist/index.js file:../../packages/practice/dist/index.js && node scripts/dev-electron.mjs\"",
     "rebuild:native": "electron-builder install-app-deps",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
     "test": "vitest run --passWithNoTests && ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run --config vitest.main.config.ts",

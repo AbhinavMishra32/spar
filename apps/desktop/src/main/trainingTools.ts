@@ -6,6 +6,8 @@ import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
+import type { PracticeService } from "./practice.js";
+import { SOURCE_READ_TOOLS } from "../workers/agentPolicy.js";
 
 export async function executeTrainingTool(
   name: string,
@@ -15,9 +17,22 @@ export async function executeTrainingTool(
   workspaces: WorkspaceService,
   runner: UtilityClient,
   web?: WebSearchService,
+  practice?: PracticeService,
 ) {
   if (!sessionId) throw new Error("Training tool call is missing its session context");
   const value = input as Record<string, unknown>;
+  /* Reads of the practice source go straight through to its MCP server, which
+     owns their schemas and their failure wording. Nothing is unwrapped here: the
+     agent gets exactly what the server said, including its "carry on without me"
+     note when the source is unreachable. */
+  if (SOURCE_READ_TOOLS.includes(name)) {
+    if (!practice) return { error: "not-connected", message: "No practice source is available in this context." };
+    return practice.callTool(name, value);
+  }
+  if (name === "assign_practice_problem") {
+    if (!practice) return { status: "invalid", report: { valid: false, checks: [{ name: "practice source", passed: false, detail: "No practice source is connected, so there is no problem to assign. Write the challenge yourself with create_question." }] } };
+    return assignPracticeProblem(value, sessionId, local, workspaces, practice);
+  }
   /* Optional so the tool tests can call this without standing up a network
      service. Missing reads as unconfigured, which is already a result the agent
      knows how to carry on from. */
@@ -115,6 +130,79 @@ export async function executeTrainingTool(
   if (name === "propose_ability_update") {const updated=local.updateAbility({abilityId:String(value.abilityId),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   throw new Error(`Unsupported Spar tool: ${name}`);
+}
+
+/**
+ * Setting a real problem as this session's challenge.
+ *
+ * The sourced counterpart to `create_question`, and it is held to the same
+ * lifecycle rules — one open challenge at a time, no repeating a title the
+ * learner has already been asked — because those rules are about the learner's
+ * experience rather than about where a problem came from.
+ *
+ * What it does *not* do is run the deterministic compiler. There is nothing to
+ * compile: the problem was not generated, there is no reference solution to check
+ * the tests against, and the visible suite is whatever the source published. The
+ * guarantee that replaces it is stated rather than assumed — the mount records
+ * which judge will decide, and this refuses outright when the answer is "nothing
+ * can", because a challenge nobody can grade is not a challenge.
+ */
+async function assignPracticeProblem(
+  value: Record<string, unknown>,
+  sessionId: string,
+  local: LocalStore,
+  workspaces: WorkspaceService,
+  practice: PracticeService,
+) {
+  const refuse = (checkName: string, detail: string) => ({ status: "invalid" as const, report: { valid: false, checks: [{ name: checkName, passed: false, detail }] } });
+  const slug = String(value.slug ?? "").trim();
+  if (!slug) return refuse("problem identity", "No problem slug was given.");
+
+  const activeQuestion = openChallenge(local, sessionId);
+  if (activeQuestion) return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already active for this session. End this agent turn instead of assigning another problem.`);
+
+  let mounted: Awaited<ReturnType<PracticeService["mount"]>>;
+  try {
+    const language = value.language === "typescript" || value.language === "cpp" || value.language === "javascript"
+      ? value.language
+      : local.getProfile()?.language ?? "javascript";
+    mounted = await practice.mount({ slug, language });
+  } catch (error) {
+    /* A slug the source does not have, a subscription-only problem, an expired
+       session. All of them are the same instruction to the agent: this one is not
+       available, choose another or write your own. */
+    return refuse("problem availability", `${practice.sourceName()} could not provide "${slug}": ${error instanceof Error ? error.message : String(error)}. Pick a different problem or write the challenge yourself.`);
+  }
+
+  const { design, source } = mounted;
+  if (local.challengeTitleUsed(design.title)) {
+    return refuse("adaptive progression", `The learner has already been set "${design.title}". Choose a different problem, or write a challenge that approaches the same gap from another direction.`);
+  }
+  /* Nothing can grade it: no judge at the source, and no case Spar could recover
+     from the statement. Assigning it would mean asking someone to solve something
+     with no way to find out whether they had. */
+  if (!source.remoteJudge && source.localCaseCount === 0) {
+    return refuse("grading", `${practice.sourceName()} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
+  }
+
+  await workspaces.writeAll(sessionId, mounted.files);
+  const question = local.createQuestion(sessionId, design, { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }] }, {
+    concepts: conceptTags(value.concepts),
+    source,
+  });
+  /* The aim is recorded as a system message rather than dropped: `why` is the
+     agent's statement of what this problem is supposed to discriminate, and a
+     later turn reading the session has to be able to find it. */
+  const why = String(value.why ?? "").trim();
+  if (why) local.addMessage(sessionId, "system", `Set ${practice.sourceName()} ${source.displayId} — ${design.title}. ${why}`);
+  return {
+    status: "playable",
+    question,
+    source: { slug: source.slug, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
+    judge: source.judge,
+    localCases: source.localCaseCount,
+    ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
+  };
 }
 
 /**
