@@ -82,8 +82,7 @@ requests:
 | `AUTH_BASE_URL` | The origin the desktop app calls, e.g. `https://spar-api.vercel.app`. Better Auth checks requests against it |
 | `RESEND_API_KEY` | Required in production. Sends the verification and password-reset codes — see below |
 | `EMAIL_FROM` | The sender, e.g. `Spar <no-reply@yourdomain.com>`. Must be an address on a domain verified with Resend |
-| `SUPABASE_URL` and `SUPABASE_SECRET_KEY` | For Supabase Storage. Storage only — the database is Neon |
-| `OBJECT_STORAGE_*` | Instead of the Supabase pair, if using another S3-compatible provider |
+| `SUPABASE_URL` and `SUPABASE_SECRET_KEY`, or `OBJECT_STORAGE_*` | Optional. Object storage backs one route, `/v1/storage/upload`, which the desktop app does not call yet — challenge artifacts and workspace files both ride inline in Postgres. Skip both and the API boots and answers 503 on that one route instead of refusing to start |
 
 **Email.** Creating an account asks for a six-digit code, and so does resetting a
 password, so a deployment that cannot send email cannot let anyone in — the API

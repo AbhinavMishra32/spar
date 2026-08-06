@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import { createDatabase } from "@spar/database";
-import { envSchema } from "./env.js";
+import { envSchema, objectStorageConfigured } from "./env.js";
 import { createAuth, installAccountRoutes, installAuth } from "./auth.js";
 import { createMailer } from "./mailer.js";
 import { installRoutes } from "./routes.js";
@@ -11,7 +11,14 @@ export async function createServer(environment=process.env){const env=envSchema.
 /* The mailer is built before the auth config because the auth config reads it:
    whether an account has to confirm its address depends on whether this
    deployment can send it a code. */
-const mailer=createMailer(env,(message)=>app.log.info(message));installAuth(app,createAuth(database.db,env,mailer));installAccountRoutes(app,database.db);installRoutes(app,database.db,new ObjectStorage(env));app.addHook("onClose",()=>database.close());return {app,env};}
+const mailer=createMailer(env,(message)=>app.log.info(message));installAuth(app,createAuth(database.db,env,mailer));installAccountRoutes(app,database.db);
+/* Storage is optional and this is where that is decided: built when it is
+   configured, left out otherwise. `installRoutes` accepts `undefined` and
+   answers 503 on the one route that needs it, which is currently unreachable
+   from the desktop app — challenge artifacts and workspace files both ride
+   inline as jsonb. */
+installRoutes(app,database.db,objectStorageConfigured(env)?new ObjectStorage(env):undefined);
+app.addHook("onClose",()=>database.close());return {app,env};}
 /* Binding a port is for running this process ourselves. Under Vercel the platform
    owns the socket and hands each request to the function in `api/index.ts`, so
    importing this module must not start a listener — it would bind, fail, or hold
