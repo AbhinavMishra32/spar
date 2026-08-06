@@ -1,1 +1,10 @@
-{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"declaration":true,"outDir":"dist"}}
+/* No `declaration`. The API is an application, not a library: nothing imports
+   `@spar/api`, and its only consumer is `api/index.ts`, which re-exports the
+   compiled JavaScript.
+
+   Emitting declarations also did not work. `createAuth` returns Better Auth's
+   inferred instance type, which reaches into zod's internals, and TypeScript
+   cannot name that from outside the pnpm store (TS2742). That failed the build,
+   and this build command is the one `vercel.json` runs — so the deploy failed
+   with it. */
+{"extends":"./tsconfig.json","compilerOptions":{"noEmit":false,"outDir":"dist"}}

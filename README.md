@@ -80,12 +80,17 @@ whenever you would rather point somewhere else.
 
 ## Your first session
 
-**You answer six questions.** Your name, roughly where you are in your career,
-what you want to get better at, where you tend to get stuck, which language
-challenges should use, and which model the agent should run on. The one about
-getting stuck is worth answering properly — "I can read async code but I never
-know what actually needs awaiting" gives Spar somewhere to start, and "I'm bad at
-algorithms" doesn't.
+**You answer seven questions, once.** Your name, roughly where you are in your
+career, what you want to get better at, where you tend to get stuck, which
+language challenges should use, which model the agent should run on, and — this
+one is optional — whether to connect a problem provider like LeetCode. The one
+about getting stuck is worth answering properly: "I can read async code but I
+never know what actually needs awaiting" gives Spar somewhere to start, and "I'm
+bad at algorithms" doesn't.
+
+You answer them once per account, not once per machine. The answers live on your
+account, so signing in on another computer picks up where you left off rather
+than starting the intake again.
 
 **Spar reads that and makes an opening call.** It has no evidence about you yet,
 so it treats everything you said as a hypothesis rather than a fact, picks
@@ -358,6 +363,7 @@ corepack pnpm dev
 
 The first run asks for a PostgreSQL connection URL and object-storage
 credentials, writes them to a git-ignored `.env.local`, applies migrations,
-creates the artifact bucket, and starts the API and the app together. A single
-Supabase project covers all of it. After that, `corepack pnpm dev` is the whole
-command.
+creates the artifact bucket, and starts the API and the app together. Any
+Postgres will do — the hosted deployment runs on [Neon](https://neon.tech) — and
+object storage is a Supabase project or anything S3-compatible. After that,
+`corepack pnpm dev` is the whole command.

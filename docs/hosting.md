@@ -56,12 +56,12 @@ requests:
 
 | Variable | Notes |
 | --- | --- |
-| `DATABASE_URL` | **Use the pooled connection string**, not the direct one — see below |
+| `DATABASE_URL` | Neon. **Use the pooled connection string**, not the direct one — see below |
 | `AUTH_SECRET` | 32+ characters. Reuse the one already signing your tokens, or every existing session is invalidated |
 | `AUTH_BASE_URL` | The origin the desktop app calls, e.g. `https://spar-api.vercel.app`. Better Auth checks requests against it |
 | `RESEND_API_KEY` | Required in production. Sends the verification and password-reset codes — see below |
 | `EMAIL_FROM` | The sender, e.g. `Spar <no-reply@yourdomain.com>`. Must be an address on a domain verified with Resend |
-| `SUPABASE_URL` and `SUPABASE_SECRET_KEY` | For Supabase Storage |
+| `SUPABASE_URL` and `SUPABASE_SECRET_KEY` | For Supabase Storage. Storage only — the database is Neon |
 | `OBJECT_STORAGE_*` | Instead of the Supabase pair, if using another S3-compatible provider |
 
 **Email.** Creating an account asks for a six-digit code, and so does resetting a
@@ -87,16 +87,51 @@ vercel env add DATABASE_URL production --cwd apps/api
 
 **The pooled connection string matters.** Every serverless instance opens its own
 connections, and there can be hundreds of instances; the direct Postgres endpoint
-runs out of connections long before the traffic justifies it. Use Supabase's
-transaction-mode pooler (port `6543`). `createDatabase` already caps the pool at
-one connection when it detects a serverless runtime and disables prepared
-statements, which that pooler rejects.
+runs out of connections long before the traffic justifies it. Use the pooled host —
+on Neon that is the one with `-pooler` in it, which is PgBouncer in transaction
+mode. `createDatabase` already caps the pool at one connection when it detects a
+serverless runtime and disables prepared statements, which that pooler rejects.
+The same two settings are what Supabase's port-`6543` pooler wants, so nothing in
+the client changes if you host Postgres somewhere else.
+
+Keep the **direct** (non-pooled) URL for migrations. `drizzle-kit` runs DDL, which
+wants a real session rather than a transaction-scoped one.
+
+### Migrate before you deploy
+
+The function does not run migrations at boot — nothing should, on a platform that
+may start a hundred instances at once — so they are applied from your own machine
+with `DATABASE_URL` in `.env.local` pointed at the direct endpoint:
+
+```bash
+corepack pnpm db:migrate
+```
+
+Order matters, and only in one direction. Spar's migrations are additive, so an
+already-deployed function against a freshly migrated database is fine; a newly
+deployed function against a database that has *not* been migrated answers 500 on
+every route that touches a new column. Migrate first.
 
 Then deploy:
 
 ```bash
 vercel deploy --prod --cwd apps/api
 ```
+
+Two settings on the Vercel project are worth checking once:
+
+- **Deployment Protection must be off for production.** It is an authentication
+  wall in front of the deployment, and the desktop app has no way through it — the
+  requests fail before they reach Fastify.
+- **`AUTH_BASE_URL` must be the stable production URL**, not a per-deployment one.
+  Better Auth checks requests against it, and every preview deployment has a
+  different host. This is a chicken-and-egg on the first deploy: deploy once to
+  learn the URL, set the variable, deploy again.
+
+One limitation to know rather than fix: Better Auth's rate limiter is in-memory,
+so on a serverless platform it is per-instance rather than global. The caps in
+`apps/api/src/auth.ts` are therefore softer in practice than they read. Moving the
+limiter's state into Postgres is the fix when it matters.
 
 Confirm it is live before pointing a release at it:
 
