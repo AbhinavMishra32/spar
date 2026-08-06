@@ -13,6 +13,29 @@ describe("challenge revision intent", () => {
     ])).toBe(true);
   });
 
+  it.each([
+    "just give me lc problem i dont care",
+    "give me a real leetcode problem",
+    "can i have another question",
+    "i want an actual problem not this",
+    "swap this challenge",
+    "skip this",
+  ])("routes %s to revision", (message) => {
+    // Asking for a different *kind* of challenge is a revision request too. These
+    // used to route to ordinary chat, so nothing made the turn swap anything and
+    // the agent answered by searching the source over and over.
+    expect(requestsChallengeRevision(message, [])).toBe(true);
+  });
+
+  it.each([
+    "give me a hint on this question",
+    "is this a leetcode problem?",
+    "explain the failing case in this challenge",
+    "what does this question want me to return",
+  ])("leaves %s as conversation", (message) => {
+    expect(requestsChallengeRevision(message, [])).toBe(false);
+  });
+
   it("does not turn unrelated confirmations into challenge mutations", () => {
     expect(requestsChallengeRevision("do it", [{ role: "learner", body: "explain the last test" }])).toBe(false);
   });

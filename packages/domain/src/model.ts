@@ -123,6 +123,25 @@ export const challengeSourceSchema = z.object({
   remoteJudge: z.boolean(),
   localCaseCount: z.number().int().nonnegative(),
   judge: z.string(),
+  /** The function the source's own starter declares, so a case can be shown as the
+   *  call it is rather than as a bare pair of values. */
+  entryName: z.string().default(""),
+  /**
+   * The examples published with the problem, as the source states them: one string
+   * per argument, and the answer it gives for them.
+   *
+   * Carried on the challenge rather than recovered from the generated test file.
+   * The generated test embeds its cases as JSON inside a loop, so the reader that
+   * lifts cases out of a hand-written `test(…)` block found nothing in it — a
+   * sourced problem showed no sample cases at all, on the one kind of challenge
+   * where the cases are published, structured, and known before anybody runs
+   * anything.
+   */
+  cases: z.array(z.object({
+    name: z.string(),
+    input: z.array(z.string()),
+    expected: z.string(),
+  })).default([]),
   /** Related problems the source names, so a learner who has just failed one can
    *  be sent to what it is a variation of. */
   references: z.array(z.object({ slug: z.string(), title: z.string(), difficulty: z.string().nullable(), relation: z.string() })).default([]),
@@ -292,11 +311,20 @@ export const abilityDetailSchema = z.object({
 });
 export type AbilityDetail = z.infer<typeof abilityDetailSchema>;
 
+/**
+ * An option is its own sentence and nothing else.
+ *
+ * It used to carry a `description` under the label, which made every choice a
+ * two-line paragraph and the card a page of prose to read before answering. One
+ * self-contained line per option says the same thing and can be scanned. Options
+ * stay objects rather than bare strings so that an intake stored under the old
+ * shape still parses — zod drops the extra key instead of rejecting the row.
+ */
 export const askUserQuestionInputSchema = z.object({
   questions: z.array(z.object({
     header: z.string().trim().min(1).max(40),
     question: z.string().trim().min(3).max(1000),
-    options: z.array(z.object({ label: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(300) })).min(2).max(3),
+    options: z.array(z.object({ label: z.string().trim().min(1).max(120) })).min(2).max(3),
     multiple: z.boolean().default(false),
     custom: z.boolean().default(true),
   })).min(1).max(3),

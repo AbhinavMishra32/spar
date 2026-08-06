@@ -115,14 +115,39 @@ export class LeetCodeClient {
    * dropped when nobody is signed in, because LeetCode answers it with an
    * unfiltered list rather than an error and a silently unfiltered "problems you
    * have never tried" is a wrong answer that looks right.
+   *
+   * **LeetCode intersects the tag filter.** A problem has to carry *every* tag in
+   * it, so a concept's alternative tags must never be sent together: `arrays` maps
+   * to five LeetCode tags, and asking for a problem tagged array *and* sorting
+   * *and* counting-sort *and* bucket-sort *and* matrix matches nothing at all. So
+   * each concept contributes its primary tag — the alternatives exist for
+   * `conceptsForSourceTags` to read a problem's tags back the other way — and a
+   * filter that still finds nothing is relaxed once to the first tag rather than
+   * returned empty. An empty answer from a source holding four thousand problems
+   * is indistinguishable from a broken search, and it is what an agent loops on.
    */
-  async search(input: PracticeSearchInput & { concepts?: string[] }): Promise<{ total: number; problems: PracticeProblemSummary[] }> {
+  async search(input: PracticeSearchInput & { concepts?: string[] }): Promise<{ total: number; problems: PracticeProblemSummary[]; appliedTags: string[]; droppedTags: string[] }> {
     const authenticated = Boolean(await this.readSession());
-    const tags = [...input.tags, ...(input.concepts ?? []).flatMap((concept) => sourceTagsForConcept(concept))];
+    const requested = [...new Set([
+      ...input.tags,
+      ...(input.concepts ?? []).flatMap((concept) => sourceTagsForConcept(concept).slice(0, 1)),
+    ])].slice(0, 8);
+
+    const found = await this.searchOnce(input, requested, authenticated);
+    if (found.problems.length || requested.length < 2) return { ...found, appliedTags: requested, droppedTags: [] };
+    /* Every tag together matched nothing. Narrowing to the first — the tag for the
+       concept the caller named first — is the one relaxation that keeps the search
+       about what was asked, and both lists come back so the caller can say which
+       filter actually produced the results. */
+    const narrowed = await this.searchOnce(input, requested.slice(0, 1), authenticated);
+    return { ...narrowed, appliedTags: requested.slice(0, 1), droppedTags: requested.slice(1) };
+  }
+
+  private async searchOnce(input: PracticeSearchInput, tags: string[], authenticated: boolean): Promise<{ total: number; problems: PracticeProblemSummary[] }> {
     const filters: Record<string, unknown> = {};
     if (input.query.trim()) filters.searchKeywords = input.query.trim();
     if (input.difficulty) filters.difficulty = input.difficulty.toUpperCase();
-    if (tags.length) filters.tags = [...new Set(tags)].slice(0, 8);
+    if (tags.length) filters.tags = tags;
     if (authenticated && input.status !== "any") filters.status = STATUS_FILTER[input.status];
     const data = await this.graphql(SEARCH_PROBLEMS_QUERY, {
       categorySlug: "",

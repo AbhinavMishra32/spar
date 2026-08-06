@@ -6,8 +6,11 @@ import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceJudgeSchema, sourceRegionSchema, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
+import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
+import { sourceSubmissionOutput } from "../shared/sourceOutput.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
+import { judgeCaseBlock } from "./judgeCases.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
@@ -65,7 +68,19 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.attemptAppend, (_event, value) => deps.store.appendNextEvent(attemptAppendInput.parse(value)));
   ipcMain.handle(ipc.workspaceRead, (_event, value) => { const input = workspacePathInput.parse(value); return deps.workspaces.read(input.sessionId, input.path); });
   ipcMain.handle(ipc.workspaceWrite, (_event, value) => { const input = workspaceWriteInput.parse(value); return deps.workspaces.write(input.sessionId, input.path, input.content); });
-  ipcMain.handle(ipc.runnerRun, (_event, value) => { const input = runInput.parse(value); const request = deps.runner.request("run", { ...input, root: deps.workspaces.sessionRoot(input.sessionId) }); void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) })); return { id: request.id }; });
+  /* How long a run may take is decided here, from the language, and never taken
+     from the window. The renderer used to send the number — 8s, hard-coded beside
+     the Run button — which is why pressing Run on a C++ challenge killed the
+     compile before it finished and reported the learner's correct solution as a
+     stopped process. A caller may ask for *less* (a quick smoke run), never more. */
+  ipcMain.handle(ipc.runnerRun, (_event, value) => {
+    const input = runInput.parse(value);
+    const budget = runLimits(input.language).timeoutMs;
+    const timeoutMs = input.timeoutMs === undefined ? budget : Math.min(input.timeoutMs, budget);
+    const request = deps.runner.request("run", { ...input, timeoutMs, root: deps.workspaces.sessionRoot(input.sessionId) });
+    void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) }));
+    return { id: request.id };
+  });
   const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:AgentTurnKind="learner-message")=>{
     const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};
     const starting=startingAgentRuns.get(sessionId);if(starting)return starting;
@@ -275,7 +290,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const input = challengeIdInput.parse(value);
     const record = practiceTarget(input.challengeId);
     const root = await deps.workspaces.ensurePractice(record.sessionId, input.challengeId, seedFiles(record.design));
-    const request = deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: 8_000 });
+    const request = deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: runLimits(record.design.language).timeoutMs });
     void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) }));
     return { id: request.id };
   });
@@ -293,7 +308,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const root = await deps.workspaces.writeValidation(record.sessionId, validationId, { ...practised, ...record.design.hiddenTests });
     let result: { exitCode: number; stdout: string; stderr: string; durationMs: number };
     try {
-      result = await deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: 8_000 }).promise as typeof result;
+      result = await deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: runLimits(record.design.language).timeoutMs }).promise as typeof result;
     } finally {
       await deps.workspaces.removeValidation(record.sessionId, validationId);
     }
@@ -370,7 +385,12 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (!source) throw new Error("This challenge did not come from a practice source, so there is nowhere to run it.");
     const code = await deps.workspaces.read(input.sessionId, solutionPath(bundle.design)).catch(() => "");
     if (!code.trim()) throw new Error("There is nothing to run yet.");
-    const verdict = await deps.practice.run({ source, code, language: bundle.language });
+    // The problem's own examples, in the judge's wire format. See `judgeCaseBlock`.
+    const testcases = await judgeCaseBlock(source, (slug) => deps.practice.judgeInput(slug));
+    if (!testcases) {
+      throw new Error(`${deps.practice.sourceName()} runs a solution against cases you give it, and Spar could not read any published for this problem. Submit instead — the hidden suite runs there.`);
+    }
+    const verdict = await deps.practice.run({ source, code, language: bundle.language, testcases });
     deps.store.appendNextEvent({
       id: randomUUID(), attemptId: input.attemptId, type: "test_run", occurredAt: new Date().toISOString(),
       payload: { scope: "source-run", judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed", status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases },
@@ -457,7 +477,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        what the evidence itself says. */
     const submissionSource=deps.store.readSession(sessionId)?.question?.source;
     if(submissionSource?.remoteJudge)return submitToSource({sessionId,attemptId,bundle,source:submissionSource});
-    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:8000}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
+    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:runLimits(bundle.language).timeoutMs}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
     /* A failed submission leaves the attempt open. Solving it is the point, so a
        wrong answer is a step in the attempt rather than the end of it: the learner
        keeps working and submits again, every submission is recorded as evidence,
@@ -643,43 +663,14 @@ function sourceRunReport(verdict: PracticeVerdict, sourceName: string): SourceRu
     runtime: verdict.runtime,
     memory: verdict.memory,
     failedCase: verdict.failedCase,
+    cases: verdict.caseAnswers.map((entry) => ({ input: entry.input, expected: entry.expected, actual: entry.actual, passed: entry.passed })),
     url: verdict.submissionUrl,
     message: verdict.outcome === "errored"
       ? `${sourceName} could not run that (${verdict.status}). Nothing was recorded.`
       : verdict.outcome === "passed"
-        ? `${sourceName} ran it against the published cases and they all passed. Submit to run it against every hidden case.`
+        ? `${sourceName} ran it against ${verdict.totalCases || verdict.caseAnswers.length} published case${(verdict.totalCases || verdict.caseAnswers.length) === 1 ? "" : "s"} and they all passed. Submit to run it against every hidden case.`
         : `${sourceName} says ${verdict.status}${verdict.totalCases ? ` — ${verdict.passedCases} of ${verdict.totalCases} cases passed` : ""}.`,
   };
-}
-
-/**
- * The source's verdict, as the text the result panel already knows how to read.
- *
- * Written in the shape a test runner would produce rather than as prose, because
- * everything downstream — the panel, the replay, the evidence extractor — parses
- * runner output, and a second format would mean a second parser.
- */
-function sourceSubmissionOutput(verdict: PracticeVerdict, sourceName: string): string {
-  const lines = [
-    `# ${sourceName}: ${verdict.status}`,
-    verdict.totalCases ? `# cases ${verdict.passedCases}/${verdict.totalCases}` : "",
-    verdict.runtime ? `# runtime ${verdict.runtime}${verdict.runtimePercentile !== null ? ` (beats ${verdict.runtimePercentile.toFixed(1)}%)` : ""}` : "",
-    verdict.memory ? `# memory ${verdict.memory}${verdict.memoryPercentile !== null ? ` (beats ${verdict.memoryPercentile.toFixed(1)}%)` : ""}` : "",
-    verdict.compileError ? `\n${verdict.compileError}` : "",
-    verdict.runtimeError ? `\n${verdict.runtimeError}` : "",
-  ].filter(Boolean);
-  if (verdict.failedCase) {
-    lines.push(
-      "",
-      "not ok 1 - the first case that failed",
-      `  input: ${verdict.failedCase.input}`,
-      `  expected: ${verdict.failedCase.expected}`,
-      `  actual: ${verdict.failedCase.actual}`,
-      ...(verdict.failedCase.stdout ? [`  stdout: ${verdict.failedCase.stdout}`] : []),
-    );
-  }
-  if (verdict.submissionUrl) lines.push("", `# ${verdict.submissionUrl}`);
-  return `${lines.join("\n")}\n`;
 }
 
 /**

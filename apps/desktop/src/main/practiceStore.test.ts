@@ -31,6 +31,8 @@ const source = (overrides: Partial<ChallengeSource> = {}): ChallengeSource => ({
   languageSlug: "javascript",
   remoteJudge: true,
   localCaseCount: 2,
+  entryName: "twoSum",
+  cases: [{ name: "Example 1", input: ["[2,7,11,15]", "9"], expected: "[0,1]" }],
   judge: "LeetCode judges this one.",
   references: [{ slug: "three-sum", title: "3Sum", difficulty: "medium", relation: "similar" }],
   ...overrides,

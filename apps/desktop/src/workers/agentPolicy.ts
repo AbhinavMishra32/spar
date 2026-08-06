@@ -38,15 +38,18 @@ export const SOURCE_TOOLS = [...SOURCE_READ_TOOLS, "assign_practice_problem"];
 export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false, webSearch = false, practiceSource = false): Set<string> {
   const web = webSearch ? WEB_TOOLS : [];
   const source = practiceSource ? SOURCE_TOOLS : [];
-  const sourceReads = practiceSource ? SOURCE_READ_TOOLS : [];
   if (turnKind === "cold-start") return new Set(["search_learner_model", "search_attempt_history", "ask_user_question"]);
   if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
   if (turnKind === "attempt-complete") return new Set(["replay_attempt", "inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
-  /* Revision replaces the challenge in place, which a sourced problem cannot be:
-     swapping one real problem for another is a new assignment, not an edit. So
-     the reads are offered and the assignment is not. */
-  if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question", ...sourceReads]);
-  return new Set(["read_session", ...(hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question", ...source]), ...(hasActiveQuestion ? sourceReads : []), "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
+  /* Both ways of changing the challenge, because "give me a real problem instead"
+     is a revision request like any other. Withholding the assignment here was a
+     dead end with one exit: the agent could not hand over the LeetCode problem the
+     learner asked for, so it wrote its own challenge, named it after that problem,
+     and had it graded locally — a counterfeit of the thing that was available all
+     along. A sourced problem supersedes rather than edits, which the store already
+     records as a replacement. */
+  if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question", ...source]);
+  return new Set(["read_session", ...(hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), ...source, "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
 }
 
 /**
@@ -97,7 +100,14 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     if (playableQuestion) return { activeTools: [], toolChoice: "none" };
     if (!completed("replay_attempt")) return { activeTools: ["replay_attempt"], toolChoice: "required" };
     if (!completed("set_training_target")) return { activeTools: ["set_training_target"], toolChoice: "required" };
-    return { activeTools: ["replace_current_question"], toolChoice: "required" };
+    /* One optional look at what the source has before the swap is written, for the
+       same reason the session-start path takes one: the learner asking for a
+       different challenge is the likeliest moment for a real problem to be the
+       right answer, and it cannot be chosen without being searched for. */
+    if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };
+    return context.practiceSource
+      ? { activeTools: ["assign_practice_problem", "replace_current_question"], toolChoice: "required" }
+      : { activeTools: ["replace_current_question"], toolChoice: "required" };
   }
 
   // The same agent handles conversation and mutations. `auto` lets ordinary
@@ -106,11 +116,13 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   if (turnKind === "learner-message") return {
     activeTools: [
       "read_session",
-      ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question", ...(context.practiceSource ? ["assign_practice_problem"] : [])]),
-      /* The reads stay available even mid-challenge: "is this like anything I
-         have done?" and "what does this relate to?" are questions about the
-         problem in front of them, and answering needs the source. */
-      ...(context.practiceSource ? SOURCE_READ_TOOLS : []),
+      ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]),
+      /* The source stays available in full even mid-challenge. The reads because
+         "is this like anything I have done?" is a question about the problem in
+         front of them; the assignment because "give me a real problem instead" is
+         a request this turn can actually carry out, and the tool refuses on its
+         own unless the agent says the learner asked to be moved. */
+      ...(context.practiceSource ? SOURCE_TOOLS : []),
       "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability",
       ...(context.webSearch ? WEB_TOOLS : []),
     ],

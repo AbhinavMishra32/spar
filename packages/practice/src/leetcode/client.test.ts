@@ -183,4 +183,48 @@ describe("LeetCodeClient — reads", () => {
     await client.search({ query: "", tags: [], status: "any", limit: 5, offset: 0, concepts: ["window-invariant-restoration"] });
     expect(JSON.parse(String(calls[0]?.init.body)).variables.filters.tags).toContain("sliding-window");
   });
+
+  it("sends one tag per concept, because the source intersects them", async () => {
+    // `arrays` maps to five LeetCode tags. Sent together they mean "tagged array
+    // AND sorting AND counting-sort AND bucket-sort AND matrix", which matches
+    // nothing at all — every array search came back empty.
+    const { fetcher, calls } = stubFetch([{ body: { data: { problemsetQuestionList: { total: 1, questions: [] } } } }]);
+    const client = new LeetCodeClient("global", async () => session, fetcher);
+    await client.search({ query: "", tags: [], status: "any", limit: 5, offset: 0, concepts: ["arrays"] });
+    expect(JSON.parse(String(calls[0]?.init.body)).variables.filters.tags).toEqual(["array"]);
+  });
+
+  it("relaxes an intersection that found nothing, and says what it dropped", async () => {
+    const { fetcher, calls } = stubFetch([
+      { body: { data: { problemsetQuestionList: { total: 0, questions: [] } } } },
+      { body: { data: { problemsetQuestionList: { total: 2196, questions: [problemSummaryNode] } } } },
+    ]);
+    const client = new LeetCodeClient("global", async () => session, fetcher);
+    const found = await client.search({ query: "", tags: [], status: "any", limit: 5, offset: 0, concepts: ["arrays", "dynamic-programming"] });
+    expect(JSON.parse(String(calls[0]?.init.body)).variables.filters.tags).toEqual(["array", "dynamic-programming"]);
+    expect(JSON.parse(String(calls[1]?.init.body)).variables.filters.tags).toEqual(["array"]);
+    expect(found.problems).toHaveLength(1);
+    expect(found.appliedTags).toEqual(["array"]);
+    expect(found.droppedTags).toEqual(["dynamic-programming"]);
+  });
+
+  it("does not retry a search that found something", async () => {
+    const { fetcher, calls } = stubFetch([{ body: { data: { problemsetQuestionList: { total: 1, questions: [problemSummaryNode] } } } }]);
+    const client = new LeetCodeClient("global", async () => session, fetcher);
+    const found = await client.search({ query: "", tags: [], status: "any", limit: 5, offset: 0, concepts: ["arrays", "dynamic-programming"] });
+    expect(calls).toHaveLength(1);
+    expect(found.droppedTags).toEqual([]);
+  });
 });
+
+const problemSummaryNode = {
+  questionId: "121",
+  questionFrontendId: "121",
+  title: "Best Time to Buy and Sell Stock",
+  titleSlug: "best-time-to-buy-and-sell-stock",
+  difficulty: "Easy",
+  isPaidOnly: false,
+  acRate: 55.1,
+  status: null,
+  topicTags: [{ slug: "array" }, { slug: "dynamic-programming" }],
+};

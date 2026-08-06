@@ -2,16 +2,17 @@ import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, Check } from "lucide-react";
 import type { Language, LearnerProfile, SessionSuggestion } from "@spar/domain";
-import type { SparApi } from "../../../shared/api";
+import type { PracticeSourceAccount, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
+import { Meter, MeterKey, type MeterBand } from "@/components/ui/meter";
 import { Textarea } from "@/components/ui/textarea";
 import { message } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
-import { LeetCodeGlyph } from "../common/SourceGlyph";
-import { SparDots } from "../common/SparDots";
+import { CodeChefGlyph, CodeforcesGlyph, HackerRankGlyph, LeetCodeGlyph } from "../common/SourceGlyph";
+import { SparDots, SparDotsLine } from "../common/SparDots";
 import { PANEL, STEP, TEXT, useMarkPass } from "../auth/arrival";
 import { SparWordmark } from "../common/SparWordmark";
 import { ProviderConnectDialog, type Provider } from "../settings/ProviderConnectDialog";
@@ -55,7 +56,7 @@ const STEPS: Step[] = [
      for them on the first session, not discover three weeks later that Spar could
      have been using it. Skipping is a real answer and costs nothing — every
      challenge is then one Spar writes. */
-  { id: "source", header: "LeetCode", question: "Practise real LeetCode problems too?", caption: "Optional. Connect it and Spar can set you real problems, judged by LeetCode, alongside the ones it writes for you.", kind: "source", optional: true },
+  { id: "source", header: "Problems", question: "Connect a problem provider?", caption: "Optional. Spar writes its own challenges either way.", kind: "source", optional: true },
 ];
 
 const EXPERIENCE: Array<{ value: LearnerProfile["experience"]; label: string; hint: string }> = [
@@ -80,6 +81,27 @@ const FOCUS = [
 ];
 
 const LANGUAGES: Language[] = ["javascript", "typescript", "cpp"];
+
+/** The judges Spar could set problems from. Only LeetCode is wired up; the rest
+ *  are listed anyway, because someone who lives on Codeforces needs to see that
+ *  Spar knows the name and has not got there yet — a list of one reads as a
+ *  product that only ever intends to speak LeetCode. */
+const SOURCES = [
+  { id: "leetcode", name: "LeetCode", Glyph: LeetCodeGlyph, soon: false },
+  { id: "codeforces", name: "Codeforces", Glyph: CodeforcesGlyph, soon: true },
+  { id: "hackerrank", name: "HackerRank", Glyph: HackerRankGlyph, soon: true },
+  { id: "codechef", name: "CodeChef", Glyph: CodeChefGlyph, soon: true },
+] as const;
+
+/** Their record at the source, in the app's own difficulty tones. Same bands as
+ *  the Settings panel draws, so the two readings are one picture. */
+function solvedBands(account: PracticeSourceAccount): MeterBand[] {
+  return [
+    { key: "easy", value: account.solved.easy, className: "bg-success", label: "Easy" },
+    { key: "medium", value: account.solved.medium, className: "bg-warning", label: "Medium" },
+    { key: "hard", value: account.solved.hard, className: "bg-destructive", label: "Hard" },
+  ];
+}
 
 /** The sunken group the sign-in window puts its fields in, reused for a list of
  *  choices: one container, hairlines between the rows, and the selection filling
@@ -217,28 +239,51 @@ export function OnboardingPage({
   /* The practice source, asked for once during intake and otherwise left alone.
      Held here rather than read from an inventory hook because there is exactly
      one question being answered — is it connected, and as whom — and the sign-in
-     window is the only thing that can change it. */
-  const [sourceAccount, setSourceAccount] = useState<string | null>(null);
-  const [connectingSource, setConnectingSource] = useState(false);
+     window is the only thing that can change it.
+
+     The username lands with the credential and the record takes another round
+     trip, so the two are held apart: the row can confirm itself the moment the
+     window closes and fill in the numbers a beat later. */
+  const [source, setSource] = useState<{ username: string; account: PracticeSourceAccount | null } | null>(null);
+  const [sourceBusy, setSourceBusy] = useState<"connect" | "disconnect" | null>(null);
   const [sourceError, setSourceError] = useState("");
-  useEffect(() => {
-    if (!api) return;
-    void api.practiceSource().then((source) => setSourceAccount(source.state === "connected" ? source.account?.username ?? source.name : null)).catch(() => undefined);
-  }, [api]);
+  const readSource = async () => {
+    const inventory = await api?.practiceSource().catch(() => null);
+    if (!inventory) return;
+    setSource(inventory.state === "connected" ? { username: inventory.account?.username ?? inventory.name, account: inventory.account } : null);
+  };
+  // Once, when the api arrives. `readSource` is rebuilt every render and is not
+  // a dependency of anything but itself.
+  useEffect(() => { void readSource(); }, [api]);
   const connectSource = async () => {
-    if (!api || connectingSource) return;
-    setConnectingSource(true);
+    if (!api || sourceBusy || source) return;
+    setSourceBusy("connect");
     setSourceError("");
     try {
       const result = await api.connectPracticeSource();
-      if (result.status === "connected") setSourceAccount(result.username);
+      if (result.status === "connected") {
+        setSource({ username: result.username, account: null });
+        await readSource();
       /* Cancelling is a decision, not an error: the step is optional and the
          learner closing the window has answered it. */
-      else if (result.status === "failed") setSourceError(result.message);
+      } else if (result.status === "failed") setSourceError(result.message);
     } catch (cause) {
       setSourceError(message(cause));
     } finally {
-      setConnectingSource(false);
+      setSourceBusy(null);
+    }
+  };
+  const disconnectSource = async () => {
+    if (!api || sourceBusy) return;
+    setSourceBusy("disconnect");
+    setSourceError("");
+    try {
+      await api.disconnectPracticeSource();
+      setSource(null);
+    } catch (cause) {
+      setSourceError(message(cause));
+    } finally {
+      setSourceBusy(null);
     }
   };
 
@@ -248,7 +293,7 @@ export function OnboardingPage({
     if (id === "focus") return focus.length ? focus.join(", ") : null;
     if (id === "weakness") return weakness.trim() || null;
     if (id === "language") return language ? LANGUAGE_LABEL[language] : null;
-    if (id === "source") return sourceAccount;
+    if (id === "source") return source?.username ?? null;
     if (!runnable) return null;
     return connected.length ? connected.map((provider) => provider.name).join(", ") : "Ready";
   };
@@ -304,6 +349,8 @@ export function OnboardingPage({
   const options = step.kind === "one" && step.id === "experience" ? EXPERIENCE.length
     : step.kind === "one" ? LANGUAGES.length
     : step.kind === "many" ? FOCUS.length
+    /* No numbers on the provider list: those rows lead with a brand mark, and a
+       digit in front of it turns four logos into a numbered form. */
     : step.kind === "source" ? 0
     : step.kind === "provider" ? offered.length
     : 0;
@@ -354,8 +401,12 @@ export function OnboardingPage({
           {!busy && <ArrowRight data-icon="inline-end" />}
         </motion.span>
       </Button>
-      <p aria-live="polite" className={cn("mt-2.5 min-h-4 text-center text-ui", error ? "text-destructive" : "text-muted-foreground/70")} role="status">
-        {error ??
+      {/* One status line for the step, and `||` rather than `??` — these are
+          empty strings, not nulls, so the nullish form printed a blank line and
+          silently ate every hint under every question. */}
+      <p aria-live="polite" className={cn("mt-2.5 min-h-4 text-center text-ui", error || (step.id === "source" && sourceError) ? "text-destructive" : "text-muted-foreground/70")} role="status">
+        {error ||
+          (step.id === "source" ? sourceError : "") ||
           (step.id === "provider" && !runnable
             ? inventory ? "Connect a provider to continue" : ""
             : step.kind === "text"
@@ -521,35 +572,96 @@ export function OnboardingPage({
                 </div>
               )}
 
+              {/* The judges, as a list of judges — brand first, the way the model
+                  step lists providers. What this replaced was a lone Connect
+                  button under three paragraphs of prose, which said nothing about
+                  what Spar can talk to and made the one live integration look
+                  like the whole story.
+
+                  A connected row grows its record rather than a sentence about
+                  one. Three counts and a bar is what "Spar knows where you are"
+                  looks like; "Spar can read what you have solved" is only a
+                  promise that it will. */}
               {phase === "intake" && step.id === "source" && (
-                <>
-                  <div className={GROUP}>
-                    <button
-                      className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-accent/60 disabled:pointer-events-none disabled:opacity-60"
-                      disabled={connectingSource}
-                      onClick={() => void connectSource()}
-                      type="button"
-                    >
-                      <LeetCodeGlyph className="size-4 shrink-0 text-foreground/80" />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-content">{sourceAccount ? `Connected as ${sourceAccount}` : "Connect LeetCode"}</span>
-                        <span className="mt-0.5 block text-ui text-muted-foreground">
-                          {sourceAccount
-                            ? "Spar can set you real problems and read what you have already solved."
-                            : "You sign in on LeetCode's own page. Spar never sees your password."}
+                <div className={GROUP}>
+                  {SOURCES.map(({ id, name, Glyph, soon }) => {
+                    const connected = id === "leetcode" && source !== null;
+                    const bands = source?.account ? solvedBands(source.account) : [];
+                    /* Only a row you can act on is a button. A connected one owns
+                       a Disconnect of its own, and a button inside a button is
+                       neither valid nor operable from the keyboard. */
+                    const head = (
+                      <>
+                        <Glyph className="size-[1.15rem] shrink-0 text-foreground/85" />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-center gap-1.5">
+                            <span className="truncate text-content text-foreground">{name}</span>
+                            {connected && <Check className="size-3 shrink-0 text-[var(--success)]" />}
+                          </span>
+                          {connected && <span className="mt-0.5 block truncate text-ui text-muted-foreground">{source.username}</span>}
                         </span>
-                      </span>
-                      {connectingSource
-                        ? <SparDots pattern="pulse" size={16} />
-                        : sourceAccount
-                          ? <Check className="size-4 shrink-0 text-[var(--success)]" />
-                          : <ArrowRight className="size-4 shrink-0 text-muted-foreground/60" />}
-                    </button>
-                  </div>
-                  <p className="mx-auto mt-3 max-w-[22rem] text-center text-ui leading-[1.6] text-muted-foreground">
-                    {sourceError || "Skip this and every challenge is one Spar writes for you. You can connect it later in Settings."}
-                  </p>
-                </>
+                      </>
+                    );
+                    const headClass = "flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors";
+                    return (
+                      <div className={cn("not-first:border-t not-first:border-border", soon && "opacity-45")} key={id}>
+                        {connected || soon ? (
+                          <div className={headClass}>
+                            {head}
+                            {soon
+                              ? <span className="shrink-0 text-ui text-muted-foreground">Soon</span>
+                              : (
+                                <button
+                                  className="shrink-0 rounded text-ui text-muted-foreground transition-colors hover:text-destructive disabled:opacity-45"
+                                  disabled={sourceBusy !== null}
+                                  onClick={() => void disconnectSource()}
+                                  type="button"
+                                >
+                                  {sourceBusy === "disconnect" ? "Disconnecting…" : "Disconnect"}
+                                </button>
+                              )}
+                          </div>
+                        ) : (
+                          <button
+                            className={cn(headClass, "hover:bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]")}
+                            disabled={sourceBusy !== null}
+                            onClick={() => void connectSource()}
+                            type="button"
+                          >
+                            {head}
+                            {sourceBusy === "connect"
+                              ? <SparDots pattern="pulse" size={16} />
+                              : <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/60" />}
+                          </button>
+                        )}
+
+                        {connected && (
+                          <div className="px-3.5 pb-3">
+                            {source.account
+                              ? (
+                                <>
+                                  {/* The mix, not the fraction of the catalogue:
+                                      412 of 3,600 draws a sliver nobody can read,
+                                      and what is worth seeing at a glance here is
+                                      how the solves are spread across the three
+                                      difficulties. The count says the rest. */}
+                                  <Meter animate bands={bands} height="0.3125rem" />
+                                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                                    {bands.filter((band) => band.value > 0).map((band) => <MeterKey band={band} key={band.key} />)}
+                                    <span className="ml-auto shrink-0 text-ui tabular-nums text-muted-foreground">
+                                      <span className="text-foreground/80">{source.account.solved.total.toLocaleString()}</span> solved
+                                      {source.account.streak > 0 && ` · ${source.account.streak}-day streak`}
+                                    </span>
+                                  </div>
+                                </>
+                              )
+                              : <SparDotsLine pattern="pulse" size={14}>Reading your record…</SparDotsLine>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
 
               {phase === "intake" && step.id === "provider" && (
@@ -592,7 +704,7 @@ export function OnboardingPage({
                   {!busy && <ArrowRight data-icon="inline-end" />}
                 </Button>
                 <p aria-live="polite" className={cn("mt-2.5 min-h-4 text-center text-ui", error ? "text-destructive" : "text-muted-foreground/70")} role="status">
-                  {error ?? (drafted.length ? `Press 1–${drafted.length} to choose` : "")}
+                  {error || (drafted.length ? `Press 1–${drafted.length} to choose` : "")}
                 </p>
                 {drafted.length > 0 && (
                   <div className="mt-1 flex justify-center text-ui">

@@ -9,6 +9,8 @@ import "./theme.css";
    and without an API, an Electron window or a real account. Not shipped; it is
    here for the same reason harness.html is. */
 
+let sourceConnected = false;
+
 const api = {
   async auth(request: AuthRequest): Promise<AuthResult> {
     await new Promise((resolve) => setTimeout(resolve, 700));
@@ -44,6 +46,37 @@ const api = {
         { title: "Read a stack trace back to its cause", why: "Cheap to practise, and it makes every later session faster.", goal: "..." },
       ],
     };
+  },
+  /* The practice source, as the intake's last step reads it: connected or not,
+     and how much the account has behind it. The sign-in itself is a real window
+     in the app, so here it is a pause and a name. */
+  async practiceSource() {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return sourceConnected
+      ? {
+          source: "leetcode",
+          name: "LeetCode",
+          state: "connected",
+          account: {
+            username: "AbhinavMishra3322",
+            premium: false,
+            avatarUrl: "",
+            solved: { total: 412, easy: 210, medium: 170, hard: 32 },
+            available: { total: 3_612, easy: 892, medium: 1_884, hard: 836 },
+            skills: [{ slug: "arrays", name: "Arrays", solved: 96, band: "fundamental" }],
+            streak: 12,
+          },
+        }
+      : { source: "leetcode", name: "LeetCode", state: "disconnected", account: null };
+  },
+  async connectPracticeSource() {
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    sourceConnected = true;
+    return { status: "connected", username: "AbhinavMishra3322" };
+  },
+  async disconnectPracticeSource() {
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    sourceConnected = false;
   },
   onProviderOAuthEvent: () => () => undefined,
   onAgentEvent: () => () => undefined,

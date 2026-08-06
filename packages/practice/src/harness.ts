@@ -298,6 +298,18 @@ inline bool matches(const std::string& actual, const std::string& expected) {
   return canonical(actual) == canonical(expected);
 }
 
+/** A value as a single-quoted TAP scalar: the quote doubled, and newlines flattened
+ *  so one case's diagnostic block stays one block. */
+inline std::string escape(const std::string& text) {
+  std::string out;
+  for (char character : text) {
+    if (character == '\\'') out += "''";
+    else if (character == '\\n' || character == '\\r') out += ' ';
+    else out += character;
+  }
+  return out;
+}
+
 } // namespace spar
 `;
 
@@ -316,17 +328,31 @@ function cppTest(signature: PracticeSignature, cases: PracticeCase[]): string {
     "#include <string>",
     "",
     "static int failures = 0;",
+    "static int ordinal = 0;",
     "",
+    /* TAP 13, byte for byte what `node --test` emits, because Spar reads a run's
+       per-case verdicts out of TAP and had no reader for anything else — so a C++
+       challenge produced a wall of raw output where a JavaScript one produced
+       cases. The failing point carries its expected and actual in the diagnostic
+       block, which is what puts the two values side by side in the result panel
+       instead of leaving them to be read out of a log. */
     "static void check(const std::string& name, const std::string& actual, const std::string& expected) {",
+    "  ++ordinal;",
     "  if (spar::matches(actual, expected)) {",
-    "    std::cout << \"ok - \" << name << \"\\n\";",
+    "    std::cout << \"ok \" << ordinal << \" - \" << name << \"\\n\";",
     "    return;",
     "  }",
     "  ++failures;",
-    "  std::cout << \"not ok - \" << name << \"\\n    expected: \" << expected << \"\\n    actual:   \" << actual << \"\\n\";",
+    "  std::cout << \"not ok \" << ordinal << \" - \" << name << \"\\n\"",
+    "            << \"  ---\\n\"",
+    "            << \"  error: 'expected \" << spar::escape(expected) << \", got \" << spar::escape(actual) << \"'\\n\"",
+    "            << \"  expected: '\" << spar::escape(expected) << \"'\\n\"",
+    "            << \"  actual: '\" << spar::escape(actual) << \"'\\n\"",
+    "            << \"  ...\\n\";",
     "}",
     "",
     "int main() {",
+    "  std::cout << \"TAP version 13\\n\";",
   ];
   cases.forEach((entry, index) => {
     const args = signature.params.map((param, position) => cppLiteral(entry.input[position] ?? "", metaTypeToCpp(param.type) ?? param.type));
@@ -342,7 +368,13 @@ function cppTest(signature: PracticeSignature, cases: PracticeCase[]): string {
     lines.push(`  }`);
     if (index < cases.length - 1) lines.push("");
   });
-  lines.push("  if (failures) std::cout << failures << \" case(s) failed\\n\";");
+  lines.push("");
+  lines.push("  std::cout << \"1..\" << ordinal << \"\\n\"");
+  lines.push("            << \"# tests \" << ordinal << \"\\n\"");
+  lines.push("            << \"# pass \" << (ordinal - failures) << \"\\n\"");
+  lines.push("            << \"# fail \" << failures << \"\\n\";");
+  /* The exit code is still the verdict. TAP is what the panel reads; the runner
+     grades on the code, and the two must never disagree. */
   lines.push("  return failures == 0 ? 0 : 1;");
   lines.push("}");
   lines.push("");
@@ -468,6 +500,6 @@ function unsupportedCppType(signature: PracticeSignature): string | null {
  * generated from the same cases the local harness asserts so the two paths test
  * the same thing.
  */
-export function judgeInputBlock(cases: PracticeCase[]): string {
+export function judgeInputBlock(cases: Array<Pick<PracticeCase, "input">>): string {
   return cases.map((entry) => entry.input.map((value) => value.trim()).join("\n")).join("\n");
 }

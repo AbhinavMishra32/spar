@@ -115,7 +115,7 @@ const toolDefinitions = {
   read_session: ["Read the current session summary and decisions.", z.object({ sessionId: z.string().uuid() })],
   read_concept_graph: ["Read the concept vocabulary near a topic, with this learner's evidence against each one. Use it to choose what to tag and what to test next.", z.object({ query: z.string().optional(), limit: z.number().int().min(1).max(24).default(14) })],
   search_concept_evidence: ["Read how this learner behaves under one concept, broken down by sub-concept, with the recent challenges and outcomes behind it. This is the tool for finding which specific sub-concept is failing inside an area that looks fine on average.", z.object({ concept: z.string().min(2).describe("a concept slug or a topic in words"), limit: z.number().int().min(1).max(6).default(3) })],
-  ask_user_question: ["Suspend the session for one focused learner answer. Offer 2-3 mutually exclusive choices with concise descriptions when useful, and always allow a custom answer.", askUserQuestionInputSchema],
+  ask_user_question: ["Suspend the session for one focused learner answer. Offer 2-3 mutually exclusive choices. Each option is one self-contained line the learner can scan — no subtitle, no second sentence — so write the whole choice into the label. Always allow a custom answer.", askUserQuestionInputSchema],
   set_session_objective: ["Persist a lightweight session objective.", z.object({ objective: z.string() })],
   set_training_target: ["Persist one primary evidence target.", z.object({ ability: z.string(), specificGap: z.string(), desiredEvidence: z.string(), avoidTesting: z.array(z.string()) })],
   create_question: ["Compile and validate a complete question from the active target. All paths are relative and the reference implementation must replace starter implementation files.", questionInputSchema],
@@ -157,6 +157,7 @@ const toolDefinitions = {
       concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and it must name the gap the target describes — not merely the topic the source files the problem under."),
       why: z.string().min(20).max(400).describe("One or two sentences: why this specific problem discriminates what is still uncertain about this learner. This is stored with the challenge and is what a later turn reads to know what you were testing."),
       language: z.enum(["javascript", "typescript", "cpp"]).optional().describe("Omit to use the learner's preferred language. Only name one when the problem demands it."),
+      replaceReason: z.string().min(3).max(500).optional().describe("Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."),
     }),
   ],
 } as const;

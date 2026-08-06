@@ -124,12 +124,26 @@ async function run(tool: PracticeToolDefinition, args: Record<string, unknown>, 
           learnerStatus: problem.status,
           paidOnly: problem.paidOnly,
         })),
+        /* What the source was actually filtered by. Said plainly because it is not
+           always what was asked: this source intersects its tags, so several
+           concepts at once cannot all be honoured and the search says which one
+           survived rather than quietly answering a different question. */
+        filteredBy: found.appliedTags,
+        ...(found.droppedTags.length
+          ? { relaxed: `No problem carries every tag at once, so this searched \`${found.appliedTags.join(", ")}\` and dropped ${found.droppedTags.map((tag) => `\`${tag}\``).join(", ")}. Name one concept at a time to control which.` }
+          : {}),
         ...(found.problems.some((problem) => problem.paidOnly)
           ? { warning: "Some results are subscription-only at the source. Reading or judging one of those will fail unless this account has that subscription." }
           : {}),
-        note: capabilities.progress
-          ? "`learnerStatus` is the source's own record: solved, attempted, or todo. Do not assign something already solved unless you mean to compare against how they solved it."
-          : "`learnerStatus` is unknown for every result because the source is not connected, so this list cannot tell you what they have already done.",
+        note: found.problems.length
+          ? capabilities.progress
+            ? "`learnerStatus` is the source's own record: solved, attempted, or todo. Do not assign something already solved unless you mean to compare against how they solved it."
+            : "`learnerStatus` is unknown for every result because the source is not connected, so this list cannot tell you what they have already done."
+          /* An empty answer is where a turn stalls: the same search gets rewritten
+             with a different phrasing until the budget is gone. So an empty answer
+             says which filter to loosen, and says outright that writing the
+             challenge instead is a legitimate way out. */
+          : `Nothing matched ${describeFilters(found.appliedTags, args)}. Loosen one filter rather than rewording the query: drop the difficulty, set \`status\` to \`any\`, name a single broader concept, or search free text with no concepts at all. If a second search still finds nothing, write the challenge yourself rather than searching again.`,
       };
     }
 
@@ -252,6 +266,18 @@ function gradingNote(capabilities: PracticeProblemBundle["capabilities"], cases:
   return cases.length
     ? `The source cannot judge this right now, so Spar grades it locally against the ${cases.length} case${cases.length === 1 ? "" : "s"} published with the problem. Passing those is weaker evidence than an acceptance at the source, and must not be described as one.`
     : "The source cannot judge this right now and Spar has no runnable case for it either, so this problem cannot be graded at all until the source is reconnected. Do not assign it.";
+}
+
+/** The filter a search actually ran under, in the caller's own words, so an empty
+ *  answer says which of the things it asked for is the one to give up. */
+function describeFilters(tags: string[], args: Record<string, unknown>): string {
+  const parts = [
+    tags.length ? `tags ${tags.join(" + ")}` : "",
+    typeof args.query === "string" && args.query.trim() ? `text "${args.query.trim()}"` : "",
+    args.difficulty ? String(args.difficulty) : "",
+    args.status && args.status !== "any" ? `status ${String(args.status)}` : "",
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "this search";
 }
 
 /** A failure, as a payload. `retryable` is the field a caller should branch on:

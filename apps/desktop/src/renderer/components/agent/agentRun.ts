@@ -310,7 +310,14 @@ export function toolRowTitle(part: Extract<RunPart, { kind: "tool" }>): string {
   return part.actionTitle.trim() || safeToolLabel(part.tool, part.phase === "running", part.phase === "error");
 }
 
-const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "create_fallback_question"];
+/** Every tool that reaches the connected practice source. The transcript marks
+ *  these with the source's own logo, because "searched" and "searched LeetCode" are
+ *  different claims and only one of them is what happened. */
+export function isSourceTool(tool: string): boolean {
+  return tool.endsWith("_practice_problem") || tool.endsWith("_practice_problems") || tool.startsWith("read_practice_") || tool === "assign_practice_problem";
+}
+
+const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "create_fallback_question", "assign_practice_problem"];
 
 /**
  * A challenge that actually reached durable storage. `phase === "done"` is the

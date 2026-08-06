@@ -8,7 +8,7 @@ import { message } from "@/lib/format";
 import { Sidebar, type Page, type SessionActions } from "./components/shell/Sidebar";
 import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
-import { CommandPalette } from "./components/common/CommandPalette";
+import { SearchPalette } from "./components/common/SearchPalette";
 import { HomePage } from "./components/pages/HomePage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
@@ -518,9 +518,13 @@ export function App() {
         </div>
       </main>
 
-      <CommandPalette
+      <SearchPalette
+        challenges={data.challenges}
+        concepts={data.concepts}
         onNewSession={() => navigate("home")}
+        onOpenChallenge={openChallenge}
         onOpenChange={setPalette}
+        onOpenConcept={setConcept}
         onOpenSession={open}
         onPage={navigate}
         open={palette}

@@ -1,6 +1,6 @@
 import type { BrowserWindow } from "electron";
 import {
-  buildHarness, effectiveCapabilities, judgeDescription, LeetCodeGateway, practiceSource, submittableCode,
+  buildHarness, effectiveCapabilities, judgeDescription, judgeInputBlock, LeetCodeGateway, practiceSource, submittableCode,
   type LeetCodeSession, type PracticeAccount, type PracticeCase, type PracticeConnectionState,
   type PracticeGateway, type PracticeProblem, type PracticeProblemBundle, type PracticeRegion, type PracticeVerdict,
 } from "@spar/practice";
@@ -253,6 +253,22 @@ export class PracticeService {
     return practiceSource("leetcode").name;
   }
 
+  /**
+   * The problem's own example inputs, in the wire format its judge accepts.
+   *
+   * Read from the source rather than from the challenge, and it exists because a
+   * challenge mounted before its cases travelled on it carries none — every one
+   * of those would otherwise post an empty case block, which LeetCode answers by
+   * running nothing and calling it Accepted. `exampleTestcaseList` is the last
+   * resort and the most literal one: it is the exact text the site puts in its own
+   * testcase box, so it works even where the statement could not be parsed into
+   * cases at all.
+   */
+  async judgeInput(slug: string): Promise<string> {
+    const bundle = await this.problem(slug);
+    return judgeInputBlock(bundle.cases) || bundle.problem.sampleTestcases.join("\n").trim();
+  }
+
   /* ---- Mounting a problem as a challenge ---------------------------------- */
 
   /**
@@ -296,6 +312,11 @@ export class PracticeService {
       remoteJudge,
       localCaseCount: harness.supported ? harness.cases.length : 0,
       judge: judgeDescription("leetcode", { ...effectiveCapabilities("leetcode", remoteJudge), remoteJudge }),
+      entryName: problem.signature?.name ?? "",
+      /* Every case the problem publishes, not only the ones the local harness could
+         wire up: a case Spar cannot run is still the contract the learner is being
+         asked to satisfy, and it is the source's own statement of it. */
+      cases: cases.map((entry) => ({ name: entry.name, input: entry.input, expected: entry.expected })),
       references: problem.references.map((reference) => ({ slug: reference.slug, title: reference.title, difficulty: reference.difficulty, relation: reference.relation })),
     };
 

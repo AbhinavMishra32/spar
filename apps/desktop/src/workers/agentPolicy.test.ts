@@ -249,13 +249,40 @@ describe("practice sources in the stage machine", () => {
     expect(nextToolStage("attempt-complete", outcomes, 15, { practiceSource: true }).activeTools).toEqual(["assign_practice_problem", "create_question"]);
   });
 
-  it("offers the source's reads mid-challenge but never a second assignment", () => {
-    // "Is this like anything I have done?" is a question about the problem in
-    // front of them. Setting another one while they are still on this one is not.
+  it("offers the whole source mid-challenge, assignment included", () => {
+    /* "Is this like anything I have done?" is a question about the problem in front
+       of them, and "just give me a real LeetCode problem instead" is a request this
+       turn can carry out. Withholding the assignment here left the agent one legal
+       way to answer the second one: write its own challenge, name it after the
+       problem it could not assign, and grade it locally. Whether the swap is
+       allowed is the tool's judgement — it refuses unless the agent states that the
+       learner asked to be moved — not something to decide by hiding the tool. */
     const stage = nextToolStage("learner-message", new Map(), 15, { hasActiveQuestion: true, practiceSource: true });
     expect(stage.activeTools).toContain("read_practice_problem");
     expect(stage.activeTools).toContain("read_practice_submissions");
-    expect(stage.activeTools).not.toContain("assign_practice_problem");
+    expect(stage.activeTools).toContain("assign_practice_problem");
+    // Replacing a challenge in place is still the only way to edit one.
+    expect(stage.activeTools).toContain("replace_current_question");
+    expect(stage.activeTools).not.toContain("create_question");
+  });
+
+  it("makes a revision turn choose between a real problem and one it writes", () => {
+    // The likeliest moment for a real problem to be the right answer is the moment
+    // the learner says this one is not what they want.
+    const done = new Map<string, unknown[]>([
+      ["replay_attempt", [{}]],
+      ["set_training_target", [{}]],
+      ["search_practice_problems", [{}]],
+    ]);
+    const stage = nextToolStage("challenge-revision", done, 15, { hasActiveQuestion: true, practiceSource: true });
+    expect(stage.toolChoice).toBe("required");
+    expect(stage.activeTools).toEqual(["assign_practice_problem", "replace_current_question"]);
+  });
+
+  it("looks at what the source has before writing a replacement", () => {
+    const done = new Map<string, unknown[]>([["replay_attempt", [{}]], ["set_training_target", [{}]]]);
+    const stage = nextToolStage("challenge-revision", done, 15, { hasActiveQuestion: true, practiceSource: true });
+    expect(stage.activeTools).toEqual(["search_practice_problems"]);
   });
 
   it("never offers the agent a tool that would run or submit on the learner's account", () => {

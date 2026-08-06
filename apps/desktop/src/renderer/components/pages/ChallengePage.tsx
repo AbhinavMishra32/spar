@@ -599,7 +599,7 @@ export function ChallengePage({
                   onTab={setResultTab}
                   busyLabel={checking ? "Running the visible and hidden cases…" : undefined}
                   outcome={outcome}
-                  question={{ visibleTestFiles }}
+                  question={{ visibleTestFiles, source: detail.source }}
                   running={running || checking}
                   tab={resultTab}
                   terminal={terminal}

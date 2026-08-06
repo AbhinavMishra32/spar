@@ -109,6 +109,36 @@ describe("parseTestOutput", () => {
     expect(cpp.summary).toBe("tests/hidden.test.cpp:12: assertion failed");
   });
 
+  it("reads the older C++ harness still sitting in workspaces generated before TAP", () => {
+    /* Verbatim from a workspace on disk. The generated test is written once, when
+       the challenge is mounted, so changing the generator does nothing for a
+       challenge somebody is part-way through — and every one of those was reading
+       as raw output. */
+    const legacy = [
+      "ok - Example 1 (statement)",
+      "not ok - Example 2 (statement)",
+      "    expected: 0",
+      "    actual:   5",
+      "1 case(s) failed",
+      "",
+    ].join("\n");
+    const report = parseTestOutput(legacy);
+
+    expect(report.parsed).toBe(true);
+    expect(report.cases.map((item) => [item.ordinal, item.name, item.status])).toEqual([
+      [1, "Example 1 (statement)", "passed"],
+      [2, "Example 2 (statement)", "failed"],
+    ]);
+    expect(report.passed).toBe(1);
+    expect(report.failed).toBe(1);
+    expect(report.cases[1]?.failure).toMatchObject({ expected: "0", actual: "5" });
+  });
+
+  it("does not read a sentence that merely contains the word ok as a verdict", () => {
+    expect(parseTestOutput("Everything looks ok - but nothing ran.\n").parsed).toBe(false);
+    expect(parseTestOutput("LeetCode could not run that (No cases were run).\n").parsed).toBe(false);
+  });
+
   it("clips an assertion value rather than storing a whole dump in the attempt", () => {
     const long = `TAP version 13\nnot ok 1 - big\n  ---\n  expected: '${"x".repeat(400)}'\n  ...\n`;
     const [record] = caseRecords(parseTestOutput(long));
@@ -118,8 +148,43 @@ describe("parseTestOutput", () => {
   });
 
   it("reports output with no TAP in it as unparsed rather than as zero cases", () => {
-    // The C++ toolchain, and any run that dies before the runner starts.
+    // Any run that dies before the runner starts, and any C++ test somebody else
+    // wrote — a hand-written assert prints nothing this can read.
     expect(parseTestOutput("The submission failed one or more deterministic tests.").parsed).toBe(false);
     expect(parseTestOutput("g++: error: unrecognized command-line option").cases).toEqual([]);
+  });
+
+  it("reads the C++ harness Spar generates for a sourced problem", () => {
+    /* Verbatim output of the compiled harness, from a real clang++ run. A sourced
+       C++ challenge used to land in the raw-output fallback — the whole result
+       panel read "No structured cases in this run" for a problem whose cases Spar
+       had itself generated. */
+    const cpp = [
+      "TAP version 13",
+      "ok 1 - Example 1 (statement)",
+      "ok 2 - Example 2 (statement)",
+      "not ok 3 - Deliberately wrong expectation (statement)",
+      "  ---",
+      "  error: 'expected 99, got 2'",
+      "  expected: '99'",
+      "  actual: '2'",
+      "  ...",
+      "1..3",
+      "# tests 3",
+      "# pass 2",
+      "# fail 1",
+      "",
+    ].join("\n");
+    const report = parseTestOutput(cpp);
+
+    expect(report.parsed).toBe(true);
+    expect(report.cases.map((item) => [item.ordinal, item.name, item.status])).toEqual([
+      [1, "Example 1 (statement)", "passed"],
+      [2, "Example 2 (statement)", "passed"],
+      [3, "Deliberately wrong expectation (statement)", "failed"],
+    ]);
+    expect(report.passed).toBe(2);
+    expect(report.failed).toBe(1);
+    expect(report.cases[2]?.failure).toMatchObject({ expected: "99", actual: "2" });
   });
 });

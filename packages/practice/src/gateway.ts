@@ -36,7 +36,11 @@ export interface PracticeGateway {
   state(): Promise<PracticeConnectionState>;
   capabilities(): Promise<PracticeSourceCapabilities>;
   account(): Promise<PracticeAccount | null>;
-  search(input: PracticeSearchInput & { concepts?: string[] }): Promise<{ total: number; problems: PracticeProblemSummary[] }>;
+  /** `appliedTags` is what the source was actually filtered by, and `droppedTags`
+   *  what had to be given up to find anything — a source that intersects its tags
+   *  cannot honour every concept at once, and a caller told only "no results"
+   *  cannot tell that apart from a broken search. */
+  search(input: PracticeSearchInput & { concepts?: string[] }): Promise<{ total: number; problems: PracticeProblemSummary[]; appliedTags: string[]; droppedTags: string[] }>;
   problem(slug: string): Promise<PracticeProblemBundle>;
   daily(): Promise<PracticeProblemBundle>;
   random(input: { tags?: string[]; difficulty?: string }): Promise<string | null>;

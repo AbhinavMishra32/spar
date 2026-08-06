@@ -67,9 +67,19 @@ export function normalizeLeetCodeVerdict(
   const runtimeError = text(value.full_runtime_error) ?? text(value.runtime_error) ?? "";
 
   const ran = statusCode === 10;
+  /**
+   * A run that judged nothing.
+   *
+   * LeetCode answers an empty `data_input` with status 10, `correct_answer: true`
+   * and no cases at all — a vacuous acceptance, and the one answer this must never
+   * pass on as a pass. It is reported as `errored`, not `failed`: the learner's code
+   * was not wrong, it was never tried, and filing it as a failure would put a
+   * verdict nobody reached into their record.
+   */
+  const judgedNothing = !context.submitted && ran && total === 0 && caseAnswers.length === 0;
   const allCasesMatch = compare ? /^1+$/.test(compare) : value.correct_answer === true || (total > 0 && correct === total);
   const outcome: PracticeVerdict["outcome"] =
-    statusCode === null || (statusCode !== null && JUDGE_FAULT.has(statusCode))
+    statusCode === null || judgedNothing || (statusCode !== null && JUDGE_FAULT.has(statusCode))
       ? "errored"
       : ran && (context.submitted ? statusText(value, statusCode) === "Accepted" : allCasesMatch)
         ? "passed"
@@ -99,7 +109,9 @@ export function normalizeLeetCodeVerdict(
 
   return {
     outcome,
-    status: statusText(value, statusCode),
+    /* The judge's word for it, except where the judge's word would mislead: it says
+       "Accepted" over a run it was given no cases for. */
+    status: judgedNothing ? "No cases were run" : statusText(value, statusCode),
     statusCode,
     passedCases: outcome === "passed" && total === 0 ? Math.max(correct, caseAnswers.length) : correct,
     totalCases: total || caseAnswers.length,

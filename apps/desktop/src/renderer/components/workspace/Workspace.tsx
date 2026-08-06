@@ -5,6 +5,7 @@ import { Check, FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateC
 import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { runEvidence } from "../../../shared/testReport";
+import { sourceRunOutput } from "../../../shared/sourceOutput";
 import { cn } from "@/lib/utils";
 import { fileName, languageFor, message } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
@@ -176,7 +177,9 @@ export function Workspace({
       setTerminal(terminalRef.current);
       await save();
       await append("command_executed", { command: "test", language: question.language });
-      const request=await api.run({ sessionId: detail.summary.id, language: question.language, command: "test", timeoutMs: 8_000 });
+      /* No timeout named here: the main process sets it from the language, because
+         a C++ run is a compile first and the window has no idea how long that is. */
+      const request=await api.run({ sessionId: detail.summary.id, language: question.language, command: "test" });
       visibleRunId.current=request.id;
     } catch (error) {
       setRunning(false);
@@ -205,17 +208,11 @@ export function Workspace({
       terminalRef.current = `$ run on ${SOURCE_NAME[question.source.source]}\n`;
       setTerminal(terminalRef.current);
       const report = await api.runAtSource({ sessionId: detail.summary.id, attemptId: question.attemptId });
-      const lines = [
-        `# ${report.status}`,
-        report.totalCases ? `# cases ${report.passedCases}/${report.totalCases}` : "",
-        report.runtime ? `# runtime ${report.runtime}` : "",
-        ...(report.failedCase
-          ? ["", "not ok 1 - the first case that failed", `  input: ${report.failedCase.input}`, `  expected: ${report.failedCase.expected}`, `  actual: ${report.failedCase.actual}`]
-          : []),
-        "",
-        report.message,
-      ].filter(Boolean);
-      terminalRef.current = `${terminalRef.current}${lines.join("\n")}\n`;
+      /* The judge's per-case answers, written as TAP — the same notation a local
+         run produces, so the panel draws them through the same case list instead
+         of dropping to raw output. The writer lives in `shared/sourceOutput` with
+         a test that reads its output back through the panel's own parser. */
+      terminalRef.current = `${terminalRef.current}${sourceRunOutput(report, SOURCE_NAME[question.source.source])}`;
       setTerminal(terminalRef.current);
       /* An errored run is the source failing, not the learner: it is reported and
          deliberately not shown as a verdict. */

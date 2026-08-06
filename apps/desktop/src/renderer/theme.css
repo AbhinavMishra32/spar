@@ -96,7 +96,14 @@
   --radius-item: 0.375rem;
   --radius-menu: calc(var(--radius-item) + 0.375rem);
 
-  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  /* The platform's own UI face leads, and for one reason: the window is glass, so
+     Chromium cannot use subpixel antialiasing anywhere in it — every glyph in the
+     app is rendered grayscale against a backdrop we do not own. SF Pro and Segoe UI
+     Variable are hinted and optically sized for exactly that job at chrome sizes; a
+     webfont is not. Geist's stems came out soft and grey beside a native source
+     list, which is the whole reason this stack turned around. It stays last as the
+     fallback for platforms that ship no UI face worth having. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Geist Variable", sans-serif;
   --font-spar: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "SF Mono", "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -112,10 +119,16 @@
      the one surface you navigate by shape rather than by reading — so its labels
      are set at the size the platform's own source lists use rather than at the
      dense size that suits a row of controls. Every sidebar text size comes from
-     this pair; nothing in there is set in `--text-ui`. */
-  --text-source: 0.875rem;
+     this pair; nothing in there is set in `--text-ui`.
+
+     13px is that size literally: it is NSFont.systemFontSize, what AppKit sets a
+     source list in, and the size SF Pro switches from its Display cut to its Text
+     cut for. The 14px this used to be was a webfont's compensation for looking
+     light — with the system face leading the stack the compensation is a liability,
+     because the platform only hints the face at the size it designed it for. */
+  --text-source: 0.8125rem;
   --text-source--line-height: 1.25rem;
-  --text-source-sm: 0.8125rem;
+  --text-source-sm: 0.75rem;
   --text-source-sm--line-height: 1.125rem;
 }
 
@@ -421,8 +434,12 @@
     /* Transparent so the native macOS vibrancy layer shows through the sidebar. */
     background: transparent;
     color: var(--foreground);
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    /* No `-webkit-font-smoothing: antialiased` here, and that is the point. On a
+       transparent window macOS is already rendering every glyph grayscale — it has
+       no opaque background to run subpixel against — so the property buys no
+       crispness it was not getting anyway, and costs stem weight: `antialiased`
+       skips the stem darkening `auto` applies, which on glass is the difference
+       between a label and a smudge. Left to the platform on purpose. */
     font-size: var(--text-ui);
   }
 

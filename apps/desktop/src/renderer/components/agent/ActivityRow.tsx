@@ -4,7 +4,8 @@ import { BookOpen, Check, ChevronDown, CircleAlert, FilePenLine, Globe, History,
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { diffTotals, toolRowTitle, type RunPart } from "./agentRun";
+import { LeetCodeGlyph } from "../common/SourceGlyph";
+import { diffTotals, isSourceTool, toolRowTitle, type RunPart } from "./agentRun";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
@@ -20,6 +21,12 @@ function orbFor(tool: string): OrbState {
 function ToolIcon({ part }: { part: ToolPart }) {
   if (part.phase === "running") return <ThinkingOrb aria-label="Working" size={20} state={orbFor(part.tool)} style={{ width: 15, height: 15 }} />;
   if (part.phase === "error") return <CircleAlert className="size-3.5 text-[var(--warning)]" />;
+  /* Anything that reached the practice source is marked with the source's own logo.
+     A magnifying glass over "Searching LeetCode for a problem" says the agent
+     searched something; the mark says what. Unconditional today because a
+     ChallengeSource can only be LeetCode — a second source means carrying which one
+     on the row rather than guessing from the tool name. */
+  if (isSourceTool(part.tool)) return <LeetCodeGlyph className="size-3.5" />;
   /* Going out to the web gets its own mark. Every other row in the transcript is
      the agent reading the learner's own record, and a globe is the one-glance
      difference between "it looked at your attempts" and "it looked outside". */
@@ -474,6 +481,10 @@ export function SolveRead({ part }: { part: ToolPart }) {
  */
 export function ChallengePublished({ part }: { part: ToolPart }) {
   const replaced = part.tool === "replace_current_question";
+  /* A problem from the source is not "validated" — nothing was compiled, because
+     nobody wrote it. What it carries instead is the source's own judge, and the mark
+     is how that reads at a glance. */
+  const sourced = part.tool === "assign_practice_problem";
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
@@ -481,12 +492,14 @@ export function ChallengePublished({ part }: { part: ToolPart }) {
       initial={{ opacity: 0, y: 4 }}
       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
     >
-      <span className="grid size-4 shrink-0 place-items-center text-[var(--success)]">
-        <Check className="size-3.5" />
+      <span className={cn("grid size-4 shrink-0 place-items-center", sourced ? "text-foreground/80" : "text-[var(--success)]")}>
+        {sourced ? <LeetCodeGlyph className="size-3.5" /> : <Check className="size-3.5" />}
       </span>
       <span className="min-w-0 truncate">
-        <span className="font-medium text-foreground">{part.label || (replaced ? "Challenge replaced" : "Challenge ready")}</span>
-        <span className="ml-1.5 text-muted-foreground/60">{replaced ? "· replaced · validated" : "· validated"}</span>
+        <span className="font-medium text-foreground">{part.label || (sourced ? "Problem set" : replaced ? "Challenge replaced" : "Challenge ready")}</span>
+        <span className="ml-1.5 text-muted-foreground/60">
+          {sourced ? "· from LeetCode · judged there" : replaced ? "· replaced · validated" : "· validated"}
+        </span>
       </span>
     </motion.div>
   );

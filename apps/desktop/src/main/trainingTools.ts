@@ -158,8 +158,19 @@ async function assignPracticeProblem(
   const slug = String(value.slug ?? "").trim();
   if (!slug) return refuse("problem identity", "No problem slug was given.");
 
+  /* Replacing the open challenge with a real problem is the whole reason this
+     takes a reason. "Just give me a LeetCode problem" arrives while a challenge is
+     open — it is the commonest thing a learner says — and refusing it here left
+     the agent one legal move: write its own challenge, name it after the LeetCode
+     problem it could not assign, and grade it locally. The learner asked for the
+     real one, so the real one has to be assignable over the top of what they have.
+     Silence still refuses: without a reason this is the old guard, because setting
+     a second problem nobody asked for would discard an attempt in progress. */
   const activeQuestion = openChallenge(local, sessionId);
-  if (activeQuestion) return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already active for this session. End this agent turn instead of assigning another problem.`);
+  const replaceReason = String(value.replaceReason ?? "").trim();
+  if (activeQuestion && !replaceReason) {
+    return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already active for this session. If the learner asked for a different problem, assign this one again with \`replaceReason\` and it will supersede theirs; otherwise end this agent turn instead of assigning another problem.`);
+  }
 
   let mounted: Awaited<ReturnType<PracticeService["mount"]>>;
   try {
@@ -175,6 +186,9 @@ async function assignPracticeProblem(
   }
 
   const { design, source } = mounted;
+  if (activeQuestion && design.title === activeQuestion.title) {
+    return refuse("adaptive progression", `"${design.title}" is the challenge they are already on, so there is nothing to swap. Choose a different problem.`);
+  }
   if (local.challengeTitleUsed(design.title)) {
     return refuse("adaptive progression", `The learner has already been set "${design.title}". Choose a different problem, or write a challenge that approaches the same gap from another direction.`);
   }
@@ -185,11 +199,28 @@ async function assignPracticeProblem(
     return refuse("grading", `${practice.sourceName()} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
   }
 
-  await workspaces.writeAll(sessionId, mounted.files);
-  const question = local.createQuestion(sessionId, design, { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }] }, {
-    concepts: conceptTags(value.concepts),
-    source,
-  });
+  /* Mounting went to the source, which takes as long as a network call takes. The
+     challenge underneath can have changed in that time — the learner may have
+     finished it — and superseding whatever is there now rather than what was there
+     when this started would discard work nobody asked to discard. */
+  const stillActive = openChallenge(local, sessionId);
+  if (activeQuestion && (!stillActive || stillActive.id !== activeQuestion.id)) {
+    return refuse("session lifecycle", "The active challenge changed while this problem was being read from the source, so it was not assigned. Look at the session again before assigning anything.");
+  }
+  if (!activeQuestion && stillActive) {
+    return refuse("session lifecycle", `A playable challenge (${stillActive.title}) was published while this problem was being read from the source. This assignment was discarded.`);
+  }
+
+  const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }] };
+  const concepts = conceptTags(value.concepts);
+  await (activeQuestion ? workspaces.replaceAll(sessionId, mounted.files) : workspaces.writeAll(sessionId, mounted.files));
+  const question = activeQuestion
+    /* Recorded as a replacement, not as a fresh start: the abandoned attempt keeps
+       its events and the new challenge keeps a pointer to what it superseded, so a
+       later turn can see that they were moved off something rather than that they
+       walked away from it. */
+    ? local.replaceQuestion(sessionId, design, report, replaceReason, concepts, source)
+    : local.createQuestion(sessionId, design, report, { concepts, source });
   /* The aim is recorded as a system message rather than dropped: `why` is the
      agent's statement of what this problem is supposed to discriminate, and a
      later turn reading the session has to be able to find it. */
@@ -201,6 +232,7 @@ async function assignPracticeProblem(
     source: { slug: source.slug, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
     judge: source.judge,
     localCases: source.localCaseCount,
+    ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
   };
 }

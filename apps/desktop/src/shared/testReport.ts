@@ -45,7 +45,7 @@ const POINT = /^(not ok|ok)\s+(\d+)\s*-?\s*(.*)$/;
 const SUMMARY = /^#\s+(tests|pass|fail|skipped|todo|duration_ms)\s+([\d.]+)$/;
 
 export function parseTestOutput(output: string): TestReport {
-  if (!output.includes("TAP version")) return EMPTY_REPORT;
+  if (!output.includes("TAP version")) return parseCheckLines(output);
 
   const lines = output.replace(/\r\n/g, "\n").split("\n");
   const cases: TestCaseResult[] = [];
@@ -115,6 +115,59 @@ export function parseTestOutput(output: string): TestReport {
     failed: totals.fail ?? cases.filter((item) => item.status === "failed").length,
     skipped: totals.skipped ?? cases.filter((item) => item.status === "skipped").length,
     ...(durationMs === undefined ? {} : { durationMs }),
+  };
+}
+
+/**
+ * The same cases, out of a suite that reports them without TAP.
+ *
+ * Spar's own C++ harness printed `ok - name` with the expected and actual values
+ * indented underneath before it emitted TAP, and every workspace generated in
+ * that period still has that file in it — the test is on the learner's disk, so
+ * it does not change when the generator does. Reading the older notation is what
+ * makes those challenges show cases instead of a log, and it costs one regex.
+ *
+ * Deliberately narrow: a point is a line that *starts* with `ok`/`not ok`, so
+ * prose that merely mentions them is not mistaken for a verdict.
+ */
+const CHECK = /^(not ok|ok)\s*(?:\d+\s*)?[-–]\s*(.+)$/;
+const CHECK_FIELD = /^\s+(expected|actual|error|message)\s*:\s*(.*)$/i;
+
+function parseCheckLines(output: string): TestReport {
+  const lines = output.replace(/\r\n/g, "\n").split("\n");
+  const cases: TestCaseResult[] = [];
+
+  for (const line of lines) {
+    const point = CHECK.exec(line);
+    if (point) {
+      cases.push({
+        id: `check-${cases.length + 1}-${(point[2] ?? "").trim()}`,
+        ordinal: cases.length + 1,
+        name: (point[2] ?? "").trim() || `Case ${cases.length + 1}`,
+        status: point[1] === "ok" ? "passed" : "failed",
+      });
+      continue;
+    }
+    // A field belongs to the point above it, which is the only case it can describe.
+    const field = CHECK_FIELD.exec(line);
+    const current = cases[cases.length - 1];
+    if (!field || !current || current.status !== "failed") continue;
+    const failure = current.failure ?? {};
+    const key = (field[1] ?? "").toLowerCase();
+    const value = (field[2] ?? "").trim();
+    if (key === "expected") failure.expected = value;
+    else if (key === "actual") failure.actual = value;
+    else failure.message = value;
+    current.failure = failure;
+  }
+
+  if (!cases.length) return EMPTY_REPORT;
+  return {
+    parsed: true,
+    cases,
+    passed: cases.filter((item) => item.status === "passed").length,
+    failed: cases.filter((item) => item.status === "failed").length,
+    skipped: 0,
   };
 }
 
@@ -247,9 +300,13 @@ function collapseMap(body: string[]): string {
 }
 
 function unquote(value: string): string {
-  if (value.length > 1 && ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"')))) {
-    return value.slice(1, -1);
-  }
+  /* A single-quoted YAML scalar carries its own quotes doubled — that is how both
+     Node and Spar's own writers escape them — so undoing that is part of reading
+     it. Without this an output containing an apostrophe was shown back to the
+     learner with the apostrophe duplicated, as a difference their code did not
+     produce. */
+  if (value.length > 1 && value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'");
+  if (value.length > 1 && value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
   return value;
 }
 

@@ -46,10 +46,6 @@ function CommandDialog({
 }) {
   return (
     <Dialog {...props}>
-      <DialogHeader className="sr-only">
-        <DialogTitle>{title}</DialogTitle>
-        <DialogDescription>{description}</DialogDescription>
-      </DialogHeader>
       <DialogContent
         className={cn(
           "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
@@ -57,7 +53,15 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
-        {children}
+        {/* Both of these have to be inside the content, and the children have to be
+            inside a `Command`: the accessible name belongs to the dialog that is
+            actually on screen, and cmdk's input and list read a store this root
+            provides — without it, opening the dialog throws rather than searching. */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <Command>{children}</Command>
       </DialogContent>
     </Dialog>
   )

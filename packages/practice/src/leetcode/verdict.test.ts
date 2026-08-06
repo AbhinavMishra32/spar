@@ -42,6 +42,41 @@ describe("normalizeLeetCodeVerdict — a scratch run", () => {
     expect(verdict.caseAnswers.map((entry) => entry.passed)).toEqual([true, false]);
   });
 
+  it("refuses to call a run that judged nothing a pass", () => {
+    /* What LeetCode answers when it is handed an empty `data_input`: status 10,
+       `correct_answer: true`, and not a single case. Read as a pass, this reported a
+       solution that returned 0 for everything as Accepted — and had no cases to show
+       for it, which is the tell nobody was looking at. */
+    const verdict = normalizeLeetCodeVerdict({
+      status_code: 10,
+      status_msg: "Accepted",
+      correct_answer: true,
+      code_answer: [],
+      expected_code_answer: [],
+      status_runtime: "0 ms",
+    }, { ...context, submitted: false });
+    // Errored, not failed: the code was never tried, so there is no verdict on it.
+    expect(verdict.outcome).toBe("errored");
+    expect(verdict.status).toBe("No cases were run");
+    expect(verdict.caseAnswers).toEqual([]);
+  });
+
+  it("keeps every case the judge answered, so a run can be read case by case", () => {
+    const verdict = normalizeLeetCodeVerdict({
+      status_code: 10,
+      status_msg: "Accepted",
+      correct_answer: false,
+      code_answer: ["0", "0"],
+      expected_code_answer: ["5", "0"],
+      last_testcase: "[7,1,5,3,6,4]\n[7,6,4,3,1]",
+    }, { ...context, submitted: false });
+    expect(verdict.outcome).toBe("failed");
+    expect(verdict.caseAnswers).toEqual([
+      { input: "[7,1,5,3,6,4]", expected: "5", actual: "0", passed: false },
+      { input: "[7,6,4,3,1]", expected: "0", actual: "0", passed: true },
+    ]);
+  });
+
   it("does not link a run's id as a submission page", () => {
     const verdict = normalizeLeetCodeVerdict({ status_code: 10, compare_result: "1", submission_id: "runcode_1730" }, { ...context, submitted: false });
     expect(verdict.submissionUrl).toBe("");

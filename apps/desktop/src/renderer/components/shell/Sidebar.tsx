@@ -35,7 +35,7 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
   { id: "challenges", label: "Challenges", icon: History },
 ];
 
-/* 30px tall on a 14px label, cornered at --radius-lg, inset 8px from the sidebar's
+/* 30px tall on a 13px label, cornered at --radius-lg, inset 8px from the sidebar's
    edge by its container and carrying 10px of padding itself: the metrics of a
    platform source list, which is what this is. The height is not h-7-and-a-bit by
    accident — it is the 20px line box plus 5px of air top and bottom, so a row is
@@ -45,14 +45,32 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
    is expected to travel fast, and a 150ms crossfade per row turns that into a
    wake of half-lit rows trailing the cursor. AppKit paints the highlight on the
    frame the pointer arrives — hovering here should feel like touching hardware,
-   not like waking a web page up. */
+   not like waking a web page up.
+
+   Every label is solid ink at regular weight, and both halves of that are
+   deliberate. Solid, because the labels used to be foreground at some fraction —
+   95, 85, 80 — and on an opaque sidebar that is a legitimate way to rank rows,
+   but on this one it is not: the surface is glass, so alpha text composites
+   against the desktop twice and arrives grey and soft however dark the token
+   behind it was. That, not the transparency, was why the list read as washed out.
+
+   Regular, because the fix for washed-out text is not weight. A source list sets
+   every row the same and separates them by fill and by colour. Reaching for medium
+   here would buy back the contrast the alpha lost while saying, wrongly, that the
+   fixed rows outrank the session titles — and a sidebar of semibold rows is the
+   thing that makes an app look like it is shouting its own navigation at you. */
 const ROW =
-  "flex h-[1.875rem] w-full items-center gap-2 rounded-lg px-2.5 text-source font-normal outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+  "flex h-[1.875rem] w-full items-center gap-2 rounded-lg px-2.5 text-source font-normal text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
 /** Nav and row glyphs. Set against the label rather than chosen for its own sake:
  *  a source list wants the icon a little larger than the cap height it sits
- *  beside, or the label starts to look like it is dragging the icon along. */
+ *  beside, or the label starts to look like it is dragging the icon along.
+ *
+ *  A shade off the label rather than the muted grey they used to be: at 55% on
+ *  glass a 16px line drawing has no stroke left to read, and the row turned into
+ *  a label with a smudge in front of it. */
 const ROW_ICON = "size-4 shrink-0";
+const ROW_ICON_TONE = "text-foreground/70";
 
 const STATUS_COPY: Record<SessionSummary["status"], string> = {
   planning: "Planning",
@@ -75,7 +93,7 @@ const RECENT_LIMIT = 8;
 function SectionLabel({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="flex h-7 items-center justify-between px-2.5 pt-1">
-      <span className="text-source-sm text-muted-foreground/70">{children}</span>
+      <span className="text-source-sm text-muted-foreground">{children}</span>
       {action}
     </div>
   );
@@ -143,9 +161,9 @@ export function Sidebar({
           inset is the shared chrome token rather than a hand-measured margin, so the
           wordmark keeps its clearance if the button metrics ever move. */}
       <div className="flex h-[var(--titlebar-height)] shrink-0 items-center pl-[max(0.625rem,var(--window-controls-leading))] pr-2">
-        <SparWordmark className="text-[1.1rem] text-foreground/90" />
+        <SparWordmark className="text-[1.1rem] text-foreground" />
         <button
-          className="app-no-drag ml-auto grid size-7 place-items-center rounded-lg text-muted-foreground/70 hover:bg-[var(--sidebar-accent)] hover:text-foreground"
+          className="app-no-drag ml-auto grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-[var(--sidebar-accent)] hover:text-foreground"
           onClick={onCollapse}
           title="Hide sidebar  ⌘B"
           type="button"
@@ -156,22 +174,22 @@ export function Sidebar({
 
       <div className="app-no-drag space-y-0.5 px-2">
         <button
-          className={cn(ROW, "text-foreground/95 hover:bg-[var(--sidebar-accent)]")}
+          className={cn(ROW, "hover:bg-[var(--sidebar-accent)]")}
           onClick={onNewSession}
           type="button"
         >
-          <Plus className={cn(ROW_ICON, "text-muted-foreground")} />
+          <Plus className={cn(ROW_ICON, ROW_ICON_TONE)} />
           <span className="flex-1 text-left">Start a session</span>
-          <kbd className="font-sans text-source-sm text-muted-foreground/55">⌘N</kbd>
+          <kbd className="font-sans text-source-sm text-muted-foreground">⌘N</kbd>
         </button>
         <button
-          className={cn(ROW, "text-foreground/95 hover:bg-[var(--sidebar-accent)]")}
+          className={cn(ROW, "hover:bg-[var(--sidebar-accent)]")}
           onClick={onCommandPalette}
           type="button"
         >
-          <Command className={cn(ROW_ICON, "text-muted-foreground")} />
+          <Command className={cn(ROW_ICON, ROW_ICON_TONE)} />
           <span className="flex-1 text-left">Search</span>
-          <kbd className="font-sans text-source-sm text-muted-foreground/55">⌘K</kbd>
+          <kbd className="font-sans text-source-sm text-muted-foreground">⌘K</kbd>
         </button>
       </div>
 
@@ -184,16 +202,21 @@ export function Sidebar({
             key={id}
             className={cn(
               ROW,
+              /* Selection is the fill and nothing else. The ink was a step lighter
+                 on unselected rows, which meant the nav read as one lit item and
+                 four half-off ones — on glass, where alpha already costs contrast,
+                 that is four rows you have to look at rather than glance at. AppKit
+                 keeps the label constant and moves the highlight. */
               // A single challenge is a page under Challenges, so the section
               // stays lit rather than the nav going blank while it is open.
               page === id || (id === "challenges" && page === "challenge")
-                ? "bg-[var(--sidebar-accent-active)] text-foreground"
-                : "text-foreground/85 hover:bg-[var(--sidebar-accent)]",
+                ? "bg-[var(--sidebar-accent-active)]"
+                : "hover:bg-[var(--sidebar-accent)]",
             )}
             onClick={() => onPage(id)}
             type="button"
           >
-            <Icon className={cn(ROW_ICON, "text-muted-foreground")} />
+            <Icon className={cn(ROW_ICON, ROW_ICON_TONE)} />
             <span className="min-w-0 flex-1 truncate text-left">{label}</span>
           </button>
         ))}
@@ -222,13 +245,13 @@ export function Sidebar({
         {shelved.length > 0 && (
           <>
             <button
-              className="flex h-7 w-full items-center gap-1 px-2.5 pt-1 text-source-sm text-muted-foreground/70 hover:text-foreground"
+              className="flex h-7 w-full items-center gap-1 px-2.5 pt-1 text-source-sm text-muted-foreground hover:text-foreground"
               onClick={() => setShowArchived((value) => !value)}
               type="button"
             >
               <ChevronRight className={cn("size-3.5 transition-transform", showArchived && "rotate-90")} />
               Archived
-              <span className="tabular-nums text-muted-foreground/50">{shelved.length}</span>
+              <span className="tabular-nums font-normal text-muted-foreground">{shelved.length}</span>
             </button>
             {showArchived && <div className="space-y-0.5">{shelved.map(row)}</div>}
           </>
@@ -248,17 +271,17 @@ export function Sidebar({
             it starts on the icons' left edge and the name still lands on the one
             text column the whole list reads down. */}
         <button
-          className={cn(ROW, "h-9 gap-1 text-foreground/90 hover:bg-[var(--sidebar-accent)]")}
+          className={cn(ROW, "h-9 gap-1 hover:bg-[var(--sidebar-accent)]")}
           onClick={() => onPage("settings")}
           title={`${account.displayName} · ${account.email} · ${SYNC[syncState].label}`}
           type="button"
         >
-          <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--color-background-elevated-secondary)] text-ui-sm font-semibold text-foreground/80">
+          <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--color-background-elevated-secondary)] text-ui-sm font-semibold text-foreground">
             {initials(account.displayName)}
           </span>
           <span className="min-w-0 flex-1 truncate text-left">{account.displayName}</span>
           <span className={cn("size-1.5 shrink-0 rounded-full", SYNC[syncState].tone)} />
-          <Settings className={cn(ROW_ICON, "text-muted-foreground/70")} />
+          <Settings className={cn(ROW_ICON, ROW_ICON_TONE)} />
         </button>
       </div>
 
@@ -276,7 +299,7 @@ export function Sidebar({
 
 /** The control cluster's buttons, in the order they sit in the row. */
 const ICON_BUTTON =
-  "grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/75 hover:bg-[var(--sidebar-accent-active)] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none";
+  "grid size-6 shrink-0 place-items-center rounded-md text-foreground/70 hover:bg-[var(--sidebar-accent-active)] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none";
 
 /**
  * One session in the list, with everything you can do to it behind ⋮ or a
@@ -361,10 +384,14 @@ function SessionRow({
           <button
             className={cn(
               ROW,
-              active
-                ? "bg-[var(--sidebar-accent-active)] text-foreground"
-                : "text-foreground/80 hover:bg-[var(--sidebar-accent)]",
-              archived && !active && "text-foreground/55",
+              /* Solid ink at regular weight: a title is the one thing in the list
+                 you actually read word by word, so it gets the full value and
+                 leaves being-chrome to the medium rows above it. Archived is still
+                 dimmed, because filed-away is a state of the session rather than a
+                 rank in the list — but not so far down that reading it is work. */
+              "text-foreground",
+              active ? "bg-[var(--sidebar-accent-active)]" : "hover:bg-[var(--sidebar-accent)]",
+              archived && !active && "text-foreground/60",
             )}
             onClick={onOpen}
             type="button"

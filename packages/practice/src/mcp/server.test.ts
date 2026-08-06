@@ -56,7 +56,7 @@ function gateway(overrides: Partial<PracticeGateway> = {}): PracticeGateway {
     state: async () => "connected",
     capabilities: async () => bundle.capabilities,
     account: async () => ACCOUNT,
-    search: async () => ({ total: 2, problems: [{ source: "leetcode", slug: "two-sum", displayId: "1", title: "Two Sum", difficulty: "easy", paidOnly: false, acceptanceRate: 55.4, topicTags: ["array"], concepts: ["arrays"], status: "solved" }] }),
+    search: async () => ({ total: 2, problems: [{ source: "leetcode", slug: "two-sum", displayId: "1", title: "Two Sum", difficulty: "easy", paidOnly: false, acceptanceRate: 55.4, topicTags: ["array"], concepts: ["arrays"], status: "solved" }], appliedTags: ["array"], droppedTags: [] }),
     problem: async () => bundle,
     daily: async () => bundle,
     random: async () => "two-sum",
@@ -166,7 +166,7 @@ describe("the practice MCP server", () => {
   });
 
   it("warns when a search result needs a subscription Spar cannot assume", async () => {
-    const paid = gateway({ search: async () => ({ total: 1, problems: [{ source: "leetcode", slug: "x", displayId: "9", title: "Paid", difficulty: "hard", paidOnly: true, acceptanceRate: null, topicTags: [], concepts: [], status: "unknown" }] }) });
+    const paid = gateway({ search: async () => ({ total: 1, problems: [{ source: "leetcode", slug: "x", displayId: "9", title: "Paid", difficulty: "hard", paidOnly: true, acceptanceRate: null, topicTags: [], concepts: [], status: "unknown" }], appliedTags: [], droppedTags: [] }) });
     const connection = await connectPracticeMcp({ gateway: paid });
     const result = await connection.call("search_practice_problems", {}) as Record<string, unknown>;
     expect(String(result.warning)).toContain("subscription-only");

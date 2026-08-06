@@ -28,6 +28,8 @@ const source: ChallengeSource = {
   source: "leetcode", region: "global", slug: "two-sum", externalId: "1", displayId: "1",
   url: "https://leetcode.com/problems/two-sum/", difficulty: "easy", languageSlug: "javascript",
   remoteJudge: true, localCaseCount: 2, judge: "LeetCode judges this one.", references: [],
+  entryName: "twoSum",
+  cases: [{ name: "Example 1", input: ["[2,7,11,15]", "9"], expected: "[0,1]" }],
 };
 
 function practiceStub(overrides: Partial<Record<keyof PracticeService, unknown>> = {}) {
@@ -38,7 +40,16 @@ function practiceStub(overrides: Partial<Record<keyof PracticeService, unknown>>
     mount: vi.fn(async () => ({ design, source, files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "" })),
     ...overrides,
   } as unknown as PracticeService;
-  const workspaces = { writeAll: vi.fn(async (_session: string, files: Record<string, string>) => { Object.assign(written, files); }) } as unknown as WorkspaceService;
+  const workspaces = {
+    writeAll: vi.fn(async (_session: string, files: Record<string, string>) => { Object.assign(written, files); }),
+    /* The replacing path clears the old challenge's files first. Modelled here
+       because leaving the previous challenge's tests in the sandbox is exactly the
+       failure the real `replaceAll` exists to prevent. */
+    replaceAll: vi.fn(async (_session: string, files: Record<string, string>) => {
+      for (const path of Object.keys(written)) delete written[path];
+      Object.assign(written, files);
+    }),
+  } as unknown as WorkspaceService;
   return { service, workspaces, written };
 }
 
@@ -94,6 +105,61 @@ describe("assign_practice_problem", () => {
       const second = await assign(store, sessionId, service, workspaces, { slug: "three-sum" });
       expect(second.status).toBe("invalid");
       expect(JSON.stringify(second.report)).toContain("already active");
+      // And says how to do the thing the learner actually asked for.
+      expect(JSON.stringify(second.report)).toContain("replaceReason");
+    } finally { store.close(); }
+  });
+
+  it("supersedes the open challenge when the learner asked for a different problem", async () => {
+    // "Just give me a LeetCode problem" arrives mid-challenge. Without this the
+    // agent's only legal move was to write its own challenge named after the
+    // problem it could not assign, and have it graded locally.
+    const store = new LocalStore(":memory:");
+    const { service, workspaces, written } = practiceStub();
+    try {
+      const sessionId = targetedSession(store);
+      const first = await assign(store, sessionId, service, workspaces);
+      const firstQuestion = first.question as { id: string; attemptId: string };
+
+      const swapped = practiceStub({
+        mount: vi.fn(async () => ({
+          design: { ...design, title: "Best Time to Buy and Sell Stock" },
+          source: { ...source, slug: "best-time-to-buy-and-sell-stock", displayId: "121" },
+          files: { "src/solution.js": "// spar:solution:start\nvar maxProfit = function(prices) {};\n// spar:solution:end" },
+          cases: [], harnessNote: "",
+        })),
+      });
+      const result = await assign(store, sessionId, swapped.service, workspaces, {
+        slug: "best-time-to-buy-and-sell-stock",
+        replaceReason: "They asked for a real LeetCode problem instead of the diagnostic.",
+      });
+
+      expect(result.status).toBe("playable");
+      expect(result.replacedQuestionId).toBe(firstQuestion.id);
+      const question = store.readSession(sessionId)?.question;
+      expect(question?.title).toBe("Best Time to Buy and Sell Stock");
+      // The real problem, judged by the real judge — not a local imitation of it.
+      expect(question?.source?.slug).toBe("best-time-to-buy-and-sell-stock");
+      expect(question?.source?.remoteJudge).toBe(true);
+      // The abandoned attempt keeps its history and says why it ended.
+      const closing = store.readAttempt(firstQuestion.attemptId).at(-1);
+      expect(closing?.type).toBe("attempt_completed");
+      expect(closing?.payload).toMatchObject({ outcome: "replaced" });
+      // And the previous challenge's files are gone from the sandbox.
+      expect(written["tests/examples.test.js"]).toBeUndefined();
+      expect(written["src/solution.js"]).toContain("maxProfit");
+    } finally { store.close(); }
+  });
+
+  it("refuses to swap in the problem they are already on", async () => {
+    const store = new LocalStore(":memory:");
+    const { service, workspaces } = practiceStub();
+    try {
+      const sessionId = targetedSession(store);
+      await assign(store, sessionId, service, workspaces);
+      const again = await assign(store, sessionId, service, workspaces, { replaceReason: "They asked for something else." });
+      expect(again.status).toBe("invalid");
+      expect(JSON.stringify(again.report)).toContain("already on");
     } finally { store.close(); }
   });
 
