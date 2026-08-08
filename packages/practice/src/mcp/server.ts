@@ -116,6 +116,8 @@ async function run(tool: PracticeToolDefinition, args: Record<string, unknown>, 
         total: found.total,
         returned: found.problems.length,
         problems: found.problems.map((problem) => ({
+          source: problem.source,
+          sourceName: source.name,
           slug: problem.slug,
           id: problem.displayId,
           title: problem.title,
@@ -228,6 +230,8 @@ function problemPayload(bundle: PracticeProblemBundle, options: { includeStateme
     ? `${problem.statement.slice(0, STATEMENT_LIMIT)}\n\n…statement truncated after ${STATEMENT_LIMIT} characters.`
     : problem.statement;
   return {
+    source: problem.source,
+    sourceName: practiceSource(problem.source).name,
     slug: problem.slug,
     id: problem.displayId,
     title: problem.title,

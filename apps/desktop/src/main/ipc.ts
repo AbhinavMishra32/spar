@@ -4,7 +4,7 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceIdSchema, sourceJudgeSchema, sourceRegionSchema, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -115,12 +115,11 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       /* Resolved per turn, like the web key: the learner can connect or drop a
          source while the app is open, and a session that expired mid-turn must
          stop offering tools that can only answer "not connected". */
-      const practiceState=await deps.practice.state().catch(()=>"disconnected" as const);
-      const practiceConnected=practiceState==="connected";
+      const practiceInventory=await deps.practice.inventory().catch(()=>[]);
+      const connectedSources=practiceInventory.filter((entry)=>entry.state==="connected");
+      const practiceConnected=connectedSources.length>0;
       const practiceSummary=practiceConnected?{
-        name:deps.practice.sourceName(),
-        region:deps.practice.region(),
-        judgesSubmissions:await deps.practice.judgesSubmissions(),
+        providers:connectedSources.map((entry)=>({source:entry.source,name:entry.name,region:entry.region,judgesSubmissions:entry.judgesSubmissions})),
         /* What has already been set from the source, so the agent can see it has
            asked for this problem before without spending a tool call to find out. */
         alreadyAssigned:deps.store.assignedPracticeProblems(12),
@@ -337,17 +336,16 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      Nothing here ever hands the renderer a session cookie: it asks for a state
      change and is told the state. */
   ipcMain.handle(ipc.sourceInventory, () => deps.practice.inventory());
-  ipcMain.handle(ipc.sourceSelect, async (_event, value) => { await deps.practice.setSource(sourceIdSchema.parse(value)); });
-  ipcMain.handle(ipc.sourceConnect, () => deps.practice.connect());
-  ipcMain.handle(ipc.sourceDisconnect, () => deps.practice.disconnect());
-  ipcMain.handle(ipc.sourceRegion, async (_event, value) => { await deps.practice.setRegion(sourceRegionSchema.parse(value)); });
-  ipcMain.handle(ipc.sourceJudge, (_event, value) => { deps.practice.setJudgePreference(sourceJudgeSchema.parse(value)); });
+  ipcMain.handle(ipc.sourceConnect, (_event, value) => deps.practice.connect(sourceConnectionInput.parse(value).source));
+  ipcMain.handle(ipc.sourceDisconnect, (_event, value) => deps.practice.disconnect(sourceConnectionInput.parse(value).source));
+  ipcMain.handle(ipc.sourceRegion, async (_event, value) => { const input = sourceRegionInput.parse(value); await deps.practice.setRegion(input.source, input.region); });
+  ipcMain.handle(ipc.sourceJudge, (_event, value) => { const input = sourceJudgeInput.parse(value); deps.practice.setJudgePreference(input.source, input.preference); });
   ipcMain.handle(ipc.sourceSearch, async (_event, value) => {
     const input = sourceSearchInput.parse(value);
     const found = await deps.practice.search(input);
-    return { total: found.total, problems: found.problems.map((problem) => ({ slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
+    return { total: found.total, problems: found.problems.map((problem) => ({ source: problem.source, sourceName: problem.source === "leetcode" ? "LeetCode" : "Codeforces", slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
   });
-  ipcMain.handle(ipc.sourceProblem, async (_event, value) => (await deps.practice.problem(sourceSlugInput.parse(value).slug)).problem);
+  ipcMain.handle(ipc.sourceProblem, async (_event, value) => { const input = sourceSlugInput.parse(value); return (await deps.practice.problem(input.source, input.slug)).problem; });
   /**
    * The learner picking a problem themselves.
    *
@@ -360,14 +358,15 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sourceStart, async (_event, value) => {
     const input = sourceStartInput.parse(value);
     if (!await deps.providers.available()) throw new Error(NO_PROVIDER);
-    const bundle = await deps.practice.problem(input.slug, { fresh: true });
+    const bundle = await deps.practice.problem(input.source, input.slug, { fresh: true });
     const problem = bundle.problem;
-    const created = deps.store.createSession(`I want to solve ${problem.title} on ${deps.practice.sourceName()}.`);
+    const sourceName = problem.source === "leetcode" ? "LeetCode" : "Codeforces";
+    const created = deps.store.createSession(`I want to solve ${problem.title} on ${sourceName}.`);
     await startAgentTurn(
       created.sessionId,
       [
-        `The learner chose this problem themselves: ${problem.title} (${deps.practice.sourceName()} ${problem.displayId}, ${problem.difficulty}, slug "${problem.slug}").`,
-        `Do not look for a different problem. Read it with read_practice_problem, set one training target aimed at what solving it will actually show about them, and assign it with assign_practice_problem using that exact slug.`,
+        `The learner chose this problem themselves: ${problem.title} (${sourceName} ${problem.displayId}, ${problem.difficulty}, source "${problem.source}", slug "${problem.slug}").`,
+        `Do not look for a different problem. Read it with read_practice_problem using that source and slug, set one training target aimed at what solving it will actually show about them, and assign it with assign_practice_problem using that exact source and slug.`,
         problem.status === "solved" ? "They have solved this one before at the source, so treat this as a re-attempt and aim the target at what a second solve would prove." : "",
       ].filter(Boolean).join(" "),
       "learner",
@@ -393,9 +392,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const code = await deps.workspaces.read(input.sessionId, solutionPath(bundle.design)).catch(() => "");
     if (!code.trim()) throw new Error("There is nothing to run yet.");
     // The problem's own examples, in the judge's wire format. See `judgeCaseBlock`.
-    const testcases = await judgeCaseBlock(source, (slug) => deps.practice.judgeInput(slug));
+    const testcases = await judgeCaseBlock(source, (slug) => deps.practice.judgeInput(source.source, slug));
     if (!testcases) {
-      throw new Error(`${deps.practice.sourceName()} runs a solution against cases you give it, and Spar could not read any published for this problem. Submit instead — the hidden suite runs there.`);
+      throw new Error(`${source.source === "leetcode" ? "LeetCode" : "Codeforces"} runs a solution against cases you give it, and Spar could not read any published for this problem. Submit instead — the hidden suite runs there.`);
     }
     const verdict = await deps.practice.run({ source, code, language: bundle.language, testcases });
     deps.store.appendNextEvent({
@@ -403,7 +402,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       payload: { scope: "source-run", judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed", status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases },
       source: "runner", schemaVersion: 1,
     });
-    return sourceRunReport(verdict, deps.practice.sourceName());
+    return sourceRunReport(verdict, source.source === "leetcode" ? "LeetCode" : "Codeforces");
   });
 
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
@@ -447,7 +446,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const verdict = await deps.practice.submit({ source, code, language: bundle.language });
     const append = (type: "submission_created" | "test_run" | "submission_evaluated" | "attempt_completed", payload: Record<string, unknown>, from: "learner" | "runner" | "system") =>
       deps.store.appendNextEvent({ id: randomUUID(), attemptId, type, occurredAt: new Date().toISOString(), payload, source: from, schemaVersion: 1 });
-    const name = deps.practice.sourceName();
+    const name = source.source === "leetcode" ? "LeetCode" : "Codeforces";
     if (verdict.outcome === "errored") {
       /* Not recorded. The learner is told plainly and their attempt is exactly
          where it was, because an outage is not something they did. */

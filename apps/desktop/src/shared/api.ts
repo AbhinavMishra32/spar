@@ -27,7 +27,7 @@ export const ipc = {
      collision, kept because renaming a channel the renderer already calls is a
      worse trade than a comment. */
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
-  sourceSelect: "source:select", sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
+  sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
   restoreRetry: "restore:retry",
 } as const;
@@ -195,7 +195,10 @@ export const sourceSearchInput = z.object({
   status: z.enum(["any", "todo", "attempted", "solved"]).default("any"),
   limit: z.number().int().min(1).max(25).default(10),
 });
-export const sourceSlugInput = z.object({ slug: z.string().trim().min(1).max(120) });
+export const sourceSlugInput = z.object({ source: sourceIdSchema, slug: z.string().trim().min(1).max(120) });
+export const sourceConnectionInput = z.object({ source: sourceIdSchema });
+export const sourceRegionInput = sourceConnectionInput.extend({ region: sourceRegionSchema });
+export const sourceJudgeInput = sourceConnectionInput.extend({ preference: sourceJudgeSchema });
 /** Starting a session on a specific problem the learner picked themselves. */
 export const sourceStartInput = sourceSlugInput.extend({ language: languageSchema.optional() });
 export const sourceRunInput = z.object({ sessionId: z.string().uuid(), attemptId: z.string().uuid() });
@@ -228,6 +231,8 @@ export type PracticeInventory = {
   problem?: string;
 };
 export type PracticeSearchHit = {
+  source: z.infer<typeof sourceIdSchema>;
+  sourceName: string;
   slug: string;
   displayId: string;
   title: string;
@@ -357,13 +362,12 @@ export interface SparApi {
      Connecting one is a sign-in on the source's own page, driven entirely by
      the main process: the renderer asks for it and is told what happened, and
      the session cookie never crosses this boundary. */
-  practiceSource(): Promise<PracticeInventory>;
-  setPracticeSource(source: z.infer<typeof sourceIdSchema>): Promise<void>;
-  connectPracticeSource(): Promise<{ status: "connected"; username: string } | { status: "cancelled" } | { status: "failed"; message: string }>;
-  disconnectPracticeSource(): Promise<void>;
-  setPracticeRegion(region: z.infer<typeof sourceRegionSchema>): Promise<void>;
+  practiceSources(): Promise<PracticeInventory[]>;
+  connectPracticeSource(source: z.infer<typeof sourceIdSchema>): Promise<{ status: "connected"; username: string } | { status: "cancelled" } | { status: "failed"; message: string }>;
+  disconnectPracticeSource(source: z.infer<typeof sourceIdSchema>): Promise<void>;
+  setPracticeRegion(source: z.infer<typeof sourceIdSchema>, region: z.infer<typeof sourceRegionSchema>): Promise<void>;
   /** Where solves are judged: at the source, or on this machine. */
-  setPracticeJudge(preference: SourceJudgePreference): Promise<void>;
+  setPracticeJudge(source: z.infer<typeof sourceIdSchema>, preference: SourceJudgePreference): Promise<void>;
   searchPracticeProblems(input: z.infer<typeof sourceSearchInput>): Promise<{ total: number; problems: PracticeSearchHit[] }>;
   /** Opens a session on one specific problem the learner chose. */
   startPracticeProblem(input: z.infer<typeof sourceStartInput>): Promise<{ sessionId: string }>;

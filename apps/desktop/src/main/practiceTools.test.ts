@@ -62,6 +62,7 @@ function targetedSession(store: LocalStore) {
 
 const assign = (store: LocalStore, sessionId: string, practice: PracticeService, workspaces: WorkspaceService, input: Record<string, unknown> = {}) =>
   executeTrainingTool("assign_practice_problem", {
+    source: "leetcode",
     slug: "two-sum",
     concepts: [{ slug: "index-mapping", role: "primary" }, { slug: "hash-maps", role: "supporting" }],
     why: "They solved the two-pass version and stalled on doing it in one, so this discriminates whether they can hold the seen-map while scanning.",
@@ -77,6 +78,7 @@ describe("assign_practice_problem", () => {
       const result = await assign(store, sessionId, service, workspaces);
 
       expect(result.status).toBe("playable");
+      expect(service.mount).toHaveBeenCalledWith(expect.objectContaining({ source: "leetcode", slug: "two-sum" }));
       expect(result.judge).toContain("LeetCode judges");
       expect(written["src/solution.js"]).toContain("twoSum");
       const question = store.readSession(sessionId)?.question;
@@ -231,6 +233,21 @@ describe("assign_practice_problem", () => {
     try {
       const result = await executeTrainingTool("assign_practice_problem", { slug: "two-sum" }, targetedSession(store), store, {} as WorkspaceService, {} as UtilityClient) as Record<string, unknown>;
       expect(JSON.stringify(result.report)).toContain("No practice source is connected");
+    } finally { store.close(); }
+  });
+
+  it("refuses an unscoped slug because providers do not share an identifier namespace", async () => {
+    const store = new LocalStore(":memory:");
+    const { service, workspaces } = practiceStub();
+    try {
+      const result = await executeTrainingTool("assign_practice_problem", {
+        slug: "two-sum",
+        concepts: [{ slug: "index-mapping", role: "primary" }],
+        why: "This would test whether the learner can preserve the complement map during one pass.",
+      }, targetedSession(store), store, workspaces, {} as UtilityClient, undefined, service) as Record<string, unknown>;
+      expect(result.status).toBe("invalid");
+      expect(JSON.stringify(result.report)).toContain("provider identity");
+      expect(service.mount).not.toHaveBeenCalled();
     } finally { store.close(); }
   });
 });

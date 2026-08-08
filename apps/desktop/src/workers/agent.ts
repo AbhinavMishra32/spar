@@ -151,8 +151,9 @@ const toolDefinitions = {
    * statement about why, and the ledger would gain a challenge nobody can explain.
    */
   assign_practice_problem: [
-    "Set a real problem from the connected practice source as this session's challenge. Prefer this over create_question whenever a real problem genuinely lands on the target you have chosen: it carries the source's own judge, a difficulty real people calibrated, and the learner's own history with it. Read the problem first — the statement is the only way to know whether it exercises the gap. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe the problem's contents in your reply, because the learner is about to read it.",
+    "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Prefer this over create_question whenever a real problem genuinely lands on the target you chose: it carries the provider's judge, calibrated difficulty, and the learner's history when that provider is connected. Read it first. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe its contents in your reply because the learner is about to read it.",
     z.object({
+      source: z.enum(["leetcode", "codeforces"]).describe("The provider identity returned by search. A slug is only unique inside its provider."),
       slug: z.string().min(1).max(120).describe("The problem's URL slug, exactly as the source gave it."),
       concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and it must name the gap the target describes — not merely the topic the source files the problem under."),
       why: z.string().min(20).max(400).describe("One or two sentences: why this specific problem discriminates what is still uncertain about this learner. This is stored with the challenge and is what a later turn reads to know what you were testing."),
@@ -172,7 +173,9 @@ const toolDefinitions = {
  * what the server documents it doing.
  */
 const sourceToolDefinitions = Object.fromEntries(
-  PRACTICE_READ_TOOLS.map((tool) => [tool.name, [tool.description, z.object(tool.shape)] as const]),
+  PRACTICE_READ_TOOLS.map((tool) => [tool.name, [tool.description, z.object(tool.name === "search_practice_problems"
+    ? tool.shape
+    : { ...tool.shape, source: z.enum(["leetcode", "codeforces"]).describe("The provider identity returned by search. Keep it paired with the slug.") })] as const]),
 ) as Record<string, readonly [string, z.ZodTypeAny]>;
 
 function hostTool(
@@ -573,7 +576,7 @@ ${sourceDoctrine()}`; }
  * about a verdict depends on the agent knowing which judge answered.
  */
 function sourceDoctrine() {
-  return `When a practice source is connected you have real problems available, and a real problem is usually the better instrument. It was written and calibrated by people, its hidden cases are ones you did not write, its verdict comes from the source rather than from anything you or the host produced, and the learner's own history with it — solved, attempted and abandoned, in their account — is evidence you cannot get any other way. Search it before you set a challenge: you are made to, once per turn, and the search costs almost nothing. Read any candidate with read_practice_problem before assigning it, because the tags say what a problem is filed under and only the statement says what it actually asks.
+  return `Problem providers form one catalogue, not a platform preference. Search fans out across every available provider and every result carries a source identity; preserve that source with its slug when you read and assign it. Choose the best-fitting problem regardless of provider. A real problem is usually the better instrument: it was written and calibrated by people, its hidden cases are ones you did not write, its verdict comes from its provider, and—when that provider is connected—the learner's own solved, attempted, and abandoned history is evidence you cannot get another way. Search before you set a challenge: you are made to once per turn and it costs almost nothing. Read any candidate with read_practice_problem before assigning it, using the result's exact source and slug, because tags say where a problem is filed and only the statement says what it actually asks.
 
 Assign one when it genuinely lands on your target. That means the problem exercises the specific gap the target names, not merely the same topic: "arrays" is not a target and a problem tagged Array is not evidence about index arithmetic. Set the primary concept to the gap you are testing rather than to the source's own tag, or the challenge will be filed under a shelf and disappear from the evidence for the thing you were actually checking. Prefer a problem they have not solved; assigning one they have solved is defensible only when the point is to compare against how they solved it before, and you must say so. Never assign a problem you have not read, and never describe its contents in your reply — they are about to read it themselves.
 

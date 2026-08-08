@@ -25,34 +25,34 @@ import { SourceGlyph } from "../common/SourceGlyph";
  * which is the only moment it can still inform a decision.
  */
 export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
-  const [inventory, setInventory] = useState<PracticeInventory | null>(null);
-  const [busy, setBusy] = useState<"connect" | "disconnect" | "source" | "region" | "judge" | null>(null);
-  const [note, setNote] = useState<{ tone: "muted" | "error"; text: string } | null>(null);
+  const [inventory, setInventory] = useState<PracticeInventory[] | null>(null);
+  const [busy, setBusy] = useState<{ source: PracticeInventory["source"]; action: string } | null>(null);
+  const [notes, setNotes] = useState<Partial<Record<PracticeInventory["source"], { tone: "muted" | "error"; text: string }>>>({});
 
   const read = useCallback(async () => {
     if (!api) return;
-    setInventory(await api.practiceSource());
+    setInventory(await api.practiceSources());
   }, [api]);
 
-  useEffect(() => { void read().catch((cause) => setNote({ tone: "error", text: message(cause) })); }, [read]);
+  useEffect(() => { void read().catch((cause) => setNotes({ leetcode: { tone: "error", text: message(cause) } })); }, [read]);
   /* The sign-in happens in a window the main process owns, so this row learns it
      finished by being told rather than by waiting on the call. */
   useEffect(() => api?.onPracticeSourceEvent((event) => {
-    setNote(event.state === "connected" ? null : { tone: "muted", text: event.message });
+    setNotes((current) => ({ ...current, [event.source]: event.state === "connected" ? undefined : { tone: "muted", text: event.message } }));
     void read().catch(() => undefined);
   }), [api, read]);
 
-  const act = async (kind: NonNullable<typeof busy>, run: () => Promise<void>) => {
-    setBusy(kind);
-    setNote(null);
+  const act = async (source: PracticeInventory["source"], action: string, run: () => Promise<void>) => {
+    setBusy({ source, action });
+    setNotes((current) => ({ ...current, [source]: undefined }));
     try { await run(); await read(); }
-    catch (cause) { setNote({ tone: "error", text: message(cause) }); }
+    catch (cause) { setNotes((current) => ({ ...current, [source]: { tone: "error", text: message(cause) } })); }
     finally { setBusy(null); }
   };
 
-  const connect = () => act("connect", async () => {
-    const result = await api?.connectPracticeSource();
-    if (result?.status === "failed") setNote({ tone: "error", text: result.message });
+  const connect = (source: PracticeInventory["source"]) => act(source, "connect", async () => {
+    const result = await api?.connectPracticeSource(source);
+    if (result?.status === "failed") setNotes((current) => ({ ...current, [source]: { tone: "error", text: result.message } }));
   });
 
   if (!inventory) {
@@ -64,28 +64,21 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
     );
   }
 
-  const { account, name, state } = inventory;
-  const connected = state === "connected";
-
   return (
     <>
-      <Row className="gap-4">
-        <div className="min-w-0 flex-1">
-          <p className="text-content font-medium">Problem platform</p>
-          <p className="mt-0.5 text-ui text-muted-foreground">Choose the source Spar searches when it assigns a real problem.</p>
-        </div>
-        <Segmented
-          ariaLabel="Problem platform"
-          disabled={busy !== null}
-          onChange={(value) => void act("source", async () => api?.setPracticeSource(value as "leetcode" | "codeforces"))}
-          options={[{ value: "leetcode", label: "LeetCode" }, { value: "codeforces", label: "Codeforces" }]}
-          value={inventory.source}
-        />
+      <Row className="items-start flex-col gap-0 py-3">
+        <p className="text-content font-medium">Problem providers</p>
+        <p className="mt-0.5 text-ui text-muted-foreground">Connect any number. Spar and its agent search all of them and keep each problem tied to its own judge.</p>
       </Row>
-
+      {inventory.map((item) => {
+        const { account, name, state, source } = item;
+        const connected = state === "connected";
+        const sourceBusy = busy?.source === source;
+        const note = notes[source];
+        return <div className="contents" key={source}>
       <Row>
         <span className="grid size-6 shrink-0 place-items-center text-foreground/85">
-          <SourceGlyph className="size-[1.15rem]" source={inventory.source} />
+          <SourceGlyph className="size-[1.15rem]" source={source} />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
@@ -98,7 +91,7 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
               ? `${account.username} · solves here count on your account`
               : state === "expired"
                 ? "The stored session lapsed, so nothing about you is readable until you reconnect."
-                : `${inventory.description} You sign in on their page — Spar never sees your password.`}
+                : `${item.description} You sign in on their page — Spar never sees your password.`}
           </p>
         </div>
 
@@ -109,20 +102,20 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
                 aria-label={`${name} options`}
                 className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
               >
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <Ellipsis className="size-4" />}
+                {sourceBusy ? <Loader2 className="size-4 animate-spin" /> : <Ellipsis className="size-4" />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void connect()}><RotateCw />Reconnect account</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void connect(source)}><RotateCw />Reconnect account</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => void act("disconnect", async () => api?.disconnectPracticeSource())} variant="destructive">
+                <DropdownMenuItem onSelect={() => void act(source, "disconnect", async () => api?.disconnectPracticeSource(source))} variant="destructive">
                   <Trash2 />Disconnect
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )
           : (
-            <Button disabled={busy !== null} onClick={() => void connect()} size="sm">
-              {busy === "connect" ? <Loader2 className="size-3.5 animate-spin" /> : "Connect"}
+            <Button disabled={sourceBusy} onClick={() => void connect(source)} size="sm">
+              {busy?.source === source && busy.action === "connect" ? <Loader2 className="size-3.5 animate-spin" /> : "Connect"}
             </Button>
           )}
       </Row>
@@ -163,8 +156,8 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
         <div className="min-w-0 flex-1">
           <p className="text-content font-medium">Grading</p>
           <p className="mt-0.5 text-ui text-muted-foreground">
-            {inventory.judgesSubmissions
-              ? `Run checks published examples ${inventory.capabilities.scratchRun ? `at ${name}` : "on this Mac"}; Submit runs every hidden case ${name} has and records the result on your account.`
+            {item.judgesSubmissions
+              ? `Run checks published examples ${item.capabilities.scratchRun ? `at ${name}` : "on this Mac"}; Submit runs every hidden case ${name} has and records the result on your account.`
               : connected
                 ? "Your code stays on this machine, checked against each problem's published examples."
                 : `Connect ${name} to have it judge submissions. Until then Spar grades locally.`}
@@ -172,14 +165,14 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
         </div>
         <Segmented
           ariaLabel="Grading"
-          disabled={busy !== null || !connected}
-          onChange={(value) => void act("judge", async () => api?.setPracticeJudge(value as SourceJudgePreference))}
+          disabled={sourceBusy || !connected}
+          onChange={(value) => void act(source, "judge", async () => api?.setPracticeJudge(source, value as SourceJudgePreference))}
           options={[{ value: "source", label: name, icon: Gavel }, { value: "local", label: "This Mac", icon: Laptop }]}
-          value={inventory.judgePreference}
+          value={item.judgePreference}
         />
       </Row>
 
-      {inventory.regions.length > 1 && (
+      {item.regions.length > 1 && (
         <Row className="gap-4">
           <div className="min-w-0 flex-1">
             <p className="text-content font-medium">{name} site</p>
@@ -187,13 +180,15 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
           </div>
           <Segmented
             ariaLabel={`${name} site`}
-            disabled={busy !== null}
-            onChange={(value) => void act("region", async () => api?.setPracticeRegion(value as "global" | "cn"))}
-            options={inventory.regions.map((region) => ({ value: region.id, label: region.label }))}
-            value={inventory.region}
+            disabled={sourceBusy}
+            onChange={(value) => void act(source, "region", async () => api?.setPracticeRegion(source, value as "global" | "cn"))}
+            options={item.regions.map((region) => ({ value: region.id, label: region.label }))}
+            value={item.region}
           />
         </Row>
       )}
+        </div>;
+      })}
     </>
   );
 }

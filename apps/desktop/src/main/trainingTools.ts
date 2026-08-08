@@ -157,6 +157,8 @@ async function assignPracticeProblem(
   const refuse = (checkName: string, detail: string) => ({ status: "invalid" as const, report: { valid: false, checks: [{ name: checkName, passed: false, detail }] } });
   const slug = String(value.slug ?? "").trim();
   if (!slug) return refuse("problem identity", "No problem slug was given.");
+  const provider = value.source === "leetcode" || value.source === "codeforces" ? value.source : null;
+  if (!provider) return refuse("problem identity", "No provider identity was given. Preserve `source` from the search result alongside its slug.");
 
   /* Replacing the open challenge with a real problem is the whole reason this
      takes a reason. "Just give me a LeetCode problem" arrives while a challenge is
@@ -177,12 +179,12 @@ async function assignPracticeProblem(
     const language = value.language === "typescript" || value.language === "cpp" || value.language === "javascript"
       ? value.language
       : local.getProfile()?.language ?? "javascript";
-    mounted = await practice.mount({ slug, language });
+    mounted = await practice.mount({ source: provider, slug, language });
   } catch (error) {
     /* A slug the source does not have, a subscription-only problem, an expired
        session. All of them are the same instruction to the agent: this one is not
        available, choose another or write your own. */
-    return refuse("problem availability", `${practice.sourceName()} could not provide "${slug}": ${error instanceof Error ? error.message : String(error)}. Pick a different problem or write the challenge yourself.`);
+    return refuse("problem availability", `${practiceSourceName(provider)} could not provide "${slug}": ${error instanceof Error ? error.message : String(error)}. Pick a different problem or write the challenge yourself.`);
   }
 
   const { design, source } = mounted;
@@ -196,7 +198,7 @@ async function assignPracticeProblem(
      from the statement. Assigning it would mean asking someone to solve something
      with no way to find out whether they had. */
   if (!source.remoteJudge && source.localCaseCount === 0) {
-    return refuse("grading", `${practice.sourceName()} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
+    return refuse("grading", `${practiceSourceName(provider)} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
   }
 
   /* Mounting went to the source, which takes as long as a network call takes. The
@@ -225,7 +227,7 @@ async function assignPracticeProblem(
      agent's statement of what this problem is supposed to discriminate, and a
      later turn reading the session has to be able to find it. */
   const why = String(value.why ?? "").trim();
-  if (why) local.addMessage(sessionId, "system", `Set ${practice.sourceName()} ${source.displayId} — ${design.title}. ${why}`);
+  if (why) local.addMessage(sessionId, "system", `Set ${practiceSourceName(provider)} ${source.displayId} — ${design.title}. ${why}`);
   return {
     status: "playable",
     question,
@@ -235,6 +237,10 @@ async function assignPracticeProblem(
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
   };
+}
+
+function practiceSourceName(source: "leetcode" | "codeforces") {
+  return source === "leetcode" ? "LeetCode" : "Codeforces";
 }
 
 /**
