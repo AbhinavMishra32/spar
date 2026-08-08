@@ -28,6 +28,7 @@ const source: ChallengeSource = {
   source: "leetcode", region: "global", slug: "two-sum", externalId: "1", displayId: "1",
   url: "https://leetcode.com/problems/two-sum/", difficulty: "easy", languageSlug: "javascript",
   remoteJudge: true, localCaseCount: 2, judge: "LeetCode judges this one.", references: [],
+  scratchRun: true,
   entryName: "twoSum",
   cases: [{ name: "Example 1", input: ["[2,7,11,15]", "9"], expected: "[0,1]" }],
 };

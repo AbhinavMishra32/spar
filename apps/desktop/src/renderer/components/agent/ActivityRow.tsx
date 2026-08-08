@@ -4,7 +4,7 @@ import { BookOpen, Check, ChevronDown, CircleAlert, FilePenLine, Globe, History,
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { LeetCodeGlyph } from "../common/SourceGlyph";
+import { SourceGlyph } from "../common/SourceGlyph";
 import { diffTotals, isSourceTool, toolRowTitle, type RunPart } from "./agentRun";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
@@ -26,7 +26,7 @@ function ToolIcon({ part }: { part: ToolPart }) {
      searched something; the mark says what. Unconditional today because a
      ChallengeSource can only be LeetCode — a second source means carrying which one
      on the row rather than guessing from the tool name. */
-  if (isSourceTool(part.tool)) return <LeetCodeGlyph className="size-3.5" />;
+  if (isSourceTool(part.tool)) return <SourceGlyph className="size-3.5" source={sourceFor(part)} />;
   /* Going out to the web gets its own mark. Every other row in the transcript is
      the agent reading the learner's own record, and a globe is the one-glance
      difference between "it looked at your attempts" and "it looked outside". */
@@ -485,6 +485,8 @@ export function ChallengePublished({ part }: { part: ToolPart }) {
      nobody wrote it. What it carries instead is the source's own judge, and the mark
      is how that reads at a glance. */
   const sourced = part.tool === "assign_practice_problem";
+  const source = sourceFor(part);
+  const sourceName = source === "codeforces" ? "Codeforces" : "LeetCode";
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
@@ -493,16 +495,21 @@ export function ChallengePublished({ part }: { part: ToolPart }) {
       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
     >
       <span className={cn("grid size-4 shrink-0 place-items-center", sourced ? "text-foreground/80" : "text-[var(--success)]")}>
-        {sourced ? <LeetCodeGlyph className="size-3.5" /> : <Check className="size-3.5" />}
+        {sourced ? <SourceGlyph className="size-3.5" source={source} /> : <Check className="size-3.5" />}
       </span>
       <span className="min-w-0 truncate">
         <span className="font-medium text-foreground">{part.label || (sourced ? "Problem set" : replaced ? "Challenge replaced" : "Challenge ready")}</span>
         <span className="ml-1.5 text-muted-foreground/60">
-          {sourced ? "· from LeetCode · judged there" : replaced ? "· replaced · validated" : "· validated"}
+          {sourced ? `· from ${sourceName} · judged there` : replaced ? "· replaced · validated" : "· validated"}
         </span>
       </span>
     </motion.div>
   );
+}
+
+function sourceFor(part: ToolPart): "leetcode" | "codeforces" {
+  const text = `${part.input} ${part.output} ${part.detail} ${part.label} ${part.actionTitle}`.toLowerCase();
+  return text.includes("codeforces") || text.includes('"source":"codeforces"') ? "codeforces" : "leetcode";
 }
 
 /**

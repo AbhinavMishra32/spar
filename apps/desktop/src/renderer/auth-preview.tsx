@@ -10,6 +10,7 @@ import "./theme.css";
    here for the same reason harness.html is. */
 
 let sourceConnected = false;
+let activeSource: "leetcode" | "codeforces" = "leetcode";
 
 const api = {
   async auth(request: AuthRequest): Promise<AuthResult> {
@@ -54,8 +55,8 @@ const api = {
     await new Promise((resolve) => setTimeout(resolve, 300));
     return sourceConnected
       ? {
-          source: "leetcode",
-          name: "LeetCode",
+          source: activeSource,
+          name: activeSource === "leetcode" ? "LeetCode" : "Codeforces",
           state: "connected",
           account: {
             username: "AbhinavMishra3322",
@@ -67,8 +68,9 @@ const api = {
             streak: 12,
           },
         }
-      : { source: "leetcode", name: "LeetCode", state: "disconnected", account: null };
+      : { source: activeSource, name: activeSource === "leetcode" ? "LeetCode" : "Codeforces", state: "disconnected", account: null };
   },
+  async setPracticeSource(source: "leetcode" | "codeforces") { activeSource = source; },
   async connectPracticeSource() {
     await new Promise((resolve) => setTimeout(resolve, 1_200));
     sourceConnected = true;

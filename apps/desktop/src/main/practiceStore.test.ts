@@ -30,6 +30,7 @@ const source = (overrides: Partial<ChallengeSource> = {}): ChallengeSource => ({
   difficulty: "easy",
   languageSlug: "javascript",
   remoteJudge: true,
+  scratchRun: true,
   localCaseCount: 2,
   entryName: "twoSum",
   cases: [{ name: "Example 1", input: ["[2,7,11,15]", "9"], expected: "[0,1]" }],

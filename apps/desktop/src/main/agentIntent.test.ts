@@ -16,6 +16,8 @@ describe("challenge revision intent", () => {
   it.each([
     "just give me lc problem i dont care",
     "give me a real leetcode problem",
+    "give me a codeforces problem",
+    "show me another cf problem",
     "can i have another question",
     "i want an actual problem not this",
     "swap this challenge",

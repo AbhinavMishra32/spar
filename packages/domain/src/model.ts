@@ -107,7 +107,7 @@ export const workspaceFileEntrySchema = z.object({
  * source layer so that no screen has to compose it and get it subtly wrong.
  */
 export const challengeSourceSchema = z.object({
-  source: z.literal("leetcode"),
+  source: z.enum(["leetcode", "codeforces"]),
   region: z.enum(["global", "cn"]),
   /** The source's URL slug — the identity every later read uses. */
   slug: z.string().min(1),
@@ -121,6 +121,8 @@ export const challengeSourceSchema = z.object({
    *  the source handed over rather than one Spar guessed. */
   languageSlug: z.string(),
   remoteJudge: z.boolean(),
+  /** Whether the source offers a non-recording remote sample run. */
+  scratchRun: z.boolean().default(false),
   localCaseCount: z.number().int().nonnegative(),
   judge: z.string(),
   /** The function the source's own starter declares, so a case can be shown as the

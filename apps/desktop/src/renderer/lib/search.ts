@@ -39,7 +39,7 @@ export const PALETTE_PLACES: PalettePlace[] = [
   { page: "sessions", label: "Sessions", keywords: "all list" },
   { page: "ability", label: "Abilities", keywords: "map skills evidence what i can do" },
   { page: "challenges", label: "Challenges", keywords: "history problems attempts tests" },
-  { page: "settings", label: "Settings", keywords: "preferences provider model theme account leetcode sign out" },
+  { page: "settings", label: "Settings", keywords: "preferences provider model theme account leetcode codeforces sign out" },
 ];
 
 const HEADING: Record<SearchKind, string> = {

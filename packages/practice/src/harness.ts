@@ -114,6 +114,84 @@ export function buildHarness(input: { problem: PracticeProblem; language: Langua
   return { supported: true, files, entryPath: paths.entry, testPaths: [paths.test], cases: runnable };
 }
 
+/** Builds a stdin/stdout workspace for conventional contest problems.
+ *
+ * Unlike LeetCode's function contract, Codeforces submits a complete program.
+ * The editable file therefore stays byte-for-byte submittable between the same
+ * markers, while each read-only test launches (or includes) that program with a
+ * published sample on stdin and compares normalized stdout. */
+export function buildProgramHarness(input: { problem: PracticeProblem; language: Language; cases: PracticeCase[] }): PracticeHarness {
+  const { problem, language } = input;
+  const paths: Record<Language, string> = { javascript: "src/solution.js", typescript: "src/solution.ts", cpp: "src/main.cpp" };
+  const entryPath = paths[language];
+  const starter = problem.languages.find((candidate) => candidate.language === language)?.starter ?? programStarter(language);
+  const cases = input.cases.filter((entry) => entry.input.length === 1 && entry.expected.trim());
+  const comment = language === "cpp" ? "//" : "//";
+  const solution = [
+    `${comment} Everything between the markers is submitted to ${problem.source === "codeforces" ? "Codeforces" : "the source"}.`,
+    `${comment} ${SOLUTION_START}`,
+    starter.replace(/\s+$/, ""),
+    `${comment} ${SOLUTION_END}`,
+    "",
+  ].join("\n");
+  if (!cases.length) return { supported: false, reason: "This problem publishes no complete input/output example Spar can run locally.", files: { [entryPath]: solution }, entryPath, testPaths: [], cases: [] };
+
+  const testPath = language === "cpp" ? "tests/examples.test.cpp" : `tests/examples.test.${language === "typescript" ? "ts" : "js"}`;
+  const test = language === "cpp" ? cppProgramTest(cases) : scriptProgramTest(entryPath, cases);
+  const support = language === "cpp" ? { "include/bits/stdc++.h": `#pragma once\n${CPP_INCLUDES}\n` } : {};
+  return { supported: true, files: { [entryPath]: solution, [testPath]: test, ...support }, entryPath, testPaths: [testPath, ...Object.keys(support)], cases };
+}
+
+function programStarter(language: Language): string {
+  if (language === "cpp") return "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n  ios::sync_with_stdio(false);\n  cin.tie(nullptr);\n\n  // Read input, solve the problem, and print the answer.\n  return 0;\n}";
+  if (language === "typescript") return "import * as fs from \"fs\";\n\nconst input: string = fs.readFileSync(0, \"utf8\").trim();\n// Parse input, solve the problem, and print the answer.\nvoid input;";
+  return "const fs = require(\"fs\");\n\nconst input = fs.readFileSync(0, \"utf8\").trim();\n// Parse input, solve the problem, and print the answer.\nvoid input;";
+}
+
+function scriptProgramTest(entryPath: string, cases: PracticeCase[]): string {
+  const rows = cases.map((entry) => ({ name: entry.name, input: entry.input[0] ?? "", expected: entry.expected }));
+  return [
+    'import test from "node:test";',
+    'import assert from "node:assert/strict";',
+    'import { spawnSync } from "node:child_process";',
+    'import { fileURLToPath } from "node:url";',
+    `const solution = fileURLToPath(new URL("../${entryPath}", import.meta.url));`,
+    `const cases = ${JSON.stringify(rows, null, 2)};`,
+    'const clean = (value) => value.replace(/\\r\\n/g, "\\n").trimEnd().split("\\n").map((line) => line.trimEnd()).join("\\n");',
+    'for (const item of cases) test(item.name, () => {',
+    '  const run = spawnSync(process.execPath, [solution], { input: item.input, encoding: "utf8", timeout: 5000 });',
+    '  assert.equal(run.status, 0, run.stderr || `program exited with ${run.status}`);',
+    '  assert.equal(clean(run.stdout), clean(item.expected));',
+    '});',
+    '',
+  ].join("\n");
+}
+
+function cppProgramTest(cases: PracticeCase[]): string {
+  const rows = cases.map((entry) => ({ name: entry.name, input: entry.input[0] ?? "", expected: entry.expected }));
+  return [
+    '#include <iostream>', '#include <sstream>', '#include <string>', '#include <vector>',
+    '#define main spar_solution_main', '#include "../src/main.cpp"', '#undef main',
+    'struct Sample { std::string name, input, expected; };',
+    'static std::string clean(std::string value) { while (!value.empty() && (value.back() == \'\\n\' || value.back() == \'\\r\' || value.back() == \' \')) value.pop_back(); return value; }',
+    'int main() {',
+    `  const std::vector<Sample> samples = ${cppSamples(rows)};`,
+    '  for (const auto& sample : samples) {',
+    '    std::istringstream input(sample.input); std::ostringstream output;',
+    '    std::cin.clear(); std::cout.clear(); auto* oldIn = std::cin.rdbuf(input.rdbuf()); auto* oldOut = std::cout.rdbuf(output.rdbuf());',
+    '    const int status = spar_solution_main(); std::cout.flush(); std::cin.rdbuf(oldIn); std::cout.rdbuf(oldOut); std::cin.clear(); std::cout.clear();',
+    '    if (status != 0 || clean(output.str()) != clean(sample.expected)) { std::cerr << sample.name << " failed\\nexpected:\\n" << sample.expected << "\\nactual:\\n" << output.str() << "\\n"; return 1; }',
+    '  }',
+    '  return 0;',
+    '}', '',
+  ].join("\n");
+}
+
+function cppSamples(rows: Array<{ name: string; input: string; expected: string }>): string {
+  const raw = (value: string) => { let delimiter = "SPAR"; while (value.includes(`)${delimiter}\"`)) delimiter += "_"; return `R\"${delimiter}(${value})${delimiter}\"`; };
+  return `{${rows.map((row) => `{${raw(row.name)},${raw(row.input)},${raw(row.expected)}}`).join(",")}}`;
+}
+
 const LANGUAGE_NAME: Record<Language, string> = { javascript: "JavaScript", typescript: "TypeScript", cpp: "C++" };
 
 const LAYOUT: Record<Language, { entry: string; test: string; support?: string }> = {

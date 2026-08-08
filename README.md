@@ -235,7 +235,7 @@ it again, or to practise it without touching the session it belongs to.
 
 Spar writes most of your challenges. It does not have to write all of them.
 
-Connect LeetCode in Settings and the agent can set you real problems alongside
+Connect LeetCode or Codeforces in Settings and the agent can set you real problems alongside
 the ones it invents — chosen against the same target, tagged into the same
 ability ledger, and sitting in the same history. You sign in on LeetCode's own
 page; Spar never sees your password, and every method that page offers works.
@@ -245,18 +245,19 @@ source first, and then has to either assign what it found or consciously write
 its own. That is a property of the controller rather than a line in a prompt: it
 cannot skip the search, and it cannot end the turn without setting something.
 
-Which one it picks is a judgement, and both directions are real. A LeetCode
+Which one it picks is a judgement, and both directions are real. A sourced
 problem brings a difficulty other people calibrated, hidden cases nobody in Spar
 wrote, and your own history with it. A challenge written for your specific
 misconception brings something no library has. Spar is told to prefer the real
 problem when it genuinely lands on the target — and not to hand you a contest
 problem to test an off-by-one.
 
-**Solving one counts where you'd expect it to.** Submit, and it goes to LeetCode's
+**Solving one counts where you'd expect it to.** Submit, and it goes to the selected source's
 judge and runs against every hidden case that problem has. The verdict is theirs,
-and it appears on your LeetCode account like any other submission. There is a
-**Run there** button for trying it without spending a submission, and the ordinary
-**Run** stays local and instant.
+and it appears on that account like any other submission. LeetCode also exposes a
+**Run there** button for trying it without spending a submission. Codeforces does
+not offer that endpoint, so **Run** checks its published stdin/stdout examples
+locally and **Submit** is the only action that reaches Codeforces.
 
 Not connected, or you would rather your code stayed on your machine? Both are
 fine, and Spar says which is happening rather than blurring it. Locally-graded
@@ -306,9 +307,9 @@ so the app tells you which one you are in.
 Being straight about the edges:
 
 - **Three languages.** JavaScript, TypeScript, and C++. That's it for now — and
-  a LeetCode problem is mounted in one of those three or not at all.
-- **One practice source.** LeetCode. The abstraction behind it is built for
-  more, and there is only one.
+  a sourced problem is mounted in one of those three or not at all.
+- **Two practice sources.** LeetCode and Codeforces. HackerRank and CodeChef are
+  shown as planned sources, not working integrations.
 - **Hosting is yours to set up.** There is no Spar-operated service; you deploy the API or run it locally, as described above.
 - **Unsigned builds.** Your OS will complain on first launch.
 - **macOS is the polished one.** The Windows and Linux builds are real, but the

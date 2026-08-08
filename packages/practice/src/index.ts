@@ -32,3 +32,6 @@ export { LEETCODE_ORIGIN, leetCodeHeaders, parseLeetCodeCookie, verifyLeetCodeSe
 export { casesForProblem, normalizeProblem, normalizeProblemSummary, SOURCE_LANGUAGE_SLUG } from "./leetcode/normalize.js";
 export { isJudgePending, normalizeLeetCodeVerdict } from "./leetcode/verdict.js";
 export { parseExamples, splitExampleInput, statementToMarkdown } from "./leetcode/statement.js";
+export { CodeforcesClient } from "./codeforces/client.js";
+export { CODEFORCES_ORIGIN, codeforcesHeaders, parseCodeforcesCookies, verifyCodeforcesSession, type CodeforcesSession } from "./codeforces/session.js";
+export { casesForCodeforcesProblem, codeforcesDifficulty, codeforcesSlug, normalizeCodeforcesProblem, normalizeCodeforcesSummary, parseCodeforcesSlug } from "./codeforces/normalize.js";

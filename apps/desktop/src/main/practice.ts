@@ -1,13 +1,13 @@
 import type { BrowserWindow } from "electron";
 import {
-  buildHarness, effectiveCapabilities, judgeDescription, judgeInputBlock, LeetCodeGateway, practiceSource, submittableCode,
-  type LeetCodeSession, type PracticeAccount, type PracticeCase, type PracticeConnectionState,
-  type PracticeGateway, type PracticeProblem, type PracticeProblemBundle, type PracticeRegion, type PracticeVerdict,
+  buildHarness, buildProgramHarness, CodeforcesGateway, effectiveCapabilities, judgeDescription, judgeInputBlock, LeetCodeGateway, practiceSource, submittableCode,
+  type CodeforcesSession, type LeetCodeSession, type PracticeAccount, type PracticeCase, type PracticeConnectionState,
+  type PracticeGateway, type PracticeProblem, type PracticeProblemBundle, type PracticeRegion, type PracticeSourceId, type PracticeVerdict,
 } from "@spar/practice";
 import { connectPracticeMcp, PRACTICE_READ_TOOLS, type PracticeMcpConnection } from "@spar/practice/mcp";
-import { practiceProblemSchema, practiceRegionSchema } from "@spar/practice";
+import { practiceProblemSchema, practiceRegionSchema, practiceSourceIdSchema } from "@spar/practice";
 import type { ChallengeSource, Language, QuestionDesign } from "@spar/domain";
-import { clearLeetCodeSignIn, signInToLeetCode } from "./practiceSignIn.js";
+import { clearCodeforcesSignIn, clearLeetCodeSignIn, signInToCodeforces, signInToLeetCode } from "./practiceSignIn.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 
@@ -35,7 +35,7 @@ import type { LocalStore } from "./store.js";
  */
 
 export type PracticeInventory = {
-  source: "leetcode";
+  source: PracticeSourceId;
   name: string;
   description: string;
   authNote: string;
@@ -60,7 +60,7 @@ export type PracticeInventory = {
  *  reason someone might genuinely prefer it. */
 export type JudgePreference = "source" | "local";
 
-const CACHE_KEY = (region: PracticeRegion) => `practice-problem-cache:leetcode:${region}`;
+const CACHE_KEY = (source: PracticeSourceId, region: PracticeRegion) => `practice-problem-cache:${source}:${region}`;
 /** A statement is good for a fortnight; the learner's status on it is not, which
  *  is why a mount re-reads and a browse does not. */
 const PROBLEM_CACHE_MS = 14 * 24 * 60 * 60 * 1_000;
@@ -68,7 +68,7 @@ const ACCOUNT_CACHE_MS = 5 * 60 * 1_000;
 
 export class PracticeService {
   private connection: PracticeMcpConnection | null = null;
-  private gatewayCache: PracticeGateway | null = null;
+  private gatewayCache = new Map<string, PracticeGateway>();
   private accountCache: { at: number; account: PracticeAccount | null } | null = null;
 
   constructor(
@@ -77,36 +77,48 @@ export class PracticeService {
     private readonly window: () => BrowserWindow | null,
     /** Told whenever the source's connection state changes, so Settings and the
      *  workspace both re-read rather than showing a stale row. */
-    private readonly emit: (event: { source: "leetcode"; state: PracticeConnectionState; message: string }) => void,
+    private readonly emit: (event: { source: PracticeSourceId; state: PracticeConnectionState; message: string }) => void,
   ) {}
 
   /* ---- Connection -------------------------------------------------------- */
 
+  sourceId(): PracticeSourceId {
+    return practiceSourceIdSchema.catch("leetcode").parse(this.store.getSetting("practice-source", "leetcode"));
+  }
+
+  async setSource(source: PracticeSourceId) {
+    if (source === this.sourceId()) return;
+    this.store.setSetting("practice-source", source);
+    this.reset();
+  }
+
   region(): PracticeRegion {
-    return practiceRegionSchema.catch("global").parse(this.store.getSetting("practice-region:leetcode", "global"));
+    const source = this.sourceId();
+    if (source === "codeforces") return "global";
+    return practiceRegionSchema.catch("global").parse(this.store.getSetting(`practice-region:${source}`, "global"));
   }
 
   async setRegion(region: PracticeRegion) {
     if (region === this.region()) return;
-    this.store.setSetting("practice-region:leetcode", region);
+    this.store.setSetting(`practice-region:${this.sourceId()}`, region);
     /* The two LeetCodes are separate services with separate accounts and separate
        problem ids, so nothing about the old one survives the switch. */
     this.reset();
   }
 
-  judgePreference(): JudgePreference {
-    return this.store.getSetting<JudgePreference>("practice-judge:leetcode", "source") === "local" ? "local" : "source";
+  judgePreference(source: PracticeSourceId = this.sourceId()): JudgePreference {
+    return this.store.getSetting<JudgePreference>(`practice-judge:${source}`, "source") === "local" ? "local" : "source";
   }
 
   setJudgePreference(preference: JudgePreference) {
-    this.store.setSetting("practice-judge:leetcode", preference);
+    this.store.setSetting(`practice-judge:${this.sourceId()}`, preference);
   }
 
   /** Whether a new challenge from this source can carry a source verdict. Both
    *  halves have to hold: the learner has to have connected it, and they have to
    *  want their code sent there. */
-  async judgesSubmissions(): Promise<boolean> {
-    return this.judgePreference() === "source" && await this.state() === "connected";
+  async judgesSubmissions(source: PracticeSourceId = this.sourceId(), region: PracticeRegion = this.region()): Promise<boolean> {
+    return this.judgePreference(source) === "source" && await this.gatewayFor(source, region).state() === "connected";
   }
 
   async state(): Promise<PracticeConnectionState> {
@@ -116,10 +128,11 @@ export class PracticeService {
   /** Everything Settings draws, in one read. Failures are reported rather than
    *  thrown: a source that cannot be reached is a row that says so. */
   async inventory(): Promise<PracticeInventory> {
-    const descriptor = practiceSource("leetcode");
+    const source = this.sourceId();
+    const descriptor = practiceSource(source);
     const region = this.region();
     const base = {
-      source: "leetcode" as const,
+      source,
       name: descriptor.name,
       description: descriptor.description,
       authNote: descriptor.authNote,
@@ -133,7 +146,7 @@ export class PracticeService {
       return {
         ...base,
         state,
-        capabilities: effectiveCapabilities("leetcode", state === "connected"),
+        capabilities: effectiveCapabilities(source, state === "connected"),
         account,
         judgesSubmissions: state === "connected" && this.judgePreference() === "source",
       };
@@ -141,7 +154,7 @@ export class PracticeService {
       return {
         ...base,
         state: "disconnected",
-        capabilities: effectiveCapabilities("leetcode", false),
+        capabilities: effectiveCapabilities(source, false),
         account: null,
         judgesSubmissions: false,
         problem: error instanceof Error ? error.message : String(error),
@@ -158,12 +171,11 @@ export class PracticeService {
    * anything.
    */
   async connect(): Promise<{ status: "connected"; username: string } | { status: "cancelled" } | { status: "failed"; message: string }> {
+    const source = this.sourceId();
     const region = this.region();
-    const result = await signInToLeetCode({
-      region,
-      parent: this.window(),
-      onProgress: (message) => this.emit({ source: "leetcode", state: "disconnected", message }),
-    });
+    const result = source === "leetcode"
+      ? await signInToLeetCode({ region, parent: this.window(), onProgress: (message) => this.emit({ source, state: "disconnected", message }) })
+      : await signInToCodeforces({ parent: this.window(), onProgress: (message) => this.emit({ source, state: "disconnected", message }) });
     if (result.status !== "connected") return result;
 
     /* The sign-in already asked LeetCode who is signed in and only finished when
@@ -171,22 +183,34 @@ export class PracticeService {
        and nothing here re-litigates that. Reading the solve counts is a separate,
        optional step: they are decoration, and letting one of them decide whether
        the sign-in worked is how a perfectly good session gets thrown away. */
-    await this.saveSession(region, result.session);
+    await this.saveSession(source, region, result.session);
     this.reset();
     this.accountCache = null;
     const account = await this.account().catch(() => null);
-    this.emit({ source: "leetcode", state: "connected", message: `Connected as ${result.username}.` });
+    this.emit({ source, state: "connected", message: `Connected as ${result.username}.` });
     return { status: "connected", username: account?.username ?? result.username };
   }
 
   async disconnect(): Promise<void> {
+    const source = this.sourceId();
     const region = this.region();
-    await this.clearSession(region);
+    await this.clearSession(source, region);
     /* The browser partition too. Leaving a live session in a jar the learner
        believes they disconnected would be the app lying to them. */
-    await clearLeetCodeSignIn(region);
+    if (source === "leetcode") await clearLeetCodeSignIn(region); else await clearCodeforcesSignIn();
     this.reset();
-    this.emit({ source: "leetcode", state: "disconnected", message: `Disconnected from ${practiceSource("leetcode").name}.` });
+    this.emit({ source, state: "disconnected", message: `Disconnected from ${practiceSource(source).name}.` });
+  }
+
+  /** Removes every source credential when the Spar account leaves this device.
+   * Selection is irrelevant here: an inactive source still holds a live browser
+   * session and keychain secret. */
+  async clearAllCredentials(): Promise<void> {
+    await Promise.all([
+      this.clearSession("leetcode", "global"), this.clearSession("leetcode", "cn"), this.clearSession("codeforces", "global"),
+      clearLeetCodeSignIn("global"), clearLeetCodeSignIn("cn"), clearCodeforcesSignIn(),
+    ]);
+    this.reset();
   }
 
   async account(): Promise<PracticeAccount | null> {
@@ -209,14 +233,15 @@ export class PracticeService {
    */
   async problem(slug: string, options: { fresh?: boolean } = {}): Promise<PracticeProblemBundle> {
     const region = this.region();
+    const source = this.sourceId();
     if (!options.fresh) {
-      const cached = this.store.readCachedPracticeProblem("leetcode", region, slug, PROBLEM_CACHE_MS);
+      const cached = this.store.readCachedPracticeProblem(source, region, slug, PROBLEM_CACHE_MS);
       const parsed = cached ? practiceProblemSchema.safeParse(cached.payload) : null;
       if (parsed?.success) return this.bundleFor(parsed.data);
     }
     const bundle = await this.gateway().problem(slug);
     this.store.cachePracticeProblem({
-      source: "leetcode",
+      source,
       region,
       slug: bundle.problem.slug,
       title: bundle.problem.title,
@@ -231,7 +256,7 @@ export class PracticeService {
    *  far. Both directions, because "a harder version of the one you just failed"
    *  and "what that one leads to" are the same edge read from opposite ends. */
   references(slug: string) {
-    return this.store.practiceProblemLinks("leetcode", this.region(), slug);
+    return this.store.practiceProblemLinks(this.sourceId(), this.region(), slug);
   }
 
   /** Search, for the learner browsing rather than the agent choosing. Same call
@@ -250,7 +275,7 @@ export class PracticeService {
   }
 
   sourceName(): string {
-    return practiceSource("leetcode").name;
+    return practiceSource(this.sourceId()).name;
   }
 
   /**
@@ -296,12 +321,12 @@ export class PracticeService {
     const bundle = input.problem ? this.bundleFor(input.problem) : await this.problem(input.slug, { fresh: true });
     const { problem, cases } = bundle;
     const language = this.languageFor(problem, input.language);
-    const harness = buildHarness({ problem, language, cases });
-    const remoteJudge = await this.judgesSubmissions();
+    const harness = problem.source === "codeforces" ? buildProgramHarness({ problem, language, cases }) : buildHarness({ problem, language, cases });
+    const remoteJudge = await this.judgesSubmissions(problem.source, problem.region);
     const sourceLanguage = problem.languages.find((entry) => entry.language === language);
 
     const source: ChallengeSource = {
-      source: "leetcode",
+      source: problem.source,
       region: problem.region,
       slug: problem.slug,
       externalId: problem.externalId,
@@ -310,8 +335,9 @@ export class PracticeService {
       difficulty: problem.difficulty,
       languageSlug: sourceLanguage?.slug ?? language,
       remoteJudge,
+      scratchRun: problem.source === "leetcode" && remoteJudge,
       localCaseCount: harness.supported ? harness.cases.length : 0,
-      judge: judgeDescription("leetcode", { ...effectiveCapabilities("leetcode", remoteJudge), remoteJudge }),
+      judge: judgeDescription(problem.source, { ...effectiveCapabilities(problem.source, remoteJudge), remoteJudge }),
       entryName: problem.signature?.name ?? "",
       /* Every case the problem publishes, not only the ones the local harness could
          wire up: a case Spar cannot run is still the contract the learner is being
@@ -324,7 +350,7 @@ export class PracticeService {
     const design: QuestionDesign = {
       title: problem.title,
       language,
-      kind: "function",
+      kind: problem.source === "codeforces" ? "repository" : "function",
       difficulty: DIFFICULTY[problem.difficulty],
       statement: statementFor(problem, source, harness.supported ? "" : harness.reason),
       starterFiles: { [harness.entryPath]: harness.files[harness.entryPath] ?? "" },
@@ -358,7 +384,7 @@ export class PracticeService {
 
   /** A scratch run at the source. Costs nothing on the learner's record. */
   async run(input: { source: ChallengeSource; code: string; language: Language; testcases?: string }): Promise<PracticeVerdict> {
-    return this.gateway().run({
+    return this.gatewayFor(input.source.source, input.source.region).run({
       slug: input.source.slug,
       externalId: input.source.externalId,
       language: input.language,
@@ -375,7 +401,7 @@ export class PracticeService {
    * coding gym whose tutor can submit on your behalf is not measuring you.
    */
   async submit(input: { source: ChallengeSource; code: string; language: Language }): Promise<PracticeVerdict> {
-    return this.gateway().submit({
+    return this.gatewayFor(input.source.source, input.source.region).submit({
       slug: input.source.slug,
       externalId: input.source.externalId,
       language: input.language,
@@ -415,17 +441,26 @@ export class PracticeService {
   /* ---- Internals ---------------------------------------------------------- */
 
   private gateway(): PracticeGateway {
-    if (this.gatewayCache) return this.gatewayCache;
-    const region = this.region();
-    this.gatewayCache = new LeetCodeGateway(region, () => this.readSession(region), {
+    return this.gatewayFor(this.sourceId(), this.region());
+  }
+
+  private gatewayFor(source: PracticeSourceId, region: PracticeRegion): PracticeGateway {
+    const key = `${source}:${region}`;
+    const cached = this.gatewayCache.get(key);
+    if (cached) return cached;
+    const options = {
       onExpired: () => {
         /* One place decides the session is dead, and everything downstream reads
            it from the connection state rather than from its own failure. */
         this.accountCache = { at: Date.now(), account: null };
-        this.emit({ source: "leetcode", state: "expired", message: `${practiceSource("leetcode").name} refused the stored session. Reconnect it in Settings.` });
+        this.emit({ source, state: "expired", message: `${practiceSource(source).name} refused the stored session. Reconnect it in Settings.` });
       },
-    });
-    return this.gatewayCache;
+    };
+    const gateway = source === "leetcode"
+      ? new LeetCodeGateway(region, () => this.readSession(source, region) as Promise<LeetCodeSession | null>, options)
+      : new CodeforcesGateway(() => this.readSession(source, region) as Promise<CodeforcesSession | null>, options);
+    this.gatewayCache.set(key, gateway);
+    return gateway;
   }
 
   /** Drops everything derived from the credential. Called on connect, disconnect
@@ -433,33 +468,33 @@ export class PracticeService {
   private reset() {
     void this.connection?.close();
     this.connection = null;
-    this.gatewayCache = null;
+    this.gatewayCache.clear();
     this.accountCache = null;
-    this.store.setSetting(CACHE_KEY(this.region()), Date.now());
+    this.store.setSetting(CACHE_KEY(this.sourceId(), this.region()), Date.now());
   }
 
   private bundleFor(problem: PracticeProblem): PracticeProblemBundle {
     const connected = Boolean(this.accountCache?.account) || this.judgePreference() === "source";
-    const capabilities = effectiveCapabilities("leetcode", connected);
-    return { problem, cases: casesFor(problem), capabilities, judge: judgeDescription("leetcode", capabilities) };
+    const capabilities = effectiveCapabilities(problem.source, connected);
+    return { problem, cases: casesFor(problem), capabilities, judge: judgeDescription(problem.source, capabilities) };
   }
 
-  private keychainAccount(region: PracticeRegion) {
-    return `practice:leetcode:${region}`;
+  private keychainAccount(source: PracticeSourceId, region: PracticeRegion) {
+    return `practice:${source}:${region}`;
   }
 
-  private async readSession(region: PracticeRegion): Promise<LeetCodeSession | null> {
-    const raw = await this.auth.readSecret(this.keychainAccount(region));
+  private async readSession(source: PracticeSourceId, region: PracticeRegion): Promise<LeetCodeSession | CodeforcesSession | null> {
+    const raw = await this.auth.readSecret(this.keychainAccount(source, region));
     if (!raw) return null;
-    try { return JSON.parse(raw) as LeetCodeSession; } catch { return null; }
+    try { return JSON.parse(raw) as LeetCodeSession | CodeforcesSession; } catch { return null; }
   }
 
-  private async saveSession(region: PracticeRegion, session: LeetCodeSession) {
-    await this.auth.saveSecret(this.keychainAccount(region), JSON.stringify(session));
+  private async saveSession(source: PracticeSourceId, region: PracticeRegion, session: LeetCodeSession | CodeforcesSession) {
+    await this.auth.saveSecret(this.keychainAccount(source, region), JSON.stringify(session));
   }
 
-  private async clearSession(region: PracticeRegion) {
-    await this.auth.deleteSecret(this.keychainAccount(region));
+  private async clearSession(source: PracticeSourceId, region: PracticeRegion) {
+    await this.auth.deleteSecret(this.keychainAccount(source, region));
   }
 }
 
@@ -481,6 +516,7 @@ const RUN_COMMAND: Record<Language, string> = {
 /** Re-derived here rather than carried, so a problem read from the cache and one
  *  read from the source produce the same cases. */
 function casesFor(problem: PracticeProblem): PracticeCase[] {
+  if (problem.source === "codeforces") return problem.examples.flatMap((example, index) => example.input.length === 1 && example.output.trim() ? [{ name: `Example ${index + 1}`, input: example.input, expected: example.output, origin: "source" as const }] : []);
   const params = problem.signature?.params.length ?? 0;
   return problem.examples.flatMap((example, index) =>
     example.input.length === params && example.output.trim()
@@ -497,7 +533,7 @@ function casesFor(problem: PracticeProblem): PracticeCase[] {
  * is entitled to know all three without asking.
  */
 function statementFor(problem: PracticeProblem, source: ChallengeSource, harnessNote: string): string {
-  const name = practiceSource("leetcode").name;
+  const name = practiceSource(problem.source).name;
   const lines = [
     problem.statement.trim(),
     "",

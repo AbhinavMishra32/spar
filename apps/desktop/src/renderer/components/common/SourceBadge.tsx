@@ -23,7 +23,7 @@ const DIFFICULTY_TONE: Record<ChallengeSource["difficulty"], string> = {
 };
 
 const DIFFICULTY_LABEL: Record<ChallengeSource["difficulty"], string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
-const SOURCE_NAME: Record<ChallengeSource["source"], string> = { leetcode: "LeetCode" };
+const SOURCE_NAME: Record<ChallengeSource["source"], string> = { leetcode: "LeetCode", codeforces: "Codeforces" };
 
 export function SourceBadge({ className, onOpen, source, size = "default" }: {
   className?: string;

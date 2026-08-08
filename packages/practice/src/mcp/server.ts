@@ -44,7 +44,9 @@ export function createPracticeMcpServer(deps: {
     },
   );
 
-  const tools = PRACTICE_TOOLS.filter((tool) => allowJudging || !tool.judging);
+  const tools = PRACTICE_TOOLS.filter((tool) =>
+    (allowJudging || !tool.judging) && (tool.name !== "run_practice_code" || practiceSource(gateway.sourceId).capabilities.scratchRun),
+  );
   for (const tool of tools) {
     server.registerTool(
       tool.name,

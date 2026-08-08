@@ -4,7 +4,7 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceJudgeSchema, sourceRegionSchema, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceIdSchema, sourceJudgeSchema, sourceRegionSchema, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -337,6 +337,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      Nothing here ever hands the renderer a session cookie: it asks for a state
      change and is told the state. */
   ipcMain.handle(ipc.sourceInventory, () => deps.practice.inventory());
+  ipcMain.handle(ipc.sourceSelect, async (_event, value) => { await deps.practice.setSource(sourceIdSchema.parse(value)); });
   ipcMain.handle(ipc.sourceConnect, () => deps.practice.connect());
   ipcMain.handle(ipc.sourceDisconnect, () => deps.practice.disconnect());
   ipcMain.handle(ipc.sourceRegion, async (_event, value) => { await deps.practice.setRegion(sourceRegionSchema.parse(value)); });
@@ -388,6 +389,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (!bundle || bundle.session_id !== input.sessionId) throw new Error("That attempt is no longer open.");
     const source = deps.store.readSession(input.sessionId)?.question?.source;
     if (!source) throw new Error("This challenge did not come from a practice source, so there is nowhere to run it.");
+    if (source.source === "codeforces") throw new Error("Codeforces has no non-recording remote run. Use Run for the published examples, then Submit for the full Codeforces judge.");
     const code = await deps.workspaces.read(input.sessionId, solutionPath(bundle.design)).catch(() => "");
     if (!code.trim()) throw new Error("There is nothing to run yet.");
     // The problem's own examples, in the judge's wire format. See `judgeCaseBlock`.
@@ -547,13 +549,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      that never reached the cloud is gone for good. */
   ipcMain.handle(ipc.authSignOut, async () => {
     await deps.sync.flush().catch(() => undefined);
+    await deps.practice.clearAllCredentials();
     await deps.auth.signOut();
     deps.store.clearAccountData();
     await deps.workspaces.clear();
     resetAppearance();
     fitWindowTo(deps.window(), "sign-in");
   });
-  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); deps.store.clearAccountData(); await deps.workspaces.clear(); resetAppearance(); fitWindowTo(deps.window(), "sign-in"); });
+  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); await deps.practice.clearAllCredentials(); deps.store.clearAccountData(); await deps.workspaces.clear(); resetAppearance(); fitWindowTo(deps.window(), "sign-in"); });
   /* Light or dark is a choice someone made for their account, and the device is
      about to be handed to whoever signs in next — including, often enough, nobody.
      So the window goes back to following the OS, which is what a Spar nobody has

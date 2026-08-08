@@ -82,13 +82,10 @@ const FOCUS = [
 
 const LANGUAGES: Language[] = ["javascript", "typescript", "cpp"];
 
-/** The judges Spar could set problems from. Only LeetCode is wired up; the rest
- *  are listed anyway, because someone who lives on Codeforces needs to see that
- *  Spar knows the name and has not got there yet — a list of one reads as a
- *  product that only ever intends to speak LeetCode. */
+/** The judges Spar can set problems from, plus the next integrations. */
 const SOURCES = [
   { id: "leetcode", name: "LeetCode", Glyph: LeetCodeGlyph, soon: false },
-  { id: "codeforces", name: "Codeforces", Glyph: CodeforcesGlyph, soon: true },
+  { id: "codeforces", name: "Codeforces", Glyph: CodeforcesGlyph, soon: false },
   { id: "hackerrank", name: "HackerRank", Glyph: HackerRankGlyph, soon: true },
   { id: "codechef", name: "CodeChef", Glyph: CodeChefGlyph, soon: true },
 ] as const;
@@ -244,25 +241,26 @@ export function OnboardingPage({
      The username lands with the credential and the record takes another round
      trip, so the two are held apart: the row can confirm itself the moment the
      window closes and fill in the numbers a beat later. */
-  const [source, setSource] = useState<{ username: string; account: PracticeSourceAccount | null } | null>(null);
+  const [source, setSource] = useState<{ id: "leetcode" | "codeforces"; username: string; account: PracticeSourceAccount | null } | null>(null);
   const [sourceBusy, setSourceBusy] = useState<"connect" | "disconnect" | null>(null);
   const [sourceError, setSourceError] = useState("");
   const readSource = async () => {
     const inventory = await api?.practiceSource().catch(() => null);
     if (!inventory) return;
-    setSource(inventory.state === "connected" ? { username: inventory.account?.username ?? inventory.name, account: inventory.account } : null);
+    setSource(inventory.state === "connected" ? { id: inventory.source, username: inventory.account?.username ?? inventory.name, account: inventory.account } : null);
   };
   // Once, when the api arrives. `readSource` is rebuilt every render and is not
   // a dependency of anything but itself.
   useEffect(() => { void readSource(); }, [api]);
-  const connectSource = async () => {
+  const connectSource = async (sourceId: "leetcode" | "codeforces") => {
     if (!api || sourceBusy || source) return;
     setSourceBusy("connect");
     setSourceError("");
     try {
+      await api.setPracticeSource(sourceId);
       const result = await api.connectPracticeSource();
       if (result.status === "connected") {
-        setSource({ username: result.username, account: null });
+        setSource({ id: sourceId, username: result.username, account: null });
         await readSource();
       /* Cancelling is a decision, not an error: the step is optional and the
          learner closing the window has answered it. */
@@ -585,7 +583,7 @@ export function OnboardingPage({
               {phase === "intake" && step.id === "source" && (
                 <div className={GROUP}>
                   {SOURCES.map(({ id, name, Glyph, soon }) => {
-                    const connected = id === "leetcode" && source !== null;
+                    const connected = id === source?.id;
                     const bands = source?.account ? solvedBands(source.account) : [];
                     /* Only a row you can act on is a button. A connected one owns
                        a Disconnect of its own, and a button inside a button is
@@ -625,7 +623,7 @@ export function OnboardingPage({
                           <button
                             className={cn(headClass, "hover:bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]")}
                             disabled={sourceBusy !== null}
-                            onClick={() => void connectSource()}
+                            onClick={() => void connectSource(id)}
                             type="button"
                           >
                             {head}

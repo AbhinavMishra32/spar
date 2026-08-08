@@ -26,7 +26,7 @@ import { SourceGlyph } from "../common/SourceGlyph";
  */
 export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
   const [inventory, setInventory] = useState<PracticeInventory | null>(null);
-  const [busy, setBusy] = useState<"connect" | "disconnect" | "region" | "judge" | null>(null);
+  const [busy, setBusy] = useState<"connect" | "disconnect" | "source" | "region" | "judge" | null>(null);
   const [note, setNote] = useState<{ tone: "muted" | "error"; text: string } | null>(null);
 
   const read = useCallback(async () => {
@@ -69,6 +69,20 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
 
   return (
     <>
+      <Row className="gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-content font-medium">Problem platform</p>
+          <p className="mt-0.5 text-ui text-muted-foreground">Choose the source Spar searches when it assigns a real problem.</p>
+        </div>
+        <Segmented
+          ariaLabel="Problem platform"
+          disabled={busy !== null}
+          onChange={(value) => void act("source", async () => api?.setPracticeSource(value as "leetcode" | "codeforces"))}
+          options={[{ value: "leetcode", label: "LeetCode" }, { value: "codeforces", label: "Codeforces" }]}
+          value={inventory.source}
+        />
+      </Row>
+
       <Row>
         <span className="grid size-6 shrink-0 place-items-center text-foreground/85">
           <SourceGlyph className="size-[1.15rem]" source={inventory.source} />
@@ -84,7 +98,7 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
               ? `${account.username} · solves here count on your account`
               : state === "expired"
                 ? "The stored session lapsed, so nothing about you is readable until you reconnect."
-                : "Real problems, judged by LeetCode. You sign in on their page — Spar never sees your password."}
+                : `${inventory.description} You sign in on their page — Spar never sees your password.`}
           </p>
         </div>
 
@@ -126,7 +140,7 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
       {connected && account && (
         <Row className="flex-col items-stretch gap-0 py-3">
           <div className="mb-2 flex items-baseline gap-2">
-            <p className="text-content font-medium">Solved on LeetCode</p>
+            <p className="text-content font-medium">Solved on {name}</p>
             <span className="ml-auto shrink-0 text-ui tabular-nums text-muted-foreground">
               <span className="font-medium text-foreground">{account.solved.total}</span>
               {account.available.total ? ` of ${account.available.total.toLocaleString()}` : " solved"}
@@ -150,7 +164,7 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
           <p className="text-content font-medium">Grading</p>
           <p className="mt-0.5 text-ui text-muted-foreground">
             {inventory.judgesSubmissions
-              ? `Submitting runs every hidden case ${name} has and records the result on your account.`
+              ? `Run checks published examples ${inventory.capabilities.scratchRun ? `at ${name}` : "on this Mac"}; Submit runs every hidden case ${name} has and records the result on your account.`
               : connected
                 ? "Your code stays on this machine, checked against each problem's published examples."
                 : `Connect ${name} to have it judge submissions. Until then Spar grades locally.`}

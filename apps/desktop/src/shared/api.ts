@@ -27,7 +27,7 @@ export const ipc = {
      collision, kept because renaming a channel the renderer already calls is a
      worse trade than a comment. */
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
-  sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
+  sourceSelect: "source:select", sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
   restoreRetry: "restore:retry",
 } as const;
@@ -185,6 +185,7 @@ export type ProviderOAuthEvent = {
    draws exactly what `PracticeService.inventory` returns. */
 
 export const sourceRegionSchema = z.enum(["global", "cn"]);
+export const sourceIdSchema = z.enum(["leetcode", "codeforces"]);
 export const sourceJudgeSchema = z.enum(["source", "local"]);
 export type SourceJudgePreference = z.infer<typeof sourceJudgeSchema>;
 export const sourceSearchInput = z.object({
@@ -210,7 +211,7 @@ export type PracticeSourceAccount = {
   streak: number;
 };
 export type PracticeInventory = {
-  source: "leetcode";
+  source: z.infer<typeof sourceIdSchema>;
   name: string;
   description: string;
   /** What the learner is told before they hand an app their session. */
@@ -218,7 +219,7 @@ export type PracticeInventory = {
   region: z.infer<typeof sourceRegionSchema>;
   regions: Array<{ id: z.infer<typeof sourceRegionSchema>; label: string }>;
   state: PracticeSourceState;
-  capabilities: { remoteJudge: boolean; officialTestcases: boolean; search: boolean; progress: boolean; submissionHistory: boolean };
+  capabilities: { remoteJudge: boolean; scratchRun: boolean; officialTestcases: boolean; search: boolean; progress: boolean; submissionHistory: boolean };
   account: PracticeSourceAccount | null;
   judgePreference: SourceJudgePreference;
   /** The connection state and the preference, resolved into the one fact the UI
@@ -255,7 +256,7 @@ export type SourceRunReport = {
   url: string;
 };
 /** Emitted whenever a source's connection changes under the app's feet. */
-export type PracticeSourceEvent = { source: "leetcode"; state: PracticeSourceState; message: string };
+export type PracticeSourceEvent = { source: z.infer<typeof sourceIdSchema>; state: PracticeSourceState; message: string };
 
 export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** How far the pull half of sync has got. The shell gates on this before it
@@ -357,6 +358,7 @@ export interface SparApi {
      the main process: the renderer asks for it and is told what happened, and
      the session cookie never crosses this boundary. */
   practiceSource(): Promise<PracticeInventory>;
+  setPracticeSource(source: z.infer<typeof sourceIdSchema>): Promise<void>;
   connectPracticeSource(): Promise<{ status: "connected"; username: string } | { status: "cancelled" } | { status: "failed"; message: string }>;
   disconnectPracticeSource(): Promise<void>;
   setPracticeRegion(region: z.infer<typeof sourceRegionSchema>): Promise<void>;

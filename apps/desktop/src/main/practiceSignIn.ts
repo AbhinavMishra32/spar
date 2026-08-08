@@ -1,5 +1,5 @@
 import { BrowserWindow, session as electronSession, type Session } from "electron";
-import { parseLeetCodeCookie, practiceSource, verifyLeetCodeSession, type LeetCodeSession, type PracticeRegion } from "@spar/practice";
+import { parseCodeforcesCookies, parseLeetCodeCookie, practiceSource, verifyLeetCodeSession, type CodeforcesSession, type LeetCodeSession, type PracticeRegion } from "@spar/practice";
 
 /**
  * Signing in to a practice source.
@@ -161,6 +161,51 @@ export async function signInToLeetCode(input: {
 export async function clearLeetCodeSignIn(region: PracticeRegion): Promise<void> {
   const partition = practiceSignInSession(region);
   await partition.clearStorageData({ storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] }).catch(() => undefined);
+}
+
+const CODEFORCES_PARTITION = "persist:spar-codeforces";
+export type CodeforcesSignInResult =
+  | { status: "connected"; session: CodeforcesSession; username: string }
+  | { status: "cancelled" }
+  | { status: "failed"; message: string };
+
+/** Codeforces sign-in uses the same isolated-browser boundary as LeetCode, but
+ * completion is read from the signed-in page: its profile link names the handle
+ * and its CSRF meta tag is required for an explicit later submission. */
+export async function signInToCodeforces(input: { parent: BrowserWindow | null; onProgress?: (message: string) => void }): Promise<CodeforcesSignInResult> {
+  const source = practiceSource("codeforces");
+  const partition = electronSession.fromPartition(CODEFORCES_PARTITION);
+  const window = new BrowserWindow({ width: 980, height: 780, ...(input.parent ? { parent: input.parent } : {}), show: false, autoHideMenuBar: true, title: `Sign in to ${source.name}`, webPreferences: { partition: CODEFORCES_PARTITION, nodeIntegration: false, contextIsolation: true, sandbox: true, webSecurity: true } });
+  input.onProgress?.(`Opening ${source.name}' sign-in page…`);
+  return new Promise<CodeforcesSignInResult>((resolve) => {
+    let settled = false;
+    let checking = false;
+    const finish = (result: CodeforcesSignInResult) => { if (settled) return; settled = true; clearInterval(poll); clearTimeout(timer); window.removeAllListeners("closed"); if (!window.isDestroyed()) window.close(); resolve(result); };
+    const attempt = async () => {
+      if (checking || window.isDestroyed()) return false;
+      checking = true;
+      try {
+        const identity = await window.webContents.executeJavaScript(`(() => { const own = document.querySelector('.lang-chooser a[href^="/profile/"], .personal-sidebar a[href^="/profile/"]'); const logout = [...document.querySelectorAll('.lang-chooser a, .personal-sidebar a')].some(a => /logout|sign out/i.test(a.textContent || '') || /\/logout/.test(a.getAttribute('href') || '')); const csrf = document.querySelector('meta[name="X-Csrf-Token"]')?.getAttribute('content') || document.querySelector('input[name="csrf_token"]')?.getAttribute('value') || ''; return logout && own ? { handle: (own.textContent || '').trim(), csrf } : null; })()`, true).catch(() => null) as { handle?: string; csrf?: string } | null;
+        if (!identity?.handle || !identity.csrf) return false;
+        const cookies = await partition.cookies.get({ domain: "codeforces.com" });
+        const session = parseCodeforcesCookies(cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; "), identity.handle, identity.csrf);
+        input.onProgress?.(`Signed in to ${source.name} as ${identity.handle}.`);
+        finish({ status: "connected", session, username: identity.handle });
+        return true;
+      } finally { checking = false; }
+    };
+    const poll = setInterval(() => { void attempt(); }, POLL_MS);
+    const timer = setTimeout(() => finish({ status: "failed", message: `The ${source.name} sign-in window timed out after ten minutes.` }), TIMEOUT_MS);
+    window.once("ready-to-show", () => window.show());
+    window.on("closed", () => { void attempt().then((done) => { if (!done) finish({ status: "cancelled" }); }).catch(() => finish({ status: "cancelled" })); });
+    window.webContents.on("did-fail-load", (_event, code, description, url, isMainFrame) => { if (isMainFrame && code !== -3) finish({ status: "failed", message: `Could not load ${url || source.name}: ${description}.` }); });
+    window.webContents.setWindowOpenHandler(({ url }) => { try { const host = new URL(url).hostname; return host === "codeforces.com" || host.endsWith(".codeforces.com") || host === "accounts.google.com" ? { action: "allow" as const } : { action: "deny" as const }; } catch { return { action: "deny" as const }; } });
+    void window.loadURL(source.signInUrl.global).catch((error: unknown) => finish({ status: "failed", message: `Could not open ${source.name}: ${error instanceof Error ? error.message : String(error)}` }));
+  });
+}
+
+export async function clearCodeforcesSignIn(): Promise<void> {
+  await electronSession.fromPartition(CODEFORCES_PARTITION).clearStorageData({ storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] }).catch(() => undefined);
 }
 
 /** The session in a partition's cookie jar, or null while it is not there yet. */

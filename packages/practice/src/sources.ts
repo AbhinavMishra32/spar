@@ -43,12 +43,31 @@ export const PRACTICE_SOURCES: PracticeSourceDescriptor[] = [
     regionLabel: { global: "leetcode.com", cn: "leetcode.cn" },
     capabilities: {
       remoteJudge: true,
+      scratchRun: true,
       officialTestcases: true,
       search: true,
       progress: true,
       submissionHistory: true,
     },
     authNote: "You sign in on LeetCode's own page — Spar never sees your password. Spar keeps the session cookie LeetCode sets, in your system keychain, and uses it only for the problems and submissions you ask for.",
+  },
+  {
+    id: "codeforces",
+    name: "Codeforces",
+    description: "Practise real Codeforces problems, run examples locally, and submit to the Codeforces judge.",
+    signInUrl: { global: "https://codeforces.com/enter", cn: "https://codeforces.com/enter" },
+    homeUrl: { global: "https://codeforces.com", cn: "https://codeforces.com" },
+    regions: ["global"],
+    regionLabel: { global: "codeforces.com", cn: "codeforces.com" },
+    capabilities: {
+      remoteJudge: true,
+      scratchRun: false,
+      officialTestcases: true,
+      search: true,
+      progress: true,
+      submissionHistory: true,
+    },
+    authNote: "You sign in on Codeforces' own page — Spar never sees your password. Spar keeps the browser session in your system keychain and uses it only to read your record and submit solutions you explicitly send.",
   },
 ];
 
@@ -75,6 +94,7 @@ export function effectiveCapabilities(id: PracticeSourceId, connected: boolean):
   if (connected) return base;
   return {
     remoteJudge: false,
+    scratchRun: false,
     officialTestcases: base.officialTestcases,
     /* Search and problem reads are public on LeetCode. What is lost while signed
        out is anything about *this learner*: which problems they have solved,

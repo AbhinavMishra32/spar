@@ -10,7 +10,8 @@ let restartTimer;
 let stopping = false;
 
 function launch() {
-  child = spawn(electronBinary, ["."], { cwd: projectRoot, stdio: "inherit" });
+  const debuggingPort = /^\d+$/.test(process.env.SPAR_REMOTE_DEBUGGING_PORT ?? "") ? process.env.SPAR_REMOTE_DEBUGGING_PORT : "";
+  child = spawn(electronBinary, [".", ...(debuggingPort ? [`--remote-debugging-port=${debuggingPort}`] : [])], { cwd: projectRoot, stdio: "inherit" });
   child.once("exit", (code, signal) => {
     child = undefined;
     if (!stopping && !restartTimer && code && signal !== "SIGTERM") process.exitCode = code;

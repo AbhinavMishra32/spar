@@ -31,6 +31,7 @@ const api: SparApi = {
   checkChallenge: (input) => ipcRenderer.invoke(ipc.challengeCheck, input),
   resetChallenge: (input) => ipcRenderer.invoke(ipc.challengeReset, input),
   practiceSource: () => ipcRenderer.invoke(ipc.sourceInventory),
+  setPracticeSource: (source) => ipcRenderer.invoke(ipc.sourceSelect, source),
   connectPracticeSource: () => ipcRenderer.invoke(ipc.sourceConnect),
   disconnectPracticeSource: () => ipcRenderer.invoke(ipc.sourceDisconnect),
   setPracticeRegion: (region) => ipcRenderer.invoke(ipc.sourceRegion, region),
