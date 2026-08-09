@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedTools, nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
 
 const TURN_KINDS: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message", "challenge-revision"];
 
@@ -26,6 +26,15 @@ function reachableStages(turnKind: AgentTurnKind, hasActiveQuestion: boolean, we
 }
 
 describe("Training Agent controller policy", () => {
+  it("requires a truthful teaching handoff after the first challenge",()=>{
+    const local=new Map<string,unknown[]>([["create_question",[{result:{status:"playable"}}]]]);
+    const sourced=new Map<string,unknown[]>([["assign_practice_problem",[{result:{status:"playable",source:"codeforces"}}]]]);
+    expect(completionInstruction("session-start",local)).toContain("tailored local prerequisite");
+    expect(completionInstruction("session-start",local)).toContain("compact micro-lesson");
+    expect(completionInstruction("session-start",local)).toContain("never describe it as a real");
+    expect(completionInstruction("session-start",sourced)).toContain("connected-provider problem");
+  });
+
   it("lets the single agent choose tools or prose for learner chat", () => {
     const stage=nextToolStage("learner-message",new Map(),15,{hasActiveQuestion:true});
     expect(stage.toolChoice).toBe("auto");

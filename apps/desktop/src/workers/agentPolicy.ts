@@ -2,6 +2,24 @@ export type AgentTurnKind = "cold-start" | "session-start" | "attempt-complete" 
 export type ToolStage = { activeTools: string[]; toolChoice: "required" | "auto" | "none"; exhausted?: { attempts: number; failure: string } };
 
 /**
+ * The final tool-free phase is part of teaching, not a receipt for a database
+ * write.  Keeping this host-authored also makes provenance non-negotiable: a
+ * locally authored prerequisite cannot be described as a real judge problem.
+ */
+export function completionInstruction(turnKind:AgentTurnKind,outcomes:Map<string,unknown[]>):string{
+  const playable=(name:string)=>(outcomes.get(name)??[]).some((value)=>Boolean(value&&typeof value==="object"&&(value as {result?:{status?:unknown}}).result?.status==="playable"));
+  if(turnKind==="session-start"){
+    const provenance=playable("assign_practice_problem")
+      ? "A connected-provider problem is now playable. Name it as a provider problem only from the successful assignment result."
+      : "A tailored local prerequisite challenge is now playable. Call it local and tailored; never describe it as a real, sourced, judged, Codeforces, or LeetCode problem.";
+    return `${provenance} Give a compact micro-lesson for the target's one central idea, connect that idea to the challenge, and end with one concrete first action for the learner. Do not provide code, pseudocode that is the full solution, or the completed answer. Do not merely report that the target or challenge was created.`;
+  }
+  if(turnKind==="attempt-complete")return "State the evidence-backed learning decision, explain the one idea the next challenge transfers, and end with one concrete first action. Do not give the solution.";
+  if(turnKind==="challenge-revision")return "State what changed in the successful replacement and why it better matches the learner's request. Preserve the successful result's provider or local provenance.";
+  return "State what changed from the successful durable result and answer the learner concisely. Preserve provider or local provenance and do not claim an action the result does not prove.";
+}
+
+/**
  * Which tools are constructed for a turn at all.
  *
  * This must be a superset of every stage `nextToolStage` can reach for the same

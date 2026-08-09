@@ -171,7 +171,32 @@ export class LocalStore {
      reads as amnesia rather than as history. */
   addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[]){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity));this.enqueue("agent-message",{sessionId,messages:[value]});return value;}
   hasLearnerEvidence(){const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents").get() as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts WHERE status='completed'").get() as {count:number}).count;return abilities>0||completed>0;}
-  hasRelevantLearnerEvidence(goal:string){return this.searchLearner(goal,1).length>0||this.searchAttempts(goal,1).length>0;}
+  /**
+   * Evidence that can calibrate this goal, rather than any row sharing a generic
+   * word with it.  Session routing used to reuse the fuzzy search helpers here.
+   * A goal such as "learn DSU in C++" therefore matched an unrelated C++ array
+   * attempt, while "DP from scratch; I know loops and arrays" matched the named
+   * prerequisites.  Both skipped placement even though the learner had never
+   * touched the requested topic.
+   *
+   * Routing is deliberately stricter than retrieval:
+   * - intent/language words do not count as subject evidence;
+   * - a multi-term goal needs two topical overlaps;
+   * - an uncertain target and an `attempt_started` row are exposure, not learner
+   *   evidence.  A real edit, run, submission, remark, or graded event is.
+   *
+   * The agent still receives the broader fuzzy results after routing, where it
+   * can use prerequisite history without mistaking it for topic mastery.
+   */
+  hasRelevantLearnerEvidence(goal:string){
+    const terms=evidenceTerms(goal);
+    if(!terms.length)return false;
+    const threshold=Math.min(2,terms.length);
+    const abilities=this.db.prepare("SELECT title,markdown,status,evidence_ids FROM ability_documents ORDER BY updated_at DESC LIMIT 200").all() as Array<{title:string;markdown:string;status:string;evidence_ids:string}>;
+    if(abilities.some((row)=>(row.status!=="uncertain"||parseStringArray(row.evidence_ids).length>0)&&evidenceRelevance(`${row.title}\n${row.markdown}`,terms)>=threshold))return true;
+    const events=this.db.prepare("SELECT q.title,e.type,e.payload FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id WHERE e.type<>'attempt_started' ORDER BY e.occurred_at DESC LIMIT 500").all() as Array<{title:string;type:string;payload:string}>;
+    return events.some((row)=>evidenceRelevance(`${row.title}\n${row.type}\n${row.payload}`,terms)>=threshold);
+  }
   setPendingIntake(sessionId:string,input:AskUserQuestionInput){const existing=this.db.prepare("SELECT question,status,answer FROM session_intake WHERE session_id=?").get(sessionId) as {question:string;status:string;answer:string|null}|undefined;if(existing?.status==="answered"){let request:AskUserQuestionRequest;try{request=askUserQuestionRequestSchema.parse(JSON.parse(existing.question));}catch{request=legacyQuestionRequest(existing.question);}return{request,status:"answered" as const,answer:existing.answer};}const now=new Date().toISOString();const request=askUserQuestionRequestSchema.parse({id:randomUUID(),...input});this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,JSON.stringify(request),now);return{request,status:"pending" as const};}
   pendingIntake(sessionId:string):AskUserQuestionRequest|undefined{const row=this.db.prepare("SELECT question FROM session_intake WHERE session_id=? AND status='pending'").get(sessionId) as {question:string}|undefined;if(!row)return undefined;try{return askUserQuestionRequestSchema.parse(JSON.parse(row.question));}catch{return legacyQuestionRequest(row.question);}}
   answeredIntake(sessionId:string):string|undefined{const row=this.db.prepare("SELECT answer FROM session_intake WHERE session_id=? AND status='answered'").get(sessionId) as {answer:string|null}|undefined;return row?.answer??undefined;}
@@ -715,9 +740,17 @@ function abilityStatusFor(evidenceCount:number):AbilityStatus{return evidenceCou
 type AbilityRow={id:string;title:string;markdown:string;version:number;status:AbilityStatus;updated_at:string;evidence_ids:string;summary:string;practice:string;earned_at:string|null};
 
 const SEARCH_STOP_WORDS=new Set(["a","an","and","day","days","for","from","have","i","in","interview","learn","me","my","of","on","prepare","the","to","want","with"]);
+const EVIDENCE_STOP_WORDS=new Set([
+  ...SEARCH_STOP_WORDS,
+  "advanced","algorithm","algorithms","beginner","c#","c++","code","coding","comfortable","cpp","data","dsa","go","java","javascript","js","know","language","not","practice","practise","prerequisite","prerequisites","problem","problems","programming","python","rust","scratch","sure","teach","typescript","understand","understanding","whether","yet",
+]);
 function tokens(value:string){return value.toLowerCase().replace(/[^a-z0-9+#-]+/g," ").split(/\s+/).filter(Boolean);}
 function searchTerms(query:string){return [...new Set(tokens(query).filter(term=>!SEARCH_STOP_WORDS.has(term)&&(term.length>2||["ai","js","c#","c++"].includes(term))))].slice(0,12);}
 function relevance(text:string,terms:string[]){const haystack=new Set(tokens(text));return terms.reduce((score,term)=>score+(haystack.has(term)?1:0),0);}
+function normalizedEvidenceTokens(value:string){return value.toLowerCase().replace(/[^a-z0-9+#]+/g," ").split(/\s+/).filter(Boolean).map((term)=>term.length>4&&term.endsWith("s")?term.slice(0,-1):term);}
+function evidenceTerms(query:string){return [...new Set(normalizedEvidenceTokens(query).filter((term)=>!EVIDENCE_STOP_WORDS.has(term)&&(term.length>2||term==="ai")))].slice(0,12);}
+function evidenceRelevance(text:string,terms:string[]){const haystack=new Set(normalizedEvidenceTokens(text));return terms.reduce((score,term)=>score+(haystack.has(term)?1:0),0);}
+function parseStringArray(value:string){try{const parsed=JSON.parse(value);return Array.isArray(parsed)?parsed.filter((item):item is string=>typeof item==="string"):[];}catch{return[];}}
 /** A `training_targets` row as the domain shape. Exported because a checkpoint
  *  carries the session's target and is composed outside this file. */
 export function normalizeTarget(row:Record<string,unknown>){return{id:String(row.id),sessionId:String(row.session_id),abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),specificGap:String(row.specific_gap),desiredEvidence:String(row.desired_evidence),avoidTesting:JSON.parse(String(row.avoid_testing)) as string[],action:String(row.action),createdAt:String(row.created_at)};}
