@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { browserCandidates, isCodeforcesUrl } from "./codeforcesBrowser.js";
+import { browserCandidates, isCloudflareCookie, isCodeforcesUrl } from "./codeforcesBrowser.js";
 
 describe("the Codeforces sign-in browser boundary", () => {
   it("uses an explicit browser override without falling through to user browsers", () => {
@@ -10,5 +10,10 @@ describe("the Codeforces sign-in browser boundary", () => {
     expect(isCodeforcesUrl("https://codeforces.com/enter")).toBe(true);
     expect(isCodeforcesUrl("https://mirror.codeforces.com/profile/me")).toBe(true);
     expect(isCodeforcesUrl("https://codeforces.com.evil.test/enter")).toBe(false);
+  });
+
+  it("clears only Cloudflare state left by an obsolete browser identity", () => {
+    expect(["cf_clearance", "__cf_bm", "cf_chl_rc_ni", "JSESSIONID", "39ce7"].filter(isCloudflareCookie))
+      .toEqual(["cf_clearance", "__cf_bm", "cf_chl_rc_ni"]);
   });
 });

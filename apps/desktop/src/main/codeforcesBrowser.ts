@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { access, readFile, rm } from "node:fs/promises";
+import { access } from "node:fs/promises";
+import { createServer } from "node:net";
 import { homedir } from "node:os";
 import path from "node:path";
 
 const START_TIMEOUT_MS = 15_000;
 
-export type CodeforcesBrowserIdentity = { handle?: string; csrf?: string; challenge: boolean };
+export type CodeforcesBrowserIdentity = { handle?: string; csrf?: string; challenge: boolean; webdriver: boolean };
 type DevToolsTarget = { id: string; type: string; url: string; webSocketDebuggerUrl?: string };
 
 /** Launches an app-owned real-browser profile. This keeps the debugging endpoint
@@ -14,19 +15,25 @@ type DevToolsTarget = { id: string; type: string; url: string; webSocketDebugger
 export async function launchCodeforcesBrowser(profileDir: string): Promise<CodeforcesBrowser> {
   const executable = await findChromiumBrowser();
   if (!executable) throw new Error("Codeforces requires Google Chrome, Microsoft Edge, Brave, or Chromium to connect. Install one and try again.");
-  const activePortFile = path.join(profileDir, "DevToolsActivePort");
-  await rm(activePortFile, { force: true });
+  /* Chrome deliberately exposes navigator.webdriver when the magic value
+     --remote-debugging-port=0 is used. Cloudflare then grants a clearance but
+     rejects it on the redirect back to /enter. Reserve an ordinary ephemeral
+     loopback port first, then give Chrome that non-zero value. */
+  const port = await reserveLoopbackPort();
   const child = spawn(executable, [
     "--remote-debugging-address=127.0.0.1",
-    "--remote-debugging-port=0",
+    `--remote-debugging-port=${port}`,
     `--user-data-dir=${profileDir}`,
     "--no-first-run",
     "--no-default-browser-check",
     "--new-window",
-    "https://codeforces.com/enter",
+    "about:blank",
   ], { stdio: "ignore" });
   try {
-    return new CodeforcesBrowser(child, await waitForDevToolsPort(activePortFile, child));
+    await waitForDevTools(port, child);
+    const browser = new CodeforcesBrowser(child, port);
+    await browser.openSignIn();
+    return browser;
   } catch (error) {
     child.kill();
     throw error;
@@ -36,6 +43,21 @@ export async function launchCodeforcesBrowser(profileDir: string): Promise<Codef
 export class CodeforcesBrowser {
   constructor(private readonly child: ChildProcess, private readonly port: number) {}
   get closed(): boolean { return this.child.exitCode !== null || this.child.signalCode !== null; }
+
+  /** Challenge cookies produced while webdriver was accidentally enabled can
+   * never validate under the corrected browser identity. Clear only that state;
+   * a still-valid Codeforces login remains available for an easy reconnect. */
+  async openSignIn(): Promise<void> {
+    const target = await this.pageTarget(false);
+    if (!target?.webSocketDebuggerUrl) throw new Error("The Codeforces browser did not open a page.");
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+    try {
+      const result = await client.command<{ cookies?: Array<{ name: string }> }>("Network.getCookies", { urls: ["https://codeforces.com/"] });
+      const challengeNames = [...new Set((result.cookies ?? []).map((cookie) => cookie.name).filter(isCloudflareCookie))];
+      for (const name of challengeNames) await client.command("Network.deleteCookies", { name, url: "https://codeforces.com/" });
+      await client.command("Page.navigate", { url: "https://codeforces.com/enter" });
+    } finally { client.close(); }
+  }
 
   async identity(): Promise<CodeforcesBrowserIdentity | null> {
     const target = await this.target();
@@ -49,7 +71,9 @@ export class CodeforcesBrowser {
           const csrf = document.querySelector('meta[name="X-Csrf-Token"]')?.getAttribute('content') || document.querySelector('input[name="csrf_token"]')?.getAttribute('value') || '';
           const text = document.body?.innerText || '';
           const challenge = location.search.includes('__cf_chl_') || location.pathname.includes('/cdn-cgi/challenge-platform/') || /verifying you are human|performing security verification|just a moment/i.test(document.title + ' ' + text);
-          return logout && own ? { handle: (own.textContent || '').trim(), csrf, challenge: false } : { challenge };
+          return logout && own
+            ? { handle: (own.textContent || '').trim(), csrf, challenge: false, webdriver: navigator.webdriver }
+            : { challenge, webdriver: navigator.webdriver };
         })()`,
         returnByValue: true,
       });
@@ -74,10 +98,14 @@ export class CodeforcesBrowser {
   }
 
   private async target(): Promise<DevToolsTarget | null> {
+    return this.pageTarget(true);
+  }
+
+  private async pageTarget(codeforcesOnly: boolean): Promise<DevToolsTarget | null> {
     const response = await fetch(`http://127.0.0.1:${this.port}/json/list`).catch(() => null);
     if (!response?.ok) return null;
     const targets = await response.json() as DevToolsTarget[];
-    return targets.find((entry) => entry.type === "page" && isCodeforcesUrl(entry.url)) ?? null;
+    return targets.find((entry) => entry.type === "page" && (!codeforcesOnly || isCodeforcesUrl(entry.url))) ?? null;
   }
 }
 
@@ -104,18 +132,33 @@ export function isCodeforcesUrl(value: string): boolean {
   catch { return false; }
 }
 
+export function isCloudflareCookie(name: string): boolean {
+  return name === "cf_clearance" || name === "__cf_bm" || name.startsWith("cf_chl_");
+}
+
 async function findChromiumBrowser(): Promise<string | null> {
   for (const candidate of browserCandidates()) if (await access(candidate).then(() => true).catch(() => false)) return candidate;
   return null;
 }
 
-async function waitForDevToolsPort(file: string, child: ChildProcess): Promise<number> {
+async function reserveLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+async function waitForDevTools(port: number, child: ChildProcess): Promise<void> {
   const started = Date.now();
   while (Date.now() - started < START_TIMEOUT_MS) {
     if (child.exitCode !== null) throw new Error("The Codeforces browser closed before it was ready.");
-    const raw = await readFile(file, "utf8").catch(() => "");
-    const port = Number.parseInt(raw.split(/\r?\n/, 1)[0] ?? "", 10);
-    if (Number.isInteger(port) && port > 0) return port;
+    const response = await fetch(`http://127.0.0.1:${port}/json/version`).catch(() => null);
+    if (response?.ok) return;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("The Codeforces browser did not start its secure local connection.");
