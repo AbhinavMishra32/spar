@@ -462,7 +462,16 @@ export function App() {
         />
       )}
 
-      <main className={cn("app-pane relative flex min-w-0 flex-1 flex-col", sidebar && "app-content-pane")}>
+      {/* The two surfaces you work on rather than read keep the window's glass;
+          every other page is opaque, because the desktop moving behind a
+          paragraph is the desktop competing with it. */}
+      <main
+        className={cn(
+          "app-pane relative flex min-w-0 flex-1 flex-col",
+          sidebar && "app-content-pane",
+          (page === "workspace" || page === "challenge") && "app-pane-glass",
+        )}
+      >
         {page !== "workspace" && page !== "challenge" && (
           <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge">]} />
         )}
