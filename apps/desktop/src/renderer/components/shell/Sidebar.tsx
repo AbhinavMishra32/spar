@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, LayoutGrid, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
+import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, LayoutGrid, Library, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
 import type { SessionSummary } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -16,7 +16,7 @@ import { SparWordmark } from "../common/SparWordmark";
    "workspace" it draws its own toolbar and is not a destination in the nav — the
    sidebar highlights "challenges" while it is up, because that is where it came
    from and where Back returns to. */
-export type Page = "home" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
+export type Page = "home" | "problems" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
 
 /** What the sidebar can do to a session. Every one of these is a write the main
  *  process owns, so the row reports intent and never edits its own copy. */
@@ -30,6 +30,10 @@ export type SessionActions = {
 
 const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "home", label: "Home", icon: Waypoints },
+  /* Second, directly under Home, because the two are the two ways in: describe a
+     goal and let the agent choose, or choose yourself. Everything below them is a
+     record of what has already happened. */
+  { id: "problems", label: "Problems", icon: Library },
   { id: "sessions", label: "Sessions", icon: LayoutGrid },
   { id: "ability", label: "Abilities", icon: Map },
   { id: "challenges", label: "Challenges", icon: History },

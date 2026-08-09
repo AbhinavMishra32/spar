@@ -250,23 +250,38 @@ export class PracticeService {
 
   /** Search, for the learner browsing rather than the agent choosing. Same call
    *  underneath, so a problem they find and a problem it finds are the same
-   *  object with the same tags. */
-  async search(input: { query?: string; concepts?: string[]; difficulty?: "easy" | "medium" | "hard" | undefined; status?: "any" | "todo" | "attempted" | "solved"; limit?: number }) {
+   *  object with the same tags.
+   *
+   *  A source that throws is dropped rather than allowed to reject the whole
+   *  search. The home page browses on every visit and asks every source at once,
+   *  so one of them rate-limiting or going offline would otherwise empty a page
+   *  the other source could have filled. `failed` says which ones did, because a
+   *  short list with no explanation is the same lie as an empty one. */
+  async search(input: { query?: string; concepts?: string[]; difficulty?: "easy" | "medium" | "hard" | undefined; status?: "any" | "todo" | "attempted" | "solved"; limit?: number; offset?: number }) {
     const limit = input.limit ?? 10;
-    const results = await Promise.all(PRACTICE_SOURCES.map(async ({ id: source }) => {
-      const found = await this.gatewayFor(source, this.region(source)).search({
-      query: input.query ?? "",
-      tags: [],
-      ...(input.difficulty ? { difficulty: input.difficulty } : {}),
-      status: input.status ?? "any",
-      limit,
-      offset: 0,
-      ...(input.concepts?.length ? { concepts: input.concepts } : {}),
-      });
-      return found.problems.map((problem) => ({ ...problem, source }));
+    const offset = input.offset ?? 0;
+    const replies = await Promise.all(PRACTICE_SOURCES.map(async ({ id: source }) => {
+      try {
+        const found = await this.gatewayFor(source, this.region(source)).search({
+          query: input.query ?? "",
+          tags: [],
+          ...(input.difficulty ? { difficulty: input.difficulty } : {}),
+          status: input.status ?? "any",
+          limit,
+          offset,
+          ...(input.concepts?.length ? { concepts: input.concepts } : {}),
+        });
+        return { source, total: found.total, problems: found.problems.map((problem) => ({ ...problem, source })) };
+      } catch (cause) {
+        return { source, total: 0, problems: [], failure: cause instanceof Error ? cause.message : String(cause) };
+      }
     }));
-    const problems = interleaveProviderResults(results).slice(0, limit);
-    return { total: results.reduce((count, rows) => count + rows.length, 0), problems };
+    const problems = interleaveProviderResults(replies.map((reply) => reply.problems)).slice(0, limit);
+    return {
+      total: replies.reduce((count, reply) => count + reply.total, 0),
+      problems,
+      failed: replies.flatMap((reply) => ("failure" in reply && reply.failure ? [{ source: reply.source, message: reply.failure }] : [])),
+    };
   }
 
   /**
