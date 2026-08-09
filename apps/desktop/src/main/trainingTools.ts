@@ -7,6 +7,7 @@ import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
+import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 import { SOURCE_READ_TOOLS } from "../workers/agentPolicy.js";
 
 export async function executeTrainingTool(
@@ -201,6 +202,28 @@ async function assignPracticeProblem(
     return refuse("grading", `${practiceSourceName(provider)} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
   }
 
+  /* The model proposes; the host admits. Availability and a real judge say a
+     problem can be assigned, not that it should be. Check the source's own
+     concept metadata against the persisted target, then bound difficulty using
+     the durable status of that exact ability. */
+  const target = local.latestTarget(sessionId);
+  if (!target) return refuse("training target", "A persisted training target is required before assigning a provider problem.");
+  const ability = local.readAbilityDetail(String(target.ability_id));
+  const adaptiveChecks = assessPracticeAssignment({
+    target: {
+      abilityTitle: String(target.ability_title),
+      specificGap: String(target.specific_gap),
+      desiredEvidence: String(target.desired_evidence),
+      abilityStatus: ability?.ability.status ?? "uncertain",
+      abilityConcepts: ability?.ability.concepts.map((concept) => concept.slug) ?? [],
+      experience: local.getProfile()?.experience ?? "new",
+    },
+    candidate: { difficulty: mounted.problem.difficulty, concepts: mounted.problem.concepts.map((concept) => concept.slug) },
+    proposedConcepts: conceptTags(value.concepts),
+    why: String(value.why ?? ""),
+  });
+  if (adaptiveChecks.some((check) => !check.passed)) return { status: "invalid" as const, report: { valid: false, checks: adaptiveChecks } };
+
   /* Mounting went to the source, which takes as long as a network call takes. The
      challenge underneath can have changed in that time — the learner may have
      finished it — and superseding whatever is there now rather than what was there
@@ -213,7 +236,7 @@ async function assignPracticeProblem(
     return refuse("session lifecycle", `A playable challenge (${stillActive.title}) was published while this problem was being read from the source. This assignment was discarded.`);
   }
 
-  const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }] };
+  const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }, ...adaptiveChecks] };
   const concepts = conceptTags(value.concepts);
   await (activeQuestion ? workspaces.replaceAll(sessionId, mounted.files) : workspaces.writeAll(sessionId, mounted.files));
   const question = activeQuestion

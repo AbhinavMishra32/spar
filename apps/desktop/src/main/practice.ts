@@ -308,7 +308,7 @@ export class PracticeService {
    * replaces it is the source's own judge, and where that is unavailable the
    * `ChallengeSource` stamp says so in plain words.
    */
-  async mount(input: { source: PracticeSourceId; slug: string; language: Language; problem?: PracticeProblem }): Promise<{ design: QuestionDesign; source: ChallengeSource; files: Record<string, string>; cases: PracticeCase[]; harnessNote: string }> {
+  async mount(input: { source: PracticeSourceId; slug: string; language: Language; problem?: PracticeProblem }): Promise<{ problem: PracticeProblem; design: QuestionDesign; source: ChallengeSource; files: Record<string, string>; cases: PracticeCase[]; harnessNote: string }> {
     const bundle = input.problem ? this.bundleFor(input.problem) : await this.problem(input.source, input.slug, { fresh: true });
     const { problem, cases } = bundle;
     const language = this.languageFor(problem, input.language);
@@ -355,6 +355,7 @@ export class PracticeService {
     };
 
     return {
+      problem,
       design,
       source,
       files: harness.files,

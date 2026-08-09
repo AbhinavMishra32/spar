@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChallengeSource, QuestionDesign } from "@spar/domain";
+import type { PracticeProblem } from "@spar/practice";
 import { LocalStore } from "./store.js";
 import { executeTrainingTool } from "./trainingTools.js";
 import type { PracticeService } from "./practice.js";
@@ -33,12 +34,21 @@ const source: ChallengeSource = {
   cases: [{ name: "Example 1", input: ["[2,7,11,15]", "9"], expected: "[0,1]" }],
 };
 
+const problem = {
+  source: "leetcode", region: "global", slug: "two-sum", externalId: "1", displayId: "1", title: "Two Sum",
+  url: "https://leetcode.com/problems/two-sum/", difficulty: "easy", paidOnly: false, statement: design.statement,
+  hints: [], topicTags: [{ slug: "hash-table", name: "Hash Table" }], concepts: [{ slug: "hash-maps", role: "primary" }],
+  references: [], languages: [{ language: "javascript", slug: "javascript", starter: design.starterFiles["src/solution.js"]! }],
+  signature: { name: "twoSum", params: [{ name: "nums", type: "number[]" }, { name: "target", type: "number" }], returnType: "number[]", classBased: false },
+  examples: [], sampleTestcases: [], acceptanceRate: 50, status: "todo",
+} satisfies PracticeProblem;
+
 function practiceStub(overrides: Partial<Record<keyof PracticeService, unknown>> = {}) {
   const written: Record<string, string> = {};
   const service = {
     sourceName: () => "LeetCode",
     callTool: vi.fn(async (name: string) => ({ tool: name, problems: [] })),
-    mount: vi.fn(async () => ({ design, source, files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "" })),
+    mount: vi.fn(async () => ({ problem, design, source, files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "" })),
     ...overrides,
   } as unknown as PracticeService;
   const workspaces = {
@@ -64,7 +74,7 @@ const assign = (store: LocalStore, sessionId: string, practice: PracticeService,
   executeTrainingTool("assign_practice_problem", {
     source: "leetcode",
     slug: "two-sum",
-    concepts: [{ slug: "index-mapping", role: "primary" }, { slug: "hash-maps", role: "supporting" }],
+    concepts: [{ slug: "index-mapping", parentSlug: "hash-maps", role: "primary" }, { slug: "hash-maps", role: "supporting" }],
     why: "They solved the two-pass version and stalled on doing it in one, so this discriminates whether they can hold the seen-map while scanning.",
     ...input,
   }, sessionId, store, workspaces, {} as UtilityClient, undefined, practice) as Promise<Record<string, unknown>>;
@@ -99,6 +109,26 @@ describe("assign_practice_problem", () => {
     } finally { store.close(); }
   });
 
+  it("rejects a provider problem outside both the target ability and demonstrated level", async () => {
+    const store = new LocalStore(":memory:");
+    const { service, workspaces } = practiceStub({
+      mount: vi.fn(async () => ({
+        problem: { ...problem, difficulty: "hard", concepts: [{ slug: "graphs", role: "primary" as const }] },
+        design: { ...design, difficulty: "advanced" as const },
+        source: { ...source, difficulty: "hard" as const },
+        files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "",
+      })),
+    });
+    try {
+      const result = await assign(store, targetedSession(store), service, workspaces, { why: "This is a generally useful contest problem." });
+      const report = result.report as { checks: Array<{ name: string; passed: boolean }> };
+      expect(result.status).toBe("invalid");
+      expect(report.checks.filter((check) => !check.passed).map((check) => check.name))
+        .toEqual(expect.arrayContaining(["learner level", "provider concept", "target rationale"]));
+      expect(workspaces.writeAll).not.toHaveBeenCalled();
+    } finally { store.close(); }
+  });
+
   it("refuses a second challenge while one is still open", async () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub();
@@ -126,6 +156,7 @@ describe("assign_practice_problem", () => {
 
       const swapped = practiceStub({
         mount: vi.fn(async () => ({
+          problem,
           design: { ...design, title: "Best Time to Buy and Sell Stock" },
           source: { ...source, slug: "best-time-to-buy-and-sell-stock", displayId: "121" },
           files: { "src/solution.js": "// spar:solution:start\nvar maxProfit = function(prices) {};\n// spar:solution:end" },
@@ -189,7 +220,7 @@ describe("assign_practice_problem", () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub({
       mount: vi.fn(async () => ({
-        design, source: { ...source, remoteJudge: false, localCaseCount: 0 }, files: design.starterFiles, cases: [],
+        problem, design, source: { ...source, remoteJudge: false, localCaseCount: 0 }, files: design.starterFiles, cases: [],
         harnessNote: "This is a design problem: it asks for a class with several methods rather than one function.",
       })),
     });
@@ -204,7 +235,7 @@ describe("assign_practice_problem", () => {
   it("allows a locally-graded problem when the source published examples", async () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub({
-      mount: vi.fn(async () => ({ design, source: { ...source, remoteJudge: false, localCaseCount: 2, judge: "Spar grades this one locally." }, files: design.starterFiles, cases: [], harnessNote: "" })),
+      mount: vi.fn(async () => ({ problem, design, source: { ...source, remoteJudge: false, localCaseCount: 2, judge: "Spar grades this one locally." }, files: design.starterFiles, cases: [], harnessNote: "" })),
     });
     try {
       const result = await assign(store, targetedSession(store), service, workspaces);
