@@ -132,7 +132,15 @@ export class CodeforcesClient {
     const pageUrl = `${CODEFORCES_ORIGIN}/problemset/submit`;
     const page = await this.fetcher(pageUrl, { headers: codeforcesHeaders(session) });
     const html = await page.text();
-    const csrf = /name=["']csrf_token["'][^>]+value=["']([^"']+)/i.exec(html)?.[1] ?? session.csrfToken;
+    if (isRejectedSession(page, html)) {
+      this.onExpired();
+      throw new PracticeAuthError("Codeforces refused this session. Reconnect Codeforces in Settings.");
+    }
+    if (isCloudflareChallenge(page, html)) {
+      throw new PracticeSourceError("Codeforces asked for another browser verification before it would open the submit page. Reconnect Codeforces in Settings, complete the verification, and try again.", page.status);
+    }
+    if (!page.ok) throw new PracticeSourceError(`Codeforces answered ${page.status} while opening its submit page.`, page.status);
+    const csrf = csrfToken(html) || session.csrfToken;
     const programTypeId = languageId(html, input.language);
     if (!programTypeId) throw new PracticeSourceError(`Codeforces did not offer a supported ${input.language} compiler on its submit page.`);
     const submittedAfter = Math.floor(Date.now() / 1000) - 5;
@@ -144,7 +152,9 @@ export class CodeforcesClient {
       ...(hidden(html, "bfaa") ? { bfaa: hidden(html, "bfaa") } : {}),
     });
     const response = await this.fetcher(pageUrl, { method: "POST", redirect: "follow", headers: { ...codeforcesHeaders(session, pageUrl), "content-type": "application/x-www-form-urlencoded" }, body: form.toString() });
-    if (response.status === 401 || response.status === 403 || /enter\?back=|handleOrEmail/i.test(response.url)) { this.onExpired(); throw new PracticeAuthError("Codeforces refused this session. Reconnect Codeforces in Settings."); }
+    const responseHtml = await response.text();
+    if (isRejectedSession(response, responseHtml)) { this.onExpired(); throw new PracticeAuthError("Codeforces refused this session. Reconnect Codeforces in Settings."); }
+    if (isCloudflareChallenge(response, responseHtml)) throw new PracticeSourceError("Codeforces asked for another browser verification while submitting. Complete it in the Codeforces window, then submit again.", response.status);
     if (!response.ok) throw new PracticeSourceError(`Codeforces answered ${response.status} while submitting.`, response.status);
     const deadline = Date.now() + (input.timeoutMs ?? 120_000);
     let submission: SubmissionWire | undefined;
@@ -201,7 +211,38 @@ function iso(seconds?: number) { return seconds ? new Date(seconds * 1000).toISO
 function slugify(value: string) { return value.toLowerCase().trim().replace(/[^a-z0-9+#]+/g, "-").replace(/^-|-$/g, ""); }
 function codeforcesTagsForConcept(value: string) { const slug = slugify(value); return ({ "dynamic-programming": ["dp"], "depth-first-search": ["dfs-and-similar"], "bit-masking": ["bitmasks"], "modular-arithmetic": ["number-theory"], "arrays": ["data-structures", "sortings"], "state-management": ["implementation"], "recursive-decomposition": ["brute-force"], "strings": ["strings"] } as Record<string, string[]>)[slug] ?? [slug]; }
 function verdictName(value?: string) { return ({ OK: "Accepted", WRONG_ANSWER: "Wrong Answer", TIME_LIMIT_EXCEEDED: "Time Limit Exceeded", MEMORY_LIMIT_EXCEEDED: "Memory Limit Exceeded", RUNTIME_ERROR: "Runtime Error", COMPILATION_ERROR: "Compilation Error", IDLENESS_LIMIT_EXCEEDED: "Idleness Limit Exceeded", TESTING: "Judging" } as Record<string, string>)[value ?? ""] ?? (value ? value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "Unknown"); }
-function languageId(html: string, language: Language) { const options = [...html.matchAll(/<option[^>]+value=["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/gi)].map((match) => ({ id: match[1]!, name: decodeHtml(match[2]!).replace(/<[^>]+>/g, "") })); const pattern = language === "cpp" ? /GNU C\+\+2[03]|GNU C\+\+17|GNU C\+\+14/i : language === "typescript" ? /TypeScript/i : /JavaScript|Node\.js/i; return options.find((option) => pattern.test(option.name))?.id ?? ""; }
+function languageId(html: string, language: Language) {
+  const options = [...html.matchAll(/<option[^>]+value=["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/gi)]
+    .map((match) => ({ id: match[1]!, name: decodeHtml(match[2]!).replace(/<[^>]+>/g, "") }));
+  /* Codeforces calls GCC's C++ driver "GNU G++" on the live submit page. It
+     used "GNU C++" in older markup and still uses that spelling in API
+     submission history, so accept both. Prefer C++20 because Spar compiles the
+     learner's local program with -std=c++20; choosing the same language level
+     keeps Run and Submit semantically aligned. */
+  const preferences = language === "cpp"
+    ? [/GNU (?:G\+\+|C\+\+)20\b/i, /GNU (?:G\+\+|C\+\+)23\b/i, /GNU (?:G\+\+|C\+\+)17\b/i, /GNU (?:G\+\+|C\+\+)14\b/i]
+    : language === "typescript" ? [/TypeScript/i] : [/JavaScript/i, /Node\.js/i];
+  for (const pattern of preferences) {
+    const option = options.find((candidate) => pattern.test(candidate.name));
+    if (option) return option.id;
+  }
+  return "";
+}
+function csrfToken(html: string): string {
+  const meta = /<meta\b[^>]*\bname=["']X-Csrf-Token["'][^>]*>/i.exec(html)?.[0] ?? "";
+  const input = /<input\b[^>]*\bname=["']csrf_token["'][^>]*>/i.exec(html)?.[0] ?? "";
+  return attribute(meta || input, meta ? "content" : "value");
+}
+function attribute(tag: string, name: string): string {
+  return new RegExp(`\\b${name}=["']([^"']*)["']`, "i").exec(tag)?.[1] ?? "";
+}
+function isRejectedSession(response: Response, html: string): boolean {
+  return response.status === 401 || /\/enter(?:\?|$)/i.test(response.url) || /name=["']handleOrEmail["']|name=["']password["']/i.test(html);
+}
+function isCloudflareChallenge(response: Response, html: string): boolean {
+  return response.status === 403 && response.headers.get("cf-mitigated") === "challenge"
+    || /(?:just a moment|verifying you are human|cdn-cgi\/challenge-platform|__cf_chl_)/i.test(html);
+}
 function hidden(html: string, name: string) { return new RegExp(`name=["']${name}["'][^>]+value=["']([^"']*)`, "i").exec(html)?.[1] ?? ""; }
 function decodeHtml(value: string) { return value.replace(/<br\s*\/?\s*>/gi, "\n").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&amp;/gi, "&").trim(); }
 function sleep(ms: number) { return new Promise<void>((resolve) => setTimeout(resolve, ms)); }

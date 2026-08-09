@@ -1,4 +1,5 @@
-import type { BrowserWindow } from "electron";
+import { app, type BrowserWindow } from "electron";
+import path from "node:path";
 import {
   buildHarness, buildProgramHarness, CodeforcesGateway, effectiveCapabilities, judgeDescription, judgeInputBlock, LeetCodeGateway, practiceSource, submittableCode,
   type CodeforcesSession, type LeetCodeSession, type PracticeAccount, type PracticeCase, type PracticeConnectionState,
@@ -8,6 +9,7 @@ import { connectPracticeMcp, PRACTICE_READ_TOOLS, type PracticeMcpConnection } f
 import { practiceProblemSchema, practiceRegionSchema, PRACTICE_SOURCES } from "@spar/practice";
 import type { ChallengeSource, Language, QuestionDesign } from "@spar/domain";
 import { clearCodeforcesSignIn, clearLeetCodeSignIn, signInToCodeforces, signInToLeetCode } from "./practiceSignIn.js";
+import { launchCodeforcesSessionBrowser, type CodeforcesBrowser } from "./codeforcesBrowser.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 
@@ -70,6 +72,7 @@ export class PracticeService {
   private connections = new Map<PracticeSourceId, PracticeMcpConnection>();
   private gatewayCache = new Map<string, PracticeGateway>();
   private accountCache = new Map<PracticeSourceId, { at: number; account: PracticeAccount | null }>();
+  private codeforcesBrowser: Promise<CodeforcesBrowser> | null = null;
 
   constructor(
     private readonly auth: AuthService,
@@ -487,7 +490,10 @@ export class PracticeService {
     };
     const gateway = source === "leetcode"
       ? new LeetCodeGateway(region, () => this.readSession(source, region) as Promise<LeetCodeSession | null>, options)
-      : new CodeforcesGateway(() => this.readSession(source, region) as Promise<CodeforcesSession | null>, options);
+      : new CodeforcesGateway(() => this.readSession(source, region) as Promise<CodeforcesSession | null>, {
+          ...options,
+          fetcher: (input, init) => this.codeforcesFetch(input, init),
+        });
     this.gatewayCache.set(key, gateway);
     return gateway;
   }
@@ -501,12 +507,57 @@ export class PracticeService {
       this.accountCache.delete(source);
       for (const key of this.gatewayCache.keys()) if (key.startsWith(`${source}:`)) this.gatewayCache.delete(key);
       this.store.setSetting(CACHE_KEY(source, this.region(source)), Date.now());
+      if (source === "codeforces") this.closeCodeforcesBrowser();
       return;
     }
     for (const connection of this.connections.values()) void connection.close();
     this.connections.clear();
     this.gatewayCache.clear();
     this.accountCache.clear();
+    this.closeCodeforcesBrowser();
+  }
+
+  /** Stops the real-browser transport before Electron exits. Chrome is a child
+   * process, not an Electron window, so closing the app does not close it for us. */
+  stop(): void {
+    this.reset();
+  }
+
+  private async codeforcesFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+    const url = input instanceof Request ? input.url : String(input);
+    const parsed = new URL(url);
+    if (parsed.hostname !== "codeforces.com" || parsed.pathname !== "/problemset/submit") return fetch(input, init);
+    let browser = await this.codeforcesBrowserInstance();
+    if (browser.closed) {
+      this.codeforcesBrowser = null;
+      browser = await this.codeforcesBrowserInstance();
+    }
+    const posting = (init?.method ?? "GET").toUpperCase() === "POST";
+    try {
+      return await browser.request(url, init);
+    } finally {
+      /* GET and POST must share one verified browser. Once the POST response is
+         back, verdict polling uses Codeforces' public API and the temporary
+         Chrome window has no reason to remain open. */
+      if (posting) this.closeCodeforcesBrowser();
+    }
+  }
+
+  private codeforcesBrowserInstance(): Promise<CodeforcesBrowser> {
+    if (!this.codeforcesBrowser) {
+      const profile = path.join(app.getPath("userData"), "codeforces-browser");
+      this.codeforcesBrowser = launchCodeforcesSessionBrowser(profile).catch((error) => {
+        this.codeforcesBrowser = null;
+        throw error;
+      });
+    }
+    return this.codeforcesBrowser;
+  }
+
+  private closeCodeforcesBrowser(): void {
+    const browser = this.codeforcesBrowser;
+    this.codeforcesBrowser = null;
+    if (browser) void browser.then((value) => value.close()).catch(() => undefined);
   }
 
   private bundleFor(problem: PracticeProblem): PracticeProblemBundle {

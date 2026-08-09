@@ -55,9 +55,32 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      turn that can never run is a dead entry in the sidebar that the learner has
      to clean up to make the error go away. */
   ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); if(!await deps.providers.available())throw new Error(NO_PROVIDER); const created=deps.store.createSession(input.goal);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);await startAgentTurn(created.sessionId,`Start a new adaptive session for this learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
-  ipcMain.handle(ipc.sessionsOpen, (_event, sessionId) => {
+  /**
+   * SQLite is the durable owner of an active challenge. A workspace can be
+   * absent after an interrupted restore or an older checkpoint that carried no
+   * files; recreate only missing declared files and never overwrite learner
+   * content that is still present.
+   */
+  const ensureLiveWorkspace = async (sessionId: string, detail = deps.store.readSession(sessionId)) => {
+    if (!detail?.question) return detail;
+    const record = deps.store.challengeRecord(detail.question.id);
+    if (!record) return detail;
+    const declared = { ...record.design.starterFiles, ...record.design.visibleTests };
+    const checkpoint = sessionCheckpointSchema.safeParse(detail.checkpoint);
+    const checkpointFiles = checkpoint.success && checkpoint.data.attemptId === detail.question.attemptId
+      ? checkpoint.data.workspaceFiles
+      : [];
+    for (const file of checkpointFiles) {
+      if (file.path in declared && (file.dirtyContent ?? file.content) !== undefined) {
+        declared[file.path] = (file.dirtyContent ?? file.content)!;
+      }
+    }
+    await deps.workspaces.ensureFiles(sessionId, declared);
+    return detail;
+  };
+  ipcMain.handle(ipc.sessionsOpen, async (_event, sessionId) => {
     const id=zUuid(sessionId);let detail=deps.store.readSession(id);
-    if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return detail;
+    if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return ensureLiveWorkspace(id, detail);
     if(deps.store.resetIncompletePlanning(id)){clearAutoResume(id);detail=deps.store.readSession(id);}
     if(!detail)return null;
     if(!mayAutoResume(id))return detail;
@@ -66,11 +89,19 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal)&&!placementAnswer){void startAgentTurn(id,`Resume placement for this learner goal: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
     if(placementAnswer){void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Commit one accessible target and create a validated question.`,"system","session-start");return detail;}
     void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
-    return detail;
+    return ensureLiveWorkspace(id, detail);
   });
   ipcMain.handle(ipc.workspaceStateSave, (_event, value) => { const { sessionId, ...state } = workspaceStateInput.parse(value); deps.checkpoints.remember(sessionId, state); });
   ipcMain.handle(ipc.attemptAppend, (_event, value) => deps.store.appendNextEvent(attemptAppendInput.parse(value)));
-  ipcMain.handle(ipc.workspaceRead, (_event, value) => { const input = workspacePathInput.parse(value); return deps.workspaces.read(input.sessionId, input.path); });
+  ipcMain.handle(ipc.workspaceRead, async (_event, value) => {
+    const input = workspacePathInput.parse(value);
+    try { return await deps.workspaces.read(input.sessionId, input.path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      await ensureLiveWorkspace(input.sessionId);
+      return deps.workspaces.read(input.sessionId, input.path);
+    }
+  });
   /* Every saved file is a reason to checkpoint. The service debounces, so a burst
      of saves costs one row rather than one each. */
   ipcMain.handle(ipc.workspaceWrite, async (_event, value) => { const input = workspaceWriteInput.parse(value); await deps.workspaces.write(input.sessionId, input.path, input.content); deps.checkpoints.note(input.sessionId); });

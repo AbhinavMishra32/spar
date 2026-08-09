@@ -2,11 +2,12 @@ import type { ComponentProps, ReactElement } from "react";
 import { Plug } from "lucide-react";
 import type { ProviderId } from "../../../shared/api";
 import { cn } from "@/lib/utils";
+import { PROVIDER_BRAND_COLOR } from "@/lib/brand";
 
 /**
- * Official provider marks, monochrome so they inherit the row's text colour the
- * way the rest of the chrome does. Every path is the vendor's own symbol — no
- * stand-in glyphs — normalised onto a single viewBox-agnostic wrapper.
+ * Official provider marks, using the provider's canonical colour where it has
+ * one. Every path is the vendor's own symbol — no stand-in glyphs — normalised
+ * onto a single viewBox-agnostic wrapper.
  */
 type GlyphProps = ComponentProps<"svg">;
 
@@ -210,5 +211,6 @@ const GLYPHS: Partial<Record<ProviderId, (props: GlyphProps) => ReactElement>> =
 /** The provider's own mark, or a neutral plug for a hand-rolled endpoint. */
 export function ProviderGlyph({ className, provider }: { className?: string; provider: ProviderId }) {
   const Glyph = GLYPHS[provider];
-  return Glyph ? <Glyph className={className} /> : <Plug className={cn("size-full", className)} />;
+  const color = PROVIDER_BRAND_COLOR[provider];
+  return Glyph ? <Glyph className={className} style={color ? { color } : undefined} /> : <Plug className={cn("size-full", className)} />;
 }

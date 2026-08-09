@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
-import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
+import { Panel, PanelGroup } from "react-resizable-panels";
 import {
   ArrowRight,
   CheckCircle2,
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { fileName, message, relativeTime, shortTime } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
+import { useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
 import { FileGlyph, LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ChallengeEmblem } from "../workspace/ChallengeEmblem";
@@ -96,7 +97,7 @@ function Brief({
 
   return (
     <div className="app-scroll h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-[62rem] px-18 pb-16 pt-8">
+      <div className="mx-auto w-full max-w-[62rem] px-8 pb-16 pt-8">
         <div className="flex items-start gap-4">
           <ChallengeEmblem question={summary} size={64} />
           <div className="min-w-0 flex-1">
@@ -264,7 +265,7 @@ export function ChallengePage({
   const [outcome, setOutcome] = useState<RunOutcome>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("testcase");
 
-  const dock = useRef<ImperativePanelHandle>(null);
+  const resultPanel = useAnimatedResultPanel();
   const visibleRunId = useRef<string | null>(null);
   const terminalRef = useRef("");
 
@@ -358,7 +359,7 @@ export function ChallengePage({
       setRunning(true);
       setOutcome(null);
       setResultTab("result");
-      dock.current?.expand();
+      resultPanel.expand();
       terminalRef.current = "$ run visible tests\n";
       setTerminal(terminalRef.current);
       await save();
@@ -377,7 +378,7 @@ export function ChallengePage({
       setChecking(true);
       setOutcome(null);
       setResultTab("result");
-      dock.current?.expand();
+      resultPanel.expand();
       await save();
       // The check replaces the visible run rather than appending to it: two TAP
       // documents in one buffer read as one confused report.
@@ -548,7 +549,7 @@ export function ChallengePage({
                     <span className="mr-1 text-ui-sm text-muted-foreground/60">⌘S</span>
                     <button
                       className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      onClick={() => (dock.current?.isCollapsed() ? dock.current?.expand() : dock.current?.collapse())}
+                      onClick={resultPanel.toggle}
                       title="Toggle the result panel"
                       type="button"
                     >
@@ -592,9 +593,22 @@ export function ChallengePage({
 
             <PaneHandle direction="vertical" />
 
-            <Panel ref={dock} collapsible collapsedSize={0} defaultSize={34} minSize={14} order={2}>
+            <Panel
+              ref={resultPanel.panel}
+              className={cn(resultPanel.moving && "transition-[flex-grow] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none")}
+              collapsible
+              collapsedSize={0}
+              defaultSize={34}
+              minSize={14}
+              onCollapse={resultPanel.markCollapsed}
+              onExpand={resultPanel.markExpanded}
+              order={2}
+            >
               <div
-                className="work-blob h-full [--shimmer-phase:-1.7s]"
+                className={cn(
+                  "work-blob h-full [--shimmer-phase:-1.7s] transition-[translate,opacity] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+                  resultPanel.open ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
+                )}
                 data-busy={busy || undefined}
                 data-settled={settled || undefined}
               >
@@ -603,7 +617,7 @@ export function ChallengePage({
                     terminalRef.current = "";
                     setTerminal("");
                   }}
-                  onCollapse={() => dock.current?.collapse()}
+                  onCollapse={resultPanel.collapse}
                   onTab={setResultTab}
                   busyLabel={checking ? "Running the visible and hidden cases…" : undefined}
                   outcome={outcome}

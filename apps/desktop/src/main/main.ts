@@ -70,7 +70,7 @@ else {
     /* Checkpoints are flushed before the store closes: quitting is the one moment
        there is no next debounce tick to wait for, and the session the learner just
        closed the laptop on is exactly the one worth not losing. */
-    app.on("before-quit", () => { void checkpoints.flushAll().finally(() => { checkpoints.stop(); sync.stop(); runner.stop(); agent.stop(); store.close(); }); });
+    app.on("before-quit", () => { practice.stop(); void checkpoints.flushAll().finally(() => { checkpoints.stop(); sync.stop(); runner.stop(); agent.stop(); store.close(); }); });
     app.on("activate", async () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow({ stage: !(await auth.account()) ? "sign-in" : store.getProfile() ? "app" : "restoring" }); });
   });
 }

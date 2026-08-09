@@ -13,6 +13,32 @@ type DevToolsTarget = { id: string; type: string; url: string; webSocketDebugger
  * away from the learner's ordinary browsing session while allowing Codeforces'
  * managed browser check to use a browser it supports. */
 export async function launchCodeforcesBrowser(profileDir: string): Promise<CodeforcesBrowser> {
+  const browser = await launch(profileDir);
+  try {
+    await browser.openSignIn();
+    return browser;
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
+}
+
+/** Opens the same persistent Chrome profile used during sign-in, but leaves its
+ * authenticated Codeforces cookies inside Chrome. Cloudflare binds its
+ * clearance to more than a cookie, so authenticated submit-page traffic has to
+ * originate from this browser rather than Node's HTTP stack. */
+export async function launchCodeforcesSessionBrowser(profileDir: string): Promise<CodeforcesBrowser> {
+  const browser = await launch(profileDir);
+  try {
+    await browser.openSession();
+    return browser;
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
+}
+
+async function launch(profileDir: string): Promise<CodeforcesBrowser> {
   const executable = await findChromiumBrowser();
   if (!executable) throw new Error("Codeforces requires Google Chrome, Microsoft Edge, Brave, or Chromium to connect. Install one and try again.");
   /* Chrome deliberately exposes navigator.webdriver when the magic value
@@ -31,9 +57,7 @@ export async function launchCodeforcesBrowser(profileDir: string): Promise<Codef
   ], { stdio: "ignore" });
   try {
     await waitForDevTools(port, child);
-    const browser = new CodeforcesBrowser(child, port);
-    await browser.openSignIn();
-    return browser;
+    return new CodeforcesBrowser(child, port);
   } catch (error) {
     child.kill();
     throw error;
@@ -56,6 +80,61 @@ export class CodeforcesBrowser {
       const challengeNames = [...new Set((result.cookies ?? []).map((cookie) => cookie.name).filter(isCloudflareCookie))];
       for (const name of challengeNames) await client.command("Network.deleteCookies", { name, url: "https://codeforces.com/" });
       await client.command("Page.navigate", { url: "https://codeforces.com/enter" });
+    } finally { client.close(); }
+  }
+
+  async openSession(): Promise<void> {
+    await this.navigate("https://codeforces.com/");
+  }
+
+  /** Performs an HTTP request in the real browser process. Forbidden browser
+   * headers are omitted deliberately: Chrome supplies its own Cookie,
+   * User-Agent, Origin and Referer, which is exactly the identity Cloudflare
+   * verified. The returned object is a normal Response so the provider package
+   * remains independent of Electron and Chrome. */
+  async request(url: string, init: RequestInit = {}): Promise<Response> {
+    const destination = new URL(url);
+    if (!isCodeforcesUrl(destination.href)) throw new Error("The Codeforces browser can only request Codeforces URLs.");
+    const target = await this.target();
+    if (!target?.webSocketDebuggerUrl) throw new Error("The Codeforces browser no longer has an open page.");
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+    try {
+      const headers = browserSafeHeaders(init.headers);
+      const request = {
+        url: destination.href,
+        method: init.method ?? "GET",
+        headers,
+        body: typeof init.body === "string" ? init.body : undefined,
+      };
+      const evaluated = await client.command<{
+        result?: { value?: { status: number; statusText: string; url: string; headers: Array<[string, string]>; body: string } };
+        exceptionDetails?: { text?: string };
+      }>("Runtime.evaluate", {
+        expression: `(async () => {
+          const request = ${JSON.stringify(request)};
+          const response = await fetch(request.url, {
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+            credentials: "include",
+            redirect: "follow"
+          });
+          return {
+            status: response.status,
+            statusText: response.statusText,
+            url: response.url,
+            headers: [...response.headers.entries()],
+            body: await response.text()
+          };
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      const value = evaluated.result?.value;
+      if (!value) throw new Error(evaluated.exceptionDetails?.text || "Chrome did not return the Codeforces response.");
+      const response = new Response(value.body, { status: value.status, statusText: value.statusText, headers: value.headers });
+      Object.defineProperty(response, "url", { value: value.url });
+      return response;
     } finally { client.close(); }
   }
 
@@ -97,6 +176,22 @@ export class CodeforcesBrowser {
     if (!this.closed) this.child.kill();
   }
 
+  private async navigate(url: string): Promise<void> {
+    const target = await this.pageTarget(false);
+    if (!target?.webSocketDebuggerUrl) throw new Error("The Codeforces browser did not open a page.");
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+    try {
+      await client.command("Page.navigate", { url });
+      const started = Date.now();
+      while (Date.now() - started < START_TIMEOUT_MS) {
+        const state = await client.command<{ result?: { value?: string } }>("Runtime.evaluate", { expression: "document.readyState", returnByValue: true });
+        if (state.result?.value === "complete") return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("The Codeforces page did not finish loading.");
+    } finally { client.close(); }
+  }
+
   private async target(): Promise<DevToolsTarget | null> {
     return this.pageTarget(true);
   }
@@ -107,6 +202,12 @@ export class CodeforcesBrowser {
     const targets = await response.json() as DevToolsTarget[];
     return targets.find((entry) => entry.type === "page" && (!codeforcesOnly || isCodeforcesUrl(entry.url))) ?? null;
   }
+}
+
+const FORBIDDEN_BROWSER_HEADERS = new Set(["cookie", "host", "origin", "referer", "user-agent", "content-length"]);
+
+export function browserSafeHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  return Object.fromEntries([...new Headers(headers).entries()].filter(([name]) => !FORBIDDEN_BROWSER_HEADERS.has(name.toLowerCase())));
 }
 
 export function browserCandidates(platform = process.platform, env: NodeJS.ProcessEnv = process.env): string[] {

@@ -36,10 +36,11 @@ describe("CodeforcesClient", () => {
     let statusReads = 0;
     const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
       const href = String(url);
-      if (href.endsWith("/problemset/submit") && !init?.method) return html(`<meta name="X-Csrf-Token" content="fresh"><input name="ftaa" value="f"><input name="bfaa" value="b"><select><option value="73">GNU C++20 (64)</option></select>`);
+      if (href.endsWith("/problemset/submit") && !init?.method) return html(`<meta content="fresh" name="X-Csrf-Token"><input name="ftaa" value="f"><input name="bfaa" value="b"><select name="programTypeId"><option value="54">GNU G++17 7.3.0</option><option value="89">GNU G++20 13.2 (64 bit, winlibs)</option><option value="91">GNU G++23 14.2 (64 bit, msys2)</option></select>`);
       if (href.endsWith("/problemset/submit") && init?.method === "POST") {
         expect(String(init.body)).toContain("submittedProblemCode=4A");
-        expect(String(init.body)).toContain("programTypeId=73");
+        expect(String(init.body)).toContain("programTypeId=89");
+        expect(String(init.body)).toContain("csrf_token=fresh");
         expect(String(init.body)).toContain("source=int+main");
         return html("submitted");
       }
@@ -51,6 +52,27 @@ describe("CodeforcesClient", () => {
     }) as typeof fetch;
     const verdict = await new CodeforcesClient(async () => SESSION, fetcher).submit({ problem: { slug: "4/A", externalId: "4/A" }, language: "cpp", code: "int main(){}", timeoutMs: 5_000 });
     expect(verdict).toMatchObject({ outcome: "passed", status: "Accepted", submitted: true, submissionId: "99" });
+  });
+
+  it("reports a rejected session instead of pretending the compiler is missing", async () => {
+    const expired = vi.fn();
+    const fetcher = vi.fn(async () => new Response(`<form><input name="handleOrEmail"><input name="password"></form>`, {
+      status: 200,
+    })) as typeof fetch;
+    const client = new CodeforcesClient(async () => SESSION, fetcher, expired);
+    await expect(client.submit({ problem: { slug: "4/A", externalId: "4/A" }, language: "cpp", code: "int main(){}" }))
+      .rejects.toThrow("Codeforces refused this session");
+    expect(expired).toHaveBeenCalledOnce();
+  });
+
+  it("names browser verification when Cloudflare replaces the submit page", async () => {
+    const fetcher = vi.fn(async () => new Response("<title>Just a moment...</title>", {
+      status: 403,
+      headers: { "cf-mitigated": "challenge" },
+    })) as typeof fetch;
+    const client = new CodeforcesClient(async () => SESSION, fetcher);
+    await expect(client.submit({ problem: { slug: "4/A", externalId: "4/A" }, language: "cpp", code: "int main(){}" }))
+      .rejects.toThrow("another browser verification");
   });
 });
 

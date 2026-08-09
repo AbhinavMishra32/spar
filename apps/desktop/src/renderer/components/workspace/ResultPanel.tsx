@@ -390,10 +390,10 @@ export function ResultPanel({
  * for none of them, which sends you looking at your own code for a fault that is
  * not there.
  */
-function ungradedReason(output: string, hasCases: boolean): string {
+export function ungradedReason(output: string, hasCases: boolean): string {
   const stopped = stoppedAt(output);
   if (stopped) return `The run was stopped at ${stopped}, so nothing was graded — this is the output up to that point, not a verdict on your code.`;
-  if (/^.*\berror:/im.test(output)) return "The run never reached the cases — it failed before they could be checked. The output says why.";
+  if (/\b(?:[A-Za-z]+Error|error):/i.test(output)) return "The run never reached the cases — it failed before they could be checked. The output says why.";
   return hasCases
     ? "No verdicts came back from this run, so these cases are shown as they stand — what was going to be checked, not what was."
     : "No case results came back from this run — showing its raw output.";
