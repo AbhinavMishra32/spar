@@ -6,7 +6,7 @@ import path from "node:path";
 
 const START_TIMEOUT_MS = 15_000;
 
-export type CodeforcesBrowserIdentity = { handle?: string; csrf?: string; challenge: boolean; webdriver: boolean };
+export type CodeforcesBrowserIdentity = { handle?: string; csrf?: string; challenge: boolean; webdriver: boolean; userAgent: string };
 type DevToolsTarget = { id: string; type: string; url: string; webSocketDebuggerUrl?: string };
 
 /** Launches an app-owned real-browser profile. This keeps the debugging endpoint
@@ -72,8 +72,8 @@ export class CodeforcesBrowser {
           const text = document.body?.innerText || '';
           const challenge = location.search.includes('__cf_chl_') || location.pathname.includes('/cdn-cgi/challenge-platform/') || /verifying you are human|performing security verification|just a moment/i.test(document.title + ' ' + text);
           return logout && own
-            ? { handle: (own.textContent || '').trim(), csrf, challenge: false, webdriver: navigator.webdriver }
-            : { challenge, webdriver: navigator.webdriver };
+            ? { handle: (own.textContent || '').trim(), csrf, challenge: false, webdriver: navigator.webdriver, userAgent: navigator.userAgent }
+            : { challenge, webdriver: navigator.webdriver, userAgent: navigator.userAgent };
         })()`,
         returnByValue: true,
       });

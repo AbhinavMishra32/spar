@@ -204,7 +204,7 @@ export async function signInToCodeforces(input: { parent: BrowserWindow | null; 
           if (identity && !signInReported) { signInReported = true; input.onProgress?.(`Sign in to ${source.name} in the browser window…`); }
           return false;
         }
-        const session = parseCodeforcesCookies(await browser.cookieHeader(), identity.handle, identity.csrf);
+        const session = parseCodeforcesCookies(await browser.cookieHeader(), identity.handle, identity.csrf, identity.userAgent);
         input.onProgress?.(`Signed in to ${source.name} as ${identity.handle}.`);
         finish({ status: "connected", session, username: identity.handle });
         return true;

@@ -8,6 +8,11 @@ export type CodeforcesSession = {
   handle: string;
   cookie: string;
   csrfToken: string;
+  /** Cloudflare binds its clearance cookie to the browser identity that earned
+   * it. Authenticated requests must retain that identity instead of advertising
+   * a hard-coded, eventually stale Chrome release. Optional only for sessions
+   * imported by older clients or environment-based MCP setups. */
+  userAgent?: string;
   capturedAt: string;
 };
 
@@ -16,17 +21,17 @@ export function codeforcesHeaders(session: CodeforcesSession | null, referer = `
     accept: "application/json,text/html;q=0.9,*/*;q=0.8",
     referer,
     origin: CODEFORCES_ORIGIN,
-    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "user-agent": session?.userAgent || "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     ...(session ? { cookie: session.cookie } : {}),
   };
 }
 
-export function parseCodeforcesCookies(raw: string, handle: string, csrfToken: string): CodeforcesSession {
+export function parseCodeforcesCookies(raw: string, handle: string, csrfToken: string, userAgent?: string): CodeforcesSession {
   const cookie = raw.trim();
   if (!cookie) throw new PracticeAuthError("Codeforces did not leave a browser session to save.");
   if (!handle.trim()) throw new PracticeAuthError("Codeforces did not identify the signed-in account.");
   if (!csrfToken.trim()) throw new PracticeAuthError("Codeforces did not publish the CSRF token required to submit solutions.");
-  return { region: "global", handle: handle.trim(), cookie, csrfToken: csrfToken.trim(), capturedAt: new Date().toISOString() };
+  return { region: "global", handle: handle.trim(), cookie, csrfToken: csrfToken.trim(), ...(userAgent?.trim() ? { userAgent: userAgent.trim() } : {}), capturedAt: new Date().toISOString() };
 }
 
 export async function verifyCodeforcesSession(session: CodeforcesSession, fetcher: typeof fetch = fetch): Promise<boolean> {
