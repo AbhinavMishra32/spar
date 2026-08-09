@@ -8,6 +8,7 @@ import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
 import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
+import { practiceSourceName } from "./practiceChoice.js";
 import { SOURCE_READ_TOOLS } from "../workers/agentPolicy.js";
 
 export async function executeTrainingTool(
@@ -260,10 +261,6 @@ async function assignPracticeProblem(
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
   };
-}
-
-function practiceSourceName(source: "leetcode" | "codeforces") {
-  return source === "leetcode" ? "LeetCode" : "Codeforces";
 }
 
 /**

@@ -10,6 +10,7 @@ import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
 import { sourceSubmissionOutput } from "../shared/sourceOutput.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
+import { openChosenProblem } from "./practiceChoice.js";
 import { judgeCaseBlock } from "./judgeCases.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
@@ -349,30 +350,37 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   /**
    * The learner picking a problem themselves.
    *
-   * A real session, with the agent told plainly that the choice was not its own:
-   * the problem is fixed, and its job is to aim the target at what this problem
-   * will show rather than to go looking for a different one. Deliberately not a
-   * shortcut past the provider guard — a session with no model behind it is a
-   * dead row in the sidebar whoever created it.
+   * Opens the problem. It does not ask the agent to go and open the problem.
+   *
+   * That distinction is the whole of this handler and it used to be the other way
+   * round: picking a problem created a session and posted an instruction into it
+   * telling the agent to read the problem and assign it. Three things were wrong
+   * with that. The instruction was written as a learner message, so the first
+   * thing anyone saw on clicking a problem was a paragraph of tool directions
+   * addressed to somebody else. The challenge did not exist until a turn had
+   * finished, so the fastest path to a problem the learner had already chosen ran
+   * through a model round trip. And it could fail — on a rate limit, on no
+   * provider, on the agent deciding the adaptive checks said no — leaving a dead
+   * session behind for a request that never needed a judgement call.
+   *
+   * Mounting is deterministic, so it happens here: read the problem, derive the
+   * target from it, write the files, create the challenge. The learner lands in
+   * the workspace with the problem open.
+   *
+   * The agent is not cut out of it — it is put *inside* it. Every turn started
+   * from this session carries the active challenge, its target and its concepts in
+   * context (see `startAgentTurn`), so the first thing the learner says in the
+   * workspace reaches an agent that is already looking at what they are looking
+   * at. What is gone is only the turn that had to run before anything appeared.
+   *
+   * No provider guard either, and that is deliberate rather than an oversight: a
+   * mounted problem is readable, editable, runnable and submittable with no model
+   * anywhere near it. Refusing to open one because no provider is connected would
+   * withhold the part of the app that does not need one.
    */
   ipcMain.handle(ipc.sourceStart, async (_event, value) => {
     const input = sourceStartInput.parse(value);
-    if (!await deps.providers.available()) throw new Error(NO_PROVIDER);
-    const bundle = await deps.practice.problem(input.source, input.slug, { fresh: true });
-    const problem = bundle.problem;
-    const sourceName = problem.source === "leetcode" ? "LeetCode" : "Codeforces";
-    const created = deps.store.createSession(`I want to solve ${problem.title} on ${sourceName}.`);
-    await startAgentTurn(
-      created.sessionId,
-      [
-        `The learner chose this problem themselves: ${problem.title} (${sourceName} ${problem.displayId}, ${problem.difficulty}, source "${problem.source}", slug "${problem.slug}").`,
-        `Do not look for a different problem. Read it with read_practice_problem using that source and slug, set one training target aimed at what solving it will actually show about them, and assign it with assign_practice_problem using that exact source and slug.`,
-        problem.status === "solved" ? "They have solved this one before at the source, so treat this as a re-attempt and aim the target at what a second solve would prove." : "",
-      ].filter(Boolean).join(" "),
-      "learner",
-      "session-start",
-    );
-    return created;
+    return openChosenProblem(deps, { source: input.source, slug: input.slug, language: input.language });
   });
   /**
    * Running the open challenge at its source, without submitting it.
