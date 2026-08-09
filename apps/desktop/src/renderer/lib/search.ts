@@ -36,6 +36,7 @@ export const PALETTE_ACTIONS: PaletteAction[] = [
 
 export const PALETTE_PLACES: PalettePlace[] = [
   { page: "home", label: "Home", keywords: "dashboard overview start" },
+  { page: "problems", label: "Problems", keywords: "practice browse library leetcode codeforces solve pick" },
   { page: "sessions", label: "Sessions", keywords: "all list" },
   { page: "ability", label: "Abilities", keywords: "map skills evidence what i can do" },
   { page: "challenges", label: "Challenges", keywords: "history problems attempts tests" },

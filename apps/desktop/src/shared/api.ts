@@ -188,12 +188,18 @@ export const sourceRegionSchema = z.enum(["global", "cn"]);
 export const sourceIdSchema = z.enum(["leetcode", "codeforces"]);
 export const sourceJudgeSchema = z.enum(["source", "local"]);
 export type SourceJudgePreference = z.infer<typeof sourceJudgeSchema>;
+/** The ceiling is the gateways' own (`practiceSearchInputSchema`), and it is set
+ *  where it is because the home page browses rather than looks something up: a
+ *  grid of ten problems is a teaser, and asking twice for the same screenful is
+ *  two round trips to say one thing. */
 export const sourceSearchInput = z.object({
   query: z.string().trim().max(200).default(""),
   concepts: z.array(z.string().trim().min(1).max(60)).max(5).default([]),
   difficulty: z.enum(["easy", "medium", "hard"]).optional(),
   status: z.enum(["any", "todo", "attempted", "solved"]).default("any"),
-  limit: z.number().int().min(1).max(25).default(10),
+  limit: z.number().int().min(1).max(50).default(10),
+  /** How far into the matches to start, so a list can grow rather than reload. */
+  offset: z.number().int().min(0).max(5_000).default(0),
 });
 export const sourceSlugInput = z.object({ source: sourceIdSchema, slug: z.string().trim().min(1).max(120) });
 export const sourceConnectionInput = z.object({ source: sourceIdSchema });
@@ -241,6 +247,15 @@ export type PracticeSearchHit = {
   acceptanceRate: number | null;
   concepts: string[];
   status: "solved" | "attempted" | "todo" | "unknown";
+};
+/** What a browse came back with. `total` is how many problems matched across
+ *  every source, not how many were returned, so a list can say what it is a
+ *  window onto. `failed` names the sources that could not answer at all — a
+ *  short list is otherwise indistinguishable from a small corpus. */
+export type PracticeSearchResult = {
+  total: number;
+  problems: PracticeSearchHit[];
+  failed: Array<{ source: z.infer<typeof sourceIdSchema>; message: string }>;
 };
 /** A judged run at the source, as the result panel reads it. */
 export type SourceRunReport = {
@@ -368,7 +383,7 @@ export interface SparApi {
   setPracticeRegion(source: z.infer<typeof sourceIdSchema>, region: z.infer<typeof sourceRegionSchema>): Promise<void>;
   /** Where solves are judged: at the source, or on this machine. */
   setPracticeJudge(source: z.infer<typeof sourceIdSchema>, preference: SourceJudgePreference): Promise<void>;
-  searchPracticeProblems(input: z.infer<typeof sourceSearchInput>): Promise<{ total: number; problems: PracticeSearchHit[] }>;
+  searchPracticeProblems(input: z.infer<typeof sourceSearchInput>): Promise<PracticeSearchResult>;
   /** Opens a session on one specific problem the learner chose. */
   startPracticeProblem(input: z.infer<typeof sourceStartInput>): Promise<{ sessionId: string }>;
   /** A scratch run of the open challenge at its source. Records a test run as

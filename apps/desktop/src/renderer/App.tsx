@@ -10,6 +10,7 @@ import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
 import { SearchPalette } from "./components/common/SearchPalette";
 import { HomePage } from "./components/pages/HomePage";
+import { ProblemsPage } from "./components/pages/ProblemsPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { AbilityPage } from "./components/pages/AbilityPage";
@@ -32,6 +33,7 @@ const api: SparApi | undefined = window.spar;
  *  their own, because both carry a back button and their own actions. */
 const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge">, string> = {
   home: "Home",
+  problems: "Problems",
   sessions: "Sessions",
   ability: "Abilities",
   challenges: "Challenges",
@@ -47,6 +49,11 @@ export function App() {
      the challenges list so navigating away and back does not silently keep a
      challenge mounted behind the list. */
   const [challengeId, setChallengeId] = useState<string | null>(null);
+  /* Where Back goes from a challenge. A challenge is opened from two places now —
+     the history list and the problem library — and a Back button that always lands
+     on Challenges would take a learner who started on Problems somewhere they have
+     never been, then leave them to find their way back. */
+  const [challengeFrom, setChallengeFrom] = useState<Extract<Page, "problems" | "challenges">>("challenges");
   const [opening, setOpening] = useState(false);
   /* Every agent turn in flight, by the session it belongs to — not just the one
      the workspace is showing. A turn is started from a session and then survives
@@ -312,8 +319,9 @@ export function App() {
   const conceptSummaries = new Map(data.concepts.map((entry) => [entry.slug, entry]));
 
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
-  const openChallenge = (id: string) => {
+  const openChallenge = (id: string, from: Extract<Page, "problems" | "challenges"> = "challenges") => {
     setChallengeId(id);
+    setChallengeFrom(from);
     setPage("challenge");
     setDetail(null);
   };
@@ -321,6 +329,23 @@ export function App() {
   /* Practice is a real session, so it lands where a new session lands: the sheet
      closes, the workspace opens, and the agent's first turn is already running by
      the time it does. Anything less would make an ability page a set of links. */
+  /* The learner picking one specific problem out of the library. Same landing as
+     practice — the session exists and its first turn is already running by the
+     time the workspace opens — but it can fail in a way practice cannot: the
+     problem has to be read from its source first. Awaited rather than fired, so
+     the row that was clicked can stay busy until the session is on screen. */
+  const startProblem = async (input: { source: "leetcode" | "codeforces"; slug: string }) => {
+    if (!api) return;
+    setError(null);
+    try {
+      const created = await api.startPracticeProblem(input);
+      await refresh();
+      await openSession(created.sessionId);
+    } catch (cause) {
+      setError(message(cause));
+    }
+  };
+
   const practise = (input: { abilityId?: string; conceptSlug?: string; drill?: string }) =>
     void (async () => {
       if (!api) return;
@@ -454,6 +479,14 @@ export function App() {
 
         <div className="min-h-0 flex-1">
           {page === "home" && <HomePage api={api} busy={opening} data={data} onOpen={open} onOpenSettings={() => navigate("settings")} onStart={(goal) => void start(goal)} onViewAll={() => navigate("sessions")} runs={runs} />}
+          {page === "problems" && (
+            <ProblemsPage
+              api={api}
+              challenges={data.challenges}
+              onOpenChallenge={(id) => openChallenge(id, "problems")}
+              onStartProblem={startProblem}
+            />
+          )}
           {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions} />}
           {page === "ability" && (
             <AbilityPage
@@ -480,7 +513,7 @@ export function App() {
               api={api}
               challengeId={challengeId}
               dark={dark}
-              onBack={() => navigate("challenges")}
+              onBack={() => navigate(challengeFrom)}
               onError={setError}
               onExpandSidebar={expandSidebar}
               onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}

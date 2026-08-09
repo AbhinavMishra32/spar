@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { History, LayoutGrid, Map, Plus, Search, Settings, Target, Waypoints } from "lucide-react";
+import { History, LayoutGrid, Library, Map, Plus, Search, Settings, Target, Waypoints } from "lucide-react";
 import type { ChallengeHistorySummary, ConceptSummary, SessionSummary } from "@spar/domain";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { LANGUAGE_LABEL } from "@/components/common/LanguageGlyph";
@@ -176,6 +176,7 @@ function Hint({ keys, children }: { keys: string; children: string }) {
  *  drawn with the icon that is already sitting next to the word Challenges. */
 const PLACE_ICON: Record<PalettePlace["page"], React.ComponentType<{ className?: string }>> = {
   home: Waypoints,
+  problems: Library,
   sessions: LayoutGrid,
   ability: Map,
   challenges: History,
