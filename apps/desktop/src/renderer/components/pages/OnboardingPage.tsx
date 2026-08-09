@@ -82,13 +82,10 @@ const FOCUS = [
 
 const LANGUAGES: Language[] = ["javascript", "typescript", "cpp"];
 
-/** The judges Spar could set problems from. Only LeetCode is wired up; the rest
- *  are listed anyway, because someone who lives on Codeforces needs to see that
- *  Spar knows the name and has not got there yet — a list of one reads as a
- *  product that only ever intends to speak LeetCode. */
+/** The judges Spar can set problems from, plus the next integrations. */
 const SOURCES = [
   { id: "leetcode", name: "LeetCode", Glyph: LeetCodeGlyph, soon: false },
-  { id: "codeforces", name: "Codeforces", Glyph: CodeforcesGlyph, soon: true },
+  { id: "codeforces", name: "Codeforces", Glyph: CodeforcesGlyph, soon: false },
   { id: "hackerrank", name: "HackerRank", Glyph: HackerRankGlyph, soon: true },
   { id: "codechef", name: "CodeChef", Glyph: CodeChefGlyph, soon: true },
 ] as const;
@@ -244,25 +241,25 @@ export function OnboardingPage({
      The username lands with the credential and the record takes another round
      trip, so the two are held apart: the row can confirm itself the moment the
      window closes and fill in the numbers a beat later. */
-  const [source, setSource] = useState<{ username: string; account: PracticeSourceAccount | null } | null>(null);
-  const [sourceBusy, setSourceBusy] = useState<"connect" | "disconnect" | null>(null);
+  const [sources, setSources] = useState<Array<{ id: "leetcode" | "codeforces"; username: string; account: PracticeSourceAccount | null }>>([]);
+  const [sourceBusy, setSourceBusy] = useState<{ id: "leetcode" | "codeforces"; action: "connect" | "disconnect" } | null>(null);
   const [sourceError, setSourceError] = useState("");
   const readSource = async () => {
-    const inventory = await api?.practiceSource().catch(() => null);
+    const inventory = await api?.practiceSources().catch(() => null);
     if (!inventory) return;
-    setSource(inventory.state === "connected" ? { username: inventory.account?.username ?? inventory.name, account: inventory.account } : null);
+    setSources(inventory.filter((entry) => entry.state === "connected").map((entry) => ({ id: entry.source, username: entry.account?.username ?? entry.name, account: entry.account })));
   };
   // Once, when the api arrives. `readSource` is rebuilt every render and is not
   // a dependency of anything but itself.
   useEffect(() => { void readSource(); }, [api]);
-  const connectSource = async () => {
-    if (!api || sourceBusy || source) return;
-    setSourceBusy("connect");
+  const connectSource = async (sourceId: "leetcode" | "codeforces") => {
+    if (!api || sourceBusy) return;
+    setSourceBusy({ id: sourceId, action: "connect" });
     setSourceError("");
     try {
-      const result = await api.connectPracticeSource();
+      const result = await api.connectPracticeSource(sourceId);
       if (result.status === "connected") {
-        setSource({ username: result.username, account: null });
+        setSources((current) => [...current.filter((entry) => entry.id !== sourceId), { id: sourceId, username: result.username, account: null }]);
         await readSource();
       /* Cancelling is a decision, not an error: the step is optional and the
          learner closing the window has answered it. */
@@ -273,13 +270,13 @@ export function OnboardingPage({
       setSourceBusy(null);
     }
   };
-  const disconnectSource = async () => {
+  const disconnectSource = async (sourceId: "leetcode" | "codeforces") => {
     if (!api || sourceBusy) return;
-    setSourceBusy("disconnect");
+    setSourceBusy({ id: sourceId, action: "disconnect" });
     setSourceError("");
     try {
-      await api.disconnectPracticeSource();
-      setSource(null);
+      await api.disconnectPracticeSource(sourceId);
+      setSources((current) => current.filter((entry) => entry.id !== sourceId));
     } catch (cause) {
       setSourceError(message(cause));
     } finally {
@@ -293,7 +290,7 @@ export function OnboardingPage({
     if (id === "focus") return focus.length ? focus.join(", ") : null;
     if (id === "weakness") return weakness.trim() || null;
     if (id === "language") return language ? LANGUAGE_LABEL[language] : null;
-    if (id === "source") return source?.username ?? null;
+    if (id === "source") return sources.length ? sources.map((entry) => entry.username).join(", ") : null;
     if (!runnable) return null;
     return connected.length ? connected.map((provider) => provider.name).join(", ") : "Ready";
   };
@@ -585,8 +582,9 @@ export function OnboardingPage({
               {phase === "intake" && step.id === "source" && (
                 <div className={GROUP}>
                   {SOURCES.map(({ id, name, Glyph, soon }) => {
-                    const connected = id === "leetcode" && source !== null;
-                    const bands = source?.account ? solvedBands(source.account) : [];
+                    const connectedSource = sources.find((entry) => entry.id === id);
+                    const connected = Boolean(connectedSource);
+                    const bands = connectedSource?.account ? solvedBands(connectedSource.account) : [];
                     /* Only a row you can act on is a button. A connected one owns
                        a Disconnect of its own, and a button inside a button is
                        neither valid nor operable from the keyboard. */
@@ -598,7 +596,7 @@ export function OnboardingPage({
                             <span className="truncate text-content text-foreground">{name}</span>
                             {connected && <Check className="size-3 shrink-0 text-[var(--success)]" />}
                           </span>
-                          {connected && <span className="mt-0.5 block truncate text-ui text-muted-foreground">{source.username}</span>}
+                          {connected && <span className="mt-0.5 block truncate text-ui text-muted-foreground">{connectedSource?.username}</span>}
                         </span>
                       </>
                     );
@@ -614,10 +612,10 @@ export function OnboardingPage({
                                 <button
                                   className="shrink-0 rounded text-ui text-muted-foreground transition-colors hover:text-destructive disabled:opacity-45"
                                   disabled={sourceBusy !== null}
-                                  onClick={() => void disconnectSource()}
+                                  onClick={() => void disconnectSource(id)}
                                   type="button"
                                 >
-                                  {sourceBusy === "disconnect" ? "Disconnecting…" : "Disconnect"}
+                                  {sourceBusy?.id === id && sourceBusy.action === "disconnect" ? "Disconnecting…" : "Disconnect"}
                                 </button>
                               )}
                           </div>
@@ -625,11 +623,11 @@ export function OnboardingPage({
                           <button
                             className={cn(headClass, "hover:bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)]")}
                             disabled={sourceBusy !== null}
-                            onClick={() => void connectSource()}
+                            onClick={() => void connectSource(id)}
                             type="button"
                           >
                             {head}
-                            {sourceBusy === "connect"
+                            {sourceBusy?.id === id && sourceBusy.action === "connect"
                               ? <SparDots pattern="pulse" size={16} />
                               : <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/60" />}
                           </button>
@@ -637,7 +635,7 @@ export function OnboardingPage({
 
                         {connected && (
                           <div className="px-3.5 pb-3">
-                            {source.account
+                            {connectedSource?.account
                               ? (
                                 <>
                                   {/* The mix, not the fraction of the catalogue:
@@ -649,8 +647,8 @@ export function OnboardingPage({
                                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                                     {bands.filter((band) => band.value > 0).map((band) => <MeterKey band={band} key={band.key} />)}
                                     <span className="ml-auto shrink-0 text-ui tabular-nums text-muted-foreground">
-                                      <span className="text-foreground/80">{source.account.solved.total.toLocaleString()}</span> solved
-                                      {source.account.streak > 0 && ` · ${source.account.streak}-day streak`}
+                                      <span className="text-foreground/80">{connectedSource.account.solved.total.toLocaleString()}</span> solved
+                                      {connectedSource.account.streak > 0 && ` · ${connectedSource.account.streak}-day streak`}
                                     </span>
                                   </div>
                                 </>

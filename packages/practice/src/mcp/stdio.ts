@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { LeetCodeGateway } from "../gateway.js";
+import { CodeforcesGateway, LeetCodeGateway, type PracticeGateway } from "../gateway.js";
+import { parseCodeforcesCookies, type CodeforcesSession } from "../codeforces/session.js";
 import { parseLeetCodeCookie, type LeetCodeSession } from "../leetcode/session.js";
 import { practiceRegionSchema } from "../types.js";
 import { createPracticeMcpServer } from "./server.js";
@@ -21,27 +22,39 @@ import { createPracticeMcpServer } from "./server.js";
  *   LEETCODE_SESSION   the LEETCODE_SESSION cookie, or a whole Cookie header
  *   LEETCODE_CSRF      the csrftoken cookie (not needed if the header has it)
  *   LEETCODE_REGION    "global" (default) or "cn"
+ *   PRACTICE_SOURCE    "leetcode" (default) or "codeforces"
+ *   CODEFORCES_HANDLE, CODEFORCES_COOKIE and CODEFORCES_CSRF for Codeforces
  *
  * Everything is written to stderr. stdout is the protocol.
  */
 async function main() {
+  const source = process.env.PRACTICE_SOURCE?.trim().toLowerCase() === "codeforces" ? "codeforces" : "leetcode";
   const region = practiceRegionSchema.catch("global").parse(process.env.LEETCODE_REGION?.trim() || "global");
-  const session = sessionFromEnvironment(region);
+  const session = source === "leetcode" ? sessionFromEnvironment(region) : codeforcesSessionFromEnvironment();
   if (!session) {
     process.stderr.write(
-      "spar-practice-mcp: no LeetCode session in the environment. Set LEETCODE_SESSION (and LEETCODE_CSRF unless LEETCODE_SESSION is a full Cookie header).\n" +
+      `spar-practice-mcp: no ${source === "leetcode" ? "LeetCode" : "Codeforces"} session in the environment. Set the source's handle/cookie/CSRF variables to enable account reads and submissions.\n` +
       "Problem statements are public, so search and reads still work; the learner's history and the judge do not.\n",
     );
   }
-  const gateway = new LeetCodeGateway(region, async () => session, {
-    onExpired: () => process.stderr.write("spar-practice-mcp: LeetCode refused the session; it has expired.\n"),
-  });
+  const gateway: PracticeGateway = source === "leetcode"
+    ? new LeetCodeGateway(region, async () => session as LeetCodeSession | null, { onExpired: () => process.stderr.write("spar-practice-mcp: LeetCode refused the session; it has expired.\n") })
+    : new CodeforcesGateway(async () => session as CodeforcesSession | null, { onExpired: () => process.stderr.write("spar-practice-mcp: Codeforces refused the session; it has expired.\n") });
   /* Judging is on here and off for Spar's own agent. The difference is who asked:
      a person typing into an MCP client is deciding to submit their own work,
      where Spar's agent would be submitting on someone's behalf. */
   const server = createPracticeMcpServer({ gateway, allowJudging: true });
   await server.connect(new StdioServerTransport());
-  process.stderr.write(`spar-practice-mcp: serving LeetCode (${region})${session ? " with a session" : " unauthenticated"}.\n`);
+  process.stderr.write(`spar-practice-mcp: serving ${source === "leetcode" ? `LeetCode (${region})` : "Codeforces"}${session ? " with a session" : " unauthenticated"}.\n`);
+}
+
+function codeforcesSessionFromEnvironment(): CodeforcesSession | null {
+  const cookie = process.env.CODEFORCES_COOKIE?.trim() ?? "";
+  const handle = process.env.CODEFORCES_HANDLE?.trim() ?? "";
+  const csrf = process.env.CODEFORCES_CSRF?.trim() ?? "";
+  if (!cookie || !handle || !csrf) return null;
+  try { return parseCodeforcesCookies(cookie, handle, csrf); }
+  catch (error) { process.stderr.write(`spar-practice-mcp: ${error instanceof Error ? error.message : String(error)}\n`); return null; }
 }
 
 function sessionFromEnvironment(region: "global" | "cn"): LeetCodeSession | null {

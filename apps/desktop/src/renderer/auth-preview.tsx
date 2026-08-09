@@ -9,7 +9,7 @@ import "./theme.css";
    and without an API, an Electron window or a real account. Not shipped; it is
    here for the same reason harness.html is. */
 
-let sourceConnected = false;
+const sourceConnections = new Set<"leetcode" | "codeforces">();
 
 const api = {
   async auth(request: AuthRequest): Promise<AuthResult> {
@@ -50,12 +50,12 @@ const api = {
   /* The practice source, as the intake's last step reads it: connected or not,
      and how much the account has behind it. The sign-in itself is a real window
      in the app, so here it is a pause and a name. */
-  async practiceSource() {
+  async practiceSources() {
     await new Promise((resolve) => setTimeout(resolve, 300));
-    return sourceConnected
+    return (["leetcode", "codeforces"] as const).map((source) => sourceConnections.has(source)
       ? {
-          source: "leetcode",
-          name: "LeetCode",
+          source,
+          name: source === "leetcode" ? "LeetCode" : "Codeforces",
           state: "connected",
           account: {
             username: "AbhinavMishra3322",
@@ -67,16 +67,16 @@ const api = {
             streak: 12,
           },
         }
-      : { source: "leetcode", name: "LeetCode", state: "disconnected", account: null };
+      : { source, name: source === "leetcode" ? "LeetCode" : "Codeforces", state: "disconnected", account: null });
   },
-  async connectPracticeSource() {
+  async connectPracticeSource(source: "leetcode" | "codeforces") {
     await new Promise((resolve) => setTimeout(resolve, 1_200));
-    sourceConnected = true;
+    sourceConnections.add(source);
     return { status: "connected", username: "AbhinavMishra3322" };
   },
-  async disconnectPracticeSource() {
+  async disconnectPracticeSource(source: "leetcode" | "codeforces") {
     await new Promise((resolve) => setTimeout(resolve, 400));
-    sourceConnected = false;
+    sourceConnections.delete(source);
   },
   onProviderOAuthEvent: () => () => undefined,
   onAgentEvent: () => () => undefined,

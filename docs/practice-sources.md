@@ -8,12 +8,13 @@ on, and putting LeetCode in that list would say the two are the same kind of
 thing. They are not: a provider decides what thinks, a source decides what you
 are asked.
 
-LeetCode is the first source. The design below is what a second one would have
-to satisfy, and nothing above the source layer knows LeetCode exists.
+LeetCode and Codeforces are implemented sources. The active source is a learner
+preference; each source keeps its own credential, cache identity, tag mapping,
+and judge behavior behind the same gateway.
 
 ## What a source is
 
-`packages/practice` holds the abstraction and the one implementation.
+`packages/practice` holds the abstraction and both implementations.
 
 | Module | What it owns |
 | --- | --- |
@@ -23,6 +24,7 @@ to satisfy, and nothing above the source layer knows LeetCode exists.
 | `harness.ts` | Turning a problem into a workspace the local runner can grade, and the marker contract that keeps the learner's file submittable. |
 | `gateway.ts` | The seam every consumer talks to a source through. |
 | `leetcode/*` | Every fact about LeetCode's API. |
+| `codeforces/*` | Codeforces' official API, HTML statement normalization, browser session, and submission form. |
 | `mcp/*` | The tools, as an MCP server. |
 
 Sources differ in exactly one interesting way: how much of the loop they can
@@ -33,6 +35,7 @@ can only describe. So everything downstream branches on
 ```ts
 type PracticeSourceCapabilities = {
   remoteJudge: boolean;        // the source will grade a submission
+  scratchRun: boolean;         // it offers a non-recording remote sample run
   officialTestcases: boolean;  // the problem ships its own inputs
   search: boolean;
   progress: boolean;           // what this learner has already done there
@@ -41,7 +44,7 @@ type PracticeSourceCapabilities = {
 ```
 
 `effectiveCapabilities` intersects that with the connection state, because a
-disconnected LeetCode still describes problems — its statements are public — and
+disconnected source still describes public problems and
 loses only the parts that are about *this learner*.
 
 ## Signing in
@@ -66,8 +69,14 @@ own sign-in page in a window and watches the cookie jar:
   the flow completes when LeetCode names an account.
 - **Disconnecting clears the partition**, not just the keychain entry.
 
-The session is stored in the OS keychain beside the model provider keys, keyed by
-region, and is dropped on sign-out and account deletion. It never crosses into
+Codeforces uses the same boundary: its own `persist:spar-codeforces` partition,
+its own page and account identity as the completion test, and a CSRF token plus
+browser cookies for the submission form. Spar uses Codeforces' official API for
+problem metadata, profiles, and submission status; the browser credential is
+only needed for authenticated reads and an explicit submission.
+
+Sessions are stored in the OS keychain beside the model provider keys, keyed by
+source and region, and are dropped on sign-out and account deletion. They never cross into
 the renderer, the local database, or a worker process.
 
 ## Who grades what
@@ -77,7 +86,7 @@ never get wrong.
 
 | Situation | Graded by | What a pass means |
 | --- | --- | --- |
-| Source connected, judging preference `source` | LeetCode | Every hidden case the problem has passed. It counts on the learner's account. |
+| Source connected, judging preference `source` | Selected source | Every hidden case the problem has passed. It counts on the learner's account. |
 | Source disconnected, or preference `local` | Spar's runner | The examples published with the problem passed. Nothing more. |
 | Neither available | Nothing | The problem is refused at assignment time rather than set. |
 
@@ -92,7 +101,9 @@ written into the attempt's evidence.
 
 ## Running a problem locally
 
-A sourced problem has to be runnable without spending a submission. The harness
+A sourced problem has to be runnable without spending a submission. LeetCode
+mounts its function signature; Codeforces mounts a complete stdin/stdout program.
+The harness
 generates the same layout a Spar-written challenge has — implementation under
 `src/`, tests under `tests/`, graded by exit code — so the runner, the result
 panel and the replay need no special case.
@@ -119,7 +130,10 @@ harness that tests the wrong thing is the one failure a learner cannot diagnose.
 The expected answers are the interesting part. LeetCode publishes a problem's
 sample *inputs* through its API and its expected *outputs* only in the statement
 prose — the site computes them with the judge — so `statement.ts` recovers the
-examples from the HTML. Without that, no problem could be run at all offline.
+examples from the HTML. Codeforces publishes paired input/output `<pre>` blocks,
+which are normalized into the same case contract. Codeforces has no non-recording
+remote run: **Run** executes these examples locally, while **Submit** reaches its
+remote judge and creates a real account submission.
 
 ## The MCP surface
 
@@ -139,6 +153,9 @@ The split between them is which tools each gets:
 | `search_practice_problems`, `read_practice_problem`, `read_practice_source`, `read_practice_progress`, `read_practice_submissions`, `read_daily_practice_problem` | yes | yes |
 | `run_practice_code`, `submit_practice_solution` | **no** | yes |
 
+The stdio list is capability-filtered: Codeforces exposes submit but omits
+`run_practice_code`, because it has no non-recording remote run endpoint.
+
 Spar's agent may learn anything the source knows and change nothing there. The
 difference is who asked: a person typing into an MCP client is deciding to submit
 their own work, where Spar's agent would be putting its code on somebody's
@@ -148,6 +165,8 @@ Running the stdio server:
 
 ```bash
 LEETCODE_SESSION="…" LEETCODE_CSRF="…" npx spar-practice-mcp
+
+PRACTICE_SOURCE=codeforces CODEFORCES_HANDLE="…" CODEFORCES_COOKIE="…" CODEFORCES_CSRF="…" npx spar-practice-mcp
 ```
 
 Credentials come from the environment and nowhere else — no config file to leak a
@@ -179,11 +198,13 @@ compile: no reference solution to check the tests against, and the visible suite
 is whatever the source published. What replaces that guarantee is the source's
 own judge, stated rather than assumed.
 
-## Adding a second source
+## Adding another source
 
 1. Implement `PracticeGateway` for it.
 2. Add a descriptor to `PRACTICE_SOURCES` with honest `capabilities`.
 3. Map its tags in `concepts.ts`, both directions.
-4. Give it a mark in `SourceGlyph.tsx`.
+4. Give it a source-specific harness when its execution contract is not a
+   LeetCode-style function.
+5. Give it a mark in `SourceGlyph.tsx` and expose it in the source selector.
 
 Nothing else should need to change. If it does, the seam is in the wrong place.

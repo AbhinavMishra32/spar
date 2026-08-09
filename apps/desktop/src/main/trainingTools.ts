@@ -7,6 +7,7 @@ import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
+import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 import { SOURCE_READ_TOOLS } from "../workers/agentPolicy.js";
 
 export async function executeTrainingTool(
@@ -157,6 +158,8 @@ async function assignPracticeProblem(
   const refuse = (checkName: string, detail: string) => ({ status: "invalid" as const, report: { valid: false, checks: [{ name: checkName, passed: false, detail }] } });
   const slug = String(value.slug ?? "").trim();
   if (!slug) return refuse("problem identity", "No problem slug was given.");
+  const provider = value.source === "leetcode" || value.source === "codeforces" ? value.source : null;
+  if (!provider) return refuse("problem identity", "No provider identity was given. Preserve `source` from the search result alongside its slug.");
 
   /* Replacing the open challenge with a real problem is the whole reason this
      takes a reason. "Just give me a LeetCode problem" arrives while a challenge is
@@ -177,12 +180,12 @@ async function assignPracticeProblem(
     const language = value.language === "typescript" || value.language === "cpp" || value.language === "javascript"
       ? value.language
       : local.getProfile()?.language ?? "javascript";
-    mounted = await practice.mount({ slug, language });
+    mounted = await practice.mount({ source: provider, slug, language });
   } catch (error) {
     /* A slug the source does not have, a subscription-only problem, an expired
        session. All of them are the same instruction to the agent: this one is not
        available, choose another or write your own. */
-    return refuse("problem availability", `${practice.sourceName()} could not provide "${slug}": ${error instanceof Error ? error.message : String(error)}. Pick a different problem or write the challenge yourself.`);
+    return refuse("problem availability", `${practiceSourceName(provider)} could not provide "${slug}": ${error instanceof Error ? error.message : String(error)}. Pick a different problem or write the challenge yourself.`);
   }
 
   const { design, source } = mounted;
@@ -196,8 +199,30 @@ async function assignPracticeProblem(
      from the statement. Assigning it would mean asking someone to solve something
      with no way to find out whether they had. */
   if (!source.remoteJudge && source.localCaseCount === 0) {
-    return refuse("grading", `${practice.sourceName()} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
+    return refuse("grading", `${practiceSourceName(provider)} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
   }
+
+  /* The model proposes; the host admits. Availability and a real judge say a
+     problem can be assigned, not that it should be. Check the source's own
+     concept metadata against the persisted target, then bound difficulty using
+     the durable status of that exact ability. */
+  const target = local.latestTarget(sessionId);
+  if (!target) return refuse("training target", "A persisted training target is required before assigning a provider problem.");
+  const ability = local.readAbilityDetail(String(target.ability_id));
+  const adaptiveChecks = assessPracticeAssignment({
+    target: {
+      abilityTitle: String(target.ability_title),
+      specificGap: String(target.specific_gap),
+      desiredEvidence: String(target.desired_evidence),
+      abilityStatus: ability?.ability.status ?? "uncertain",
+      abilityConcepts: ability?.ability.concepts.map((concept) => concept.slug) ?? [],
+      experience: local.getProfile()?.experience ?? "new",
+    },
+    candidate: { difficulty: mounted.problem.difficulty, concepts: mounted.problem.concepts.map((concept) => concept.slug) },
+    proposedConcepts: conceptTags(value.concepts),
+    why: String(value.why ?? ""),
+  });
+  if (adaptiveChecks.some((check) => !check.passed)) return { status: "invalid" as const, report: { valid: false, checks: adaptiveChecks } };
 
   /* Mounting went to the source, which takes as long as a network call takes. The
      challenge underneath can have changed in that time — the learner may have
@@ -211,7 +236,7 @@ async function assignPracticeProblem(
     return refuse("session lifecycle", `A playable challenge (${stillActive.title}) was published while this problem was being read from the source. This assignment was discarded.`);
   }
 
-  const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }] };
+  const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }, ...adaptiveChecks] };
   const concepts = conceptTags(value.concepts);
   await (activeQuestion ? workspaces.replaceAll(sessionId, mounted.files) : workspaces.writeAll(sessionId, mounted.files));
   const question = activeQuestion
@@ -225,7 +250,7 @@ async function assignPracticeProblem(
      agent's statement of what this problem is supposed to discriminate, and a
      later turn reading the session has to be able to find it. */
   const why = String(value.why ?? "").trim();
-  if (why) local.addMessage(sessionId, "system", `Set ${practice.sourceName()} ${source.displayId} — ${design.title}. ${why}`);
+  if (why) local.addMessage(sessionId, "system", `Set ${practiceSourceName(provider)} ${source.displayId} — ${design.title}. ${why}`);
   return {
     status: "playable",
     question,
@@ -235,6 +260,10 @@ async function assignPracticeProblem(
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
   };
+}
+
+function practiceSourceName(source: "leetcode" | "codeforces") {
+  return source === "leetcode" ? "LeetCode" : "Codeforces";
 }
 
 /**

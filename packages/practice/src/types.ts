@@ -15,7 +15,7 @@ import { languageSchema } from "@spar/domain";
  * the workspace, the verdict path, what the agent is told it may promise —
  * follows from `PracticeSourceCapabilities` rather than from the source's name.
  */
-export const practiceSourceIdSchema = z.enum(["leetcode"]);
+export const practiceSourceIdSchema = z.enum(["leetcode", "codeforces"]);
 export type PracticeSourceId = z.infer<typeof practiceSourceIdSchema>;
 
 /** Which LeetCode. The two are separate services with separate accounts, separate
@@ -44,6 +44,9 @@ export type PracticeDifficulty = z.infer<typeof practiceDifficultySchema>;
  */
 export type PracticeSourceCapabilities = {
   remoteJudge: boolean;
+  /** Whether the remote judge offers a non-recording sample run. Codeforces does
+   *  not: its Run button must stay local while Submit reaches the remote judge. */
+  scratchRun: boolean;
   officialTestcases: boolean;
   search: boolean;
   progress: boolean;

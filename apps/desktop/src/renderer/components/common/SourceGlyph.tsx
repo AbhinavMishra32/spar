@@ -65,6 +65,6 @@ export function CodeChefGlyph(props: GlyphProps) {
   );
 }
 
-export function SourceGlyph({ className, source }: { className?: string; source: "leetcode" }) {
-  return source === "leetcode" ? <LeetCodeGlyph className={className} /> : null;
+export function SourceGlyph({ className, source }: { className?: string; source: "leetcode" | "codeforces" }) {
+  return source === "leetcode" ? <LeetCodeGlyph className={className} /> : <CodeforcesGlyph className={className} />;
 }

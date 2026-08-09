@@ -167,6 +167,7 @@ describe("searchEverything", () => {
             difficulty: "easy",
             languageSlug: "typescript",
             remoteJudge: true,
+            scratchRun: true,
             localCaseCount: 2,
             judge: "LeetCode grades this one.",
             entryName: "twoSum",

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { buildHarness, type PracticeProblem } from "@spar/practice";
+import { buildHarness, buildProgramHarness, type PracticeProblem } from "@spar/practice";
 import { parseTestOutput } from "../shared/testReport.js";
 import { planCppBuild } from "./cppBuild.js";
 
@@ -109,6 +109,17 @@ describe("the generated C++ harness", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  }, 120_000);
+
+  it("runs a complete Codeforces stdin/stdout program without linking its main twice", async () => {
+    const source = { ...PROBLEM, source: "codeforces", slug: "4/A", externalId: "4/A", displayId: "4/A", url: "https://codeforces.com/problemset/problem/4/A", signature: null, languages: [{ language: "cpp", slug: "cpp", starter: "#include <bits/stdc++.h>\nusing namespace std;\nint main(){ int w; cin >> w; cout << (w > 2 && w % 2 == 0 ? \"YES\" : \"NO\"); return 0; }" }] } as PracticeProblem;
+    const harness = buildProgramHarness({ problem: source, language: "cpp", cases: [{ name: "Example 1", input: ["8"], expected: "YES", origin: "source" }, { name: "Example 2", input: ["3"], expected: "NO", origin: "source" }] });
+    if (!harness.supported) throw new Error(harness.reason);
+    const root = await materialize(harness.files);
+    try {
+      const run = await runPlan(root, harness.files);
+      expect(run.exitCode, run.output).toBe(0);
+    } finally { await rm(root, { recursive: true, force: true }); }
   }, 120_000);
 });
 

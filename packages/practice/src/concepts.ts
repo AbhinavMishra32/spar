@@ -88,10 +88,22 @@ const TAG_TO_CONCEPT: Record<string, string> = {
   "divide-and-conquer": "recursive-decomposition",
   "memoization": "memoization",
   "dynamic-programming": "dynamic-programming",
+  "dp": "dynamic-programming",
 
   // Search and selection.
   "binary-search": "binary-search",
   "greedy": "greedy",
+  "graphs": "graphs",
+  "trees": "trees",
+  "dfs-and-similar": "depth-first-search",
+  "shortest-paths": "graphs",
+  "data-structures": "state-management",
+  "implementation": "state-management",
+  "brute-force": "recursive-decomposition",
+  "constructive-algorithms": "greedy",
+  "strings": "strings",
+  "bitmasks": "bit-masking",
+  "sortings": "arrays",
 
   // Ranges.
   "line-sweep": "sweep-line",

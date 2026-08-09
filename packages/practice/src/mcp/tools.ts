@@ -35,12 +35,13 @@ export type PracticeToolDefinition = {
 };
 
 const slug = z.string().trim().min(1).max(120).describe("The problem's URL slug, e.g. \"two-sum\". Never its number or its title.");
+const source = z.enum(["leetcode", "codeforces"]).optional().describe("The provider identity returned by an aggregated search. Required by Spar's multi-provider bridge; optional for a server already bound to one provider.");
 
 export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
   {
     name: "search_practice_problems",
     description:
-      "Search the connected practice source for real problems. This is how you find something the world already asks that lands on the target you have chosen — prefer it over writing a challenge whenever a real problem fits, because a real problem carries a real judge, a real difficulty and the learner's own history with it. Search by Spar concept slug (translated to the source's tags for you) and narrow by difficulty. When the source knows who is asking, `status` filters by what this learner has already done: `todo` is the useful one when you want something new, and every result says whether they have solved it before.",
+      "Search every available problem provider for real problems. Results carry `source`; keep it paired with `slug` when reading or assigning a candidate. Prefer a fitting real problem over writing one because it carries a real judge, calibrated difficulty, and—when that provider is connected—the learner's own history. Search by Spar concept slug (translated separately to each provider's tags) and narrow by difficulty. `todo` is useful when you want something new.",
     shape: {
       concepts: z.array(z.string().min(2).max(60)).max(5).optional().describe("Spar concept slugs, e.g. [\"window-invariant-restoration\"]. Translated to the source's own tags, walking up to the area when the sub-concept has no tag of its own."),
       query: z.string().trim().max(200).optional().describe("Free text, for when the concept vocabulary does not reach what you mean."),
@@ -55,6 +56,7 @@ export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
     description:
       "Read one problem in full: its statement, its signature, the languages it publishes starters for, the cases Spar can run locally, the concepts it maps onto, and the problems the source says it is related to. Read this before assigning a problem — the statement is the only way to know whether it actually exercises the gap you are aiming at, and the reply says plainly who will grade it.",
     shape: {
+      source,
       slug,
       includeStatement: z.boolean().default(true).describe("Set false when you only need the shape and the tags, which is most of a fit decision."),
     },
@@ -63,13 +65,14 @@ export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
     name: "read_practice_source",
     description:
       "What the connected practice source can do right now, and who it thinks the learner is: the account, how many problems they have solved at each difficulty, and the source's own per-topic solve counts. Read the solve counts as weak prior evidence beside Spar's own ledger — they say what the learner has been exposed to, never how well they understood it. Call this before relying on anything else here, because every learner-specific answer is empty while the source is not connected.",
-    shape: {},
+    shape: { source },
   },
   {
     name: "read_practice_progress",
     description:
       "Problems this learner has already touched at the source, newest first. This is the one thing the source knows that Spar's own record cannot: what they attempted elsewhere and never finished. An unfinished attempt is a strong candidate for a target — it is a gap they have already met and walked away from.",
     shape: {
+      source,
       status: z.enum(["attempted", "solved"]).default("attempted"),
       limit: z.number().int().min(1).max(50).default(20),
       offset: z.number().int().min(0).max(2_000).default(0),
@@ -80,6 +83,7 @@ export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
     description:
       "This learner's own past submissions for one problem, and optionally the code of one of them. An accepted solution they wrote themselves is the strongest possible statement about what they can do, and a rejected one shows exactly where they stalled. Use it when their history with a specific problem is what you are reasoning about.",
     shape: {
+      source,
       slug,
       limit: z.number().int().min(1).max(20).default(5),
       includeCode: z.boolean().default(false).describe("Fetches the source of the most recent submission. Costs an extra request, so ask for it only when the code itself is what you need."),
@@ -88,7 +92,7 @@ export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
   {
     name: "read_daily_practice_problem",
     description: "The source's problem of the day, in full. Worth offering when the learner has no particular direction, and worth ignoring when they do — it is chosen for everybody, so it is unlikely to land on their gap.",
-    shape: {},
+    shape: { source },
   },
   {
     name: "run_practice_code",

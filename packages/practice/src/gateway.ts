@@ -2,6 +2,9 @@ import type { Language } from "@spar/domain";
 import { casesForProblem } from "./leetcode/normalize.js";
 import { LeetCodeClient } from "./leetcode/client.js";
 import type { LeetCodeSession } from "./leetcode/session.js";
+import { CodeforcesClient } from "./codeforces/client.js";
+import { casesForCodeforcesProblem } from "./codeforces/normalize.js";
+import type { CodeforcesSession } from "./codeforces/session.js";
 import { effectiveCapabilities, judgeDescription, practiceSource } from "./sources.js";
 import type {
   PracticeAccount, PracticeCase, PracticeConnectionState, PracticeProblem, PracticeProblemSummary,
@@ -114,6 +117,36 @@ export class LeetCodeGateway implements PracticeGateway {
     const capabilities = await this.capabilities();
     return { problem, cases: casesForProblem(problem), capabilities, judge: judgeDescription(this.sourceId, capabilities) };
   }
+}
+
+/** Codeforces behind the same source seam. Its public API handles discovery and
+ * history; authenticated browser requests are reserved for explicit submits. */
+export class CodeforcesGateway implements PracticeGateway {
+  readonly sourceId = "codeforces" as const;
+  readonly region = "global" as const;
+  private readonly client: CodeforcesClient;
+
+  constructor(
+    private readonly readSession: () => Promise<CodeforcesSession | null>,
+    options: { fetcher?: typeof fetch; onExpired?: () => void } = {},
+  ) { this.client = new CodeforcesClient(readSession, options.fetcher ?? fetch, options.onExpired ?? (() => undefined)); }
+
+  async state(): Promise<PracticeConnectionState> {
+    if (!await this.readSession()) return "disconnected";
+    try { return await this.client.whoami() ? "connected" : "expired"; } catch { return "expired"; }
+  }
+  async capabilities() { return effectiveCapabilities(this.sourceId, await this.state() === "connected"); }
+  account() { return this.client.account(); }
+  search(input: PracticeSearchInput & { concepts?: string[] }) { return this.client.search(input); }
+  random(input: { tags?: string[]; difficulty?: string }) { return this.client.random(input); }
+  progress(input: { status?: "ATTEMPTED" | "SOLVED"; limit?: number; offset?: number }) { return this.client.progress(input); }
+  submissions(slug: string, limit?: number) { return this.client.submissions(slug, limit); }
+  submissionDetail(id: string) { return this.client.submissionDetail(id); }
+  async problem(slug: string) { return this.bundle(await this.client.problem(slug)); }
+  async daily() { return this.bundle(await this.client.daily()); }
+  run(_input: { slug: string; externalId: string; language: Language; code: string; dataInput?: string }) { return this.client.run(); }
+  submit(input: { slug: string; externalId: string; language: Language; code: string }) { return this.client.submit({ problem: { slug: input.slug, externalId: input.externalId }, language: input.language, code: input.code }); }
+  private async bundle(problem: PracticeProblem): Promise<PracticeProblemBundle> { const capabilities = await this.capabilities(); return { problem, cases: casesForCodeforcesProblem(problem), capabilities, judge: judgeDescription(this.sourceId, capabilities) }; }
 }
 
 /** The source's own name, for a message that has to say who is being talked to. */

@@ -241,7 +241,7 @@ function rowContent(hit: SearchHit): { icon: React.ReactNode; title: string; sub
       const challenge = hit.challenge;
       // Where it came from reads before which session it was set in: a learner
       // hunting "1" wants to see that this is LeetCode 1 before anything else.
-      const origin = challenge.source ? `LeetCode ${challenge.source.displayId}` : LANGUAGE_LABEL[challenge.language];
+      const origin = challenge.source ? `${challenge.source.source === "codeforces" ? "Codeforces" : "LeetCode"} ${challenge.source.displayId}` : LANGUAGE_LABEL[challenge.language];
       return {
         icon: <Target className={GLYPH} />,
         title: challenge.title,

@@ -11,8 +11,8 @@ const REVISION_REQUEST = new RegExp([
      the agent answered by searching, and searching, and searching. Qualified
      deliberately: only another/different/new/real/sourced, never a bare "this
      question", so that "give me a hint on this question" stays a conversation. */
-  /(?:another|a\s+different|a\s+new|a\s+real|an?\s+actual|an?\s+lc|a\s+leetcode)\s+(?:\w+\s+){0,2}?(?:challenge|question|problem)/,
-  /(?:give|gimme|get|set|assign|want|show)\s+me\s+(?:\w+\s+){0,3}?(?:lc|leetcode|neetcode)\b/,
+  /(?:another|a\s+different|a\s+new|a\s+real|an?\s+actual|an?\s+(?:lc|cf)|a\s+(?:leetcode|codeforces))\s+(?:\w+\s+){0,2}?(?:challenge|question|problem)/,
+  /(?:give|gimme|get|set|assign|want|show)\s+me\s+(?:\w+\s+){0,3}?(?:lc|cf|leetcode|neetcode|codeforces)\b/,
   /skip\s+(?:it|this)\b/,
 ].map((pattern) => pattern.source).join("|"), "i");
 const CONFIRMATION = /^(?:do it|yes|yeah|yep|yup|sure|ok(?:ay)?|go|go ahead|please do|change it)$/i;

@@ -1,5 +1,8 @@
-import { BrowserWindow, session as electronSession, type Session } from "electron";
-import { parseLeetCodeCookie, practiceSource, verifyLeetCodeSession, type LeetCodeSession, type PracticeRegion } from "@spar/practice";
+import { rm } from "node:fs/promises";
+import path from "node:path";
+import { app, BrowserWindow, session as electronSession, type Session } from "electron";
+import { parseCodeforcesCookies, parseLeetCodeCookie, practiceSource, verifyLeetCodeSession, type CodeforcesSession, type LeetCodeSession, type PracticeRegion } from "@spar/practice";
+import { launchCodeforcesBrowser } from "./codeforcesBrowser.js";
 
 /**
  * Signing in to a practice source.
@@ -161,6 +164,61 @@ export async function signInToLeetCode(input: {
 export async function clearLeetCodeSignIn(region: PracticeRegion): Promise<void> {
   const partition = practiceSignInSession(region);
   await partition.clearStorageData({ storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] }).catch(() => undefined);
+}
+
+const CODEFORCES_PARTITION = "persist:spar-codeforces";
+export type CodeforcesSignInResult =
+  | { status: "connected"; session: CodeforcesSession; username: string }
+  | { status: "cancelled" }
+  | { status: "failed"; message: string };
+
+/** Codeforces rejects the clearance produced by Electron's embedded Chromium,
+ * so this source uses an app-owned profile in an installed Chromium browser.
+ * It never attaches to the learner's normal browser profile. Completion is read
+ * from the signed-in Codeforces page: its profile link names the handle and its
+ * CSRF meta tag is required for an explicit later submission. */
+export async function signInToCodeforces(input: { parent: BrowserWindow | null; onProgress?: (message: string) => void }): Promise<CodeforcesSignInResult> {
+  const source = practiceSource("codeforces");
+  input.onProgress?.(`Opening ${source.name} in your browser…`);
+  const launched = await launchCodeforcesBrowser(path.join(app.getPath("userData"), "codeforces-browser"))
+    .then((browser) => ({ browser })).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+  if ("error" in launched) return { status: "failed", message: launched.error };
+  const { browser } = launched;
+  return new Promise<CodeforcesSignInResult>((resolve) => {
+    let settled = false;
+    let checking = false;
+    let challengeReported = false;
+    let signInReported = false;
+    const finish = (result: CodeforcesSignInResult) => { if (settled) return; settled = true; clearInterval(poll); clearTimeout(timer); void browser.close(); resolve(result); };
+    const attempt = async () => {
+      if (checking) return false;
+      if (browser.closed) { finish({ status: "cancelled" }); return false; }
+      checking = true;
+      try {
+        const identity = await browser.identity().catch(() => null);
+        if (identity?.challenge) {
+          if (!challengeReported) { challengeReported = true; input.onProgress?.(`${source.name} is checking this browser…`); }
+          return false;
+        }
+        if (!identity?.handle || !identity.csrf) {
+          if (identity && !signInReported) { signInReported = true; input.onProgress?.(`Sign in to ${source.name} in the browser window…`); }
+          return false;
+        }
+        const session = parseCodeforcesCookies(await browser.cookieHeader(), identity.handle, identity.csrf, identity.userAgent);
+        input.onProgress?.(`Signed in to ${source.name} as ${identity.handle}.`);
+        finish({ status: "connected", session, username: identity.handle });
+        return true;
+      } finally { checking = false; }
+    };
+    const poll = setInterval(() => { void attempt(); }, POLL_MS);
+    const timer = setTimeout(() => finish({ status: "failed", message: `The ${source.name} sign-in window timed out after ten minutes.` }), TIMEOUT_MS);
+    void attempt();
+  });
+}
+
+export async function clearCodeforcesSignIn(): Promise<void> {
+  await electronSession.fromPartition(CODEFORCES_PARTITION).clearStorageData({ storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] }).catch(() => undefined);
+  await rm(path.join(app.getPath("userData"), "codeforces-browser"), { recursive: true, force: true }).catch(() => undefined);
 }
 
 /** The session in a partition's cookie jar, or null while it is not there yet. */

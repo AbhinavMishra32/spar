@@ -47,7 +47,7 @@ function gateway(overrides: Partial<PracticeGateway> = {}): PracticeGateway {
   const bundle: PracticeProblemBundle = {
     problem: PROBLEM,
     cases: [{ name: "Example 1", input: ["[2,7,11,15]", "9"], expected: "[0,1]", origin: "statement" }],
-    capabilities: { remoteJudge: true, officialTestcases: true, search: true, progress: true, submissionHistory: true },
+    capabilities: { remoteJudge: true, scratchRun: true, officialTestcases: true, search: true, progress: true, submissionHistory: true },
     judge: "LeetCode judges this one.",
   };
   return {
@@ -127,11 +127,11 @@ describe("the practice MCP server", () => {
     // having accepted the answer.
     const disconnected = gateway({
       state: async () => "disconnected",
-      capabilities: async () => ({ remoteJudge: false, officialTestcases: true, search: true, progress: false, submissionHistory: false }),
+      capabilities: async () => ({ remoteJudge: false, scratchRun: false, officialTestcases: true, search: true, progress: false, submissionHistory: false }),
       problem: async () => ({
         problem: PROBLEM,
         cases: [{ name: "Example 1", input: ["[2,7,11,15]", "9"], expected: "[0,1]", origin: "statement" }],
-        capabilities: { remoteJudge: false, officialTestcases: true, search: true, progress: false, submissionHistory: false },
+        capabilities: { remoteJudge: false, scratchRun: false, officialTestcases: true, search: true, progress: false, submissionHistory: false },
         judge: "LeetCode is not connected, so Spar grades this one locally.",
       }),
     });
@@ -147,7 +147,7 @@ describe("the practice MCP server", () => {
       problem: async () => ({
         problem: PROBLEM,
         cases: [],
-        capabilities: { remoteJudge: false, officialTestcases: false, search: true, progress: false, submissionHistory: false },
+        capabilities: { remoteJudge: false, scratchRun: false, officialTestcases: false, search: true, progress: false, submissionHistory: false },
         judge: "Not connected.",
       }),
     });

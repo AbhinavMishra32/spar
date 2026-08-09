@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHarness, cppLiteral, judgeInputBlock, submittableCode } from "./harness.js";
+import { buildHarness, buildProgramHarness, cppLiteral, judgeInputBlock, submittableCode } from "./harness.js";
 import type { PracticeCase, PracticeProblem } from "./types.js";
 
 const JS_STARTER = `/**
@@ -162,6 +162,29 @@ describe("submittableCode", () => {
   it("survives a learner writing the marker text inside their own comment", () => {
     const file = ["// spar:solution:start", "// mentions spar:solution:end in a string", "var f = 1;", "// spar:solution:end"].join("\n");
     expect(submittableCode(file)).toContain("var f = 1;");
+  });
+});
+
+describe("buildProgramHarness — Codeforces", () => {
+  const source = problem({
+    source: "codeforces", slug: "4/A", externalId: "4/A", displayId: "4/A",
+    url: "https://codeforces.com/problemset/problem/4/A", signature: null,
+    languages: [{ language: "cpp", slug: "cpp", starter: "#include <bits/stdc++.h>\nusing namespace std;\nint main(){ return 0; }" }],
+  });
+  const published = [{ name: "Example 1", input: ["8"], expected: "YES", origin: "source" as const }];
+
+  it("keeps a complete stdin/stdout program submittable", () => {
+    const harness = buildProgramHarness({ problem: source, language: "cpp", cases: published });
+    expect(harness.supported).toBe(true);
+    expect(submittableCode(harness.files["src/main.cpp"] ?? "")).toContain("int main()");
+    expect(harness.files["tests/examples.test.cpp"]).toContain("spar_solution_main");
+    expect(harness.cases).toEqual(published);
+  });
+
+  it("refuses a local run when no paired output was published, without losing the editor file", () => {
+    const harness = buildProgramHarness({ problem: source, language: "cpp", cases: [] });
+    expect(harness.supported).toBe(false);
+    expect(harness.files["src/main.cpp"]).toContain("spar:solution:start");
   });
 });
 

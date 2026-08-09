@@ -160,7 +160,7 @@ export class AuthService {
       // live credential for somebody else's account on a machine its owner
       // believes they have wiped.
       "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai", "openrouter", "cline", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom", "exa",
-      "practice:leetcode:global", "practice:leetcode:cn",
+      "practice:leetcode:global", "practice:leetcode:cn", "practice:codeforces:global",
     ].flatMap((provider) => [this.deleteSecret(provider), this.deleteProviderOAuth(provider)]));
   }
   saveSecret(account: string, secret: string) { return keytar.setPassword(service, `provider:${account}`, secret).then(() => undefined); }
