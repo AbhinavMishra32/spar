@@ -25,9 +25,28 @@ export function seedFiles(design: QuestionDesign): Record<string, string> {
   return { ...design.starterFiles, ...design.visibleTests };
 }
 
-/** The challenge's files in the order the page mounts them: solution files first,
- *  because that is the one the learner lands in, then the read-only tests. */
-export function challengeFiles(design: QuestionDesign, content: Record<string, string>): ChallengeFile[] {
+/**
+ * Which files a challenge has, what each one is, and which of them the learner
+ * may edit — solution files first, because the first one is what they land in.
+ *
+ * Editability is membership in `visibleTests`, not a path that looks like a test.
+ * The workspace used to decide it with `path.startsWith("tests/")` and that is
+ * wrong for any challenge whose harness ships a support file outside `tests/`.
+ * The C++ mount is exactly that case: it vendors `include/bits/stdc++.h` so
+ * `#include <bits/stdc++.h>` resolves off a Codeforces submission, the shim lands
+ * in `visibleTests` because a design has nowhere else to put a non-starter file,
+ * and under the prefix rule it came out editable. Being editable, it counted as a
+ * solution file — so it sorted to the front and became the file the editor opened
+ * on, and its three-segment path tripped the "nested paths deserve a tree" rule.
+ * Opening a Codeforces problem dropped you into a copy of the standard library
+ * with a file tree beside it.
+ *
+ * Both readers derive it here now, because they had drifted apart: the standalone
+ * challenge page was already doing this correctly and the live workspace was not,
+ * which is why the same challenge looked like two different challenges depending
+ * on which surface you opened it from.
+ */
+export function challengeFileEntries(design: QuestionDesign): Array<{ path: string; language: string; role: "solution" | "test"; readOnly: boolean }> {
   const tests = new Set(Object.keys(design.visibleTests));
   return Object.keys(seedFiles(design))
     .sort()
@@ -36,9 +55,14 @@ export function challengeFiles(design: QuestionDesign, content: Record<string, s
       language: fileLanguage(path),
       role: tests.has(path) ? ("test" as const) : ("solution" as const),
       readOnly: tests.has(path),
-      content: content[path] ?? "",
     }))
     .sort((left, right) => Number(left.role === "test") - Number(right.role === "test"));
+}
+
+/** The challenge's files in the order the page mounts them, with what is on the
+ *  sandbox's disk for each. */
+export function challengeFiles(design: QuestionDesign, content: Record<string, string>): ChallengeFile[] {
+  return challengeFileEntries(design).map((entry) => ({ ...entry, content: content[entry.path] ?? "" }));
 }
 
 /** Lines of the excerpt, and the width one is allowed to reach before it is cut.
