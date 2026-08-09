@@ -216,11 +216,6 @@ function solutionFile(language: Language, starter: string, signature: PracticeSi
     return [
       "#pragma once",
       "",
-      "/* Everything between the two markers is what Spar submits to LeetCode.",
-      "   Write your solution inside them and leave the markers where they are.",
-      "   The includes and `using namespace std;` above match LeetCode's own",
-      "   environment, which is why the starter compiles unchanged. */",
-      "",
       CPP_INCLUDES,
       "using namespace std;",
       "",
@@ -230,16 +225,10 @@ function solutionFile(language: Language, starter: string, signature: PracticeSi
       "",
     ].join("\n");
   }
-  const comment = language === "typescript" ? "//" : "//";
   return [
-    `${comment} Everything between the two markers is what Spar submits to LeetCode.`,
-    `${comment} Write your solution inside them and leave the markers where they are —`,
-    `${comment} the export below is how Spar's local tests reach your function, and it`,
-    `${comment} is deliberately outside the region so it is never submitted.`,
-    "",
-    `${comment} ${SOLUTION_START}`,
+    `// ${SOLUTION_START}`,
     body,
-    `${comment} ${SOLUTION_END}`,
+    `// ${SOLUTION_END}`,
     "",
     ...(entry ? [`export { ${entry} as entry };`, ""] : []),
   ].join("\n");

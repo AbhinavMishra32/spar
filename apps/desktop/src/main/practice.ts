@@ -345,6 +345,8 @@ export class PracticeService {
       localCaseCount: harness.supported ? harness.cases.length : 0,
       judge: judgeDescription(problem.source, { ...effectiveCapabilities(problem.source, remoteJudge), remoteJudge }),
       entryName: problem.signature?.name ?? "",
+      hints: problem.hints,
+      localRunNote: harness.supported ? "" : harness.reason,
       /* Every case the problem publishes, not only the ones the local harness could
          wire up: a case Spar cannot run is still the contract the learner is being
          asked to satisfy, and it is the source's own statement of it. */
@@ -358,7 +360,7 @@ export class PracticeService {
       language,
       kind: problem.source === "codeforces" ? "repository" : "function",
       difficulty: DIFFICULTY[problem.difficulty],
-      statement: statementFor(problem, source, harness.supported ? "" : harness.reason),
+      statement: problem.statement.trim(),
       starterFiles: { [harness.entryPath]: harness.files[harness.entryPath] ?? "" },
       referenceFiles: {},
       visibleTests: tests,
@@ -557,33 +559,6 @@ function casesFor(problem: PracticeProblem): PracticeCase[] {
       ? [{ name: `Example ${index + 1}`, input: example.input, expected: example.output, origin: "statement" as const }]
       : []);
 }
-
-/**
- * The statement the learner reads.
- *
- * The source's own text, with a footer Spar adds. The footer is not decoration:
- * it names where the problem came from, links to it, and states who will decide
- * whether the answer is right. A learner looking at a problem in a practice app
- * is entitled to know all three without asking.
- */
-function statementFor(problem: PracticeProblem, source: ChallengeSource, harnessNote: string): string {
-  const name = practiceSource(problem.source).name;
-  const lines = [
-    problem.statement.trim(),
-    "",
-    "---",
-    "",
-    `**${name} ${source.displayId} · ${TITLE_CASE[problem.difficulty]}** — [open on ${name}](${problem.url})`,
-    "",
-    source.judge,
-  ];
-  if (harnessNote) lines.push("", `Spar cannot run this one locally: ${harnessNote}`);
-  else if (source.localCaseCount) lines.push("", `Running the tests here checks the ${source.localCaseCount} example${source.localCaseCount === 1 ? "" : "s"} published with the problem. ${source.remoteJudge ? `Submitting sends your solution to ${name}, which runs every hidden case it has.` : ""}`.trim());
-  if (problem.hints.length) lines.push("", `<details><summary>${problem.hints.length} hint${problem.hints.length === 1 ? "" : "s"} from ${name}</summary>`, "", ...problem.hints.map((hint, index) => `${index + 1}. ${hint}`), "", "</details>");
-  return lines.join("\n");
-}
-
-const TITLE_CASE: Record<PracticeProblem["difficulty"], string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
 
 /** Round-robin rather than concatenation: when each provider returns a full page,
  * concatenating and trimming would make the registry's first provider the only

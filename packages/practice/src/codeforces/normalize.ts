@@ -69,17 +69,54 @@ function starter(language: Language): string {
 }
 
 function extractProblemStatement(html: string): string {
-  const block = balancedDiv(html, html.search(/<div[^>]+class=["'][^"']*problem-statement/));
+  let block = balancedDiv(html, html.search(/<div[^>]+class=["'][^"']*problem-statement/));
   if (!block) return "Codeforces did not return a readable statement for this problem.";
+  /* The header is one nested div containing the title and all four limit/file
+     rows. A non-balanced regex only removed its first child, which is why those
+     rows appeared as five loose paragraphs in the problem pane. Samples are
+     removed as one balanced block too, preserving a Note that follows them. */
+  block = removeClassDiv(block, "header");
+  block = removeClassDiv(block, "sample-test");
   return decode(block
-    .replace(/<div[^>]+class=["']header["'][^>]*>[\s\S]*?<\/div>\s*<div[^>]+class=["']time-limit["'][^>]*>[\s\S]*?<\/div>\s*<div[^>]+class=["']memory-limit["'][^>]*>[\s\S]*?<\/div>\s*<div[^>]+class=["']input-file["'][^>]*>[\s\S]*?<\/div>\s*<div[^>]+class=["']output-file["'][^>]*>[\s\S]*?<\/div>/i, "")
-    .replace(/<div[^>]+class=["']sample-test["'][^>]*>[\s\S]*$/i, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<span[^>]+class=["'][^"']*tex-span[^"']*["'][^>]*>([\s\S]*?)<\/span>/gi, (_match, body: string) => `\`${latexText(htmlText(body))}\``)
     .replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_match, body: string) => `\n\n\`\`\`text\n${htmlText(body)}\n\`\`\`\n\n`)
+    .replace(/<div[^>]+class=["']title["'][^>]*>([\s\S]*?)<\/div>/gi, (_match, body: string) => `\n\n**${htmlText(body)}**\n\n`)
+    .replace(/<(strong|b)[^>]*>([\s\S]*?)<\/\1>/gi, (_match, _tag: string, body: string) => `**${htmlText(body)}**`)
+    .replace(/<(em|i)[^>]*>([\s\S]*?)<\/\1>/gi, (_match, _tag: string, body: string) => `*${htmlText(body)}*`)
     .replace(/<li[^>]*>/gi, "\n- ").replace(/<br\s*\/?\s*>/gi, "\n")
     .replace(/<\/(p|div|li|ul|ol|section|h\d)>/gi, "\n\n")
     .replace(/<[^>]+>/g, "")
-  ).replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  ).replace(/\n[ \t]+/g, "\n").replace(/\n{3,}/g, "\n\n").trim()
+    /* Codeforces places this label immediately before sample-test rather than
+       inside it. Samples have their own typed pane in Spar, so an orphan label
+       at the end of the prose is only visual debris. */
+    .replace(/\n\nExamples?\s*$/i, "");
+}
+
+function removeClassDiv(html: string, className: string): string {
+  const pattern = new RegExp(`<div[^>]+class=["'][^"']*\\b${className}\\b[^"']*["']`, "i");
+  const start = html.search(pattern);
+  if (start < 0) return html;
+  const block = balancedDiv(html, start);
+  return block ? `${html.slice(0, start)}${html.slice(start + block.length)}` : html;
+}
+
+/** Codeforces wraps TeX in triple dollar markers for MathJax. Spar deliberately
+ *  does not execute MathJax in a problem description, so turn its small inline
+ *  vocabulary into readable Unicode/plain text and protect it as inline code. */
+function latexText(value: string): string {
+  return value
+    .replace(/^\${1,3}|\${1,3}$/g, "")
+    .replace(/\\(?:leq?|le)/g, "≤").replace(/\\(?:geq?|ge)/g, "≥")
+    .replace(/\\lt/g, "<").replace(/\\gt/g, ">")
+    .replace(/\\ne(q)?/g, "≠").replace(/\\cdot|\\times/g, "×")
+    .replace(/\\(?:ldots|dots)/g, "…")
+    .replace(/\\infty/g, "∞")
+    .replace(/\\(?:text|mathrm|operatorname)\{([^{}]*)\}/g, "$1")
+    .replace(/[{}]/g, "")
+    .replace(/\\([A-Za-z]+)/g, "$1")
+    .trim();
 }
 
 function extractSamples(html: string): Array<{ input: string; output: string }> {
@@ -102,5 +139,15 @@ function balancedDiv(html: string, start: number): string {
   return "";
 }
 
-function htmlText(value: string): string { return decode(value.replace(/<br\s*\/?\s*>/gi, "\n").replace(/<[^>]+>/g, "")).replace(/\r/g, "").trim(); }
+function htmlText(value: string): string {
+  return decode(value
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    /* Recent Codeforces pages wrap each visual preformatted line in a div. If
+       those tags are merely stripped, `3`, `5`, and `1 2` become `351 2`. */
+    .replace(/<\/div\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, ""))
+    .replace(/\r/g, "")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
+}
 function decode(value: string): string { return value.replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&amp;/gi, "&").replace(/&#(\d+);/g, (_m, code: string) => String.fromCodePoint(Number(code))); }

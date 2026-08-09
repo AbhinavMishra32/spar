@@ -20,6 +20,7 @@ import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { fileName, message, relativeTime, shortTime } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
+import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
 import { Toolbar } from "../shell/Toolbar";
 import { FileGlyph, LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ChallengeEmblem } from "../workspace/ChallengeEmblem";
@@ -427,6 +428,10 @@ export function ChallengePage({
 
   const mount: OnMount = (editor) => editor.updateOptions({ fontLigatures: true });
   const activeFile = detail?.files.find((file) => file.path === activePath);
+  const scaffold = useMemo(
+    () => detail?.source?.source === "leetcode" ? splitSolutionScaffold(drafts[activePath] ?? "") : null,
+    [activePath, detail?.source?.source, drafts],
+  );
   const edited = Object.values(dirty).some(Boolean) || Boolean(detail?.practiceEdited);
 
   if (missing) {
@@ -557,7 +562,10 @@ export function ChallengePage({
                     language={activeFile?.language ?? "plaintext"}
                     onChange={(value) => {
                       if (!activePath) return;
-                      setDrafts((current) => ({ ...current, [activePath]: value ?? "" }));
+                      setDrafts((current) => ({
+                        ...current,
+                        [activePath]: scaffold ? withSolutionBody(scaffold, value ?? "") : value ?? "",
+                      }));
                       setDirty((current) => ({ ...current, [activePath]: true }));
                     }}
                     onMount={mount}
@@ -576,7 +584,7 @@ export function ChallengePage({
                     }}
                     path={activePath}
                     theme={dark ? EDITOR_THEME_DARK : EDITOR_THEME_LIGHT}
-                    value={drafts[activePath] ?? ""}
+                    value={scaffold?.body ?? drafts[activePath] ?? ""}
                   />
                 </div>
               </div>

@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, ChevronDown, FlaskConical, Target } from "lucide-react";
+import { ArrowRight, ChevronDown, FlaskConical, Lightbulb, Target, TriangleAlert } from "lucide-react";
 import type { ActiveQuestion } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { declaredCases, sourcedCases } from "@/lib/testCases";
+import { presentSourcedStatement } from "@/lib/sourcedStatement";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { ProblemStatement } from "./ProblemStatement";
 import { ConceptChip } from "../concepts/ConceptChip";
@@ -36,6 +37,11 @@ export function ProblemView({
   );
   const [selected, setSelected] = useState("");
   const [whyOpen, setWhyOpen] = useState(false);
+  const [openHints, setOpenHints] = useState<number[]>([]);
+  const presented = useMemo(
+    () => presentSourcedStatement(question.statement, question.source),
+    [question.source, question.statement],
+  );
 
   const active = declared.cases.find((item) => item.id === selected) ?? declared.cases[0];
 
@@ -70,7 +76,41 @@ export function ProblemView({
           </div>
         )}
 
-        <ProblemStatement source={question.statement} />
+        <ProblemStatement source={presented.statement} />
+
+        {question.source?.localRunNote && (
+          <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-lg)] border border-[color-mix(in_oklab,var(--warning)_30%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_6%,transparent)] px-3 py-2 text-ui leading-[1.55] text-muted-foreground">
+            <TriangleAlert className="mt-[0.15em] size-3.5 shrink-0 text-[var(--warning)]" />
+            <p><span className="font-medium text-foreground/80">Local run unavailable. </span>{question.source.localRunNote}</p>
+          </div>
+        )}
+
+        {question.source?.source === "leetcode" && presented.hints.length > 0 && (
+          <section className="mt-4 space-y-1.5" aria-label="LeetCode hints">
+            {presented.hints.map((hint, index) => {
+              const open = openHints.includes(index);
+              return (
+                <div className="overflow-hidden rounded-[var(--radius-lg)] border border-border bg-card" key={index}>
+                  <button
+                    aria-expanded={open}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-[var(--color-background-elevated-secondary)]"
+                    onClick={() => setOpenHints((current) => open ? current.filter((item) => item !== index) : [...current, index])}
+                    type="button"
+                  >
+                    <Lightbulb className="size-3.5 shrink-0 text-[var(--warning)]" />
+                    <span className="min-w-0 flex-1 text-ui font-medium">Hint {index + 1}</span>
+                    <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")} />
+                  </button>
+                  {open && (
+                    <div className="border-t border-border/70 px-3 py-2">
+                      <ProblemStatement source={hint} />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </section>
+        )}
 
         {declared.cases.length > 0 && active && (
           <section className="mt-5">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { QuestionDesign } from "@spar/domain";
-import { challengeFileEntries, challengeFiles } from "./challengeFiles.js";
+import { challengeFileEntries, challengeFiles, codePreview } from "./challengeFiles.js";
 
 function design(over: Partial<QuestionDesign> = {}): QuestionDesign {
   return {
@@ -77,5 +77,27 @@ describe("challengeFiles", () => {
 
   it("agrees with the entries it is built from", () => {
     expect(challengeFiles(cppMount, {}).map((file) => file.path)).toEqual(challengeFileEntries(cppMount).map((file) => file.path));
+  });
+});
+
+describe("codePreview", () => {
+  it("shows only the learner-owned region from an old LeetCode scaffold", () => {
+    const preview = codePreview(design({
+      starterFiles: {
+        "solution.h": "#pragma once\n/* host explanation */\n#include <vector>\n// spar:solution:start\nclass Solution {};\n// spar:solution:end\n",
+      },
+    }));
+    expect(preview?.code).toBe("class Solution {};");
+    expect(preview?.remainingLines).toBe(0);
+  });
+
+  it("removes Codeforces markers but keeps submitted program infrastructure", () => {
+    const preview = codePreview(design({
+      starterFiles: {
+        "main.cpp": "// host explanation\n// spar:solution:start\n#include <bits/stdc++.h>\nusing namespace std;\nint main() { return 0; }\n// spar:solution:end\n",
+      },
+    }));
+    expect(preview?.code).toBe("#include <bits/stdc++.h>\nusing namespace std;\nint main() { return 0; }");
+    expect(preview?.code).not.toContain("spar:solution");
   });
 });

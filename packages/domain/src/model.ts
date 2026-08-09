@@ -128,6 +128,14 @@ export const challengeSourceSchema = z.object({
   /** The function the source's own starter declares, so a case can be shown as the
    *  call it is rather than as a bare pair of values. */
   entryName: z.string().default(""),
+  /** Provider-authored hints are content, but revealing them is a renderer
+   *  decision. Keeping them structured prevents source HTML such as <details>
+   *  from leaking into the statement markdown. Optional for challenges saved
+   *  before hints were carried on the source stamp. */
+  hints: z.array(z.string()).optional(),
+  /** Why the published samples could not become a local harness, when that is
+   *  the case. Presentation belongs to the renderer rather than the statement. */
+  localRunNote: z.string().optional(),
   /**
    * The examples published with the problem, as the source states them: one string
    * per argument, and the answer it gives for them.

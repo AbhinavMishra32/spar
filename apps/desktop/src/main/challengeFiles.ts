@@ -1,4 +1,5 @@
 import type { ChallengeCodePreview, ChallengeFile, ChallengeTimelineEntry, QuestionDesign } from "@spar/domain";
+import { splitSolutionScaffold } from "../shared/solutionScaffold.js";
 
 /**
  * Reading a compiled challenge as files rather than as a design blob.
@@ -81,7 +82,11 @@ export function codePreview(design: QuestionDesign): ChallengeCodePreview | null
     (left, right) => right[1].trim().length - left[1].trim().length || left[0].localeCompare(right[0]),
   )[0]!;
 
-  const lines = body.replace(/\r\n/g, "\n").split("\n");
+  /* A card previews the learner-owned submission, not Spar's compile envelope.
+     This also cleans old persisted challenges whose generated starter still has
+     the explanatory comment that newer harnesses no longer create. */
+  const projected = splitSolutionScaffold(body)?.body ?? body;
+  const lines = projected.replace(/\r\n/g, "\n").split("\n");
   // Leading blank lines and a lone file-header comment carry nothing at this
   // size; the excerpt starts where the code does.
   let start = 0;
