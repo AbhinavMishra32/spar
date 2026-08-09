@@ -203,7 +203,11 @@
   /* Only painted when the platform gives us no native material to sit on. */
   --app-sidebar-fill: oklch(95.5% 0 0);
   --app-vibrant-tint: oklch(100% 0 0 / 30%);
-  --app-glass-fill: 88%;
+  /* Opaque. The pane held a heavy tint so the window's glass carried through the
+     whole app, but the desktop moving behind a page of text is the desktop
+     competing with it — and the sidebar still shows the material, so the two
+     surfaces stay told apart by the one that is meant to be doing it. */
+  --app-glass-fill: 100%;
   --app-user-message-background: oklch(14.5% 0 0 / 6%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 10%), 0 8px 10px -6px oklch(0% 0 0 / 10%);
   --app-shadow-menu: 0 16px 40px -12px oklch(0% 0 0 / 20%), 0 4px 10px -4px oklch(0% 0 0 / 8%);
@@ -304,7 +308,7 @@
      sits on, so it catches more light. Only painted with no native material. */
   --app-sidebar-fill: oklch(28.5% 0 0);
   --app-vibrant-tint: oklch(100% 0 0 / 6%);
-  --app-glass-fill: 86%;
+  --app-glass-fill: 100%;
   --app-user-message-background: oklch(98.5% 0 0 / 8%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 40%), 0 8px 10px -6px oklch(0% 0 0 / 40%);
   --app-shadow-menu: 0 16px 40px -10px oklch(0% 0 0 / 55%), 0 4px 12px -4px oklch(0% 0 0 / 40%);
