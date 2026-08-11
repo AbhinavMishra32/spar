@@ -6,13 +6,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const keychain = new Map<string, string>();
 vi.mock("keytar", () => ({
   default: {
-    getPassword: async (_service: string, account: string) => keychain.get(account) ?? null,
-    setPassword: async (_service: string, account: string, secret: string) => void keychain.set(account, secret),
-    deletePassword: async (_service: string, account: string) => keychain.delete(account),
+    getPassword: vi.fn(async (_service: string, account: string) => keychain.get(account) ?? null),
+    setPassword: vi.fn(async (_service: string, account: string, secret: string) => void keychain.set(account, secret)),
+    deletePassword: vi.fn(async (_service: string, account: string) => keychain.delete(account)),
   },
 }));
 
 const { AuthService, AuthError } = await import("./auth.js");
+const keytar = (await import("keytar")).default;
 
 type Handler = (body: Record<string, unknown>) => Response;
 let routes: Record<string, Handler>;
@@ -24,6 +25,9 @@ const session = (token: string) => json({ token, user: { id: "8f1c", email: "lea
 
 beforeEach(() => {
   keychain.clear();
+  vi.mocked(keytar.getPassword).mockImplementation(async (_service: string, account: string) => keychain.get(account) ?? null);
+  vi.mocked(keytar.setPassword).mockImplementation(async (_service: string, account: string, secret: string) => void keychain.set(account, secret));
+  vi.mocked(keytar.deletePassword).mockImplementation(async (_service: string, account: string) => keychain.delete(account));
   calls = [];
   origins = [];
   routes = {};
@@ -39,6 +43,27 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const service = () => new AuthService("https://api.test");
+
+describe("credential-store bootstrap", () => {
+  it("starts signed out when the OS credential store cannot be read", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(keytar.getPassword).mockRejectedValueOnce(new Error("An unknown error occurred."));
+
+    await expect(service().account()).resolves.toBeNull();
+    expect(log).toHaveBeenCalledWith(
+      "Credential store unavailable; starting Spar signed out:",
+      expect.any(Error),
+    );
+  });
+
+  it("turns an opaque credential write failure into an actionable error", async () => {
+    routes["sign-in/email"] = () => session("raw-token");
+    vi.mocked(keytar.setPassword).mockRejectedValueOnce(new Error("An unknown error occurred."));
+
+    await expect(service().request({ action: "sign-in", email: "learner@example.com", password: "a-good-password" }))
+      .rejects.toThrow(/Unlock the login keychain in Keychain Access/);
+  });
+});
 
 describe("signing in", () => {
   it("keeps the signed token from the bearer header, not the one in the body", async () => {

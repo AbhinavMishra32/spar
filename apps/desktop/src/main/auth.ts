@@ -2,6 +2,49 @@ import keytar from "keytar";
 import type { AuthCodePurpose, AuthRequest, AuthResult } from "../shared/api.js";
 
 const service = "ai.spar.desktop";
+let reportedCredentialReadFailure = false;
+
+export class CredentialStoreError extends Error {
+  constructor(operation: "read" | "write" | "delete", cause: unknown) {
+    const store = process.platform === "darwin" ? "macOS Keychain" : "the operating system credential store";
+    const recovery = process.platform === "darwin" ? " Unlock the login keychain in Keychain Access and try again." : " Unlock it and try again.";
+    super(`Spar could not ${operation} credentials in ${store}.${recovery}`, { cause });
+    this.name = "CredentialStoreError";
+  }
+}
+
+/** Reading the credential store is part of deciding which screen to show, but
+ *  it must never be part of deciding whether Spar gets a window at all. macOS
+ *  Keychain can reject a read while the login keychain is locked or unhealthy;
+ *  in that case the safe bootstrap state is signed out. Writes still reject so
+ *  the UI cannot claim a credential was saved when it was not. */
+async function readPassword(account: string): Promise<string | null> {
+  try {
+    return await keytar.getPassword(service, account);
+  } catch (cause) {
+    if (!reportedCredentialReadFailure) {
+      reportedCredentialReadFailure = true;
+      console.error("Credential store unavailable; starting Spar signed out:", cause);
+    }
+    return null;
+  }
+}
+
+async function writePassword(account: string, password: string): Promise<void> {
+  try {
+    await keytar.setPassword(service, account, password);
+  } catch (cause) {
+    throw new CredentialStoreError("write", cause);
+  }
+}
+
+async function removePassword(account: string): Promise<boolean> {
+  try {
+    return await keytar.deletePassword(service, account);
+  } catch (cause) {
+    throw new CredentialStoreError("delete", cause);
+  }
+}
 /** Where the session token lives. The fifteen-minute JWT this replaced was held
  *  under "access-token"; that entry is cleared whenever a token is written or
  *  dropped, so no install is left holding a credential nothing will accept. */
@@ -49,9 +92,9 @@ export class AuthService {
    *  `verify-email`, so the fact has to be remembered across the two calls. */
   private freshAccount = false;
   signedUpThisSession() { return this.freshAccount; }
-  async account() { const raw = await keytar.getPassword(service, "account"); return raw ? JSON.parse(raw) as Account : null; }
+  async account() { const raw = await readPassword("account"); return raw ? JSON.parse(raw) as Account : null; }
   /** The bearer token every authenticated request carries. */
-  async accessToken() { return keytar.getPassword(service, TOKEN); }
+  async accessToken() { return readPassword(TOKEN); }
 
   /** One entry point for every step of signing in. Each case is one call to
    *  Better Auth and, on success, one of two outcomes: the device is signed in,
@@ -125,9 +168,9 @@ export class AuthService {
   private async persist(payload: AuthPayload): Promise<AuthResult> {
     if (!payload.token || !payload.user) throw new AuthError("The server did not return a session. Try signing in again.");
     const account: Account = { id: payload.user.id, email: payload.user.email, displayName: payload.user.name ?? payload.user.email.split("@")[0] ?? "Learner" };
-    await keytar.setPassword(service, TOKEN, payload.token);
-    await keytar.setPassword(service, "account", JSON.stringify(account));
-    await keytar.deletePassword(service, LEGACY_TOKEN).catch(() => undefined);
+    await writePassword(TOKEN, payload.token);
+    await writePassword("account", JSON.stringify(account));
+    await removePassword(LEGACY_TOKEN).catch(() => undefined);
     return { status: "signed-in" };
   }
 
@@ -137,9 +180,9 @@ export class AuthService {
        out of a device has to work on a plane. */
     const token = await this.accessToken();
     if (token) await fetch(`${this.apiOrigin}/v1/auth/sign-out`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", origin: DESKTOP_ORIGIN }, body: "{}" }).catch(() => undefined);
-    await keytar.deletePassword(service, TOKEN);
-    await keytar.deletePassword(service, LEGACY_TOKEN).catch(() => undefined);
-    await keytar.deletePassword(service, "account");
+    await removePassword(TOKEN);
+    await removePassword(LEGACY_TOKEN).catch(() => undefined);
+    await removePassword("account");
     /* Whoever signs in next is not the account that was just created here, so the
        next sign-in must restore rather than assume there is nothing to pull. */
     this.freshAccount = false;
@@ -163,16 +206,16 @@ export class AuthService {
       "practice:leetcode:global", "practice:leetcode:cn", "practice:codeforces:global",
     ].flatMap((provider) => [this.deleteSecret(provider), this.deleteProviderOAuth(provider)]));
   }
-  saveSecret(account: string, secret: string) { return keytar.setPassword(service, `provider:${account}`, secret).then(() => undefined); }
-  readSecret(account: string) { return keytar.getPassword(service, `provider:${account}`); }
-  deleteSecret(account: string) { return keytar.deletePassword(service, `provider:${account}`).then(() => undefined); }
-  saveProviderOAuth(provider: string, credentials: unknown) { return keytar.setPassword(service, `provider-oauth:${provider}`, JSON.stringify(credentials)).then(() => undefined); }
+  saveSecret(account: string, secret: string) { return writePassword(`provider:${account}`, secret); }
+  readSecret(account: string) { return readPassword(`provider:${account}`); }
+  deleteSecret(account: string) { return removePassword(`provider:${account}`).then(() => undefined); }
+  saveProviderOAuth(provider: string, credentials: unknown) { return writePassword(`provider-oauth:${provider}`, JSON.stringify(credentials)); }
   async readProviderOAuth<T>(provider: string): Promise<T | null> {
-    const raw = await keytar.getPassword(service, `provider-oauth:${provider}`);
+    const raw = await readPassword(`provider-oauth:${provider}`);
     if (!raw) return null;
     try { return JSON.parse(raw) as T; } catch { return null; }
   }
-  deleteProviderOAuth(provider: string) { return keytar.deletePassword(service, `provider-oauth:${provider}`).then(() => undefined); }
+  deleteProviderOAuth(provider: string) { return removePassword(`provider-oauth:${provider}`).then(() => undefined); }
 }
 
 /** A failure with a sentence in it that can be shown as-is, and the server's own

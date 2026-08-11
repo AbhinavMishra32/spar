@@ -72,6 +72,13 @@ else {
        closed the laptop on is exactly the one worth not losing. */
     app.on("before-quit", () => { practice.stop(); void checkpoints.flushAll().finally(() => { checkpoints.stop(); sync.stop(); runner.stop(); agent.stop(); store.close(); }); });
     app.on("activate", async () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow({ stage: !(await auth.account()) ? "sign-in" : store.getProfile() ? "app" : "restoring" }); });
+  }).catch((error: unknown) => {
+    /* A rejected async Electron event otherwise becomes an unhandled promise and
+       leaves a process with a Dock icon but no window. This is the last-resort
+       boundary; recoverable dependencies such as Keychain are handled closer to
+       their owner, while a genuinely failed bootstrap exits cleanly. */
+    console.error("Desktop bootstrap failed:", error);
+    app.quit();
   });
 }
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });

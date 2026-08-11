@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { route } from "./sync.js";
+import { CloudSyncService, route } from "./sync.js";
+import type { AuthService } from "./auth.js";
+import type { LocalStore } from "./store.js";
+
+describe("background sync failures", () => {
+  it("reports offline instead of rejecting when credentials cannot be read", async () => {
+    const states: string[] = [];
+    const auth = { accessToken: async () => { throw new Error("credential store unavailable"); } } as unknown as AuthService;
+    const sync = new CloudSyncService({} as LocalStore, auth, "https://api.test", (state) => states.push(state));
+
+    await expect(sync.flush()).resolves.toBeUndefined();
+    expect(states).toEqual(["offline"]);
+  });
+});
 
 /* The outbox is a table of `kind` strings and JSON payloads, and `route` is the
    only thing that turns one into a request. A kind that maps to the wrong path is
