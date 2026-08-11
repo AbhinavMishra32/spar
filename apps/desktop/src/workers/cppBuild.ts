@@ -21,16 +21,21 @@ const FLAGS = ["-std=c++20", "-O2", "-Wall", "-Wextra", "-pedantic"];
  * without one.
  */
 export function planCppBuild(input: { files: string[]; outputDir: string; command: "test" | "run" }): CppPlan {
-  const files = input.files.filter((file) => !file.startsWith(".spar/")).map(normalize).sort();
+  const entries = input.files.map((file) => ({ physical: file.replace(/^\.\/+/, ""), canonical: normalize(file) })).filter((entry) => !entry.canonical.startsWith(".spar/")).sort((a,b)=>a.canonical.localeCompare(b.canonical));
+  const aliases = new Map<string,string[]>();
+  for (const entry of entries) aliases.set(entry.canonical,[...(aliases.get(entry.canonical)??[]),entry.physical]);
+  const collision = [...aliases].find(([,paths])=>new Set(paths).size>1);
+  if(collision)return{error:`Workspace path collision: ${collision[1].map(value=>JSON.stringify(value)).join(" and ")} both identify ${collision[0]}. Normalize persisted workspace paths to forward slashes before building; no compiler was started.\n`};
+  const files = entries.map((entry) => entry.physical);
   const sources = files.filter((file) => /\.(cpp|cc|cxx)$/.test(file));
   const testSources = sources.filter(isTestSource);
-  const librarySources = sources.filter((file) => !isTestSource(file) && path.posix.basename(file) !== "main.cpp");
+  const librarySources = sources.filter((file) => !isTestSource(file) && path.posix.basename(normalize(file)) !== "main.cpp");
   const include = includeFlags(files);
 
   const compile = (binary: string, inputs: string[]): CppStage => ({ bin: COMPILER, args: [...FLAGS, ...include, "-o", binary, ...inputs] });
 
   if (input.command === "run") {
-    const entry = sources.find((file) => path.posix.basename(file) === "main.cpp");
+    const entry = sources.find((file) => path.posix.basename(normalize(file)) === "main.cpp");
     if (!entry) return { error: `No C++ entrypoint found. Provide main.cpp defining int main(). Files seen: ${files.join(", ") || "none"}.\n` };
     const binary = path.join(input.outputDir, "solution");
     return { stages: [compile(binary, [entry, ...librarySources]), { bin: binary, args: [] }], binaries: [binary] };
@@ -52,7 +57,8 @@ function normalize(file: string): string {
 }
 
 function isTestSource(file: string): boolean {
-  return /(^|\/)tests?\//.test(file) || /[._-]test\.(cpp|cc|cxx)$/.test(file) || /(^|\/)test[^/]*\.(cpp|cc|cxx)$/.test(file);
+  const canonical=normalize(file);
+  return /(^|\/)tests?\//.test(canonical) || /[._-]test\.(cpp|cc|cxx)$/.test(canonical) || /(^|\/)test[^/]*\.(cpp|cc|cxx)$/.test(canonical);
 }
 
 /**
@@ -62,13 +68,14 @@ function isTestSource(file: string): boolean {
  */
 function includeFlags(files: string[]): string[] {
   const directories = new Set<string>(["."]);
-  for (const file of files) {
+  for (const physical of files) {
+    const file=normalize(physical);
     if (!/\.(h|hpp|hh|hxx)$/.test(file)) continue;
     const directory = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : ".";
     directories.add(directory);
   }
   for (const conventional of ["src", "include", "lib"]) {
-    if (files.some((file) => file.startsWith(`${conventional}/`))) directories.add(conventional);
+    if (files.some((file) => normalize(file).startsWith(`${conventional}/`))) directories.add(conventional);
   }
   return [...directories].sort().map((directory) => `-I${directory}`);
 }

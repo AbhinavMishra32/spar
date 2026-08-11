@@ -9,6 +9,7 @@ import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
 import { sourceSubmissionOutput } from "../shared/sourceOutput.js";
+import { canonicalWorkspacePath } from "../shared/workspacePath.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
 import { openChosenProblem } from "./practiceChoice.js";
 import { judgeCaseBlock } from "./judgeCases.js";
@@ -71,8 +72,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       ? checkpoint.data.workspaceFiles
       : [];
     for (const file of checkpointFiles) {
-      if (file.path in declared && (file.dirtyContent ?? file.content) !== undefined) {
-        declared[file.path] = (file.dirtyContent ?? file.content)!;
+      const restoredPath = canonicalWorkspacePath(file.path);
+      if (restoredPath in declared && (file.dirtyContent ?? file.content) !== undefined) {
+        declared[restoredPath] = (file.dirtyContent ?? file.content)!;
       }
     }
     await deps.workspaces.ensureFiles(sessionId, declared);
@@ -110,8 +112,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      the Run button — which is why pressing Run on a C++ challenge killed the
      compile before it finished and reported the learner's correct solution as a
      stopped process. A caller may ask for *less* (a quick smoke run), never more. */
-  ipcMain.handle(ipc.runnerRun, (_event, value) => {
+  ipcMain.handle(ipc.runnerRun, async (_event, value) => {
     const input = runInput.parse(value);
+    await deps.workspaces.prepareForExecution(input.sessionId);
     const budget = runLimits(input.language).timeoutMs;
     const timeoutMs = input.timeoutMs === undefined ? budget : Math.min(input.timeoutMs, budget);
     const request = deps.runner.request("run", { ...input, timeoutMs, root: deps.workspaces.sessionRoot(input.sessionId) });

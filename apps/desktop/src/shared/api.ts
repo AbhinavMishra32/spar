@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { canonicalWorkspacePath } from "./workspacePath.js";
 import { attemptEventSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type SessionDetail, type SessionSuggestion } from "@spar/domain";
 
 export const ipc = {
@@ -75,11 +76,12 @@ export const sessionFlagInput = z.object({ sessionId: z.string().uuid(), value: 
 /* Only the two the learner can mean by hand. `planning` and `active` are the
    agent's to set — they promise a turn or a live challenge behind them. */
 export const sessionStatusInput = z.object({ sessionId: z.string().uuid(), status: z.enum(["completed", "paused"]) });
-export const workspacePathInput = z.object({ sessionId: z.string().uuid(), path: z.string().min(1).max(500) });
+const workspacePath = z.string().min(1).max(500).transform(canonicalWorkspacePath);
+export const workspacePathInput = z.object({ sessionId: z.string().uuid(), path: workspacePath });
 /* Practising a challenge out of history is addressed by challenge id alone. The
    session it came from is looked up rather than passed, so a renderer can never
    name one challenge and a different session's sandbox. */
-export const challengePathInput = z.object({ challengeId: z.string().uuid(), path: z.string().min(1).max(500) });
+export const challengePathInput = z.object({ challengeId: z.string().uuid(), path: workspacePath });
 export const challengeWriteInput = challengePathInput.extend({ content: z.string().max(2_000_000) });
 export const challengeIdInput = z.object({ challengeId: z.string().uuid() });
 /* Starting a session from something the learner already has. Named by id rather
@@ -98,8 +100,8 @@ export const workspaceWriteInput = workspacePathInput.extend({ content: z.string
  *  the renderer's contribution to one. */
 export const workspaceStateInput = z.object({
   sessionId: z.string().uuid(),
-  openFiles: z.array(z.string().min(1).max(500)).max(50).default([]),
-  activeFile: z.string().min(1).max(500).nullable().default(null),
+  openFiles: z.array(workspacePath).max(50).default([]),
+  activeFile: workspacePath.nullable().default(null),
   layout: z.object({ sidebarWidth: z.number(), editorRatio: z.number(), bottomPanelHeight: z.number(), agentPanelOpen: z.boolean() }),
   visibleTestRunIds: z.array(z.string()).max(50).default([]),
   terminalRecipe: z.array(z.string().max(500)).max(20).default([]),

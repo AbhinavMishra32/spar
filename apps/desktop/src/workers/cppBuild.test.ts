@@ -124,6 +124,12 @@ describe("the generated C++ harness", () => {
 });
 
 describe("C++ build planning", () => {
+  it("rejects separator aliases before clang links one source twice", () => {
+    const plan=planCppBuild({files:["src/trace.cpp","src\\trace.cpp","tests/visible.test.cpp"],outputDir:"/out",command:"test"});
+    expect("error" in plan&&plan.error).toContain("both identify src/trace.cpp");
+    expect("error" in plan&&plan.error).toContain("no compiler was started");
+  });
+
   it("gives each test file its own binary so visible and hidden tests never collide", () => {
     const plan = planCppBuild({ files: Object.keys(layout), outputDir: "/out", command: "test" });
     if ("error" in plan) throw new Error(plan.error);
