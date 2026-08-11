@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ArrowRight, Check } from "lucide-react";
-import type { Language, LearnerProfile, SessionSuggestion } from "@spar/domain";
+import { LANGUAGES as SUPPORTED_LANGUAGES, type Language, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import type { PracticeSourceAccount, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Meter, MeterKey, type MeterBand } from "@/components/ui/meter";
@@ -80,7 +80,7 @@ const FOCUS = [
   "API design",
 ];
 
-const LANGUAGES: Language[] = ["javascript", "typescript", "cpp"];
+const LANGUAGES: Language[] = [...SUPPORTED_LANGUAGES];
 
 /** The judges Spar can set problems from, plus the next integrations. */
 const SOURCES = [

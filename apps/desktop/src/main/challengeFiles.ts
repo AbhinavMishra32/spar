@@ -14,6 +14,7 @@ export function fileLanguage(path: string): string {
   if (path.endsWith(".ts") || path.endsWith(".tsx") || path.endsWith(".mts")) return "typescript";
   if (path.endsWith(".js") || path.endsWith(".mjs") || path.endsWith(".cjs")) return "javascript";
   if (/\.(cpp|cc|cxx|hpp|hh|hxx|h)$/.test(path)) return "cpp";
+  if(path.endsWith(".py"))return"python";if(path.endsWith(".java"))return"java";if(path.endsWith(".c"))return"c";if(path.endsWith(".go"))return"go";if(path.endsWith(".rs"))return"rust";if(path.endsWith(".swift"))return"swift";if(path.endsWith(".rb"))return"ruby";
   if (path.endsWith(".json")) return "json";
   if (path.endsWith(".md")) return "markdown";
   return "plaintext";

@@ -3,7 +3,7 @@ import { Agent } from "@mastra/core/agent";
 import { Mastra } from "@mastra/core/mastra";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
-import { askUserQuestionInputSchema } from "@spar/domain";
+import { askUserQuestionInputSchema, languageSchema, type Language } from "@spar/domain";
 import { PRACTICE_READ_TOOLS } from "@spar/practice/mcp";
 import { createPiMastraModel, type PiProviderInput } from "./piMastraModel.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
@@ -85,7 +85,7 @@ const conceptTagInputSchema=z.object({
   parentSlug:z.string().min(2).max(60).optional().describe("the area a new sub-concept belongs under, e.g. sliding-window"),
   role:z.enum(["primary","supporting"]).default("supporting"),
 });
-const questionInputSchema=z.object({ concepts:z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."),title:z.string().min(3).describe("A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."),language:z.enum(["javascript","typescript","cpp"]),kind:z.enum(["function","module","repair","extension","repository"]),difficulty:z.enum(["foundation","developing","proficient","advanced"]),statement:z.string().min(30).describe("The complete learner-facing problem page in professional Markdown: description, numbered examples with Input and Output, then constraints. No agent commentary, selection rationale, validation notes, or hidden-test details."),starterFiles:z.record(z.string()),referenceFiles:z.record(z.string()),visibleTests:z.record(z.string()),hiddenTests:z.record(z.string()),knownIncorrectFiles:z.array(z.record(z.string())).min(1),runCommand:z.string().min(1),accidentalDifficulty:z.array(z.string()).max(3),expectedFailureSignatures:z.array(z.string()).min(1) });
+const questionInputSchema=z.object({ concepts:z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."),title:z.string().min(3).describe("A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."),language:languageSchema,kind:z.enum(["function","module","repair","extension","repository"]),difficulty:z.enum(["foundation","developing","proficient","advanced"]),statement:z.string().min(30).describe("The complete learner-facing problem page in professional Markdown: description, numbered examples with Input and Output, then constraints. No agent commentary, selection rationale, validation notes, or hidden-test details."),starterFiles:z.record(z.string()),referenceFiles:z.record(z.string()),visibleTests:z.record(z.string()),hiddenTests:z.record(z.string()),knownIncorrectFiles:z.array(z.record(z.string())).min(1),runCommand:z.string().min(1),accidentalDifficulty:z.array(z.string()).max(3),expectedFailureSignatures:z.array(z.string()).min(1) });
 /**
  * What turns an ability document into an Ability the learner has. The markdown is
  * the agent's working notes; these three are the claim it supports — one sentence
@@ -158,7 +158,7 @@ const toolDefinitions = {
       slug: z.string().min(1).max(120).describe("The problem's URL slug, exactly as the source gave it."),
       concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and it must name the gap the target describes — not merely the topic the source files the problem under."),
       why: z.string().min(20).max(400).describe("One or two sentences: why this specific problem discriminates what is still uncertain about this learner. This is stored with the challenge and is what a later turn reads to know what you were testing."),
-      language: z.enum(["javascript", "typescript", "cpp"]).optional().describe("Omit to use the learner's preferred language. Only name one when the problem demands it."),
+      language: languageSchema.optional().describe("Omit to use the learner's preferred language. Only name one when the problem demands it."),
       replaceReason: z.string().min(3).max(500).optional().describe("Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."),
     }),
   ],
@@ -486,11 +486,11 @@ async function publishFallbackChallenge(request: Request, outcomes: Map<string, 
 }
 
 /** The language the agent was actually authoring in, taken from its own attempts. */
-function requestedLanguage(outcomes: Map<string, unknown[]>): "javascript" | "typescript" | "cpp" {
+function requestedLanguage(outcomes: Map<string, unknown[]>): Language {
   const attempts = [...(outcomes.get("create_question") ?? []), ...(outcomes.get("replace_current_question") ?? [])];
   for (const attempt of attempts.reverse()) {
     const input = (attempt && typeof attempt === "object" ? (attempt as { input?: unknown }).input : undefined) as { language?: unknown } | undefined;
-    if (input?.language === "typescript" || input?.language === "cpp" || input?.language === "javascript") return input.language;
+    const parsed=languageSchema.safeParse(input?.language);if(parsed.success)return parsed.data;
   }
   return "javascript";
 }
@@ -547,7 +547,14 @@ function languageContracts() {
   return [
     `A JavaScript question uses Node's built-in test runner, .js files, no dependencies, and runCommand "node --test". Visible and hidden tests are separate *.test.js files that import the implementation relatively.`,
     `A TypeScript question follows the same contract with .ts files and *.test.ts tests.`,
+    `A Python question uses dependency-free .py files and standalone test_*.py or *_test.py scripts with assertions; tests import the implementation from the workspace root.`,
+    `A Java question uses dependency-free .java files in the default package. Put implementation classes under src/ and standalone assertion-enabled test classes in files ending Test.java, each with public static void main(String[] args).`,
+    `A C question declares functions in a header, defines them in a .c implementation without main, and puts each standalone int main(void) test in its own *.test.c file. Code must build under clang -std=c17 -Wall -Wextra -pedantic.`,
     `A C++ question has no test framework available. The implementation is a library: declare its functions in a header (for example src/window.h) and define them in a matching .cpp (src/window.cpp) that must not define main. Every test is a separate standalone program under tests/ (for example tests/visible.test.cpp and tests/hidden.test.cpp), each with its own int main() that includes the header by its bare name, checks expectations, and returns 0 when they all hold and non-zero otherwise; assert from <cassert> is sufficient. The host compiles each test file into its own binary against the implementation, so never define main in the implementation and never put two tests in one file. Ship every header you include in both starterFiles and referenceFiles. Code must build under clang++ -std=c++20 -Wall -Wextra -pedantic.`,
+    `A Go question uses one dependency-free package under src/: implementation *.go files and visible/hidden *_test.go files using the standard testing package.`,
+    `A Rust question uses a dependency-free src/*.rs implementation and standalone *_test.rs or *.test.rs harnesses compiled with rustc --test; each harness imports the implementation with #[path = "../src/file.rs"] mod name.`,
+    `A Swift question uses dependency-free src/*.swift implementation files and separate *.test.swift programs, each declaring one @main test type and checking with precondition.`,
+    `A Ruby question uses dependency-free .rb implementation files and standalone *_test.rb or *.test.rb scripts that require_relative the implementation and raise on failed expectations.`,
   ].join(" ");
 }
 

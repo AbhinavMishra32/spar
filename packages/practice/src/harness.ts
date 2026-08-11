@@ -74,6 +74,8 @@ export function buildHarness(input: { problem: PracticeProblem; language: Langua
   const signature = problem.signature;
   const paths = LAYOUT[language];
 
+  if(!LOCAL_FUNCTION_HARNESS.has(language))return{supported:false,reason:`${LANGUAGE_NAME[language]} uses the source's own judge; Spar does not synthesize a local function harness for it.`,files:{[paths.entry]:starter},entryPath:paths.entry,testPaths:[],cases:[]};
+
   const refuse = (reason: string): PracticeHarness => ({
     supported: false,
     reason,
@@ -122,9 +124,10 @@ export function buildHarness(input: { problem: PracticeProblem; language: Langua
  * published sample on stdin and compares normalized stdout. */
 export function buildProgramHarness(input: { problem: PracticeProblem; language: Language; cases: PracticeCase[] }): PracticeHarness {
   const { problem, language } = input;
-  const paths: Record<Language, string> = { javascript: "src/solution.js", typescript: "src/solution.ts", cpp: "src/main.cpp" };
+  const paths: Record<Language, string> = { javascript:"src/solution.js",typescript:"src/solution.ts",python:"src/main.py",java:"src/Main.java",c:"src/main.c",cpp:"src/main.cpp",go:"src/main.go",rust:"src/main.rs",swift:"src/main.swift",ruby:"src/main.rb" };
   const entryPath = paths[language];
   const starter = problem.languages.find((candidate) => candidate.language === language)?.starter ?? programStarter(language);
+  if(!LOCAL_PROGRAM_HARNESS.has(language))return{supported:false,reason:`${LANGUAGE_NAME[language]} uses the source's own sample runner or judge; Spar does not wrap its stdin/stdout locally yet.`,files:{[entryPath]:starter},entryPath,testPaths:[],cases:[]};
   const cases = input.cases.filter((entry) => entry.input.length === 1 && entry.expected.trim());
   const comment = language === "cpp" ? "//" : "//";
   const solution = [
@@ -192,12 +195,16 @@ function cppSamples(rows: Array<{ name: string; input: string; expected: string 
   return `{${rows.map((row) => `{${raw(row.name)},${raw(row.input)},${raw(row.expected)}}`).join(",")}}`;
 }
 
-const LANGUAGE_NAME: Record<Language, string> = { javascript: "JavaScript", typescript: "TypeScript", cpp: "C++" };
+const LANGUAGE_NAME: Record<Language, string> = {javascript:"JavaScript",typescript:"TypeScript",python:"Python",java:"Java",c:"C",cpp:"C++",go:"Go",rust:"Rust",swift:"Swift",ruby:"Ruby"};
+const LOCAL_FUNCTION_HARNESS=new Set<Language>(["javascript","typescript","cpp"]);
+const LOCAL_PROGRAM_HARNESS=new Set<Language>(["javascript","typescript","cpp"]);
 
 const LAYOUT: Record<Language, { entry: string; test: string; support?: string }> = {
   javascript: { entry: "src/solution.js", test: "tests/examples.test.js" },
   typescript: { entry: "src/solution.ts", test: "tests/examples.test.ts" },
+  python:{entry:"src/solution.py",test:"tests/test_examples.py"},java:{entry:"src/Solution.java",test:"tests/ExamplesTest.java"},c:{entry:"src/solution.c",test:"tests/examples.test.c"},
   cpp: { entry: "src/solution.h", test: "tests/examples.test.cpp", support: "tests/spar_check.h" },
+  go:{entry:"src/solution.go",test:"src/solution_examples_test.go"},rust:{entry:"src/solution.rs",test:"tests/examples_test.rs"},swift:{entry:"src/Solution.swift",test:"tests/examples.test.swift"},ruby:{entry:"src/solution.rb",test:"tests/examples_test.rb"},
 };
 
 /**

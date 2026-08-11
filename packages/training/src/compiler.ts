@@ -110,7 +110,14 @@ function stableJson(value: unknown): string { if (Array.isArray(value)) return `
 const LANGUAGE_RULES = {
   javascript: { extensions: [".js", ".mjs", ".cjs"], test: /\.test\.js$/, runCommand: "node --test" },
   typescript: { extensions: [".ts", ".tsx"], test: /\.test\.ts$/, runCommand: "node --test" },
+  python: { extensions: [".py"], test: /(^|\/)(test_.*|.*_test)\.py$/, runCommand: "python3 tests" },
+  java: { extensions: [".java"], test: /Test\.java$/, runCommand: "javac && java tests" },
+  c: { extensions: [".c", ".h"], test: /\.test\.c$/, runCommand: "clang && run tests" },
   cpp: { extensions: [".cpp", ".cc", ".cxx", ".h", ".hpp"], test: /\.cpp$/, runCommand: "clang++ && run tests" },
+  go: { extensions: [".go"], test: /_test\.go$/, runCommand: "go test ./..." },
+  rust: { extensions: [".rs"], test: /(?:_test|\.test)\.rs$/, runCommand: "rustc --test" },
+  swift: { extensions: [".swift"], test: /\.test\.swift$/, runCommand: "swiftc && run tests" },
+  ruby: { extensions: [".rb"], test: /(?:_test|\.test)\.rb$/, runCommand: "ruby tests" },
 } as const;
 
 /**
@@ -180,7 +187,7 @@ function preflight(design: QuestionDesign): ValidationReport["checks"] {
   if (wrongExtension.length) fail("file extensions match the language", `${wrongExtension.join(", ")} do not use a ${design.language} extension (${rules.extensions.join(", ")}).`);
   else pass("file extensions match the language", `All paths use ${design.language} extensions`);
 
-  if (design.language === "cpp") checks.push(...preflightCpp(design, testPaths));
+  if (design.language === "cpp" || design.language === "c") checks.push(...preflightNative(design, testPaths));
   else checks.push(...preflightNode(design, testPaths, rules.test));
 
   if (!design.expectedFailureSignatures.length) fail("expected failure signatures declared", "expectedFailureSignatures is empty. Name at least one observable way the targeted misconception fails.");
@@ -194,18 +201,18 @@ function preflight(design: QuestionDesign): ValidationReport["checks"] {
  * and runs them one at a time against the shared implementation, which only
  * works if exactly the test files carry `main`.
  */
-function preflightCpp(design: QuestionDesign, testPaths: string[]): ValidationReport["checks"] {
+function preflightNative(design: QuestionDesign, testPaths: string[]): ValidationReport["checks"] {
   const checks: ValidationReport["checks"] = [];
   const definesMain = (source: string) => /\bint\s+main\s*\(/.test(source);
   const allTests = { ...design.visibleTests, ...design.hiddenTests };
 
   const missingMain = testPaths.filter((file) => !definesMain(allTests[file] ?? ""));
   if (missingMain.length) {
-    checks.push({ name: "each C++ test defines main", passed: false, detail: `${missingMain.join(", ")} does not define int main(). There is no test framework: every test file must be a standalone program with its own int main() that returns 0 when all expectations hold and non-zero otherwise.` });
-  } else checks.push({ name: "each C++ test defines main", passed: true, detail: `${testPaths.length} standalone test programs` });
+    checks.push({ name: `each ${design.language} test defines main`, passed: false, detail: `${missingMain.join(", ")} does not define int main(). Every native test file must be a standalone program.` });
+  } else checks.push({ name: `each ${design.language} test defines main`, passed: true, detail: `${testPaths.length} standalone test programs` });
 
   const implementationWithMain = Object.entries({ ...design.referenceFiles, ...design.starterFiles })
-    .filter(([file, source]) => file.endsWith(".cpp") && definesMain(source))
+    .filter(([file, source]) => /\.(?:c|cpp|cc|cxx)$/.test(file) && definesMain(source))
     .map(([file]) => file);
   if (implementationWithMain.length) {
     checks.push({ name: "implementation defines no main", passed: false, detail: `${implementationWithMain.join(", ")} defines int main(). The implementation is linked into every test program, so a main() here collides with the test's own. Move it out and expose the behaviour as a function declared in a header.` });

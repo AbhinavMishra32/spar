@@ -58,7 +58,7 @@ describe("normalizeProblem", () => {
   });
 
   it("keeps only the languages Spar can build", () => {
-    expect(problem?.languages.map((entry) => entry.language)).toEqual(["cpp", "javascript"]);
+    expect(problem?.languages.map((entry) => entry.language)).toEqual(["cpp", "javascript", "rust"]);
   });
 
   it("tags the problem in Spar's vocabulary, with exactly one primary", () => {

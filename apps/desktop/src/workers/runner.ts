@@ -1,16 +1,15 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, globSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { planCppBuild } from "./cppBuild.js";
-import { TEST_FLAGS } from "./testCommand.js";
+import os from "node:os";
+import type { Language } from "@spar/domain";
+import { resolveLanguageStages } from "./languageStages.js";
 
 type Request = {
   kind: "request";
   id: string;
   payload: {
     root: string;
-    language: "javascript" | "typescript" | "cpp";
+    language: Language;
     command: "test" | "run";
     timeoutMs: number;
   };
@@ -26,7 +25,7 @@ parentPort.on("message", (event) => {
 });
 
 async function execute(request: Request) {
-  const resolved = resolveStages(request.payload.root, request.payload.language, request.payload.command);
+  const resolved = resolveLanguageStages(request.payload.root, request.payload.language, request.payload.command);
   const started = Date.now();
   // A layout the toolchain cannot build is a fact about the candidate, not a
   // crash. Reporting it as a failed run keeps the diagnostic inside the
@@ -95,29 +94,11 @@ async function execute(request: Request) {
   runStage(0);
 }
 
-type Resolution = { stages: Stage[] } | { error: string };
-
-function resolveStages(root: string, language: Request["payload"]["language"], command: Request["payload"]["command"]): Resolution {
-  const tests = (pattern: string) => globSync(pattern, { cwd: root }).sort();
-  if (language === "javascript") {
-    return { stages: [{ bin: process.execPath, args: command === "test" ? [...TEST_FLAGS, ...tests("**/*.test.js")] : [existsSync(path.join(root, "index.js")) ? "index.js" : "src/index.js"] }] };
-  }
-  if (language === "typescript") {
-    const tsxCli = fileURLToPath(import.meta.resolve("tsx/cli"));
-    return { stages: [{ bin: process.execPath, args: [tsxCli, ...(command === "test" ? [...TEST_FLAGS, ...tests("**/*.test.ts")] : [existsSync(path.join(root, "index.ts")) ? "index.ts" : "src/index.ts"])] }] };
-  }
-
-  const output = path.join(root, ".spar");
-  mkdirSync(output, { recursive: true });
-  const plan = planCppBuild({ files: tests("**/*.{cpp,cc,cxx,h,hpp,hh,hxx}"), outputDir: output, command });
-  if ("error" in plan) return plan;
-  for (const binary of plan.binaries) rmSync(binary, { force: true });
-  return { stages: plan.stages };
-}
-
 function safeEnvironment() {
   return {
-    PATH: "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+    PATH: `/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:${path.join(os.homedir(), ".cargo", "bin")}`,
+    GO111MODULE: "off",
+    PYTHONPATH: ".",
     LANG: "en_US.UTF-8",
     TMPDIR: process.env.TMPDIR ?? "/tmp",
     ELECTRON_RUN_AS_NODE: "1",

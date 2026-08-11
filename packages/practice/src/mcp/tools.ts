@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { languageSchema } from "@spar/domain";
 
 /**
  * The practice-source tools, declared once.
@@ -100,7 +101,7 @@ export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
       "Run code against the source's own interpreter without submitting it. Costs nothing on the learner's record. Returns the judge's per-case answers, including what it expected — which is the fastest way to see why something fails on a case that is hidden locally.",
     shape: {
       slug,
-      language: z.enum(["javascript", "typescript", "cpp"]),
+      language: languageSchema,
       code: z.string().min(1).max(200_000).describe("The whole solution, as the source expects to receive it."),
       testcases: z.string().max(20_000).optional().describe("Custom input in the source's own format: one argument per line, cases concatenated. Omit to run the problem's published samples."),
     },
@@ -112,7 +113,7 @@ export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
       "Submit a solution for official judging. This appears on the learner's account at the source and counts there. Returns the verdict, the failing case when there is one, and the runtime and memory percentiles when it is accepted.",
     shape: {
       slug,
-      language: z.enum(["javascript", "typescript", "cpp"]),
+      language: languageSchema,
       code: z.string().min(1).max(200_000),
     },
     judging: true,

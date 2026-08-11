@@ -14,7 +14,9 @@ import type { ProviderId } from "../../shared/api";
 export const LANGUAGE_BRAND_COLOR: Record<Language, string> = {
   javascript: "#f7df1e",
   typescript: "#3178c6",
+  python:"#3776ab",java:"#e76f00",c:"#555555",
   cpp: "#00599c",
+  go:"#00add8",rust:"#b7410e",swift:"#f05138",ruby:"#cc342d",
 };
 
 export const PROVIDER_BRAND_COLOR: Partial<Record<ProviderId, string>> = {

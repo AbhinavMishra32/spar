@@ -3,7 +3,8 @@ import { conceptTagSchema } from "./concepts.js";
 
 export const id = z.string().uuid();
 export const isoDate = z.string().datetime();
-export const languageSchema = z.enum(["javascript", "typescript", "cpp"]);
+export const LANGUAGES = ["javascript", "typescript", "python", "java", "c", "cpp", "go", "rust", "swift", "ruby"] as const;
+export const languageSchema = z.enum(LANGUAGES);
 export type Language = z.infer<typeof languageSchema>;
 
 /** What the learner told Spar about themselves at onboarding.

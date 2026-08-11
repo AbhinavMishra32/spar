@@ -597,7 +597,9 @@ const DIFFICULTY: Record<PracticeProblem["difficulty"], NonNullable<QuestionDesi
 const RUN_COMMAND: Record<Language, string> = {
   javascript: "node --test",
   typescript: "node --test",
+  python:"python3 tests",java:"javac && java tests",c:"clang && run tests",
   cpp: "clang++ && run tests",
+  go:"go test ./...",rust:"rustc --test",swift:"swiftc && run tests",ruby:"ruby tests",
 };
 
 /** Re-derived here rather than carried, so a problem read from the cache and one

@@ -26,11 +26,18 @@ import type { Language } from "@spar/domain";
 export const RUN_TIMEOUT_MS: Record<Language, number> = {
   javascript: 8_000,
   typescript: 12_000,
+  python: 12_000,
+  ruby: 12_000,
+  go: 60_000,
+  rust: 90_000,
+  java: 60_000,
+  c: 60_000,
   /* Two cold compiles and their runs, with room for a loaded machine. A C++
      program that genuinely loops forever still gets caught here — it just costs a
      minute to find out, which is the right trade against never being able to set
      a C++ challenge at all. */
   cpp: 90_000,
+  swift: 90_000,
 };
 
 export const MEMORY_LIMIT_MB = 512;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, ExternalLink, Ellipsis, Globe, KeyRound, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
-import type { Language } from "@spar/domain";
+import { LANGUAGES as SUPPORTED_LANGUAGES, type Language } from "@spar/domain";
 import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,7 +31,7 @@ import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
 
-const LANGUAGES: Language[] = ["javascript", "typescript", "cpp"];
+const LANGUAGES: Language[] = [...SUPPORTED_LANGUAGES];
 
 const KIND_LABEL: Record<Provider["kind"], string> = {
   subscription: "Subscription",

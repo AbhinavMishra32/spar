@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { compileQuestion, fallbackDesign } from "@spar/training";
-import { abilityStatusSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
+import { abilityStatusSchema, languageSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
@@ -102,7 +102,7 @@ export async function executeTrainingTool(
      trusting it. */
   if (name === "create_fallback_question") {
     if (openChallenge(local, sessionId)) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "A challenge is already active for this session." }] } };
-    const language = value.language === "typescript" || value.language === "cpp" ? value.language : "javascript";
+    const language = languageSchema.catch("javascript").parse(value.language);
     const design = fallbackDesign(language);
     const compiled = await compileCandidate(design, sessionId, workspaces, runner);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
@@ -178,9 +178,7 @@ async function assignPracticeProblem(
 
   let mounted: Awaited<ReturnType<PracticeService["mount"]>>;
   try {
-    const language = value.language === "typescript" || value.language === "cpp" || value.language === "javascript"
-      ? value.language
-      : local.getProfile()?.language ?? "javascript";
+    const language = languageSchema.catch(local.getProfile()?.language ?? "javascript").parse(value.language);
     mounted = await practice.mount({ source: provider, slug, language });
   } catch (error) {
     /* A slug the source does not have, a subscription-only problem, an expired

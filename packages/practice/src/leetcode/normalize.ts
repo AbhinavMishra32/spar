@@ -25,6 +25,7 @@ import { LEETCODE_ORIGIN } from "./session.js";
 const LANGUAGE_BY_SLUG: Record<string, Language> = {
   javascript: "javascript",
   typescript: "typescript",
+  python3:"python",java:"java",c:"c",golang:"go",rust:"rust",swift:"swift",ruby:"ruby",
   cpp: "cpp",
 };
 
@@ -32,6 +33,7 @@ const LANGUAGE_BY_SLUG: Record<string, Language> = {
 export const SOURCE_LANGUAGE_SLUG: Record<Language, string> = {
   javascript: "javascript",
   typescript: "typescript",
+  python:"python3",java:"java",c:"c",go:"golang",rust:"rust",swift:"swift",ruby:"ruby",
   cpp: "cpp",
 };
 

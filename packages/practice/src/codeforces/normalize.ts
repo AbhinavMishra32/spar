@@ -60,7 +60,7 @@ export function casesForCodeforcesProblem(problem: PracticeProblem): PracticeCas
     : []);
 }
 
-export const CODEFORCES_LANGUAGE_SLUG: Record<Language, string> = { javascript: "javascript", typescript: "typescript", cpp: "cpp" };
+export const CODEFORCES_LANGUAGE_SLUG: Record<Language, string> = {javascript:"javascript",typescript:"typescript",python:"python",java:"java",c:"c",cpp:"cpp",go:"go",rust:"rust",swift:"swift",ruby:"ruby"};
 
 function starter(language: Language): string {
   if (language === "cpp") return "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n  ios::sync_with_stdio(false);\n  cin.tie(nullptr);\n\n  // Read input, solve the problem, and print the answer.\n  return 0;\n}";

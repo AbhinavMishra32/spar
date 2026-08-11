@@ -109,7 +109,7 @@ export const workspaceStateInput = z.object({
 /** `timeoutMs` is optional and only ever lowers the budget: the main process sets
  *  it from the language, because how long a toolchain needs is not something the
  *  window can know. */
-export const runInput = z.object({ sessionId: z.string().uuid(), language: z.enum(["javascript", "typescript", "cpp"]), command: z.enum(["test", "run"]), timeoutMs: z.number().int().min(100).max(600_000).optional() });
+export const runInput = z.object({ sessionId: z.string().uuid(), language: languageSchema, command: z.enum(["test", "run"]), timeoutMs: z.number().int().min(100).max(600_000).optional() });
 // Ordering belongs to the authoritative local event store. Renderer processes
 // supply event identity and content, but never a guessed stream sequence.
 export const attemptAppendInput = attemptEventSchema.omit({ sequence: true });
