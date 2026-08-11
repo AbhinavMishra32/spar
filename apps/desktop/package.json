@@ -1,6 +1,6 @@
 {
   "name": "@spar/desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "An adaptive coding gym that writes your next exercise from your own attempt history.",

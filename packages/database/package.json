@@ -1,6 +1,6 @@
 {
   "name": "@spar/database",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "exports": { ".": { "types": "./src/index.ts", "development": "./src/index.ts", "default": "./dist/index.js" } },
   "scripts": { "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput", "typecheck": "tsc --noEmit", "test": "vitest run --passWithNoTests", "lint": "tsc --noEmit", "build": "tsc -p tsconfig.build.json", "db:generate": "drizzle-kit generate", "db:migrate": "drizzle-kit migrate", "db:studio": "drizzle-kit studio" },
