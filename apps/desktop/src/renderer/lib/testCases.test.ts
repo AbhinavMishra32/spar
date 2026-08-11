@@ -89,10 +89,10 @@ int main() {
 
     expect(declared.parsed).toBe(true);
     expect(declared.cases.map((item) => item.name)).toEqual([
-      "r1.loopVarAfter equals 3",
-      "r2.loopVarAfter equals 5",
+      "(run_trace(2)).loopVarAfter equals 3",
+      "(run_trace(4)).loopVarAfter equals 5",
     ]);
-    expect(declared.cases[0]?.assertions[0]).toMatchObject({ call: "r1.loopVarAfter", expected: "3" });
+    expect(declared.cases[0]?.assertions[0]).toMatchObject({ call: "(run_trace(2)).loopVarAfter", expected: "3" });
   });
 
   it("reports a file it cannot read as unparsed rather than as zero cases", () => {

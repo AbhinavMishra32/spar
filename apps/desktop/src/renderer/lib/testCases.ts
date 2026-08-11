@@ -142,6 +142,7 @@ function cppCases(source: string): Array<Pick<DeclaredCase, "name" | "assertions
 }
 
 const NATIVE_ASSERT = /\bassert\s*\(/g;
+const LOCAL_ASSIGNMENT = /\b(?:const\s+)?(?:[\w:]+(?:\s*<[^;{}]+>)?[\s&*]+)([A-Za-z_]\w*)\s*=\s*([^;]+);/g;
 
 function nativeAssertCases(source: string): Array<Pick<DeclaredCase, "name" | "assertions">> {
   const found: Array<Pick<DeclaredCase, "name" | "assertions">> = [];
@@ -153,11 +154,23 @@ function nativeAssertCases(source: string): Array<Pick<DeclaredCase, "name" | "a
     const expression = parsed.arguments[0]?.trim();
     if (!expression) continue;
     const equality = splitTopLevelEquality(expression);
+    let actual = equality?.actual ?? expression;
+    /* Put a named setup value back into the assertion. In the affected legacy
+       workspace, `TraceResult r1 = run_trace(2); assert(r1.loopVarAfter == 3)`
+       should read as the meaningful input `run_trace(2).loopVarAfter`, not the
+       implementation-detail local `r1.loopVarAfter`. */
+    const locals = new Map<string, string>();
+    const prefix = source.slice(0, match.index);
+    LOCAL_ASSIGNMENT.lastIndex = 0;
+    for (let local = LOCAL_ASSIGNMENT.exec(prefix); local; local = LOCAL_ASSIGNMENT.exec(prefix)) {
+      locals.set(local[1] ?? "", compact(local[2] ?? ""));
+    }
+    actual = actual.replace(/^\s*([A-Za-z_]\w*)\b/, (whole, name: string) => locals.has(name) ? `(${locals.get(name)})` : whole);
     found.push({
-      name: equality ? `${compact(equality.actual)} equals ${compact(equality.expected)}` : compact(expression),
+      name: equality ? `${compact(actual)} equals ${compact(equality.expected)}` : compact(actual),
       assertions: [{
         method: equality?.operator === "!=" ? "notStrictEqual" : equality ? "strictEqual" : "ok",
-        call: compact(equality?.actual ?? expression),
+        call: compact(actual),
         expected: compact(equality?.expected ?? "true"),
       }],
     });

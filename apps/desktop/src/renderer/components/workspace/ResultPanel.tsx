@@ -175,6 +175,13 @@ export function ResultPanel({
   const firstFailure = report.cases.find((item) => item.status === "failed");
   const activeResult =
     report.cases.find((item) => item.id === selectedResult) ?? firstFailure ?? report.cases[0];
+  /* Protocol results and source declarations have independent ids. Ordinal is
+     their stable join key; name is a fallback for source judges that report a
+     sparse subset and preserve the published case name instead. */
+  const declaredForResult = activeResult
+    ? declared.cases.find((item) => item.ordinal === activeResult.ordinal)
+      ?? declared.cases.find((item) => item.name === activeResult.name)
+    : undefined;
 
   const rawShown = rawOpen ?? !report.parsed;
 
@@ -336,7 +343,7 @@ export function ResultPanel({
                     onSelect={setSelectedResult}
                   />
                   <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-                    <CaseDetail result={activeResult} />
+                    <CaseDetail declared={declaredForResult} result={activeResult} />
                     <RawOutput open={rawShown} onToggle={() => setRawOpen(!rawShown)} terminal={terminal} endRef={rawEnd} />
                   </div>
                 </>
@@ -470,9 +477,32 @@ function DeclaredDetail({ item, source }: { item: DeclaredCase; source: ActiveQu
   );
 }
 
-function CaseDetail({ result }: { result: TestCaseResult }) {
+export type CaseValue = { input: string; output?: string; expected: string };
+
+/** Joins what the test declared with what the runner observed. A successful
+ * equality proves actual === expected, so using the expected value as Output is
+ * not a guess. A failure only uses the runner's actual value; if an old harness
+ * did not report it, the UI says so rather than manufacturing one. */
+export function caseValues(result: TestCaseResult, declared?: DeclaredCase): CaseValue[] {
+  const assertions = declared?.assertions ?? [];
+  if (!assertions.length && (result.failure?.expected !== undefined || result.failure?.actual !== undefined)) {
+    return [{ input: "—", expected: result.failure.expected ?? "—", ...(result.failure.actual === undefined ? {} : { output: result.failure.actual }) }];
+  }
+  return assertions.map((assertion, index) => ({
+    input: assertion.call || "—",
+    expected: index === 0 ? (result.failure?.expected ?? assertion.expected) || "—" : assertion.expected || "—",
+    ...(index === 0 && result.failure?.actual !== undefined
+      ? { output: result.failure.actual }
+      : result.status === "passed"
+        ? { output: assertion.expected || "—" }
+        : {}),
+  }));
+}
+
+function CaseDetail({ result, declared }: { result: TestCaseResult; declared?: DeclaredCase }) {
   const failure = result.failure;
   const message = headline(failure?.message);
+  const values = caseValues(result, declared);
 
   return (
     <div>
@@ -484,15 +514,32 @@ function CaseDetail({ result }: { result: TestCaseResult }) {
         )}
       </div>
 
-      {result.status === "passed" && (
-        <p className="mt-1.5 text-ui text-muted-foreground">This case passed.</p>
+      {values.length > 0 && (
+        <div className="mt-2.5 space-y-3">
+          {values.map((value, index) => (
+            <div className="space-y-2" key={index}>
+              <ValueBlock label={values.length > 1 ? `Input ${index + 1}` : "Input"} value={value.input} />
+              <div className="grid grid-cols-2 gap-2">
+                <ValueBlock
+                  label="Output"
+                  tone={result.status === "failed" && value.output !== undefined ? "actual" : undefined}
+                  value={value.output ?? "Not reported"}
+                />
+                <ValueBlock label="Expected" tone="expected" value={value.expected} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {result.status === "passed" && values.length === 0 && (
+        <p className="mt-1.5 text-ui text-muted-foreground">This case passed, but the test did not declare its input and expected value.</p>
       )}
       {result.status === "skipped" && <p className="mt-1.5 text-ui text-muted-foreground">This case was skipped.</p>}
 
       {failure && (
         <>
           {message && <p className="mt-1.5 text-ui leading-[1.6] text-foreground/85">{message}</p>}
-          {(failure.expected !== undefined || failure.actual !== undefined) && (
+          {values.length === 0 && (failure.expected !== undefined || failure.actual !== undefined) && (
             <div className="mt-2.5 grid grid-cols-2 gap-2">
               <ValueBlock label="Expected" tone="expected" value={failure.expected ?? "—"} />
               <ValueBlock label="Your output" tone="actual" value={failure.actual ?? "—"} />
