@@ -499,7 +499,7 @@ export function caseValues(result: TestCaseResult, declared?: DeclaredCase): Cas
   }));
 }
 
-function CaseDetail({ result, declared }: { result: TestCaseResult; declared?: DeclaredCase }) {
+function CaseDetail({ result, declared }: { result: TestCaseResult; declared: DeclaredCase | undefined }) {
   const failure = result.failure;
   const message = headline(failure?.message);
   const values = caseValues(result, declared);
@@ -522,8 +522,8 @@ function CaseDetail({ result, declared }: { result: TestCaseResult; declared?: D
               <div className="grid grid-cols-2 gap-2">
                 <ValueBlock
                   label="Output"
-                  tone={result.status === "failed" && value.output !== undefined ? "actual" : undefined}
                   value={value.output ?? "Not reported"}
+                  {...(result.status === "failed" && value.output !== undefined ? { tone: "actual" as const } : {})}
                 />
                 <ValueBlock label="Expected" tone="expected" value={value.expected} />
               </div>
