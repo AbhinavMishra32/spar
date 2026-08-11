@@ -75,6 +75,26 @@ describe("declared cases", () => {
     expect(declared.cases[1]?.assertions[0]).toMatchObject({ call: "maxProfit({7, 6, 4, 3, 1})", expected: "0" });
   });
 
+  it("recovers cases from silent native assertions in existing workspaces", () => {
+    const source = `#include "trace.h"
+#include <cassert>
+int main() {
+  TraceResult r1 = run_trace(2);
+  assert(r1.loopVarAfter == 3);
+  TraceResult r2 = run_trace(4);
+  assert(r2.loopVarAfter == 5);
+  return 0;
+}`;
+    const declared = declaredCases({ "tests/visible.test.cpp": source }, ["tests/visible.test.cpp"]);
+
+    expect(declared.parsed).toBe(true);
+    expect(declared.cases.map((item) => item.name)).toEqual([
+      "r1.loopVarAfter equals 3",
+      "r2.loopVarAfter equals 5",
+    ]);
+    expect(declared.cases[0]?.assertions[0]).toMatchObject({ call: "r1.loopVarAfter", expected: "3" });
+  });
+
   it("reports a file it cannot read as unparsed rather than as zero cases", () => {
     const declared = declaredCases({ "tests/opaque.txt": "nothing to read here" }, ["tests/opaque.txt"]);
 

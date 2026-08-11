@@ -3,8 +3,10 @@
  * YAML diagnostic blocks. That gives per-case names, durations, and assertion
  * expected/actual values — enough to render real test cases instead of a log.
  *
- * C++ challenges compile and run an arbitrary binary, so nothing is parsed there;
- * `parsed` stays false and callers fall back to the raw output.
+ * Synthetic harnesses in every supported language now emit TAP or Spar's small
+ * `ok - name` protocol. Older arbitrary binaries may still be silent; there
+ * `parsed` stays false and callers can join the exit status to declarations in
+ * the persisted visible test source.
  *
  * Shared rather than renderer-local because the same parse has to happen twice:
  * once to draw the result panel, and once where a run is recorded, so the
@@ -207,7 +209,7 @@ export function caseRecords(report: TestReport): TestCaseRecord[] {
  * What a run leaves behind in the attempt it belongs to. Cases are the durable
  * part: they are what lets a later turn say which case the learner fixed and
  * which one they broke doing it. Raw output is kept only where there are no
- * cases to keep — a C++ binary, or a run that died before the runner started —
+ * cases to keep — a legacy silent binary, or a run that died before the runner started —
  * because there it is the only evidence of what happened.
  *
  * Shared so the visible run recorded by the renderer and the submission recorded

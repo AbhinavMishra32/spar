@@ -28,20 +28,64 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
   const checks: ValidationReport["checks"] = [...structural];
   const reference = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
   checks.push({ name: "reference solution", passed: reference.exitCode === 0, detail: summarize(reference) });
+  checks.push(structuredResultCheck("reference case results", reference, "passed"));
   // Whether each misconception replaces the implementation was already settled
   // structurally, so this loop only measures behaviour.
   for (const [index, incorrect] of design.knownIncorrectFiles.entries()) {
     const visibleResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language));
     checks.push({ name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : summarize(visibleResult) });
+    checks.push(structuredResultCheck(`known incorrect ${index + 1} visible case results`, visibleResult, "passed"));
     const hiddenResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
     checks.push({ name: `known incorrect ${index + 1} fails hidden`, passed: hiddenResult.exitCode !== 0, detail: hiddenResult.exitCode !== 0 ? "Targeted hidden tests rejected the misconception" : differentialDiagnostics[index] ?? "Incorrect implementation passed visible and hidden tests" });
+    checks.push(structuredResultCheck(`known incorrect ${index + 1} failure case results`, hiddenResult, "failed"));
   }
   const visibleOnly = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, runLimits(design.language));
   checks.push({ name: "visible test agreement", passed: visibleOnly.exitCode === 0, detail: summarize(visibleOnly) });
+  checks.push(structuredResultCheck("visible case results", visibleOnly, "passed"));
   checks.push({ name: "targeted hidden coverage", passed: design.hiddenTests && Object.keys(design.hiddenTests).length > 0 && design.expectedFailureSignatures.length > 0, detail: `${Object.keys(design.hiddenTests).length} hidden files cover ${design.expectedFailureSignatures.length} expected signatures` });
   checks.push({ name: "accidental difficulty budget", passed: design.accidentalDifficulty.length <= 3, detail: design.accidentalDifficulty.join(", ") || "No incidental complexity declared" });
   const contentHash = createHash("sha256").update(stableJson(design)).digest("hex");
   return { design, report: { id: randomUUID(), valid: checks.every((check) => check.passed), contentHash, checks, validatedAt: new Date().toISOString() } };
+}
+
+type VerdictKind = "passed" | "failed";
+
+/**
+ * A challenge is not publishable merely because its process exits correctly.
+ * The learner-facing runner needs one protocol point per case. TAP and Spar's
+ * deliberately tiny `ok - name` protocol are both accepted because every
+ * supported language can print the latter without a dependency.
+ *
+ * Checking a known-incorrect run is important: it proves the harness reports
+ * its negative branch too. A harness that prints `ok` before calling assert
+ * would otherwise pass reference validation and still collapse to raw output
+ * precisely when the learner needs expected/actual evidence.
+ */
+function structuredResultCheck(name: string, run: ValidationRun, expected: VerdictKind): ValidationReport["checks"][number] {
+  const verdicts = structuredVerdicts(`${run.stdout}\n${run.stderr}`);
+  const matching = expected === "passed" ? verdicts.passed : verdicts.failed;
+  const passed = verdicts.total > 0 && matching > 0;
+  return {
+    name,
+    passed,
+    detail: passed
+      ? `${verdicts.total} structured case verdict${verdicts.total === 1 ? "" : "s"} (${verdicts.passed} passed, ${verdicts.failed} failed)`
+      : expected === "passed"
+        ? "The run emitted no passing case verdicts. Emit TAP, or one `ok - case name` / `not ok - case name` line per case; silent assert-only tests cannot power the structured Test Result UI."
+        : "The targeted misconception failed but emitted no failing case verdict. Catch each comparison, print `not ok - case name` with expected/actual values, continue the remaining cases, and exit non-zero after reporting them.",
+  };
+}
+
+function structuredVerdicts(output: string): { total: number; passed: number; failed: number } {
+  let passed = 0;
+  let failed = 0;
+  for (const line of output.replace(/\r\n/g, "\n").split("\n")) {
+    const point = /^(not ok|ok)(?:\s+\d+)?(?:\s*[-–]\s*.*)?(?:\s+#\s*(?:SKIP|TODO).*)?$/i.exec(line.trim());
+    if (!point) continue;
+    if (point[1]?.toLowerCase() === "ok") passed += 1;
+    else failed += 1;
+  }
+  return { total: passed + failed, passed, failed };
 }
 function summarize(run: ValidationRun) {
   if (run.exitCode === 0) return `Passed in ${run.durationMs}ms`;

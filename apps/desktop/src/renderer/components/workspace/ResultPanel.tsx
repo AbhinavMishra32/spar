@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/format";
 import { declaredCases, sourcedCases, type DeclaredCase } from "@/lib/testCases";
 import { SparDots } from "@/components/common/SparDots";
-import { EMPTY_REPORT, headline, parseTestOutput, type CaseStatus, type TestCaseResult } from "../../../shared/testReport";
+import { EMPTY_REPORT, headline, parseTestOutput, type CaseStatus, type TestCaseResult, type TestReport } from "../../../shared/testReport";
 import { AttemptsPanel } from "./AttemptsPanel";
 
 export type ResultTab = "testcase" | "result" | "attempts";
@@ -156,7 +156,10 @@ export function ResultPanel({
       : declaredCases(testFiles, question.visibleTestFiles)),
     [question.source, testFiles, question.visibleTestFiles],
   );
-  const report = useMemo(() => (running ? EMPTY_REPORT : parseTestOutput(terminal)), [terminal, running]);
+  const report = useMemo(
+    () => reportForRun(terminal, running, outcome, declared),
+    [declared, outcome, running, terminal],
+  );
 
   const [selectedDeclared, setSelectedDeclared] = useState("");
   const [selectedResult, setSelectedResult] = useState("");
@@ -378,6 +381,33 @@ export function ResultPanel({
       )}
     </div>
   );
+}
+
+/**
+ * Compatibility for challenges already persisted with silent assertion tests.
+ * Exit zero is suite-level proof that every assertion reached by that process
+ * passed. When the test source also declares the cases, joining those two facts
+ * is truthful and gives old workspaces the same structured success UI as newly
+ * generated harnesses. We never synthesize failures: a non-zero process does
+ * not tell us which assertion failed, so inventing a per-case verdict there
+ * would be false precision.
+ */
+export function reportForRun(
+  output: string,
+  running: boolean,
+  outcome: RunOutcome,
+  declared: ReturnType<typeof declaredCases>,
+): TestReport {
+  if (running) return EMPTY_REPORT;
+  const parsed = parseTestOutput(output);
+  if (parsed.parsed || outcome?.kind !== "passed" || !declared.parsed) return parsed;
+  const cases: TestCaseResult[] = declared.cases.map((item) => ({
+    id: `declared-${item.id}`,
+    ordinal: item.ordinal,
+    name: item.name,
+    status: "passed",
+  }));
+  return { parsed: true, cases, passed: cases.length, failed: 0, skipped: 0 };
 }
 
 /**

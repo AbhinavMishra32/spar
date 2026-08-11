@@ -133,7 +133,64 @@ function cppCases(source: string): Array<Pick<DeclaredCase, "name" | "assertions
       assertions: [{ method: "deepStrictEqual", call, expected: literal(expected ?? "") }],
     });
   }
+  /* Synthetic native challenges written before the case-output contract used
+     ordinary assert(...). A successful C/C++ assertion is deliberately silent,
+     but it still declares a real case. Keep this compatibility reader separate
+     from the generated check(...) grammar: it is only used when no named checks
+     were found, so a modern suite cannot accidentally get every condition twice. */
+  return found.length ? found : nativeAssertCases(source);
+}
+
+const NATIVE_ASSERT = /\bassert\s*\(/g;
+
+function nativeAssertCases(source: string): Array<Pick<DeclaredCase, "name" | "assertions">> {
+  const found: Array<Pick<DeclaredCase, "name" | "assertions">> = [];
+  NATIVE_ASSERT.lastIndex = 0;
+  for (let match = NATIVE_ASSERT.exec(source); match; match = NATIVE_ASSERT.exec(source)) {
+    const parsed = splitArguments(source, match.index + match[0].length);
+    if (!parsed) continue;
+    NATIVE_ASSERT.lastIndex = parsed.end + 1;
+    const expression = parsed.arguments[0]?.trim();
+    if (!expression) continue;
+    const equality = splitTopLevelEquality(expression);
+    found.push({
+      name: equality ? `${compact(equality.actual)} equals ${compact(equality.expected)}` : compact(expression),
+      assertions: [{
+        method: equality?.operator === "!=" ? "notStrictEqual" : equality ? "strictEqual" : "ok",
+        call: compact(equality?.actual ?? expression),
+        expected: compact(equality?.expected ?? "true"),
+      }],
+    });
+  }
   return found;
+}
+
+/** Finds == or != outside calls/containers/strings. Native generated tests use
+ * these comparisons overwhelmingly; keeping the scanner structural avoids
+ * splitting an operator inside a function argument or string literal. */
+function splitTopLevelEquality(source: string): { actual: string; expected: string; operator: "==" | "!=" } | null {
+  let depth = 0;
+  let quote: string | null = null;
+  let escaped = false;
+  for (let index = 0; index < source.length - 1; index += 1) {
+    const character = source[index]!;
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === "'" || character === '"') quote = character;
+    else if (character === "(" || character === "[" || character === "{") depth += 1;
+    else if (character === ")" || character === "]" || character === "}") depth -= 1;
+    else if (depth === 0) {
+      const operator = source.slice(index, index + 2);
+      if (operator === "==" || operator === "!=") {
+        return { actual: source.slice(0, index), expected: source.slice(index + 2), operator };
+      }
+    }
+  }
+  return null;
 }
 
 /** A C++ string literal as its text. Anything else — a named constant, an
