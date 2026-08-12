@@ -184,10 +184,14 @@
     display: inline-flex;
     align-items: center;
     gap: 0.6em;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    padding: 0.4rem 0.8rem 0.4rem 0.65rem;
+    background: rgba(255, 255, 255, 0.03);
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 500;
-    letter-spacing: 0.18em;
+    letter-spacing: 0.16em;
     text-transform: uppercase;
     color: var(--color-faint);
   }
@@ -234,6 +238,21 @@
       text-shadow:
         -1.5px 0 0 rgba(255, 45, 85, 0.42),
         1.5px 0 0 rgba(0, 229, 255, 0.42);
+    }
+  }
+
+  /* Each word of the headline arrives on its own beat. */
+  .rise {
+    opacity: 0;
+    translate: 0 0.4em;
+    animation: rise 0.9s var(--ease-out-quint) forwards;
+    animation-delay: var(--rise-delay, 0ms);
+  }
+
+  @keyframes rise {
+    to {
+      opacity: 1;
+      translate: 0 0;
     }
   }
 
@@ -441,10 +460,10 @@
     inset: 0;
     pointer-events: none;
     background: radial-gradient(
-      46% 40% at 50% 44%,
-      rgba(0, 0, 0, 0.94),
-      rgba(0, 0, 0, 0.7) 55%,
-      transparent 78%
+      44% 38% at 50% 44%,
+      rgba(0, 0, 0, 0.92),
+      rgba(0, 0, 0, 0.52) 58%,
+      transparent 80%
     );
   }
 
@@ -502,6 +521,112 @@
     color: var(--color-paper);
   }
 
+  /* ---- Disclosure ------------------------------------------------------ */
+
+  .faq summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .faq summary::marker {
+    content: "";
+  }
+
+  .faq-mark {
+    display: inline-block;
+    font-family: var(--font-mono);
+    transition: transform 0.35s var(--ease-out-quint);
+  }
+
+  .faq[open] .faq-mark {
+    transform: rotate(45deg);
+    color: var(--color-paper);
+  }
+
+  .faq summary:hover .faq-mark {
+    color: var(--color-paper);
+  }
+
+  /* ---- Wires and beams ------------------------------------------------- */
+
+  /* A pulse travelling along an SVG path. One long gap and one short dash, so
+     what you see is a head moving down a wire rather than a marching stripe. */
+  .beam {
+    stroke-dasharray: 26 320;
+    stroke-dashoffset: 346;
+    animation: beam-run 3.4s linear infinite;
+  }
+
+  @keyframes beam-run {
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  /* A light running around a border. The mask trick leaves only the 1px ring:
+     paint the gradient over the whole box, then punch the content area out of
+     it. Registered angle, or the conic gradient would jump between frames. */
+  .beam-border {
+    position: relative;
+  }
+
+  .beam-border::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(
+      from var(--beam-angle),
+      transparent 0turn 0.62turn,
+      rgba(255, 45, 85, 0.85) 0.74turn,
+      #ffffff 0.8turn,
+      rgba(0, 229, 255, 0.85) 0.86turn,
+      transparent 0.98turn
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    animation: beam-spin 7s linear infinite;
+    pointer-events: none;
+  }
+
+  @keyframes beam-spin {
+    to {
+      --beam-angle: 360deg;
+    }
+  }
+
+  /* A highlight that travels across a line of text, once every few seconds. */
+  .shimmer {
+    background: linear-gradient(
+      100deg,
+      var(--color-muted) 30%,
+      #ffffff 45%,
+      #ffffff 55%,
+      var(--color-muted) 70%
+    );
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 6s var(--ease-out-quint) infinite;
+  }
+
+  @keyframes shimmer {
+    0%,
+    55% {
+      background-position: 160% 0;
+    }
+    100% {
+      background-position: -60% 0;
+    }
+  }
+
   /* ---- Page texture ---------------------------------------------------- */
 
   /* Film grain over the whole page. Flat black at these sizes bands on cheap
@@ -550,6 +675,12 @@
   .marquee-mask:hover .marquee {
     animation-play-state: paused;
   }
+}
+
+@property --beam-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
 }
 
 @keyframes marquee {

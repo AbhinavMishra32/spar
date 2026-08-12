@@ -3,6 +3,8 @@ import { DotField } from "@/components/hero/DotField";
 import { ArrowGlyph } from "@/components/icons";
 import { site } from "@/lib/site";
 
+const HEADLINE = ["Practice", "that", "fights", "back."];
+
 export function Hero() {
   return (
     <section id="top" className="relative isolate flex min-h-svh flex-col justify-center overflow-hidden">
@@ -18,9 +20,19 @@ export function Hero() {
         </a>
 
         {/* No gradient fill here: a clipped background paints over the text
-            shadow, and the shadow is the aberration. */}
+            shadow, and the shadow is the aberration. The words land one after
+            another because the line is four beats long and reading it that way
+            is the joke. */}
         <h1 className="chromatic mt-8 text-[length:var(--text-display)]">
-          Practice that fights back.
+          {HEADLINE.map((word, index) => (
+            <span
+              key={word}
+              className="rise mr-[0.26em] inline-block last:mr-0"
+              style={{ ["--rise-delay" as string]: `${160 + index * 85}ms` }}
+            >
+              {word}
+            </span>
+          ))}
         </h1>
 
         <p className="lede mt-7 max-w-[58ch]">

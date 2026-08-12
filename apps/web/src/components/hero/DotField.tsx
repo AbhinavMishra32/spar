@@ -132,9 +132,30 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       frame = requestAnimationFrame(draw);
       if (!visible) return;
 
+      const seconds = (now - started) / 1000;
+
+      // Nobody has pointed at it yet — most obviously on a phone, and for the
+      // first few seconds on every desktop. Rather than sit there as a flat
+      // halftone, the swell wanders the field on its own. Two incommensurable
+      // frequencies per axis, so the path never visibly repeats. The real
+      // pointer takes over the moment it arrives, from wherever the drift had
+      // got to.
+      if (activeTarget === 0 && !reduced) {
+        target.x = size.w * (0.5 + 0.3 * Math.sin(seconds * 0.17) + 0.11 * Math.sin(seconds * 0.43));
+        target.y = size.h * (0.48 + 0.26 * Math.cos(seconds * 0.23) + 0.09 * Math.cos(seconds * 0.55));
+        if (pointer.x < -1000) {
+          pointer.x = target.x;
+          pointer.y = target.y;
+        }
+      }
+
+      // The drift is quieter than a hand on the mouse: it is the page idling,
+      // not the page pretending someone is there.
+      const wanted = activeTarget === 1 ? 1 : reduced ? 0 : 0.58;
+
       pointer.x += (target.x - pointer.x) * EASE;
       pointer.y += (target.y - pointer.y) * EASE;
-      active += (activeTarget - active) * EASE;
+      active += (wanted - active) * EASE;
 
       const age = (now - clickAt) / 1000;
       click[2] = age;
@@ -143,7 +164,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       gl.uniform1f(uDpr, size.dpr);
       gl.uniform2f(uPointer, pointer.x, pointer.y);
       gl.uniform1f(uActive, active);
-      gl.uniform1f(uTime, reduced ? 0 : (now - started) / 1000);
+      gl.uniform1f(uTime, reduced ? 0 : seconds);
       gl.uniform1f(uSpacing, spacing);
       gl.uniform1f(uBase, radius);
       gl.uniform1f(uMotion, reduced ? 0 : 1);

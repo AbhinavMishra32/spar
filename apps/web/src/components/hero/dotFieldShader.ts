@@ -85,10 +85,12 @@ void main() {
 
       // Resting state: the mark's diagonal, run across the whole field as a
       // slow band so the page has a pulse without anything moving.
-      float diagonal = (center.x + center.y) * 0.0021;
-      float wave = 0.5 + 0.5 * sin(diagonal - uTime * 0.5);
-      float radius = uBase * (0.52 + 0.32 * wave * uMotion);
-      float tone = 0.2 + 0.16 * wave * uMotion;
+      float diagonal = (center.x + center.y) * 0.0044;
+      float wave = 0.5 + 0.5 * sin(diagonal - uTime * 0.62);
+      // Enough contrast that the band is something you can watch cross the
+      // page, rather than a gradient you have to be told is moving.
+      float radius = uBase * (0.42 + 0.52 * wave * uMotion);
+      float tone = 0.14 + 0.3 * wave * uMotion;
 
       // The swell.
       float reach = distance(center, uPointer) / INFLUENCE;
