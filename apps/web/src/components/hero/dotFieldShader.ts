@@ -23,6 +23,11 @@
  * lets go. Nothing is ever drawn between them — no line, no bolt. It is dots
  * the whole way through, which is the only way it belongs to this page.
  *
+ * **And the field gravitates towards it.** While a connection is live the grid
+ * is magnified around it and the parallax pans that way, both eased in over the
+ * charge and out over the settle — so the attention arrives slightly before the
+ * event and leaves after it.
+ *
  * Kept in its own file because it is the one piece of this site that is a
  * program rather than markup, and it is easier to read whole.
  */
@@ -226,6 +231,21 @@ void main() {
   vec2 toPointer = s - uPointer;
   vec2 dir = normalize(toPointer + vec2(1e-4));
 
+  // The field gravitates. Sampling the grid a little nearer the focus than the
+  // fragment actually is magnifies the pattern around it — dots there sit
+  // further apart and read as closer to you, as though the whole surface were
+  // being drawn towards whatever is happening. It is the same displacement for
+  // every layer, applied before any of them are sampled, so the field bends as
+  // one sheet rather than sliding apart.
+  //
+  // The arcs are deliberately not warped with it. They are evaluated in screen
+  // space, so whichever dot is *drawn* at a point is the one that lights — the
+  // connection stays on the dots you can see rather than on where they would
+  // have been.
+  vec2 toFocus = s - uFocus.xy;
+  float gravity = uFocus.z * 0.16 * exp(-dot(toFocus, toFocus) / (FOCUS_REACH * FOCUS_REACH * 1.7));
+  s -= toFocus * gravity;
+
   // Two layers behind the field, offset against it as the pointer moves. The
   // grid is the same grid at every depth — the parallax is doing the work, not
   // a different pattern — and the far one is slow enough to read as distance
@@ -274,8 +294,8 @@ void main() {
       // The field leans in. Every dot for some way around a live connection
       // comes up a little, so the eye is taken there before the thing itself
       // resolves — the attention arrives before the event does.
-      vec2 toFocus = center - uFocus.xy;
-      float halo = uFocus.z * exp(-dot(toFocus, toFocus) / (FOCUS_REACH * FOCUS_REACH));
+      vec2 fromFocus = center - uFocus.xy;
+      float halo = uFocus.z * exp(-dot(fromFocus, fromFocus) / (FOCUS_REACH * FOCUS_REACH));
       radius += halo * uBase * 0.7;
       tone += halo * 0.22;
 

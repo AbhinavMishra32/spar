@@ -153,6 +153,11 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
      *  it passes through. The bends are pushed off the straight line so the two
      *  meet by a route rather than along a ruler. */
     function strike(slot: number, w: number, h: number, step: number) {
+      // The canvas runs the whole height of the hero, which includes the part
+      // the app window sits over and the part the mask has already faded out.
+      // An arc down there happens where nobody can see it, so the whole event
+      // is kept to the band where the field is actually legible.
+      const zone = Math.min(h * 0.52, window.innerHeight * 0.94);
       const snap = (x: number, y: number): [number, number] => [
         (Math.floor(x / step) + 0.5) * step,
         (Math.floor(y / step) + 0.5) * step,
@@ -160,22 +165,22 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
 
       // Both ends have to be on screen with room around them. A connection with
       // one end off the edge is not a connection, it is a thing leaving.
-      const inset = Math.min(w, h) * 0.14;
+      const inset = Math.min(w, zone) * 0.12;
       const pick = (): [number, number] => [
         inset + Math.random() * (w - inset * 2),
-        inset + Math.random() * (h - inset * 2),
+        inset + Math.random() * (zone - inset * 2),
       ];
 
       // The copy sits in the middle under a scrim, so anything that happens
       // there happens where it cannot be seen.
       const clear = (x: number, y: number) => {
         const dx = (x - w / 2) / (w * 0.3);
-        const dy = (y - h * 0.42) / (h * 0.26);
+        const dy = (y - zone * 0.5) / (zone * 0.42);
         return dx * dx + dy * dy > 1;
       };
 
       const min = step * 5;
-      const max = Math.min(w, h) * 0.62;
+      const max = Math.min(w, zone) * 0.72;
       let from = pick();
       let to = pick();
       // A handful of tries, then take what we have — this runs on a frame.
@@ -195,7 +200,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       const at = (t: number, offset: number): [number, number] =>
         snap(
           Math.min(w - inset, Math.max(inset, from[0] + (to[0] - from[0]) * t + px * offset)),
-          Math.min(h - inset, Math.max(inset, from[1] + (to[1] - from[1]) * t + py * offset)),
+          Math.min(zone - inset, Math.max(inset, from[1] + (to[1] - from[1]) * t + py * offset)),
         );
 
       const [x0, y0] = snap(from[0], from[1]);
