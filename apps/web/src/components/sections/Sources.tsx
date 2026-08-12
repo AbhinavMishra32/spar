@@ -1,3 +1,4 @@
+import { Dots } from "@/components/Dots";
 import { markDots, markRadius } from "@/components/Mark";
 import { Reveal } from "@/components/Reveal";
 import { Section, SectionHead } from "@/components/Section";
@@ -88,12 +89,12 @@ const LABEL_W = 232;
  */
 export function Sources() {
   return (
-    <Section id="sources">
+    <Section id="sources" bloom="bl">
       <SectionHead
         index="05"
-        label="Practice sources"
-        title="Spar writes most of your challenges. It does not have to write all of them."
-        lede="Connect LeetCode or Codeforces and real problems arrive against the same target, in the same history, judged by the people who wrote them."
+        label="Where problems come from"
+        title="The right problem might already exist."
+        lede="Connect LeetCode and Codeforces and Spar can set you real problems from them — chosen against your ability map instead of browsed by you, and opened in the Spar workspace so the attempt lands in the same history as everything else."
       />
 
       {/* Below `sm` the diagram would be 1000 units wide in a 340px column,
@@ -143,7 +144,8 @@ export function Sources() {
       </div>
 
       <Reveal delay={90} className="mt-14 hidden sm:block">
-        <div className="card overflow-hidden p-4 sm:p-6">
+        <div className="card relative isolate overflow-hidden p-4 sm:p-6">
+          <Dots variant="panel" alpha={0.13} />
           <svg
             viewBox="0 0 1000 430"
             className="h-auto w-full"
@@ -346,25 +348,26 @@ export function Sources() {
 
       <div className="mt-12 grid gap-10 md:grid-cols-3">
         <Reveal>
-          <h3 className="text-[1.15rem] leading-snug">The agent is made to look.</h3>
+          <h3 className="text-[1.15rem] leading-snug">Recommended, not browsed.</h3>
           <p className="mt-3.5 text-[0.93rem] leading-relaxed text-muted">
-            On any turn that sets a challenge it searches the source first, then either assigns what it found
-            or writes its own. That is the controller, not a line in a prompt — it cannot skip the search.
+            Instead of picking from hundreds of questions yourself, the problem is matched to your current
+            abilities, your solved history, the concepts that need strengthening, the difficulty you should be
+            at, and whatever Spar is trying to improve right now.
           </p>
         </Reveal>
         <Reveal delay={90}>
-          <h3 className="text-[1.15rem] leading-snug">Both directions are real.</h3>
+          <h3 className="text-[1.15rem] leading-snug">Solved without leaving Spar.</h3>
           <p className="mt-3.5 text-[0.93rem] leading-relaxed text-muted">
-            A sourced problem brings a difficulty other people calibrated. A written one brings something no
-            library has. Spar prefers the real problem when it lands on the target — and won&rsquo;t hand you a
-            contest problem to test an off-by-one.
+            A selected problem opens in the workspace: read it, write it, run it, work through the failures,
+            submit. The verdict is the judge&rsquo;s and it lands on your account there — but the attempt stays
+            here, as evidence, instead of being an event nothing learned from.
           </p>
         </Reveal>
         <Reveal delay={180}>
           <h3 className="text-[1.15rem] leading-snug">You sign in on their page.</h3>
           <p className="mt-3.5 text-[0.93rem] leading-relaxed text-muted">
-            Spar never sees your password. Not connected is fine too — and Spar says which is happening rather
-            than blurring it.
+            Spar never sees your password. Not connected is fine too — you just get generated challenges, and
+            Spar says which is happening rather than blurring it.
           </p>
         </Reveal>
       </div>

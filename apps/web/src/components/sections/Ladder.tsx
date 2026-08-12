@@ -6,32 +6,33 @@ import { useEffect, useRef } from "react";
  * One field of dots, read three ways, driven by how far you have scrolled.
  *
  * The argument the whole product rests on is hard to say in a sentence and easy
- * to show in a grid. A practice site is a ladder: the same rungs, evenly
- * spaced, handed to everyone. So the section opens on exactly that — a
- * perfectly uniform grid, which is the most boring thing dots can do, on
- * purpose. Scroll and the same dots take on the shape of what you actually did
- * with them, some bright and some barely there. Scroll again and they resolve
- * into Spar's own diagonal: the next thing to work on, taken from the evidence.
+ * to show in a grid. A roadmap is a uniform grid: every problem the same size,
+ * evenly spaced, in the same order for everyone, with no idea which of them cost
+ * you an afternoon. So the section opens on exactly that — a perfectly uniform
+ * field, which is the most boring thing dots can do, on purpose. Scroll and the
+ * same problems take on the shape of how they actually went, some bright and
+ * some barely there. Scroll again and they resolve into Spar's own diagonal: a
+ * weakness with a shape, and what to do about it.
  *
  * Nothing moves except by scrolling, and nothing is added between the acts. It
- * is the same dots the whole way down, which is the point — the ladder did not
- * change, what Spar knows about you did.
+ * is the same dots the whole way down, which is the point — you solved the same
+ * problems either way. What is known about them is the difference.
  */
 
 const ACTS = [
   {
-    label: "The ladder",
-    line: "Every practice site hands out the same rungs, evenly spaced, in the same order.",
+    label: "The same sheet, for everyone",
+    line: "A roadmap, a 150-problem sheet, a course in a fixed order. Handed to you and to everybody else, in the same order, forever.",
     at: 0,
   },
   {
-    label: "Your attempts",
-    line: "Spar records which ones you actually cleared, which you scraped, and where you stalled.",
+    label: "How you actually solved it",
+    line: "Spar keeps what a checklist throws away — where you stalled, what you tried first, which case broke you.",
     at: 0.4,
   },
   {
-    label: "The next rung",
-    line: "And writes what comes next from that — aimed at the one thing the evidence says you can't do yet.",
+    label: "Where you're actually weak",
+    line: "Losing an invariant and never spotting that a problem is a graph are completely different weaknesses. Spar remembers the difference.",
     at: 0.75,
   },
 ];

@@ -214,16 +214,66 @@
   .section-dots {
     position: absolute;
     inset: 0 0 auto;
-    height: 22rem;
+    height: 30rem;
     pointer-events: none;
-    opacity: 0.6;
     background-image: radial-gradient(
       circle at center,
-      rgba(255, 255, 255, 0.085) 1px,
-      transparent 1.15px
+      rgba(255, 255, 255, 0.15) 1.2px,
+      transparent 1.3px
     );
-    background-size: 26px 26px;
-    mask-image: linear-gradient(to bottom, #000 0%, transparent 82%);
+    background-size: 30px 30px;
+    mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.4) 46%, transparent 88%);
+  }
+
+  /* The same grid, placed rather than assumed.
+
+     `.section-dots` handles the top of every section on its own. This is for
+     everywhere else it should show: inside a panel, off the corner of a claim,
+     behind a diagram. One background image, one mask, no canvas — it repeats a
+     dozen times down the page and none of it may cost a frame.
+
+     Step and alpha are custom properties so a caller can go denser or fainter
+     without a new class; the mask is what each variant actually is. */
+  .dots {
+    position: absolute;
+    pointer-events: none;
+    /* Behind the content without every sibling needing its own `relative`.
+       The parent carries `isolate`, so this cannot fall through to whatever is
+       under the section. */
+    z-index: -1;
+    background-image: radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, var(--dots-alpha, 0.14)) 1.2px,
+      transparent 1.3px
+    );
+    background-size: var(--dots-step, 30px) var(--dots-step, 30px);
+  }
+
+  /* Inside a bordered box: closes in from every edge, because a panel ends at
+     its own border and dots cut against a rounded corner read as cropped. */
+  .dots--panel {
+    inset: 0;
+    mask-image: radial-gradient(120% 130% at 50% 50%, #000 30%, transparent 82%);
+  }
+
+  /* A field spilling out of one corner — the section's own weather. */
+  .dots--bloom {
+    inset: 0;
+    mask-image: radial-gradient(58% 62% at var(--dots-x, 100%) var(--dots-y, 0%), #000 0%, transparent 78%);
+  }
+
+  /* A column of grid running down one side of a two-column section, so the
+     text block has something to sit against. */
+  .dots--rail {
+    inset: 0;
+    mask-image: linear-gradient(to right, #000 0%, transparent 42%);
+  }
+
+  /* Under a block, fading up into it. */
+  .dots--floor {
+    inset: auto 0 0;
+    height: 22rem;
+    mask-image: linear-gradient(to top, #000 0%, transparent 86%);
   }
 
   /* ---- Labels and type ------------------------------------------------- */

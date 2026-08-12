@@ -6,9 +6,10 @@ const COLUMNS = [
   {
     heading: "Product",
     links: [
+      { label: "Ability map", href: "#abilities" },
       { label: "How it works", href: "#how" },
+      { label: "Problems", href: "#sources" },
       { label: "The app", href: "#app" },
-      { label: "Models", href: "#models" },
       { label: "Download", href: "#download" },
     ],
   },
@@ -78,7 +79,7 @@ export function Footer() {
         <div className="mt-16 flex flex-col gap-3 border-t border-line pt-7 text-[0.82rem] text-ghost sm:flex-row sm:items-center sm:justify-between">
           <p>© {new Date().getFullYear()} Spar — no analytics, no telemetry.</p>
           <p className="font-mono text-[11px] tracking-[0.12em] uppercase">
-            The tests decide the verdict. Never the model.
+            Graded by execution. Never by the model.
           </p>
         </div>
       </div>

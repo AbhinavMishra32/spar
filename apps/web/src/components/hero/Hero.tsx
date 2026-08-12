@@ -4,15 +4,17 @@ import { Shot } from "@/components/Shot";
 import type { Release } from "@/lib/release";
 
 /**
- * Two lines, and the second one is the claim.
+ * Two imperatives on the same verb, and the second one is the offer.
  *
- * It says the mechanism rather than a mood: the exercise you get next is
- * written out of the attempt you just made. That is the whole product, and it
- * is the one thing no other practice site does.
+ * The complaint the whole product answers is not that practice is hard, it is
+ * that nobody can tell which problem is worth the next hour — so you pick one
+ * and hope. Naming that first is what makes the second line an answer rather
+ * than a slogan; the rest of the page is the argument that Spar can do the
+ * picking.
  */
 const HEADLINE = [
-  ["Your", "next", "exercise,"],
-  ["written", "from", "your", "last."],
+  ["Stop", "guessing."],
+  ["Solve", "the", "right", "problems."],
 ];
 
 /**
@@ -56,9 +58,9 @@ export function Hero({ release }: { release: Release }) {
           ))}
         </h1>
 
-        <p className="lede mt-7 max-w-[46ch] sm:mt-8">
-          Spar watches how the attempt actually goes, and builds the next challenge around the one thing you
-          couldn&rsquo;t do.
+        <p className="lede mt-7 max-w-[52ch] sm:mt-8">
+          Spar learns how you solve — where you stall, what you reach for first, which case breaks your
+          approach — and picks or writes the one problem worth your next hour.
         </p>
 
         <div className="mt-9 flex w-full flex-col items-center gap-3 sm:mt-10 sm:w-auto sm:flex-row">
@@ -69,7 +71,7 @@ export function Hero({ release }: { release: Release }) {
         </div>
 
         <p className="mt-8 font-mono text-[10.5px] tracking-[0.2em] text-faint uppercase sm:text-[11px]">
-          The tests decide the verdict. Never the model.
+          LeetCode. Codeforces. Spar-generated challenges. One training system.
         </p>
       </div>
 

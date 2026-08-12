@@ -4,27 +4,27 @@ import { AgentDemo } from "@/components/sections/AgentDemo";
 
 const POINTS = [
   {
-    title: "It says what it is about to do.",
-    body: "Before each phase, in words. Its thinking is labelled by what it was doing, not by how long it took.",
+    title: "It looks things up.",
+    body: "Your ability map, one ability's history, the attempts behind it, this challenge's state, the failing cases. Fetched when they matter, rather than pasted into one enormous transcript that gets worse the longer you use it.",
   },
   {
-    title: "It can ask you things back.",
-    body: "Mid-attempt — what you were trying, where you expected the value to change. The answer is evidence too.",
+    title: "It comes back knowing.",
+    body: "Close the app and the evidence stays. Tomorrow doesn't open with “what level are you at” — you already answered that, by solving things.",
   },
   {
     title: "It is not the judge.",
-    body: "It proposes what you practise. It is never the authority on whether your code is correct.",
+    body: "It decides what you practise and what to look at next. It is never the authority on whether your code is correct.",
   },
 ];
 
 export function TheAgent() {
   return (
-    <Section id="agent">
+    <Section id="agent" bloom="br">
       <SectionHead
-        index="04"
-        label="The agent"
-        title="Ask it why, and it has to answer from the evidence."
-        lede="Scripted, not a live model — it can't have your history from here. Try the third question."
+        index="08"
+        label="The training agent"
+        title="One agent, with your whole history to read from."
+        lede="Spar isn't a chatbot that happens to generate coding questions — the agent is what runs the training system, and it answers from the evidence. Scripted here, because from a landing page it can't have yours. Try the third question."
       />
 
       <div className="mt-14 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-5">

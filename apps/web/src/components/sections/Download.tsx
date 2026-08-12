@@ -12,8 +12,8 @@ const GLYPHS = { macOS: AppleGlyph, Windows: WindowsGlyph, Linux: LinuxGlyph };
 /** The two things worth knowing before the download finishes. */
 const NEEDS = [
   {
-    title: "Sign in, and you're going",
-    body: "Nothing to host, nothing to configure. Seven questions once, on your account rather than once per machine.",
+    title: "The first session teaches it about you",
+    body: "Seven questions once, then it starts from evidence instead. Every problem gives Spar a better picture of you, and every better picture makes the next problem more useful.",
   },
   {
     title: "A model to run the agent on",
@@ -35,9 +35,12 @@ export function Download({ release }: { release: Release }) {
 
           <div className="relative">
             <Mark size={34} animated className="mx-auto" />
-            <h2 className="mt-8 text-[length:var(--text-title)]">Get in the ring.</h2>
-            <p className="lede mx-auto mt-5 max-w-[48ch]">
-              Free, and the whole product is on GitHub.
+            <h2 className="mt-8 text-[length:var(--text-title)]">
+              Your practice should remember you.
+            </h2>
+            <p className="lede mx-auto mt-5 max-w-[54ch]">
+              Stop deciding for yourself whether today is another sliding-window problem, a graph problem you
+              have forgotten, or yesterday&rsquo;s mistake again. Free, and the whole product is on GitHub.
             </p>
 
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -49,7 +52,9 @@ export function Download({ release }: { release: Release }) {
             </div>
 
             <p className="mt-6 font-mono text-[11px] tracking-[0.14em] text-ghost uppercase">
-              <span className="shimmer">v{release.version} — free forever, no Spar subscription</span>
+              <span className="shimmer">
+                v{release.version} — LeetCode + Codeforces + adaptive Spar challenges
+              </span>
             </p>
           </div>
         </div>

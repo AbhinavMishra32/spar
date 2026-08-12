@@ -33,12 +33,12 @@ const ROUTES: readonly { route: Route; line: string }[] = [
 
 export function Models() {
   return (
-    <Section id="models">
+    <Section id="models" bloom="tr">
       <SectionHead
-        index="06"
+        index="10"
         label="Bring your own model"
-        title="Spar is a client for whatever model you want to drive it with."
-        lede="It doesn't ship one and doesn't resell one. There is no Spar subscription — point it at a model you already pay for, or run one yourself."
+        title="Use whichever model you want to drive it."
+        lede="Spar doesn't ship one and doesn't resell one. There is no Spar subscription — point it at a model you already pay for, or run one on your own machine. Your ability map, attempts and history belong to Spar's training system, not to a model provider, so switching models doesn't reset what it knows about you."
       />
 
       <div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

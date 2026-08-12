@@ -4,9 +4,9 @@ export const REPO = "https://github.com/AbhinavMishra32/spar";
 
 export const site = {
   name: "Spar",
-  tagline: "A coding gym that watches you work and writes your next exercise.",
+  tagline: "Stop guessing. Solve the right problems.",
   description:
-    "Spar records how an attempt actually goes — what you wrote, what you ran, where you stalled — and generates your next challenge against the specific thing it thinks you can't do yet. Tests decide the verdict, never the model.",
+    "Spar builds a living map of your programming abilities from how you solve — what you understand, where you get stuck, which cases break your approach — then chooses or creates the next challenge from it. LeetCode, Codeforces and generated challenges in one training system, graded by execution rather than by a model.",
   url: "https://tryspar.dev",
   repo: REPO,
   releases: `${REPO}/releases/latest`,
@@ -14,10 +14,10 @@ export const site = {
 } as const;
 
 export const nav = [
+  { label: "Ability map", href: "#abilities" },
   { label: "How it works", href: "#how" },
+  { label: "Problems", href: "#sources" },
   { label: "The app", href: "#app" },
-  { label: "The agent", href: "#agent" },
-  { label: "Models", href: "#models" },
   { label: "FAQ", href: "#faq" },
 ] as const;
 

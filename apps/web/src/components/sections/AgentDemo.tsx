@@ -32,21 +32,21 @@ const SCRIPTS: readonly { q: string; a: Reply }[] = [
     q: "Why this challenge?",
     a: {
       phases: ["reading your last four attempts", "checking what the evidence supports"],
-      say: "Three of your last four failed on the first iteration, not on the algorithm — and both times you fixed it by flipping < to <= until it went green. That is repaired, not traced.",
+      say: "You had the window model right in all four. Three of them failed the same way: you shrank once, the window was still invalid, and you carried on. So this one is that, on purpose — several removals before it is valid again.",
       target: {
-        title: "Trace TypeScript loop state to diagnose boundary-condition bugs",
-        concepts: ["Loop boundary tracing", "Off-by-one", "Invariants"],
+        title: "Restore the invariant when one removal isn't enough",
+        concepts: ["Variable-size windows", "Invariant restoration", "Frequency state"],
       },
     },
   },
   {
     q: "Am I getting better?",
     a: {
-      phases: ["reading the ability ledger"],
+      phases: ["reading the ability map"],
       say: "Two things, and I will not merge them.",
       ledger: {
-        earned: "Repairs loop boundaries across scalar counters and array scans. 4 passing submissions, 2 with no hint asked for.",
-        uncertain: "Probably holds inside a nested scan. Nothing you have submitted proves it.",
+        earned: "Recognises variable-size window problems and maintains frequency state. 4 passing submissions, 2 with no hint asked for.",
+        uncertain: "Whether that survives outside a string problem. Nothing you have submitted tests it, so I want a transfer next.",
       },
     },
   },
@@ -54,15 +54,15 @@ const SCRIPTS: readonly { q: string; a: Reply }[] = [
     q: "Just tell me the answer.",
     a: {
       phases: ["no"],
-      say: "I will talk about the invariant and the case that fails. I cannot move the verdict — it comes from running the committed tests and reading the exit code, and I am not in that path.",
-      verdict: "graded by tests · exit code 1 · 2 of 7 cases failing",
+      say: "I will talk about the invariant and the case that fails. I cannot move the verdict — it comes from running the committed cases and reading the exit code, and I am not in that path.",
+      verdict: "graded by execution · exit code 1 · 2 of 7 cases failing",
     },
   },
 ];
 
 const TYPED: Reply = {
   phases: ["reading the question"],
-  say: "In the app this runs against your own history — the attempt you have open, every test run behind it, the ledger it has built about you. From a landing page I have none of that.",
+  say: "In the app this runs against your own history — the attempt you have open, every run behind it, the ability map it has built from all of them. From a landing page I have none of that.",
 };
 
 /** How long each announced phase sits before the next one. */

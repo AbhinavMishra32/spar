@@ -1,3 +1,4 @@
+import { Dots } from "@/components/Dots";
 import { Mark } from "@/components/Mark";
 import { languages } from "@/lib/site";
 
@@ -13,7 +14,10 @@ export function Languages() {
   const run = [...languages, ...languages];
 
   return (
-    <section className="edge relative overflow-hidden py-9" aria-label="Supported languages">
+    <section className="edge relative isolate overflow-hidden py-9" aria-label="Supported languages">
+      {/* The strip sits directly under the hero's field, so it keeps a band of
+          the same grid rather than reading as the point the dots stop. */}
+      <Dots variant="panel" alpha={0.12} />
       <div className="shell flex flex-col gap-6 md:flex-row md:items-center">
         <p className="shrink-0 font-mono text-[11px] tracking-[0.18em] text-faint uppercase">
           Challenges are set in

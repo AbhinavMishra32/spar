@@ -25,17 +25,17 @@ import { useEffect, useRef } from "react";
 const ACTS = [
   {
     label: "Run the reference",
-    line: "The solution Spar wrote has to pass every test — the ones you can see and the ones you can't.",
+    line: "Before you see it, the solution Spar wrote has to pass every case — the ones you can see and the ones you can't.",
     at: 0,
   },
   {
     label: "Break it on purpose",
-    line: "Then a deliberately broken version has to pass the visible tests, proving that suite is genuinely incomplete.",
+    line: "Then a deliberately broken version has to pass the visible cases, proving that suite is genuinely incomplete.",
     at: 0.38,
   },
   {
     label: "The hidden cases bite",
-    line: "And fail the hidden ones. A challenge that misses any of this is thrown away rather than set for you.",
+    line: "And fail the hidden ones. Anything that misses a step here is thrown away instead of set for you.",
     at: 0.72,
   },
 ];
@@ -199,8 +199,8 @@ export function ProofRun() {
         <div className="shell grid w-full items-center gap-12 lg:grid-cols-[minmax(0,25rem)_minmax(0,1fr)] lg:gap-16">
           <div>
             <p className="eyebrow">
-              <span data-index>[04]</span>
-              Proven before you see it
+              <span data-index>[07]</span>
+              The model is not the judge
             </p>
             {/* Stacked, so the block never resizes as one line replaces another. */}
             <div className="relative mt-7 grid min-h-[10rem]">
@@ -220,6 +220,16 @@ export function ProofRun() {
                 </div>
               ))}
             </div>
+
+            {/* Static, under the acts that move: the verdict is where the page
+                stops talking about validation and starts talking about what a
+                failure is worth. A failed case is not a grade, it is the most
+                specific evidence in the system. */}
+            <p className="mt-8 max-w-[46ch] border-t border-line pt-7 text-[0.92rem] leading-relaxed text-muted">
+              Your solution is graded by running those cases, never by asking a model. And a failing hidden
+              case says more than <span className="text-paper">Wrong Answer</span> — it names which input broke
+              you, which is the sharpest evidence the ability map ever gets.
+            </p>
           </div>
 
           {/* The suite gets its own column, and nothing is set over it. */}
