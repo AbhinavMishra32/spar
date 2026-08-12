@@ -272,8 +272,8 @@
      aberration is. It arrives wide and settles, once, on load. */
   .chromatic {
     text-shadow:
-      -1.1px 0 0 rgba(255, 45, 85, 0.34),
-      1.1px 0 0 rgba(0, 229, 255, 0.34);
+      -0.9px 0 0 rgba(255, 45, 85, 0.26),
+      0.9px 0 0 rgba(0, 229, 255, 0.26);
     animation: chromatic-settle 1.5s var(--ease-out-quint) both;
   }
 
@@ -285,8 +285,8 @@
     }
     to {
       text-shadow:
-        -1.1px 0 0 rgba(255, 45, 85, 0.34),
-        1.1px 0 0 rgba(0, 229, 255, 0.34);
+        -0.9px 0 0 rgba(255, 45, 85, 0.26),
+        0.9px 0 0 rgba(0, 229, 255, 0.26);
     }
   }
 

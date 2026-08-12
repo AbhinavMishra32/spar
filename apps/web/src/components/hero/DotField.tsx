@@ -299,9 +299,8 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       gl.uniform1f(uBase, radius);
       gl.uniform1f(uMotion, reduced ? 0 : 1);
       gl.uniform3fv(uClicks, ripples);
-      // Whichever connection is furthest along its charge takes the field's
-      // attention, and the field pans towards it — the same lean the pointer
-      // gets, borrowed by the event for as long as it lasts.
+      // Whichever connection is furthest along its charge is what the camera
+      // goes to, for as long as it lasts.
       let want = 0;
       let wantX = 0;
       let wantY = 0;
@@ -324,16 +323,10 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
 
       // How far the pointer is from the middle, in units the layers scale up.
       // Capped, so a cursor parked in a corner leans the field rather than
-      // shearing the layers apart.
-      let leanX = Math.max(-1, Math.min(1, (pointer.x - size.w / 2) / (size.w / 2)));
-      let leanY = Math.max(-1, Math.min(1, (pointer.y - size.h / 2) / (size.h / 2)));
-      if (focus.weight > 0.01) {
-        const pullX = Math.max(-1, Math.min(1, (focus.x - size.w / 2) / (size.w / 2)));
-        const pullY = Math.max(-1, Math.min(1, (focus.y - size.h / 2) / (size.h / 2)));
-        const pull = focus.weight * 0.75;
-        leanX += (pullX - leanX) * pull;
-        leanY += (pullY - leanY) * pull;
-      }
+      // shearing the layers apart. The move towards a connection is the
+      // camera's, in the shader — panning here as well would compound it.
+      const leanX = Math.max(-1, Math.min(1, (pointer.x - size.w / 2) / (size.w / 2)));
+      const leanY = Math.max(-1, Math.min(1, (pointer.y - size.h / 2) / (size.h / 2)));
       gl.uniform2f(uDrift, leanX * 11, leanY * 11);
       gl.uniform4fv(uArcA, arcA);
       gl.uniform4fv(uArcB, arcB);

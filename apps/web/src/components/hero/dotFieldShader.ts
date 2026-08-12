@@ -23,9 +23,9 @@
  * lets go. Nothing is ever drawn between them — no line, no bolt. It is dots
  * the whole way through, which is the only way it belongs to this page.
  *
- * **And the field gravitates towards it.** While a connection is live the grid
- * is magnified around it and the parallax pans that way, both eased in over the
- * charge and out over the settle — so the attention arrives slightly before the
+ * **And the camera goes to it.** While a connection is live the whole field
+ * closes in on it and slides it towards the middle of the screen, eased in over
+ * the charge and out over the settle — so the move arrives slightly before the
  * event and leaves after it.
  *
  * Kept in its own file because it is the one piece of this site that is a
@@ -90,8 +90,6 @@ const float ARC_BURST_REACH = 118.0;
 /** How near a dot has to be to the path to be taken up by it, CSS px. Wide, so
  *  the arc has shoulders and is not a one-dot-thick wire. */
 const float ARC_REACH = 34.0;
-/** How far the field's attention spreads around a connection, CSS px. */
-const float FOCUS_REACH = 330.0;
 
 /** How fast a click's band travels, CSS px per second, and how long it lives. */
 const float RIPPLE_SPEED = 720.0;
@@ -183,7 +181,7 @@ float arcsAt(vec2 s) {
     // Beat four, over everything.
     float alive = 1.0 - easeOut(over);
 
-    lit += (ends * 1.7 + bridge * 1.25 + shell * 1.3) * alive;
+    lit += (ends * 1.55 + bridge * 1.15 + shell * 0.85) * alive;
   }
   return min(lit, 1.4);
 }
@@ -231,20 +229,17 @@ void main() {
   vec2 toPointer = s - uPointer;
   vec2 dir = normalize(toPointer + vec2(1e-4));
 
-  // The field gravitates. Sampling the grid a little nearer the focus than the
-  // fragment actually is magnifies the pattern around it — dots there sit
-  // further apart and read as closer to you, as though the whole surface were
-  // being drawn towards whatever is happening. It is the same displacement for
-  // every layer, applied before any of them are sampled, so the field bends as
-  // one sheet rather than sliding apart.
+  // The camera. Not a bulge around the event — the whole field moves. It closes
+  // in uniformly about the connection and slides so that the connection drifts
+  // towards the middle of the screen, which is what a camera does when it takes
+  // an interest in something. Being global is the entire point: a local warp
+  // reads as the surface deforming, and a surface that deforms around an event
+  // is a lens sitting on the page rather than a camera looking at it.
   //
-  // The arcs are deliberately not warped with it. They are evaluated in screen
-  // space, so whichever dot is *drawn* at a point is the one that lights — the
-  // connection stays on the dots you can see rather than on where they would
-  // have been.
-  vec2 toFocus = s - uFocus.xy;
-  float gravity = uFocus.z * 0.16 * exp(-dot(toFocus, toFocus) / (FOCUS_REACH * FOCUS_REACH * 1.7));
-  s -= toFocus * gravity;
+  // Applied before any layer is sampled, so all three move together, and before
+  // the parallax, so leaning and looking stay independent of each other.
+  s = uFocus.xy + (s - uFocus.xy) * (1.0 - 0.085 * uFocus.z);
+  s += (uFocus.xy - uRes * 0.5) * 0.17 * uFocus.z;
 
   // Two layers behind the field, offset against it as the pointer moves. The
   // grid is the same grid at every depth — the parallax is doing the work, not
@@ -282,22 +277,14 @@ void main() {
       tone += prox * 1.25;
 
       // The bands from every click still in the air.
-      radius += ripple * uBase * 2.2;
-      tone += ripple * 0.85;
+      radius += ripple * uBase * 1.35;
+      tone += ripple * 0.95;
 
-      // And whatever an arc has just taken up. Generous, because this is the
-      // one thing on the field that is supposed to be an event: at the old
-      // weight the connection happened and you could miss it.
-      radius += arc * uBase * 3.4;
-      tone += arc * 1.1;
-
-      // The field leans in. Every dot for some way around a live connection
-      // comes up a little, so the eye is taken there before the thing itself
-      // resolves — the attention arrives before the event does.
-      vec2 fromFocus = center - uFocus.xy;
-      float halo = uFocus.z * exp(-dot(fromFocus, fromFocus) / (FOCUS_REACH * FOCUS_REACH));
-      radius += halo * uBase * 0.7;
-      tone += halo * 0.22;
+      // And whatever an arc has just taken up. Mostly in brightness rather than
+      // in size — past about twice the resting radius these stop being dots
+      // that lit up and start being blobs, and the grid loses its grain.
+      radius += arc * uBase * 1.75;
+      tone += arc * 1.15;
 
       // Aberration. Strongest in a ring around the pointer — a dot directly
       // under the cursor is the one thing you are looking at, so it stays
@@ -314,7 +301,7 @@ void main() {
       // Every term is a fraction of the dot's own radius, so the proportion
       // holds as the field swells, and a 2px offset never tears a 1.5px
       // resting dot into three separate coloured ones.
-      vec2 shift = dir * radius * (0.34 * ring + 0.14 * edge + 0.26 * ripple);
+      vec2 shift = dir * radius * (0.26 * ring + 0.1 * edge + 0.2 * ripple);
 
       tone = clamp(tone, 0.0, 1.0);
       acc = max(acc, tone * vec3(
