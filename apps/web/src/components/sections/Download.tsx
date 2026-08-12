@@ -35,9 +35,7 @@ export function Download({ release }: { release: Release }) {
 
           <div className="relative">
             <Mark size={34} animated className="mx-auto" />
-            <h2 className="mt-8 text-[length:var(--text-title)]">
-              Your practice should remember you.
-            </h2>
+            <h2 className="mt-8 text-[length:var(--text-title)]">Get in the ring.</h2>
             <p className="lede mx-auto mt-5 max-w-[54ch]">
               Stop deciding for yourself whether today is another sliding-window problem, a graph problem you
               have forgotten, or yesterday&rsquo;s mistake again. Free, and the whole product is on GitHub.
