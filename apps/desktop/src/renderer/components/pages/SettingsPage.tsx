@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Ellipsis, Globe, KeyRound, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, ShieldCheck, Sun, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, Ellipsis, Globe, KeyRound, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, Sun, Trash2 } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type Language } from "@spar/domain";
 import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -414,25 +414,6 @@ function ConnectRow({ available, onPick }: { available: Provider[]; onPick(provi
   );
 }
 
-function Boundary({ title, detail, badge, tone = "muted" }: { title: string; detail: string; badge: React.ReactNode; tone?: "muted" | "success" }) {
-  return (
-    <Row className="items-start gap-4 py-3">
-      <div className="min-w-0 flex-1">
-        <p className="text-content font-medium">{title}</p>
-        <p className="mt-0.5 text-ui leading-[1.6] text-muted-foreground">{detail}</p>
-      </div>
-      <span
-        className={cn(
-          "mt-px inline-flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-background-elevated-secondary)] px-2 py-1 text-ui-sm",
-          tone === "success" ? "text-success" : "text-muted-foreground",
-        )}
-      >
-        {badge}
-      </span>
-    </Row>
-  );
-}
-
 export function SettingsPage({
   api,
   language,
@@ -637,20 +618,6 @@ export function SettingsPage({
 
         <Group label="Updates">
           <UpdateSettings api={api} />
-        </Group>
-
-        <Group label="Runtime boundary">
-          <Boundary
-            badge={<><Lock className="size-3" />Main process only</>}
-            detail={`API keys and refresh tokens are stored in ${credentialStore} and resolved by the main process immediately before a run.`}
-            title="Credential isolation"
-          />
-          <Boundary
-            badge={<><ShieldCheck className="size-3" />Enforced</>}
-            detail="Every provider protocol feeds the same Spar agent inside its isolated utility process."
-            title="Agent isolation"
-            tone="success"
-          />
         </Group>
 
         <Group label="Account">
