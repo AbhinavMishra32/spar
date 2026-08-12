@@ -10,12 +10,12 @@ const GLYPHS = { macOS: AppleGlyph, Windows: WindowsGlyph, Linux: LinuxGlyph };
 /** The two things worth knowing before the download finishes. */
 const NEEDS = [
   {
-    title: "A model to run the agent on",
-    body: "Spar doesn't ship one and doesn't resell one. Sign in with a subscription you already have, paste a key, or run Ollama locally.",
+    title: "Sign in, and you're going",
+    body: "Nothing to host and nothing to configure. You answer seven questions once — on your account, not once per machine — and Spar makes its opening call from there.",
   },
   {
-    title: "Somewhere for your account to live",
-    body: "Spar signs you in against the Spar API, and a release is stamped with the origin it should talk to. Deploy it in a few commands, or run it locally.",
+    title: "A model to run the agent on",
+    body: "The one thing Spar doesn't ship. Sign in with a subscription you already have, paste a key, or point it at Ollama and keep the whole thing on your machine.",
   },
 ];
 

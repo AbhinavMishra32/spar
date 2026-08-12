@@ -92,6 +92,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const uBase = uniform("uBase");
     const uMotion = uniform("uMotion");
     const uClick = uniform("uClick");
+    const uDrift = uniform("uDrift");
 
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reduced = calm.matches;
@@ -169,6 +170,12 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       gl.uniform1f(uBase, radius);
       gl.uniform1f(uMotion, reduced ? 0 : 1);
       gl.uniform3f(uClick, click[0], click[1], reduced ? 999 : age);
+      // How far the pointer is from the middle, in units the layers scale up.
+      // Capped, so a cursor parked in a corner leans the field rather than
+      // shearing the layers apart.
+      const leanX = Math.max(-1, Math.min(1, (pointer.x - size.w / 2) / (size.w / 2)));
+      const leanY = Math.max(-1, Math.min(1, (pointer.y - size.h / 2) / (size.h / 2)));
+      gl.uniform2f(uDrift, leanX * 11, leanY * 11);
 
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);

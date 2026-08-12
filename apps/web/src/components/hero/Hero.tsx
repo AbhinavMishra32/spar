@@ -1,17 +1,19 @@
 import { DownloadButton } from "@/components/DownloadButton";
+import { AgentLine } from "@/components/hero/AgentLine";
 import { DotField } from "@/components/hero/DotField";
 import { ArrowGlyph } from "@/components/icons";
+import { Shot } from "@/components/Shot";
 import { site } from "@/lib/site";
 
 const HEADLINE = ["Practice", "that", "fights", "back."];
 
 export function Hero() {
   return (
-    <section id="top" className="relative isolate flex min-h-svh flex-col justify-center overflow-hidden">
+    <section id="top" className="relative isolate flex min-h-svh flex-col overflow-hidden pt-28 pb-0">
       <DotField />
       <div className="hero-scrim" aria-hidden />
 
-      <div className="shell relative z-10 flex flex-col items-center pt-28 pb-24 text-center">
+      <div className="shell relative z-10 flex flex-1 flex-col items-center justify-center pt-8 text-center">
         <a href={site.releases} target="_blank" rel="noreferrer" className="chip">
           <span className="ml-1 font-mono text-[11px] tracking-wide text-paper">v{site.version}</span>
           <span className="h-3.5 w-px bg-white/15" />
@@ -48,17 +50,32 @@ export function Hero() {
           </a>
         </div>
 
-        <p className="mt-7 font-mono text-[11px] tracking-[0.14em] text-ghost uppercase">
+        <p className="mt-6 font-mono text-[11px] tracking-[0.14em] text-ghost uppercase">
           macOS · Windows · Linux — free, and{" "}
-          <a href="#download" className="text-faint underline-offset-4 transition hover:text-paper hover:underline">
+          <a
+            href="#download"
+            className="text-faint underline-offset-4 transition hover:text-paper hover:underline"
+          >
             every build is here
           </a>
         </p>
       </div>
 
-      {/* A hairline down to the fold, with the mark's own dot travelling it. */}
-      <div className="relative z-10 flex justify-center pb-10" aria-hidden>
-        <span className="scroll-cue" />
+      {/* The app itself, rising into the fold. The perspective and the fade are
+          doing one job between them: making the bottom of the viewport read as
+          somewhere the page continues, rather than as where it stops. */}
+      <div className="relative z-10 mt-16 pt-4">
+        <div className="mb-6">
+          <AgentLine />
+        </div>
+        <div className="shell hero-window">
+          <Shot
+            shot="workspace"
+            priority
+            sizes="(max-width: 900px) 130vw, 1160px"
+            alt="A Spar challenge open: the problem statement and sample cases on the left, the file being repaired in the editor, and the declared test cases below it."
+          />
+        </div>
       </div>
     </section>
   );

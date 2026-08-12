@@ -3,8 +3,12 @@ import { Section, SectionHead } from "@/components/Section";
 
 const QUESTIONS = [
   {
+    q: "Is there anything to set up?",
+    a: "Download it, sign in, answer seven questions, and Spar sets your first challenge. There is no server to stand up and nothing to configure — the only choice you make is which model the agent runs on. The repository is open source because the product is open source, not because you are expected to assemble it.",
+  },
+  {
     q: "Is there a subscription?",
-    a: "No. Spar is free and open source, and it doesn't resell model access — you bring a model you already pay for or run yourself. The only thing you might pay for is the model and wherever you host the API.",
+    a: "No. Spar is free and open source, and it doesn't resell model access — you bring a model you already pay for or run yourself. That is the only thing you ever pay for, and if you run a local model it is nothing.",
   },
   {
     q: "Can the agent be talked into passing me?",
@@ -20,7 +24,7 @@ const QUESTIONS = [
   },
   {
     q: "Where does my code go?",
-    a: "The challenge files, your in-flight attempt and your settings stay on your machine; model keys go to your operating system's keychain. Your account and the canonical copy of your history go to the backend you point Spar at. The contents of a challenge and your conversation with the agent go to your model provider, because that is what running a model means — run Ollama or LM Studio if that matters for your work.",
+    a: "The challenge files, your in-flight attempt and your settings stay on your machine; model keys go to your operating system's keychain. Your account and the canonical copy of your learning history sit on Spar's backend, so they survive a reinstall and follow you to another computer. The contents of a challenge and your conversation with the agent go to your model provider, because that is what running a model means — run Ollama or LM Studio if that matters for your work.",
   },
   {
     q: "Is there any telemetry?",

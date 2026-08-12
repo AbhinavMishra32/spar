@@ -42,6 +42,7 @@ uniform float uSpacing;  // grid step, CSS px
 uniform float uBase;     // resting dot radius at full tone, CSS px
 uniform float uMotion;   // 0 when the visitor asked for reduced motion
 uniform vec3  uClick;    // xy of the last click, z = seconds since it landed
+uniform vec2  uDrift;    // parallax offset, CSS px, from the pointer's travel
 
 out vec4 outColor;
 
@@ -59,6 +60,14 @@ float disc(vec2 d, float r) {
   return 1.0 - smoothstep(r - 1.1, r + 1.1, length(d));
 }
 
+/** The layer behind: sparser, dimmer, and further from the pointer's parallax.
+ *  One cell rather than nine — these dots never swell, so they never reach past
+ *  their own square and the neighbours cannot contribute anything. */
+float backdrop(vec2 s, float spacing, float radius, float tone) {
+  vec2 center = (floor(s / spacing) + 0.5) * spacing;
+  return tone * disc(s - center, radius);
+}
+
 void main() {
   // Work in CSS pixels with y running down, so the pointer needs no conversion.
   vec2 s = gl_FragCoord.xy / uDpr;
@@ -73,7 +82,17 @@ void main() {
   vec2 toPointer = s - uPointer;
   vec2 dir = normalize(toPointer + vec2(1e-4));
 
-  vec3 acc = vec3(0.0);
+  // Two layers behind the field, offset against it as the pointer moves. The
+  // grid is the same grid at every depth — the parallax is doing the work, not
+  // a different pattern — and the far one is slow enough to read as distance
+  // rather than as a second thing sliding about.
+  float far = backdrop(s + uDrift * 2.4, uSpacing * 3.1, uBase * 0.34, 0.1);
+  float mid = backdrop(s + uDrift, uSpacing * 1.7, uBase * 0.42, 0.14);
+  vec3 acc = vec3(max(far, mid));
+
+  // The near layer moves against them, so the whole thing has a front and a
+  // back rather than sliding as one sheet.
+  s -= uDrift * 0.5;
   vec2 home = floor(s / uSpacing);
 
   // The neighbours matter: a swollen dot reaches past its own cell, and a dot

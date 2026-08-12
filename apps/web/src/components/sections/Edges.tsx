@@ -11,10 +11,6 @@ import { Section, SectionHead } from "@/components/Section";
  */
 const EDGES = [
   {
-    label: "Hosting",
-    body: "There is no Spar-operated service. You deploy the API — a few commands on Vercel — or run it locally. Your account and the canonical copy of your history live wherever you put it.",
-  },
-  {
     label: "Signing",
     body: "Builds are not code-signed yet, so your operating system will say so in its usual alarming way. On a Mac, right-click and choose Open the first time. Signed builds are next on the list.",
   },

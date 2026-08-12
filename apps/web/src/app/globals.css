@@ -445,8 +445,9 @@
       transparent 1.45px
     );
     background-size: 32px 32px;
-    /* Merges into the section below instead of stopping at an edge. */
-    mask-image: linear-gradient(to bottom, #000 58%, transparent 96%);
+    /* Merges into the section below instead of stopping at an edge, and is out
+       of the way by the time the app window comes up. */
+    mask-image: linear-gradient(to bottom, #000 46%, rgba(0, 0, 0, 0.35) 72%, transparent 88%);
   }
 
   .dot-field[data-live="true"] {
@@ -460,11 +461,46 @@
     inset: 0;
     pointer-events: none;
     background: radial-gradient(
-      44% 38% at 50% 44%,
+      42% 34% at 50% 38%,
       rgba(0, 0, 0, 0.92),
-      rgba(0, 0, 0, 0.52) 58%,
+      rgba(0, 0, 0, 0.5) 58%,
       transparent 80%
     );
+  }
+
+  /* The app rising into the fold. The tilt is small on purpose — enough that
+     the window has a floor under it, not so much that the UI inside it becomes
+     a picture of a screen. The mask is what turns the bottom of the viewport
+     into somewhere the page continues rather than where it stops. */
+  .hero-window {
+    perspective: 2200px;
+    perspective-origin: 50% 0%;
+  }
+
+  .hero-window > * {
+    transform: rotateX(11deg);
+    transform-origin: 50% 0%;
+    mask-image: linear-gradient(to bottom, #000 42%, rgba(0, 0, 0, 0.55) 76%, transparent 99%);
+    box-shadow:
+      0 -1px 0 rgba(255, 255, 255, 0.12) inset,
+      0 -30px 120px -30px rgba(255, 255, 255, 0.09);
+  }
+
+  /* Each phase the agent announces replaces the last one. */
+  .phase-in {
+    display: inline-block;
+    animation: phase-in 0.45s var(--ease-out-quint) both;
+  }
+
+  @keyframes phase-in {
+    from {
+      opacity: 0;
+      translate: 0 0.5em;
+    }
+    to {
+      opacity: 1;
+      translate: 0 0;
+    }
   }
 
   /* The announcement chip above the headline. */

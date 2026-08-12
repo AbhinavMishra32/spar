@@ -27,7 +27,7 @@ const COLUMNS = [
       { label: "Architecture", href: `${REPO}/blob/main/docs/architecture.md` },
       { label: "Threat model", href: `${REPO}/blob/main/docs/threat-model.md` },
       { label: "Practice sources", href: `${REPO}/blob/main/docs/practice-sources.md` },
-      { label: "Hosting", href: `${REPO}/blob/main/docs/hosting.md` },
+      { label: "Releasing", href: `${REPO}/blob/main/docs/releasing.md` },
     ],
   },
 ];

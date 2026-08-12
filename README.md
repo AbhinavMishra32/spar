@@ -340,8 +340,8 @@ Spar has no analytics and no telemetry.
 
 ## For developers
 
-This repository is the whole product: the desktop app, the API, and the
-deterministic challenge compiler.
+This repository is the whole product: the desktop app, the API, the
+deterministic challenge compiler, and the landing page.
 
 - [`docs/architecture.md`](docs/architecture.md) — how the processes are split and
   why the renderer is treated as untrusted
@@ -352,6 +352,8 @@ deterministic challenge compiler.
 - [`docs/hosting.md`](docs/hosting.md) — deploying the API, and how a build
   learns which one to talk to
 - [`docs/releasing.md`](docs/releasing.md) — how a release is cut
+- [`apps/web/README.md`](apps/web/README.md) — the landing page, and the one
+  file to edit to change Spar's typeface
 - [`apps/desktop/scripts/icon/README.md`](apps/desktop/scripts/icon/README.md) —
   how the app icon's macOS geometry was measured
 
