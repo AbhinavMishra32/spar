@@ -768,20 +768,43 @@
   }
 }
 
-/* Longhands, not the `animation` shorthand: the shorthand resets
-   animation-delay, and the delay is the per-dot stagger that makes the band
-   travel the diagonal rather than the whole grid blinking at once. */
+/* One pass of the band, corner to corner, and back to the logo.
+   Longhands rather than the `animation` shorthand: the shorthand resets
+   animation-delay, and the delay is the per-dot stagger that makes this a band
+   travelling the diagonal instead of the whole grid blinking at once.
+   `both` so a dot holds its resting values before its turn comes and after it
+   has gone, which is what leaves a logo at the end rather than a pose. */
 .wake-on-hover:hover .spar-dot,
 .wake-on-hover:focus-visible .spar-dot {
-  animation-name: spar-dots-wave;
-  animation-duration: 1.5s;
+  animation-name: spar-dots-pass;
+  animation-duration: 0.62s;
   animation-timing-function: ease-in-out;
-  animation-iteration-count: infinite;
+  animation-iteration-count: 1;
+  animation-fill-mode: both;
+  animation-delay: var(--dot-pass-delay, 0s);
 }
 
 /* The mark's own motion, lifted from the desktop app so a loading state on the
    site and in the app are the same object. Each dot departs from and returns to
    its own resting scale, which is what keeps the grid a logo. */
+/* One band, corner to corner, that begins and ends on the resting mark. Both
+   ends are the dot's own resting values, so when it lands there is nothing to
+   snap back to. Verbatim from the desktop app's theme.css. */
+@keyframes spar-dots-pass {
+  0% {
+    transform: scale(var(--dot-rest));
+    opacity: var(--dot-tone);
+  }
+  45% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(var(--dot-rest));
+    opacity: var(--dot-tone);
+  }
+}
+
 @keyframes spar-dots-wave {
   0%,
   55%,

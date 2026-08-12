@@ -52,6 +52,11 @@ export const markRadius = radius;
 const WAVE_DURATION = 1.5;
 const WAVE_TRAVEL = 0.55;
 
+/** One pass: what a single dot spends rising and falling, and how long the band
+ *  takes to cross the grid corner to corner. Both from the desktop app. */
+const PASS_DURATION = 0.62;
+const PASS_TRAVEL = 0.62;
+
 export function Mark({
   size = 22,
   animated = false,
@@ -83,16 +88,19 @@ export function Mark({
             transformOrigin: `${dot.cx}px ${dot.cy}px`,
             transform: `scale(${dot.rest})`,
             opacity: dot.tone,
-            /* The stagger is set whether or not anything is running: it is what
-               puts this dot at its own point along the diagonal, and a hover
-               that starts the wave from CSS has no way to work it out. */
-            animationDelay: `${-WAVE_DURATION * (1 - WAVE_TRAVEL * dot.along)}s`,
+            /* This dot's place in a pass, set whether or not one is running:
+               it is what puts the dot at its own point along the diagonal, and
+               a rule that starts a pass from CSS has no way to work it out.
+               Forwards and positive, unlike the wave's — a pass travels from
+               the top-left corner rather than being caught mid-cycle. */
+            ["--dot-pass-delay" as string]: `${PASS_TRAVEL * dot.along}s`,
             ...(animated
               ? {
                   animationName: "spar-dots-wave",
                   animationDuration: `${WAVE_DURATION}s`,
                   animationIterationCount: "infinite",
                   animationTimingFunction: "ease-in-out",
+                  animationDelay: `${-WAVE_DURATION * (1 - WAVE_TRAVEL * dot.along)}s`,
                 }
               : {}),
             ["--dot-rest" as string]: dot.rest,
