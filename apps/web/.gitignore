@@ -1,0 +1,6 @@
+.next/
+next-env.d.ts
+tsconfig.tsbuildinfo
+AGENTS.md
+CLAUDE.md
+.vercel
