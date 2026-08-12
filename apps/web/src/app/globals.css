@@ -1,0 +1,445 @@
+@import "tailwindcss";
+
+/* Spar's landing page.
+   One theme, and it is black — not a dark mode with a light one behind it. The
+   only colour on the page is the fringe that falls off the white dots, which is
+   why the palette below is a greyscale ramp plus a red/cyan pair that never
+   appears as fill. */
+
+@theme {
+  /* Ground. #000 rather than a near-black, because the hero's dot field is drawn
+     in WebGL against transparent and any offset between canvas and page would
+     show as a seam. */
+  --color-ink: #000000;
+  --color-surface: #070707;
+  --color-surface-2: #0e0e0e;
+
+  /* Hairlines. Two weights: the rails and card edges that should barely register,
+     and the one used where an edge is doing work. */
+  --color-line: rgba(255, 255, 255, 0.09);
+  --color-line-strong: rgba(255, 255, 255, 0.2);
+
+  /* Ink on that ground. */
+  --color-paper: #ffffff;
+  --color-muted: rgba(255, 255, 255, 0.64);
+  --color-faint: rgba(255, 255, 255, 0.42);
+  --color-ghost: rgba(255, 255, 255, 0.26);
+
+  /* The aberration pair. Used for fringing and glow, never as a fill. */
+  --color-fringe-r: #ff2d55;
+  --color-fringe-c: #00e5ff;
+
+  /* Type. The three faces come from lib/fonts.ts as --face-*; this is the only
+     place in the codebase that binds them to anything. */
+  --font-display: var(--face-brand), "Poppins", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--face-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--face-mono), ui-monospace, "SF Mono", Menlo, monospace;
+
+  --text-display: clamp(2.9rem, 7.4vw, 6rem);
+  --text-title: clamp(2rem, 4.2vw, 3.4rem);
+  --text-lede: clamp(1.02rem, 1.35vw, 1.2rem);
+
+  /* The page's one measure. Rails, sections and the nav all align to it. */
+  --shell: 1240px;
+
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    /* Sections are anchored, and the nav is fixed over them. */
+    scroll-padding-top: 6rem;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-ink);
+    color: var(--color-paper);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+  }
+
+  ::selection {
+    background: var(--color-paper);
+    color: var(--color-ink);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-paper);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-weight: var(--brand-weight, 600);
+    letter-spacing: var(--brand-tracking, -0.035em);
+    line-height: 0.98;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+}
+
+@layer components {
+  /* ---- The shell ------------------------------------------------------- */
+
+  /* Content column. `--shell` wide, gutters below that. */
+  .shell {
+    width: 100%;
+    max-width: var(--shell);
+    margin-inline: auto;
+    padding-inline: clamp(1.25rem, 4vw, 2.5rem);
+  }
+
+  /* The vertical hairlines that run the height of the page at the column's
+     edges. Drawn on a fixed layer rather than per-section, so they are one
+     continuous line instead of a stack of segments that never quite meet. */
+  .rails {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    display: flex;
+    justify-content: center;
+  }
+
+  .rails::before,
+  .rails::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: linear-gradient(
+      to bottom,
+      transparent,
+      var(--color-line) 12rem,
+      var(--color-line) calc(100% - 6rem),
+      transparent
+    );
+  }
+
+  .rails::before {
+    left: max(calc(50% - var(--shell) / 2), 0px);
+  }
+
+  .rails::after {
+    right: max(calc(50% - var(--shell) / 2), 0px);
+  }
+
+  @media (max-width: 900px) {
+    .rails {
+      display: none;
+    }
+  }
+
+  /* A section's top edge: a hairline that fades out before it reaches the
+     viewport edge, with a crosshair sitting on each rail intersection. */
+  .edge {
+    position: relative;
+    border-top: 1px solid var(--color-line);
+  }
+
+  .edge::before,
+  .edge::after {
+    content: "+";
+    position: absolute;
+    top: 0;
+    translate: 0 -50%;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1;
+    color: var(--color-ghost);
+    pointer-events: none;
+  }
+
+  .edge::before {
+    left: max(calc(50% - var(--shell) / 2), 0px);
+    translate: -50% -50%;
+  }
+
+  .edge::after {
+    right: max(calc(50% - var(--shell) / 2), 0px);
+    translate: 50% -50%;
+  }
+
+  /* ---- Labels and type ------------------------------------------------- */
+
+  /* `[01] HOW IT WORKS` — the index makes a long page navigable by eye. */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6em;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--color-faint);
+  }
+
+  .eyebrow span[data-index] {
+    color: var(--color-ghost);
+  }
+
+  .lede {
+    font-size: var(--text-lede);
+    line-height: 1.62;
+    color: var(--color-muted);
+    letter-spacing: -0.01em;
+  }
+
+  /* Long headlines fade toward their tail so the eye lands on the first clause.
+     Only ever applied to display type — at body size it reads as a rendering
+     fault rather than as emphasis. */
+  .fade-tail {
+    background: linear-gradient(105deg, #fff 34%, rgba(255, 255, 255, 0.58) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* ---- Buttons --------------------------------------------------------- */
+
+  .btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    height: 3rem;
+    padding-inline: 1.4rem;
+    border-radius: 999px;
+    font-size: 0.94rem;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+    transition:
+      transform 0.22s var(--ease-out-quint),
+      background-color 0.22s var(--ease-out-quint),
+      border-color 0.22s var(--ease-out-quint),
+      box-shadow 0.3s var(--ease-out-quint),
+      color 0.22s var(--ease-out-quint);
+  }
+
+  .btn:active {
+    transform: scale(0.975);
+  }
+
+  .btn-primary {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    /* The fringe, once, on the element the page most wants you to press. Two
+       tinted shadows in opposite directions read as the dot field's aberration
+       rather than as a coloured glow. */
+    box-shadow:
+      -2px 0 18px -6px var(--color-fringe-r),
+      2px 0 18px -6px var(--color-fringe-c),
+      0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  }
+
+  .btn-primary:hover {
+    box-shadow:
+      -5px 0 26px -6px var(--color-fringe-r),
+      5px 0 26px -6px var(--color-fringe-c),
+      0 1px 0 rgba(255, 255, 255, 0.9) inset;
+  }
+
+  .btn-ghost {
+    border: 1px solid var(--color-line-strong);
+    color: var(--color-paper);
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.32);
+  }
+
+  /* ---- Surfaces -------------------------------------------------------- */
+
+  .card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--color-line);
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0) 40%),
+      var(--color-surface);
+    border-radius: 18px;
+    transition:
+      border-color 0.35s var(--ease-out-quint),
+      background-color 0.35s var(--ease-out-quint);
+  }
+
+  .card:hover {
+    border-color: var(--color-line-strong);
+  }
+
+  /* A light that follows the pointer across the card. `--mx`/`--my` are written
+     by useSpotlight; with no pointer the layer stays at zero opacity, so a
+     touch device gets the card and none of the machinery. */
+  .card-spotlight::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    opacity: 0;
+    transition: opacity 0.4s var(--ease-out-quint);
+    background: radial-gradient(
+      340px circle at var(--mx, 50%) var(--my, 50%),
+      rgba(255, 255, 255, 0.09),
+      transparent 62%
+    );
+    pointer-events: none;
+  }
+
+  .card-spotlight:hover::before {
+    opacity: 1;
+  }
+
+  /* The hairline that lights up along the top edge of a hovered card. */
+  .card-spotlight::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    opacity: 0;
+    transition: opacity 0.4s var(--ease-out-quint);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.55) var(--mx, 50%),
+      transparent
+    );
+    pointer-events: none;
+  }
+
+  .card-spotlight:hover::after {
+    opacity: 1;
+  }
+
+  /* A screenshot, framed. The inner ring keeps the image from touching the
+     border, which is what makes a flat PNG sit in the page like a window. */
+  .frame {
+    position: relative;
+    border-radius: 14px;
+    padding: 6px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.08) inset,
+      0 40px 120px -40px rgba(0, 0, 0, 1);
+  }
+
+  .frame > * {
+    border-radius: 9px;
+    overflow: hidden;
+    display: block;
+    border: 1px solid rgba(0, 0, 0, 0.6);
+  }
+
+  /* ---- Page texture ---------------------------------------------------- */
+
+  /* Film grain over the whole page. Flat black at these sizes bands on cheap
+     panels; a little noise breaks the gradient up. */
+  .grain {
+    position: fixed;
+    inset: -50%;
+    z-index: 60;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    mix-blend-mode: screen;
+  }
+
+  /* ---- Motion ---------------------------------------------------------- */
+
+  /* Scroll reveal. The element is laid out where it belongs and only its paint
+     is offset, so nothing reflows when it lands. */
+  .reveal {
+    opacity: 0;
+    translate: 0 18px;
+    transition:
+      opacity 0.7s var(--ease-out-quint),
+      translate 0.7s var(--ease-out-quint);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+
+  .reveal[data-shown="true"] {
+    opacity: 1;
+    translate: 0 0;
+  }
+
+  .marquee {
+    display: flex;
+    width: max-content;
+    animation: marquee 46s linear infinite;
+  }
+
+  .marquee-mask {
+    mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  }
+
+  .marquee-mask:hover .marquee {
+    animation-play-state: paused;
+  }
+}
+
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* The mark's own motion, lifted from the desktop app so a loading state on the
+   site and in the app are the same object. Each dot departs from and returns to
+   its own resting scale, which is what keeps the grid a logo. */
+@keyframes spar-dots-wave {
+  0%,
+  55%,
+  100% {
+    transform: scale(calc(var(--dot-rest) * 0.62));
+    opacity: calc(var(--dot-tone) * 0.55);
+  }
+  22% {
+    transform: scale(var(--dot-rest));
+    opacity: var(--dot-tone);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .reveal {
+    opacity: 1;
+    translate: none;
+    transition: none;
+  }
+
+  .marquee {
+    animation: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
