@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "installCommand": "corepack pnpm install --ignore-workspace",
+  "installCommand": "corepack pnpm install --ignore-workspace --ignore-scripts",
   "buildCommand": "corepack pnpm exec next build",
   "github": {
     "silent": true
