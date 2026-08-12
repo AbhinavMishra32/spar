@@ -31,7 +31,7 @@ export function TheApp() {
         index="03"
         label="What's in it"
         title="Every claim on this page has a page in the app that shows its working."
-        lede="Spar keeps what you have proved and what it is guessing strictly apart, and never draws them the same way."
+        lede="What you have proved and what it is guessing are kept strictly apart, and never drawn the same way."
       />
 
       <div className="mt-14 grid gap-4 md:grid-cols-12">
@@ -39,9 +39,8 @@ export function TheApp() {
           <Card className="p-6 sm:p-8 md:p-10">
             <Heading>Challenges proven before you ever see them.</Heading>
             <Body>
-              Every challenge is generated for the target Spar picked, so nobody else is getting your exercise
-              and you can&rsquo;t look it up. Generated exercises have an obvious failure mode, so before one
-              reaches you it has to survive a mechanical check:
+              Nobody else is getting your exercise, so you can&rsquo;t look it up. And before one reaches you
+              it has to survive a mechanical check:
             </Body>
             <ul className="mt-7 space-y-3.5 border-t border-line pt-7">
               {PROOFS.map((proof) => (
@@ -52,8 +51,7 @@ export function TheApp() {
               ))}
             </ul>
             <p className="mt-7 text-[0.9rem] text-paper">
-              A challenge that fails any of these never reaches you. You will never lose twenty minutes to a
-              broken problem.
+              You will never lose twenty minutes to a broken problem.
             </p>
           </Card>
         </Reveal>
@@ -63,9 +61,9 @@ export function TheApp() {
             <div>
               <Heading>Verdicts nothing can talk out of you.</Heading>
               <Body>
-                Your submission is graded by running the committed tests and reading the exit code. There is no
-                model in that path. Nothing you say to the agent, and nothing it decides it likes about you,
-                can turn a failing program into a passing submission — or the reverse.
+                Graded by running the committed tests and reading the exit code. No model in that path —
+                nothing you say to the agent can turn a failing program into a passing submission, or the
+                reverse.
               </Body>
             </div>
             <p className="mt-10 border-t border-line pt-7 font-display text-[1.06rem] leading-snug text-paper">
@@ -78,9 +76,8 @@ export function TheApp() {
           <Card className="overflow-hidden p-6 pb-0 sm:p-8 sm:pb-0 md:p-10 md:pb-0">
             <Heading>The ability ledger.</Heading>
             <Body>
-              The page that answers &ldquo;what am I actually good at now&rdquo;. An <em>earned</em> ability is
-              one your submissions have demonstrated more than once; an <em>uncertain</em> one is a hypothesis
-              Spar hasn&rsquo;t confirmed. They are drawn differently and never merged.
+              An <em>earned</em> ability is one your submissions have demonstrated more than once. An{" "}
+              <em>uncertain</em> one is a hypothesis Spar hasn&rsquo;t confirmed yet.
             </Body>
             <div className="mt-8 -mb-px translate-y-2">
               <Shot
@@ -96,9 +93,8 @@ export function TheApp() {
           <Card className="p-6 sm:p-8 md:p-10">
             <Heading>Concepts you can interrogate.</Heading>
             <Body>
-              Every challenge is tagged with what it exercises. Hover any tag, anywhere in the app, and you get
-              a straight answer about that concept: passed, failed, still open, and the attempts behind each.
-              This is how you find out whether &ldquo;closures&rdquo; is a real gap or one bad afternoon.
+              Hover any concept tag, anywhere in the app: passed, failed, still open, and the attempts behind
+              each. This is how you find out whether &ldquo;closures&rdquo; is a real gap or one bad afternoon.
             </Body>
             <div className="mt-8">
               <Shot
@@ -114,9 +110,8 @@ export function TheApp() {
           <Card className="overflow-hidden p-6 pb-0 sm:p-8 sm:pb-0 md:p-10 md:pb-0">
             <Heading>Nothing is thrown away.</Heading>
             <Body>
-              Every challenge Spar has ever written for you stays, filterable by open, passed or replaced —
-              Spar swaps a challenge out when your evidence moves on before you got to it, and says so rather
-              than quietly dropping it. A session you abandoned is still evidence.
+              Every challenge stays, filterable by open, passed or replaced. A session you abandoned is still
+              evidence.
             </Body>
             <div className="mt-8 -mb-px translate-y-2">
               <Shot
@@ -134,14 +129,12 @@ export function TheApp() {
               <Heading>Real problems, when a real problem fits.</Heading>
               <Body>
                 Connect LeetCode or Codeforces and the agent can set you real problems alongside the ones it
-                invents — chosen against the same target, tagged into the same ledger. On any turn that sets a
-                challenge it has to search the source first, then either assign what it found or consciously
-                write its own. It cannot skip the search.
+                invents — against the same target, in the same ledger.
               </Body>
             </div>
             <p className="mt-10 border-t border-line pt-7 text-[0.9rem] text-muted">
-              Submit and it goes to that judge, against every hidden case the problem has. The verdict is
-              theirs, and it lands on your account like any other submission.
+              Submit and it goes to that judge, against every hidden case. The verdict is theirs, and it lands
+              on your account there.
             </p>
           </Card>
         </Reveal>

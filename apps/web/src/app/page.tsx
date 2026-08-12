@@ -2,7 +2,6 @@ import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/hero/Hero";
 import { Nav } from "@/components/Nav";
 import { Download } from "@/components/sections/Download";
-import { Edges } from "@/components/sections/Edges";
 import { Faq } from "@/components/sections/Faq";
 import { HowItWorks } from "@/components/sections/HowItWorks";
 import { Languages } from "@/components/sections/Languages";
@@ -25,7 +24,6 @@ export default function Home() {
         <TheAgent />
         <Sources />
         <Models />
-        <Edges />
         <Download />
         <Faq />
       </main>

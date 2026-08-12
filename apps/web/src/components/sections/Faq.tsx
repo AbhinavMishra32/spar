@@ -4,27 +4,27 @@ import { Section, SectionHead } from "@/components/Section";
 const QUESTIONS = [
   {
     q: "Is there anything to set up?",
-    a: "Download it, sign in, answer seven questions, and Spar sets your first challenge. There is no server to stand up and nothing to configure — the only choice you make is which model the agent runs on. The repository is open source because the product is open source, not because you are expected to assemble it.",
+    a: "Download it, sign in, answer seven questions, and Spar sets your first challenge. The only thing to choose is which model the agent runs on. The repository is open source because the product is; you are not expected to assemble it.",
   },
   {
     q: "Is there a subscription?",
-    a: "No. Spar is free and open source, and it doesn't resell model access — you bring a model you already pay for or run yourself. That is the only thing you ever pay for, and if you run a local model it is nothing.",
+    a: "No. Spar is free, and it doesn't resell model access — you bring a model you already pay for or run yourself. That is the only thing you ever pay for, and a local model costs nothing.",
   },
   {
     q: "Can the agent be talked into passing me?",
-    a: "No. Submissions are graded by running the committed tests and reading the exit code. There is no model in that path, which means nothing you say to the agent and nothing it decides it likes about you can turn a failing program into a passing submission — or the reverse.",
+    a: "No. Submissions are graded by running the committed tests and reading the exit code, with no model in that path. Nothing you say to the agent can turn a failing program into a passing one, or the reverse.",
   },
   {
     q: "What if a generated problem is broken?",
-    a: "It never reaches you. Before a challenge is shown, the reference solution has to pass every test, deliberately broken versions have to pass the visible tests and fail the hidden ones, and the files, commands and language have to agree. A challenge that fails any of those checks is thrown away rather than set.",
+    a: "It never reaches you. Before a challenge is shown, the reference solution has to pass every test, deliberately broken versions have to pass the visible tests and fail the hidden ones, and the files and commands have to agree. Anything that fails those checks is thrown away rather than set.",
   },
   {
     q: "Does it work with LeetCode?",
-    a: "Yes, and with Codeforces. You sign in on their own page — Spar never sees your password. Solving a sourced problem goes to that judge against every hidden case it has, and the verdict appears on your account there like any other submission. LeetCode also exposes a Run there button for trying one without spending a submission.",
+    a: "Yes, and with Codeforces. You sign in on their own page, so Spar never sees your password. A sourced problem goes to that judge against every hidden case, and the verdict lands on your account there.",
   },
   {
     q: "Where does my code go?",
-    a: "The challenge files, your in-flight attempt and your settings stay on your machine; model keys go to your operating system's keychain. Your account and the canonical copy of your learning history sit on Spar's backend, so they survive a reinstall and follow you to another computer. The contents of a challenge and your conversation with the agent go to your model provider, because that is what running a model means — run Ollama or LM Studio if that matters for your work.",
+    a: "Challenge files, your in-flight attempt and your settings stay on your machine; keys go to the system keychain. Your account and learning history sit on Spar's backend so they survive a reinstall. The challenge and your conversation go to your model provider, because that is what running a model means — run Ollama if that matters.",
   },
   {
     q: "Is there any telemetry?",
@@ -36,7 +36,7 @@ export function Faq() {
   return (
     <Section id="faq">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:gap-20">
-        <SectionHead index="08" label="Questions" title="The ones worth asking." />
+        <SectionHead index="07" label="Questions" title="The ones worth asking." />
 
         <div className="border-t border-line">
           {QUESTIONS.map((item, index) => (

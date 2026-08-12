@@ -38,7 +38,7 @@ export function Models() {
         index="06"
         label="Bring your own model"
         title="Spar is a client for whatever model you want to drive it with."
-        lede="It doesn't ship one and doesn't resell one. There is no Spar subscription — you point it at a model you already pay for or run yourself, and change your mind whenever you like."
+        lede="It doesn't ship one and doesn't resell one. There is no Spar subscription — point it at a model you already pay for, or run one yourself."
       />
 
       <div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -92,9 +92,9 @@ export function Models() {
 
       <Reveal delay={140}>
         <p className="lede mt-12 max-w-[64ch]">
-          The contents of a challenge and your conversation with the agent go to whichever provider you picked,
-          because that is what running a model means. If that matters for your work, run a local one —{" "}
-          <span className="text-paper">Spar has no analytics and no telemetry.</span>
+          Your challenge and your conversation with the agent go to whichever provider you picked, because
+          that is what running a model means. Run a local one if that matters —{" "}
+          <span className="text-paper">Spar itself has no analytics and no telemetry.</span>
         </p>
       </Reveal>
     </Section>

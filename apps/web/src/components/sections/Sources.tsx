@@ -45,7 +45,7 @@ export function Sources() {
         index="05"
         label="Practice sources"
         title="Spar writes most of your challenges. It does not have to write all of them."
-        lede="Connect LeetCode or Codeforces and the agent can set you real problems alongside the ones it invents — chosen against the same target, tagged into the same ability ledger, sitting in the same history."
+        lede="Connect LeetCode or Codeforces and real problems arrive against the same target, in the same ledger, in the same history."
       />
 
       {/* Below `sm` the diagram would be 340px wide, which puts its labels at
@@ -198,25 +198,22 @@ export function Sources() {
           <h3 className="text-[1.15rem] leading-snug">The agent is made to look.</h3>
           <p className="mt-3.5 text-[0.93rem] leading-relaxed text-muted">
             On any turn that sets a challenge it searches the source first, then either assigns what it found
-            or consciously writes its own. That is a property of the controller, not a line in a prompt: it
-            cannot skip the search, and it cannot end the turn without setting something.
+            or writes its own. That is the controller, not a line in a prompt — it cannot skip the search.
           </p>
         </Reveal>
         <Reveal delay={90}>
           <h3 className="text-[1.15rem] leading-snug">Both directions are real.</h3>
           <p className="mt-3.5 text-[0.93rem] leading-relaxed text-muted">
-            A sourced problem brings a difficulty other people calibrated and hidden cases nobody in Spar
-            wrote. A challenge written for your specific misconception brings something no library has. Spar
-            prefers the real problem when it genuinely lands on the target — and won&rsquo;t hand you a contest
-            problem to test an off-by-one.
+            A sourced problem brings a difficulty other people calibrated. A written one brings something no
+            library has. Spar prefers the real problem when it lands on the target — and won&rsquo;t hand you a
+            contest problem to test an off-by-one.
           </p>
         </Reveal>
         <Reveal delay={180}>
           <h3 className="text-[1.15rem] leading-snug">You sign in on their page.</h3>
           <p className="mt-3.5 text-[0.93rem] leading-relaxed text-muted">
-            Spar never sees your password, and every method that page offers works. Not connected, or would
-            rather your code stayed on your machine? Also fine — and Spar says which is happening rather than
-            blurring it. A problem it can neither judge nor run is refused rather than set.
+            Spar never sees your password. Not connected is fine too — and Spar says which is happening rather
+            than blurring it.
           </p>
         </Reveal>
       </div>

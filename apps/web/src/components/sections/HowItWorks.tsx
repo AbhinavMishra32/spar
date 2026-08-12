@@ -4,19 +4,19 @@ import { Section, SectionHead } from "@/components/Section";
 const STEPS = [
   {
     title: "You answer seven questions, once.",
-    body: "Where you are in your career, what you want to get better at, where you tend to get stuck, which language, which model. The one about getting stuck is worth answering properly — “I can read async code but I never know what actually needs awaiting” gives Spar somewhere to start, and “I'm bad at algorithms” doesn't.",
+    body: "Career, goal, where you get stuck, language, model. Answer the stuck one properly — “I never know what actually needs awaiting” gives Spar somewhere to start. “I'm bad at algorithms” doesn't.",
   },
   {
     title: "Spar makes an opening call.",
-    body: "It has no evidence about you yet, so it treats everything you said as a hypothesis rather than a fact, picks something to probe, and tells you what it is about to do and why before it does it.",
+    body: "No evidence about you yet, so everything you said is a hypothesis rather than a fact. It picks something to probe, and says what it is doing before it does it.",
   },
   {
     title: "You work, and Spar watches.",
-    body: "Edits, runs, the tests you ran and what they said, how long you sat on each part. A clock runs while the attempt is open, because every moment in the replay of your solve is measured from that zero.",
+    body: "Edits, runs, what the tests said, how long you sat on each part. The clock runs from the moment the attempt opens.",
   },
   {
     title: "The tests decide. Then it tells you what it learned.",
-    body: "Not a score — a statement about what your attempt is evidence of, and what it wants to check next. That becomes the target for your next challenge.",
+    body: "Not a score. A statement about what your attempt is evidence of, and what it wants to check next — which becomes your next challenge.",
   },
 ];
 
@@ -27,7 +27,7 @@ export function HowItWorks() {
         index="02"
         label="How it works"
         title="Closer to sparring with someone who has been watching you."
-        lede="Practice sites hand everyone the same ladder. Get stuck on the same thing four times and the site will happily let you get stuck a fifth. Spar is built the other way round."
+        lede="Practice sites hand everyone the same ladder. Get stuck on the same thing four times and the site will happily let you get stuck a fifth."
       />
 
       <ol className="mt-16 grid gap-px overflow-hidden rounded-2xl border border-line bg-line md:grid-cols-2">

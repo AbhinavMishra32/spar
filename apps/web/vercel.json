@@ -1,8 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "installCommand": "cd ../.. && corepack pnpm install --frozen-lockfile",
-  "buildCommand": "cd ../.. && corepack pnpm turbo run build --filter=@spar/web...",
+  "installCommand": "corepack pnpm install --ignore-workspace",
+  "buildCommand": "corepack pnpm exec next build",
   "github": {
     "silent": true
   }

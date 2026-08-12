@@ -9,7 +9,7 @@ const PANES = [
   },
   {
     name: "Test Result",
-    line: "Per-case verdicts once you do, with the first failure already selected rather than left for you to hunt.",
+    line: "Per-case verdicts once you do, with the first failure already selected for you.",
   },
   {
     name: "Attempt",
@@ -28,9 +28,7 @@ export function Workspace() {
           lede={
             <>
               Not a text box with a function signature in it. A file tree, a real editor, the problem
-              statement, your test results and a terminal — in panes you can resize, in one window. The agent
-              sits alongside it and says what it is about to do before each phase, so you are never watching a
-              spinner wondering what is happening.
+              statement, your test results and a terminal — in panes you can resize, in one window.
             </>
           }
         />
@@ -51,9 +49,8 @@ export function Workspace() {
           </div>
           <Reveal delay={240}>
             <p className="mt-7 text-[0.94rem] leading-relaxed text-muted">
-              While anything is running, the app animates its own logo — the dot grid waking up along its
-              diagonal — instead of a borrowed spinner. Different motion for different kinds of waiting, so it
-              tells you which one you are in.
+              While anything runs, the app animates its own logo instead of a borrowed spinner — a diagonal
+              wave for work being produced, a slow breath for work being read.
             </p>
           </Reveal>
         </div>

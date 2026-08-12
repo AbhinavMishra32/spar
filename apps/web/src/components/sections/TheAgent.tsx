@@ -5,15 +5,15 @@ import { AgentDemo } from "@/components/sections/AgentDemo";
 const POINTS = [
   {
     title: "It says what it is about to do.",
-    body: "Before each phase, in words, so you are never watching a spinner wondering what is happening. Its thinking is labelled by what it was actually doing, not by how long it took.",
+    body: "Before each phase, in words. Its thinking is labelled by what it was doing, not by how long it took.",
   },
   {
     title: "It can ask you things back.",
-    body: "Mid-attempt, about what you were trying, where you expected the value to change. The answer is evidence too.",
+    body: "Mid-attempt — what you were trying, where you expected the value to change. The answer is evidence too.",
   },
   {
     title: "It is not the judge.",
-    body: "It proposes what you practise and explains what your work shows. It is never the authority on whether your code is correct — that line runs down the middle of the product.",
+    body: "It proposes what you practise. It is never the authority on whether your code is correct.",
   },
 ];
 
@@ -24,7 +24,7 @@ export function TheAgent() {
         index="04"
         label="The agent"
         title="Ask it why, and it has to answer from the evidence."
-        lede="The panel below is a transcript, not a live model — the answers are the ones the app gives, and it can't have your history from here. Try the third question."
+        lede="Scripted, not a live model — it can't have your history from here. Try the third question."
       />
 
       <div className="mt-14 grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-5">

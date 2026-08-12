@@ -11,11 +11,11 @@ const GLYPHS = { macOS: AppleGlyph, Windows: WindowsGlyph, Linux: LinuxGlyph };
 const NEEDS = [
   {
     title: "Sign in, and you're going",
-    body: "Nothing to host and nothing to configure. You answer seven questions once — on your account, not once per machine — and Spar makes its opening call from there.",
+    body: "Nothing to host, nothing to configure. Seven questions once, on your account rather than once per machine.",
   },
   {
     title: "A model to run the agent on",
-    body: "The one thing Spar doesn't ship. Sign in with a subscription you already have, paste a key, or point it at Ollama and keep the whole thing on your machine.",
+    body: "The one thing Spar doesn't ship. A subscription you already have, a key, or Ollama on your own machine.",
   },
 ];
 
@@ -40,8 +40,7 @@ export function Download() {
             <Mark size={34} animated className="mx-auto" />
             <h2 className="mt-8 text-[length:var(--text-title)]">Get in the ring.</h2>
             <p className="lede mx-auto mt-5 max-w-[48ch]">
-              Free, and the whole product is on GitHub — the desktop app, the API and the deterministic
-              challenge compiler.
+              Free, and the whole product is on GitHub.
             </p>
 
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
