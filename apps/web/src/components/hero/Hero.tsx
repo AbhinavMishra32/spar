@@ -1,10 +1,7 @@
 import { DownloadButton } from "@/components/DownloadButton";
-import { AgentLine } from "@/components/hero/AgentLine";
 import { DotField } from "@/components/hero/DotField";
-import { ArrowGlyph } from "@/components/icons";
 import { Shot } from "@/components/Shot";
 import type { Release } from "@/lib/release";
-import { site } from "@/lib/site";
 
 /**
  * Two lines, and the second one is the claim.
@@ -18,6 +15,19 @@ const HEADLINE = [
   ["written", "from", "your", "last."],
 ];
 
+/**
+ * Four things: the line, a sentence, a way in, and the app.
+ *
+ * It used to be seven — a version chip, the headline, a three-line paragraph,
+ * two buttons, a platform list, and the agent narrating underneath. Every one
+ * of them was true, and the stack of them was noise, which is its own kind of
+ * untrue: a hero that lists everything says nothing on it matters more than
+ * anything else. The version and the platform list moved to the download
+ * section, which is where somebody who wants them is already going.
+ *
+ * The one mono line that survives is the claim the rest of the page exists to
+ * earn, so it is the last thing read before the app itself comes up.
+ */
 export function Hero({ release }: { release: Release }) {
   return (
     <section id="top" className="relative isolate flex min-h-svh flex-col overflow-hidden pt-24 sm:pt-28">
@@ -25,18 +35,10 @@ export function Hero({ release }: { release: Release }) {
       <div className="hero-scrim" aria-hidden />
 
       <div className="shell relative z-10 flex flex-1 flex-col items-center justify-center py-10 text-center">
-        <a href={site.releases} target="_blank" rel="noreferrer" className="chip">
-          <span className="ml-1 font-mono text-[11px] tracking-wide text-paper">v{release.version}</span>
-          <span className="hidden h-3.5 w-px bg-white/15 sm:block" />
-          <span className="hidden sm:block">ten languages, and real problems from LeetCode</span>
-          <span className="sm:hidden">ten languages, and LeetCode</span>
-          <ArrowGlyph className="size-[13px] opacity-60" />
-        </a>
-
         {/* No gradient fill here: a clipped background paints over the text
             shadow, and the shadow is the aberration. The words land one after
             another, in reading order across both lines. */}
-        <h1 className="chromatic mt-7 text-[length:var(--text-display)] sm:mt-8">
+        <h1 className="chromatic text-[length:var(--text-display)]">
           {HEADLINE.map((line, lineIndex) => (
             <span key={lineIndex} className="block">
               {line.map((word, wordIndex) => (
@@ -54,10 +56,9 @@ export function Hero({ release }: { release: Release }) {
           ))}
         </h1>
 
-        <p className="lede mt-6 max-w-[54ch] sm:mt-8">
-          Spar watches how the attempt actually goes — what you wrote, what you ran, where you stalled — and
-          builds the next challenge around the one thing you couldn&rsquo;t do.{" "}
-          <span className="text-paper">The tests decide the verdict. Never the model.</span>
+        <p className="lede mt-7 max-w-[46ch] sm:mt-8">
+          Spar watches how the attempt actually goes, and builds the next challenge around the one thing you
+          couldn&rsquo;t do.
         </p>
 
         <div className="mt-9 flex w-full flex-col items-center gap-3 sm:mt-10 sm:w-auto sm:flex-row">
@@ -67,24 +68,15 @@ export function Hero({ release }: { release: Release }) {
           </a>
         </div>
 
-        <p className="mt-6 font-mono text-[10.5px] tracking-[0.14em] text-ghost uppercase sm:text-[11px]">
-          macOS · Windows · Linux — free, and{" "}
-          <a
-            href="#download"
-            className="text-faint underline-offset-4 transition hover:text-paper hover:underline"
-          >
-            every build is here
-          </a>
+        <p className="mt-8 font-mono text-[10.5px] tracking-[0.2em] text-faint uppercase sm:text-[11px]">
+          The tests decide the verdict. Never the model.
         </p>
       </div>
 
       {/* The app itself, rising into the fold. The perspective and the fade are
           doing one job between them: making the bottom of the viewport read as
           somewhere the page continues, rather than as where it stops. */}
-      <div className="relative z-10 mt-12 pt-4 sm:mt-16">
-        <div className="mb-6 hidden sm:block">
-          <AgentLine />
-        </div>
+      <div className="relative z-10 mt-12 sm:mt-16">
         <div className="shell hero-window">
           <Shot
             shot="workspace"

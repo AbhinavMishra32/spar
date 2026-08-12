@@ -1,0 +1,222 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+
+/**
+ * One field of dots, read three ways, driven by how far you have scrolled.
+ *
+ * The argument the whole product rests on is hard to say in a sentence and easy
+ * to show in a grid. A practice site is a ladder: the same rungs, evenly
+ * spaced, handed to everyone. So the section opens on exactly that — a
+ * perfectly uniform grid, which is the most boring thing dots can do, on
+ * purpose. Scroll and the same dots take on the shape of what you actually did
+ * with them, some bright and some barely there. Scroll again and they resolve
+ * into Spar's own diagonal: the next thing to work on, taken from the evidence.
+ *
+ * Nothing moves except by scrolling, and nothing is added between the acts. It
+ * is the same dots the whole way down, which is the point — the ladder did not
+ * change, what Spar knows about you did.
+ */
+
+const ACTS = [
+  {
+    label: "The ladder",
+    line: "Every practice site hands out the same rungs, evenly spaced, in the same order.",
+    at: 0,
+  },
+  {
+    label: "Your attempts",
+    line: "Spar records which ones you actually cleared, which you scraped, and where you stalled.",
+    at: 0.4,
+  },
+  {
+    label: "The next rung",
+    line: "And writes what comes next from that — aimed at the one thing the evidence says you can't do yet.",
+    at: 0.75,
+  },
+];
+
+/** Grid size. Fewer columns on a phone, where the same count would be mush. */
+const COLS = { wide: 19, narrow: 9 };
+const ROWS = { wide: 11, narrow: 13 };
+
+/** Stable per-dot pseudo-randomness — the same field on every visit. */
+function evidence(col: number, row: number) {
+  const n = Math.sin(col * 12.9898 + row * 78.233) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+function smoothstep(edge0: number, edge1: number, x: number) {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+export function LadderField() {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    const canvas = canvasRef.current;
+    if (!wrap || !canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let size = { w: 0, h: 0, dpr: 1 };
+    let frame = 0;
+
+    function resize() {
+      const canvas = canvasRef.current;
+      if (!canvas || !ctx) return;
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      size = { w: rect.width, h: rect.height, dpr };
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function draw() {
+      frame = requestAnimationFrame(draw);
+      const wrap = wrapRef.current;
+      if (!wrap || !ctx) return;
+
+      // Progress is read from the sticky wrapper's own box rather than from a
+      // scroll listener, so it is right on the frame it is drawn — including
+      // the frames an inertial scroller produces between wheel events.
+      const rect = wrap.getBoundingClientRect();
+      const travel = rect.height - window.innerHeight;
+      const p = travel <= 0 ? 0 : Math.min(1, Math.max(0, -rect.top / travel));
+
+      const narrow = size.w < 640;
+      const cols = narrow ? COLS.narrow : COLS.wide;
+      const rows = narrow ? ROWS.narrow : ROWS.wide;
+
+      // The two crossfades between the three acts.
+      const toEvidence = smoothstep(0.14, 0.46, p);
+      const toDiagonal = smoothstep(0.56, 0.88, p);
+
+      const step = Math.min(size.w / (cols + 1), size.h / (rows + 1));
+      const originX = (size.w - step * (cols - 1)) / 2;
+      const originY = (size.h - step * (rows - 1)) / 2;
+      const base = step * 0.13;
+
+      ctx.clearRect(0, 0, size.w, size.h);
+      ctx.globalCompositeOperation = "lighter";
+
+      for (let row = 0; row < rows; row++) {
+        for (let col = 0; col < cols; col++) {
+          const u = cols > 1 ? col / (cols - 1) : 0;
+          const v = rows > 1 ? row / (rows - 1) : 0;
+          const ev = evidence(col, row);
+
+          // Act one: a rung is a rung. Every dot identical, which is the whole
+          // complaint about a fixed curriculum stated as a picture.
+          const ladderR = base;
+          const ladderTone = 0.3;
+
+          // Act two: what the attempts actually showed. Same grid, no longer
+          // uniform — a few cleared cleanly, most somewhere in between.
+          const evidenceR = base * (0.3 + 2.1 * ev * ev);
+          const evidenceTone = 0.12 + 0.8 * ev * ev;
+
+          // Act three: the mark's own taper, at the scale of the whole field.
+          // Brightest along the leading diagonal, falling away from it.
+          const offDiagonal = Math.abs(u - v);
+          const diagonalR = base * (2.2 - 2.0 * offDiagonal);
+          const diagonalTone = Math.max(0, 1 - 1.15 * offDiagonal);
+
+          const radius = lerp(lerp(ladderR, evidenceR, toEvidence), diagonalR, toDiagonal);
+          const tone = lerp(lerp(ladderTone, evidenceTone, toEvidence), diagonalTone, toDiagonal);
+          if (radius <= 0.15 || tone <= 0.01) continue;
+
+          // Scatter belongs to the middle act only: evidence is messy, and the
+          // point of the third act is that Spar makes something ordered of it.
+          const messy = toEvidence * (1 - toDiagonal);
+          const x = originX + col * step + (ev - 0.5) * step * 0.5 * messy;
+          const y = originY + row * step + (evidence(row, col) - 0.5) * step * 0.5 * messy;
+
+          // The hero's aberration, on a 2D canvas: three copies of the disc,
+          // one per channel, pushed apart along the row. Where they agree you
+          // get white; where they don't you get the fringe. Additive blending
+          // is what makes the overlap add back up to white.
+          const split = radius * 0.34 * (0.25 + 0.75 * toDiagonal);
+          ctx.globalAlpha = tone;
+          ctx.fillStyle = "#ff0000";
+          ctx.beginPath();
+          ctx.arc(x + split, y, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#00ff00";
+          ctx.beginPath();
+          ctx.arc(x, y, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = "#0000ff";
+          ctx.beginPath();
+          ctx.arc(x - split, y, radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = "source-over";
+
+      // The captions are driven from the same progress, so what you read and
+      // what the dots are doing can never disagree.
+      for (const [index, act] of ACTS.entries()) {
+        const node = wrap.querySelector<HTMLElement>(`[data-act="${index}"]`);
+        if (!node) continue;
+        const next = ACTS[index + 1]?.at ?? 2;
+        // The first act is already on screen when the section arrives — fading
+        // it in from nothing would mean the section opens on a blank frame.
+        const rising = index === 0 ? 1 : smoothstep(act.at - 0.12, act.at + 0.02, p);
+        const shown = rising * (1 - smoothstep(next - 0.14, next - 0.02, p));
+        node.style.opacity = String(calm.matches ? (index === 0 ? 1 : 0) : shown);
+        node.style.transform = `translateY(${(1 - shown) * 14}px)`;
+      }
+    }
+
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    resize();
+    frame = requestAnimationFrame(draw);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
+  return (
+    <div ref={wrapRef} className="relative h-[320svh]">
+      <div className="sticky top-0 flex h-svh flex-col items-center justify-center overflow-hidden">
+        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden />
+        {/* Keeps the copy off the brightest part of the field. */}
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(46%_34%_at_50%_52%,rgba(0,0,0,0.9),transparent_78%)]" />
+
+        <div className="shell relative z-10 text-center">
+          {/* Stacked, so the box never resizes as one line replaces another. */}
+          <div className="relative mx-auto grid min-h-[11rem] max-w-[46ch] place-items-center">
+            {ACTS.map((act, index) => (
+              <div
+                key={act.label}
+                data-act={index}
+                className="col-start-1 row-start-1"
+                style={{ opacity: index === 0 ? 1 : 0 }}
+              >
+                <p className="font-mono text-[10.5px] tracking-[0.2em] text-faint uppercase">
+                  {String(index + 1).padStart(2, "0")} — {act.label}
+                </p>
+                <p className="mt-5 font-display text-[clamp(1.5rem,3.1vw,2.4rem)] leading-[1.12]">
+                  {act.line}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -50,6 +50,20 @@
     color-scheme: dark;
   }
 
+  html.lenis,
+  html.lenis body {
+    height: auto;
+  }
+
+  /* Lenis eases the scroll position itself. Leaving the native smooth
+     behaviour on means two easings fighting over the same anchor jump, and the
+     anchor lands somewhere neither of them intended. The rule keys off the
+     class Lenis puts on <html>, so the native behaviour is still what you get
+     if it never starts — under reduced motion, or if the script fails. */
+  html.lenis {
+    scroll-behavior: auto;
+  }
+
   html {
     scroll-behavior: smooth;
     /* Sections are anchored, and the nav is fixed over them. */
@@ -190,6 +204,26 @@
     .edge::after {
       display: none;
     }
+  }
+
+  /* The grid, as a wash under a section's top edge. The hero is a field of
+     these; the rest of the page gets the same grid quietly, so the aesthetic
+     is the page's rather than one section's. It fades out well before the
+     copy, and it is a background rather than a canvas — this repeats down a
+     long page and none of it should cost a frame. */
+  .section-dots {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 22rem;
+    pointer-events: none;
+    opacity: 0.6;
+    background-image: radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, 0.085) 1px,
+      transparent 1.15px
+    );
+    background-size: 26px 26px;
+    mask-image: linear-gradient(to bottom, #000 0%, transparent 82%);
   }
 
   /* ---- Labels and type ------------------------------------------------- */
@@ -392,11 +426,16 @@
     border-radius: inherit;
     opacity: 0;
     transition: opacity 0.4s var(--ease-out-quint);
-    background: radial-gradient(
-      340px circle at var(--mx, 50%) var(--my, 50%),
-      rgba(255, 255, 255, 0.09),
-      transparent 62%
-    );
+    /* Two layers travelling together: the grid, and the light that reveals it.
+       Masked to the same circle, so the dots are not a texture sitting on the
+       card — they are something the pointer finds. */
+    background-image:
+      radial-gradient(circle at center, rgba(255, 255, 255, 0.4) 1px, transparent 1.15px),
+      radial-gradient(300px circle at var(--mx, 50%) var(--my, 50%), rgba(255, 255, 255, 0.1), transparent 60%);
+    background-size:
+      22px 22px,
+      auto;
+    mask-image: radial-gradient(240px circle at var(--mx, 50%) var(--my, 50%), #000, transparent 72%);
     pointer-events: none;
   }
 
@@ -727,6 +766,46 @@
     }
     100% {
       background-position: -60% 0;
+    }
+  }
+
+  /* ---- The boot screen -------------------------------------------------- */
+
+  .boot {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: grid;
+    place-items: center;
+    background: var(--color-ink);
+    color: var(--color-paper);
+    transition:
+      opacity 0.6s var(--ease-out-quint),
+      visibility 0.6s;
+  }
+
+  /* Leaves by opening up rather than by fading flat, so the mark reads as
+     having handed the page over instead of having been switched off. */
+  .boot[data-leaving="true"] {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .boot[data-leaving="true"] .boot-mark {
+    transform: scale(1.35);
+    transition: transform 0.7s var(--ease-out-quint);
+  }
+
+  .boot-dot {
+    transform: scale(0);
+    opacity: 0;
+    animation: boot-dot 0.5s var(--ease-out-quint) forwards;
+  }
+
+  @keyframes boot-dot {
+    to {
+      transform: scale(var(--dot-rest));
+      opacity: var(--dot-tone);
     }
   }
 

@@ -46,8 +46,9 @@ export function Section({
   className?: string;
 }) {
   return (
-    <section id={id} className={cn("edge relative", className)}>
-      <div className="shell py-24 md:py-32">{children}</div>
+    <section id={id} className={cn("edge relative overflow-hidden", className)}>
+      <span className="section-dots" aria-hidden />
+      <div className="shell relative py-24 md:py-32">{children}</div>
     </section>
   );
 }

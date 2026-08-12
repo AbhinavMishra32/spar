@@ -190,6 +190,13 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     }
 
     function onPointerMove(event: PointerEvent) {
+      // Only a real cursor takes the field over. A touch device fires
+      // pointermove while you scroll, and it has no pointerleave to fire
+      // afterwards — so honouring those latched the swell to wherever your
+      // thumb last was and killed the drift for the rest of the visit. On
+      // touch the field keeps drifting and taps send ripples, which is the
+      // whole of the interaction there anyway.
+      if (event.pointerType !== "mouse") return;
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
@@ -217,10 +224,6 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       ripples[slot * 3] = event.clientX - rect.left;
       ripples[slot * 3 + 1] = event.clientY - rect.top;
       rippleAt[slot] = performance.now();
-      // A tap is also the first time a touch device has pointed at anything,
-      // and it should take the swell with it rather than only sending a wave.
-      target.x = event.clientX - rect.left;
-      target.y = event.clientY - rect.top;
     }
 
     function onLeave() {
