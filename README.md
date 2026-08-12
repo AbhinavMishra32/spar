@@ -11,7 +11,7 @@
 <p align="center">
   A coding gym that watches you work and writes your next exercise.
   <br>
-  macOS · Windows · Linux — <a href="https://github.com/AbhinavMishra32/spar/releases/latest">download v0.1.1</a>
+  macOS · Windows · Linux — <a href="https://github.com/AbhinavMishra32/spar/releases/latest">download the latest release</a>
 </p>
 
 ---
@@ -48,12 +48,12 @@ Grab the build for your machine from the
 
 | Your machine | Download |
 | --- | --- |
-| Mac, Apple silicon (M1 and later) | `Spar-0.1.1-arm64.dmg` |
-| Mac, Intel | `Spar-0.1.1.dmg` |
-| Windows | `Spar-0.1.1-x64.exe` |
-| Linux | `Spar-0.1.1-x86_64.AppImage` or `Spar-0.1.1-amd64.deb` |
+| Mac, Apple silicon (M1 and later) | `Spar-0.3.1-arm64.dmg` |
+| Mac, Intel | `Spar-0.3.1.dmg` |
+| Windows | `Spar-0.3.1-x64.exe` |
+| Linux | `Spar-0.3.1-x86_64.AppImage` or `Spar-0.3.1-amd64.deb` |
 
-**v0.1.1 builds are not code-signed yet.** Your operating system will say so, in
+**v0.3.1 builds are not code-signed yet.** Your operating system will say so, in
 its usual alarming way. On a Mac, right-click the app and choose *Open* the first
 time rather than double-clicking it, or run
 `xattr -d com.apple.quarantine /Applications/Spar.app`. On Windows, choose *More
@@ -302,12 +302,13 @@ dot grid runs a diagonal wave while something is being produced, and breathes
 while something is being read. Different motion for different kinds of waiting,
 so the app tells you which one you are in.
 
-## What v0.1.1 doesn't do yet
+## Current limits
 
 Being straight about the edges:
 
-- **Three languages.** JavaScript, TypeScript, and C++. That's it for now — and
-  a sourced problem is mounted in one of those three or not at all.
+- **Ten languages.** JavaScript, TypeScript, Python, Java, C, C++, Go, Rust,
+  Swift, and Ruby are available for Spar-authored challenges. A source problem
+  is mounted only when its language is supported by the source integration.
 - **Two practice sources.** LeetCode and Codeforces. HackerRank and CodeChef are
   shown as planned sources, not working integrations.
 - **Hosting is yours to set up.** There is no Spar-operated service; you deploy the API or run it locally, as described above.
@@ -315,8 +316,9 @@ Being straight about the edges:
 - **macOS is the polished one.** The Windows and Linux builds are real, but the
   Mac is where the window chrome, materials, and window controls have had the
   attention.
-- **Updates are opt-in.** Packaged builds only check for updates when
-  `SPAR_ENABLE_UPDATES=1` is set. Otherwise you download new versions yourself.
+- **Updates check automatically.** Spar checks each packaged release when it
+  opens and while it remains running. On unsigned macOS and Windows builds, the
+  operating system can still require a manual approval or install.
 
 ## Where your work lives
 

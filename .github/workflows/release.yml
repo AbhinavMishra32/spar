@@ -49,7 +49,7 @@ jobs:
       - name: Check the tag matches the manifests
         run: |
           EXPECTED="${{ steps.tag.outputs.version }}"
-          for manifest in package.json apps/desktop/package.json; do
+          for manifest in package.json apps/api/package.json apps/desktop/package.json apps/web/package.json packages/database/package.json packages/domain/package.json packages/practice/package.json packages/provider/package.json packages/training/package.json; do
             ACTUAL="$(node -p "require('./${manifest}').version")"
             if [ "$ACTUAL" != "$EXPECTED" ]; then
               echo "::error::${manifest} is at ${ACTUAL} but the tag says ${EXPECTED}"
@@ -109,9 +109,10 @@ jobs:
       - name: Rebuild native modules for Electron
         run: pnpm --filter @spar/desktop rebuild:native
 
-      # Signing is opt-in: with no certificate in the repository secrets the mac
-      # build is unsigned rather than failed, and auto-discovery is turned off so
-      # the result does not depend on whatever happens to be in the keychain.
+      # Signing is optional for this open distribution. When identities are
+      # configured we use them; otherwise auto-discovery is disabled so an
+      # unsigned build is intentional and repeatable rather than depending on
+      # whatever happens to be in a runner keychain.
       - name: Package
         working-directory: apps/desktop
         shell: bash
@@ -130,22 +131,24 @@ jobs:
           RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         run: |
           if [ "${{ matrix.platform }}" = "macos" ]; then
-            if [ -z "$MACOS_CERTIFICATE_BASE64" ] || [ -z "$MACOS_CERTIFICATE_PASSWORD" ] || [ -z "$APPLE_ID_INPUT" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD_INPUT" ] || [ -z "$APPLE_TEAM_ID_INPUT" ]; then
-              echo "::error title=Missing macOS release identity::Self-updating macOS releases must be signed and notarized. Configure the MACOS_CERTIFICATE_*, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID secrets."
-              exit 1
+            if [ -n "$MACOS_CERTIFICATE_BASE64" ] && [ -n "$MACOS_CERTIFICATE_PASSWORD" ] && [ -n "$APPLE_ID_INPUT" ] && [ -n "$APPLE_APP_SPECIFIC_PASSWORD_INPUT" ] && [ -n "$APPLE_TEAM_ID_INPUT" ]; then
+              export CSC_LINK="$MACOS_CERTIFICATE_BASE64"
+              export CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD"
+              export APPLE_ID="$APPLE_ID_INPUT"
+              export APPLE_APP_SPECIFIC_PASSWORD="$APPLE_APP_SPECIFIC_PASSWORD_INPUT"
+              export APPLE_TEAM_ID="$APPLE_TEAM_ID_INPUT"
+            else
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              echo "::warning title=Unsigned macOS build::No Developer ID identity is configured. Users may need to approve the downloaded app manually and automatic install can be unavailable."
             fi
-            export CSC_LINK="$MACOS_CERTIFICATE_BASE64"
-            export CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD"
-            export APPLE_ID="$APPLE_ID_INPUT"
-            export APPLE_APP_SPECIFIC_PASSWORD="$APPLE_APP_SPECIFIC_PASSWORD_INPUT"
-            export APPLE_TEAM_ID="$APPLE_TEAM_ID_INPUT"
           elif [ "${{ matrix.platform }}" = "windows" ]; then
-            if [ -z "$WINDOWS_CERTIFICATE_BASE64" ] || [ -z "$WINDOWS_CERTIFICATE_PASSWORD" ]; then
-              echo "::error title=Missing Windows release identity::Self-updating Windows releases must be Authenticode signed. Configure WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD."
-              exit 1
+            if [ -n "$WINDOWS_CERTIFICATE_BASE64" ] && [ -n "$WINDOWS_CERTIFICATE_PASSWORD" ]; then
+              export CSC_LINK="$WINDOWS_CERTIFICATE_BASE64"
+              export CSC_KEY_PASSWORD="$WINDOWS_CERTIFICATE_PASSWORD"
+            else
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              echo "::warning title=Unsigned Windows build::No Authenticode identity is configured. SmartScreen can require manual approval and automatic install can be unavailable."
             fi
-            export CSC_LINK="$WINDOWS_CERTIFICATE_BASE64"
-            export CSC_KEY_PASSWORD="$WINDOWS_CERTIFICATE_PASSWORD"
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false
           fi

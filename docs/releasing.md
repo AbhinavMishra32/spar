@@ -36,18 +36,20 @@ release is rebuilt after a packaging failure.
 
 ## Signing
 
-Signing is mandatory for macOS and Windows releases. This is not cosmetic:
-`electron-updater` verifies that a replacement binary belongs to the same
-publisher before handing it to the native installer. Publishing an unsigned
-installer would therefore publish an update that the in-app experience cannot
-honestly promise to install.
+Signing is optional, so Spar can ship without paid Apple or Microsoft developer
+accounts. When a release has a stable publisher identity, the operating system
+can verify that a replacement binary belongs to the same publisher before the
+native installer runs. Without one, the release still has GitHub's HTTPS and
+electron-builder checksum protection, but macOS Gatekeeper or Windows SmartScreen
+may require a manual approval and in-place installation can be unavailable.
 
 The macOS job requires `MACOS_CERTIFICATE_BASE64`,
 `MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and
 `APPLE_TEAM_ID`. It signs with Developer ID and notarizes with Apple. The Windows
 job requires `WINDOWS_CERTIFICATE_BASE64` and
-`WINDOWS_CERTIFICATE_PASSWORD` for Authenticode signing. A missing release
-identity fails its platform job before an unsigned artifact can reach GitHub.
+`WINDOWS_CERTIFICATE_PASSWORD` for Authenticode signing. When either identity is
+absent, the corresponding job intentionally produces an unsigned installer and
+emits a visible workflow warning rather than failing the release.
 
 ## Icons
 
@@ -61,8 +63,10 @@ AppKit and only the macOS job has it. Regenerate them on a Mac with
 Every packaged build checks the GitHub release feed after launch and every six
 hours while it remains open. The notification asks before downloading; there is
 no setting that can silently disable checks. After the learner accepts, Spar
-shows byte-level progress, waits for signature/checksum verification, flushes
-active checkpoints, then closes, installs, and relaunches.
+shows byte-level progress, waits for electron-builder's checksum verification,
+flushes active checkpoints, then closes, installs, and relaunches when the
+platform permits it. Unsigned macOS and Windows installations can instead need
+the learner to approve or manually open the downloaded installer.
 
 The same `.github/release-notes/v<version>.md` file used for the GitHub release is
 embedded into every `latest*.yml` feed. The app stores those notes with the
