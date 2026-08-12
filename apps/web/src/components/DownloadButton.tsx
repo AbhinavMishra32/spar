@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AppleGlyph, DownloadGlyph, LinuxGlyph, WindowsGlyph } from "@/components/icons";
 import { cn } from "@/lib/cn";
-import { downloads } from "@/lib/site";
+import type { Build } from "@/lib/release";
 
 type Platform = "macOS" | "Windows" | "Linux";
 
@@ -29,12 +29,12 @@ const GLYPHS = { macOS: AppleGlyph, Windows: WindowsGlyph, Linux: LinuxGlyph };
  * wrong one for an Intel Mac; every build is listed under #download, and the
  * link beside this button goes straight there.
  */
-export function DownloadButton({ className }: { className?: string }) {
+export function DownloadButton({ builds, className }: { builds: readonly Build[]; className?: string }) {
   const [platform, setPlatform] = useState<Platform | null>(null);
 
   useEffect(() => setPlatform(detect()), []);
 
-  const build = downloads.find((entry) => entry.platform === platform);
+  const build = builds.find((entry) => entry.platform === platform);
   const Glyph = platform ? GLYPHS[platform] : DownloadGlyph;
 
   return (

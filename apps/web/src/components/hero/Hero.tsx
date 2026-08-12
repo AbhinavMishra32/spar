@@ -3,6 +3,7 @@ import { AgentLine } from "@/components/hero/AgentLine";
 import { DotField } from "@/components/hero/DotField";
 import { ArrowGlyph } from "@/components/icons";
 import { Shot } from "@/components/Shot";
+import type { Release } from "@/lib/release";
 import { site } from "@/lib/site";
 
 /**
@@ -17,7 +18,7 @@ const HEADLINE = [
   ["written", "from", "your", "last."],
 ];
 
-export function Hero() {
+export function Hero({ release }: { release: Release }) {
   return (
     <section id="top" className="relative isolate flex min-h-svh flex-col overflow-hidden pt-24 sm:pt-28">
       <DotField />
@@ -25,7 +26,7 @@ export function Hero() {
 
       <div className="shell relative z-10 flex flex-1 flex-col items-center justify-center py-10 text-center">
         <a href={site.releases} target="_blank" rel="noreferrer" className="chip">
-          <span className="ml-1 font-mono text-[11px] tracking-wide text-paper">v{site.version}</span>
+          <span className="ml-1 font-mono text-[11px] tracking-wide text-paper">v{release.version}</span>
           <span className="hidden h-3.5 w-px bg-white/15 sm:block" />
           <span className="hidden sm:block">ten languages, and real problems from LeetCode</span>
           <span className="sm:hidden">ten languages, and LeetCode</span>
@@ -60,7 +61,7 @@ export function Hero() {
         </p>
 
         <div className="mt-9 flex w-full flex-col items-center gap-3 sm:mt-10 sm:w-auto sm:flex-row">
-          <DownloadButton className="w-full sm:w-auto" />
+          <DownloadButton builds={release.builds} className="w-full sm:w-auto" />
           <a href="#how" className="btn btn-ghost w-full sm:w-auto">
             See how it works
           </a>

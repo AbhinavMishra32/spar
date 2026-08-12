@@ -1,3 +1,4 @@
+import { getRelease } from "@/lib/release";
 import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/hero/Hero";
 import { Nav } from "@/components/Nav";
@@ -11,12 +12,18 @@ import { TheAgent } from "@/components/sections/TheAgent";
 import { TheApp } from "@/components/sections/TheApp";
 import { Workspace } from "@/components/sections/Workspace";
 
-export default function Home() {
+/* The page is static, rebuilt on a timer, so the version it advertises follows
+   GitHub without anyone editing this repository. */
+export const revalidate = 3600;
+
+export default async function Home() {
+  const release = await getRelease();
+
   return (
     <>
       <Nav />
       <main className="relative z-10">
-        <Hero />
+        <Hero release={release} />
         <Languages />
         <Workspace />
         <HowItWorks />
@@ -24,7 +31,7 @@ export default function Home() {
         <TheAgent />
         <Sources />
         <Models />
-        <Download />
+        <Download release={release} />
         <Faq />
       </main>
       <Footer />

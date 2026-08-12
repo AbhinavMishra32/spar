@@ -3,7 +3,8 @@ import { Mark } from "@/components/Mark";
 import { Reveal } from "@/components/Reveal";
 import { Section } from "@/components/Section";
 import { AppleGlyph, ArrowGlyph, LinuxGlyph, WindowsGlyph } from "@/components/icons";
-import { downloads, site } from "@/lib/site";
+import type { Release } from "@/lib/release";
+import { site } from "@/lib/site";
 
 const GLYPHS = { macOS: AppleGlyph, Windows: WindowsGlyph, Linux: LinuxGlyph };
 
@@ -19,7 +20,7 @@ const NEEDS = [
   },
 ];
 
-export function Download() {
+export function Download({ release }: { release: Release }) {
   return (
     <Section id="download">
       <Reveal>
@@ -44,7 +45,7 @@ export function Download() {
             </p>
 
             <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
-              <DownloadButton />
+              <DownloadButton builds={release.builds} />
               <a href={site.repo} target="_blank" rel="noreferrer" className="btn btn-ghost">
                 Read the source
                 <ArrowGlyph className="size-[15px] opacity-70" />
@@ -52,14 +53,14 @@ export function Download() {
             </div>
 
             <p className="mt-6 font-mono text-[11px] tracking-[0.14em] text-ghost uppercase">
-              <span className="shimmer">v{site.version} — free forever, no Spar subscription</span>
+              <span className="shimmer">v{release.version} — free forever, no Spar subscription</span>
             </p>
           </div>
         </div>
       </Reveal>
 
       <div className="mt-4 grid gap-4 md:grid-cols-3">
-        {downloads.map((build, index) => {
+        {release.builds.map((build, index) => {
           const Glyph = GLYPHS[build.platform as keyof typeof GLYPHS];
           return (
             <Reveal key={build.platform} delay={index * 80}>
