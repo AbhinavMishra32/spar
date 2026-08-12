@@ -23,10 +23,9 @@
  * lets go. Nothing is ever drawn between them — no line, no bolt. It is dots
  * the whole way through, which is the only way it belongs to this page.
  *
- * **And the camera goes to it.** While a connection is live the whole field
- * closes in on it and slides it towards the middle of the screen, eased in over
- * the charge and out over the settle — so the move arrives slightly before the
- * event and leaves after it.
+ * **And the app window is seated in it.** Dots close to the edges of the
+ * screenshot below the copy come up a little, so the window reads as something
+ * resting in the field rather than a rectangle pasted over it.
  *
  * Kept in its own file because it is the one piece of this site that is a
  * program rather than markup, and it is easier to read whole.
@@ -68,7 +67,7 @@ uniform vec2  uDrift;    // parallax offset, CSS px, from the pointer's travel
 uniform vec4  uArcA[ARCS];   // p0.xy, p1.xy
 uniform vec4  uArcB[ARCS];   // p2.xy, p3.xy
 uniform float uArcAge[ARCS]; // seconds since it struck, or below zero for idle
-uniform vec3  uFocus;    // xy of whatever the field is attending to, z how much
+uniform vec4  uSeat;     // the app window's box: centre xy, half extents zw
 
 out vec4 outColor;
 
@@ -90,6 +89,8 @@ const float ARC_BURST_REACH = 118.0;
 /** How near a dot has to be to the path to be taken up by it, CSS px. Wide, so
  *  the arc has shoulders and is not a one-dot-thick wire. */
 const float ARC_REACH = 34.0;
+/** How far the lift around the app window's edges reaches, CSS px. */
+const float SEAT_REACH = 46.0;
 
 /** How fast a click's band travels, CSS px per second, and how long it lives. */
 const float RIPPLE_SPEED = 720.0;
@@ -229,18 +230,6 @@ void main() {
   vec2 toPointer = s - uPointer;
   vec2 dir = normalize(toPointer + vec2(1e-4));
 
-  // The camera. Not a bulge around the event — the whole field moves. It closes
-  // in uniformly about the connection and slides so that the connection drifts
-  // towards the middle of the screen, which is what a camera does when it takes
-  // an interest in something. Being global is the entire point: a local warp
-  // reads as the surface deforming, and a surface that deforms around an event
-  // is a lens sitting on the page rather than a camera looking at it.
-  //
-  // Applied before any layer is sampled, so all three move together, and before
-  // the parallax, so leaning and looking stay independent of each other.
-  s = uFocus.xy + (s - uFocus.xy) * (1.0 - 0.085 * uFocus.z);
-  s += (uFocus.xy - uRes * 0.5) * 0.17 * uFocus.z;
-
   // Two layers behind the field, offset against it as the pointer moves. The
   // grid is the same grid at every depth — the parallax is doing the work, not
   // a different pattern — and the far one is slow enough to read as distance
@@ -279,6 +268,19 @@ void main() {
       // The bands from every click still in the air.
       radius += ripple * uBase * 1.35;
       tone += ripple * 0.95;
+
+      // The app window's edges. Signed distance to its box, and only the
+      // outside of it counts — everything within is behind the screenshot and
+      // will never be seen. The lift is small and hugs the border tightly: what
+      // it is for is stopping the window reading as a rectangle pasted over the
+      // field, and anything more than that becomes a glow around a picture.
+      if (uSeat.z > 0.0) {
+        vec2 fromSeat = abs(center - uSeat.xy) - uSeat.zw;
+        float outside = length(max(fromSeat, 0.0));
+        float rim = exp(-(outside * outside) / (SEAT_REACH * SEAT_REACH));
+        radius += rim * uBase * 0.5;
+        tone += rim * 0.34;
+      }
 
       // And whatever an arc has just taken up. Mostly in brightness rather than
       // in size — past about twice the resting radius these stop being dots

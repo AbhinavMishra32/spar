@@ -107,7 +107,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const uArcA = uniform("uArcA");
     const uArcB = uniform("uArcB");
     const uArcAge = uniform("uArcAge");
-    const uFocus = uniform("uFocus");
+    const uSeat = uniform("uSeat");
 
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reduced = calm.matches;
@@ -126,9 +126,9 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const ripples = new Float32Array(RIPPLES * 3);
     const rippleAt = new Float64Array(RIPPLES).fill(-99_999);
     let nextRipple = 0;
-    // Where the field is looking, and how hard. Eased, so attention arrives and
-    // leaves rather than cutting.
-    const focus = { x: 0, y: 0, weight: 0 };
+    // The app window's box in canvas coordinates, so the field can be lifted
+    // around its edges. Half extents below zero mean there is nothing to seat.
+    const seat = { x: 0, y: 0, halfW: -1, halfH: -1 };
     let visible = true;
     let frame = 0;
     const started = performance.now();
@@ -236,6 +236,21 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       canvas.width = Math.round(w * dpr);
       canvas.height = Math.round(h * dpr);
       gl.viewport(0, 0, canvas.width, canvas.height);
+
+      // The window and the canvas are both in the hero and neither moves
+      // relative to the other, so this only has to be measured when the layout
+      // changes. getBoundingClientRect gives the box after the perspective
+      // tilt, which is the box you actually see.
+      const window_ = document.querySelector(".hero-window > *");
+      if (!window_) {
+        seat.halfW = -1;
+        return;
+      }
+      const box = window_.getBoundingClientRect();
+      seat.x = box.left - rect.left + box.width / 2;
+      seat.y = box.top - rect.top + box.height / 2;
+      seat.halfW = box.width / 2;
+      seat.halfH = box.height / 2;
     }
 
     function draw(now: number) {
@@ -299,28 +314,6 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       gl.uniform1f(uBase, radius);
       gl.uniform1f(uMotion, reduced ? 0 : 1);
       gl.uniform3fv(uClicks, ripples);
-      // Whichever connection is furthest along its charge is what the camera
-      // goes to, for as long as it lasts.
-      let want = 0;
-      let wantX = 0;
-      let wantY = 0;
-      for (let i = 0; i < ARCS; i++) {
-        const age = arcAge[i] ?? -1;
-        if (age < 0 || age > ARC_LIFE) continue;
-        // In over the charge, out over the settle.
-        const strength = Math.min(1, age / 0.9) * (1 - Math.min(1, Math.max(0, (age - 2.6) / 1.2)));
-        if (strength <= want) continue;
-        want = strength;
-        wantX = ((arcA[i * 4] ?? 0) + (arcB[i * 4 + 2] ?? 0)) / 2;
-        wantY = ((arcA[i * 4 + 1] ?? 0) + (arcB[i * 4 + 3] ?? 0)) / 2;
-      }
-      if (want > focus.weight || focus.weight < 0.01) {
-        focus.x = wantX;
-        focus.y = wantY;
-      }
-      focus.weight += (want - focus.weight) * 0.05;
-      gl.uniform3f(uFocus, focus.x, focus.y, focus.weight);
-
       // How far the pointer is from the middle, in units the layers scale up.
       // Capped, so a cursor parked in a corner leans the field rather than
       // shearing the layers apart. The move towards a connection is the
@@ -328,6 +321,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       const leanX = Math.max(-1, Math.min(1, (pointer.x - size.w / 2) / (size.w / 2)));
       const leanY = Math.max(-1, Math.min(1, (pointer.y - size.h / 2) / (size.h / 2)));
       gl.uniform2f(uDrift, leanX * 11, leanY * 11);
+      gl.uniform4f(uSeat, seat.x, seat.y, seat.halfW, seat.halfH);
       gl.uniform4fv(uArcA, arcA);
       gl.uniform4fv(uArcB, arcB);
       gl.uniform1fv(uArcAge, arcAge);
