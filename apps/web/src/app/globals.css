@@ -213,6 +213,65 @@
     color: transparent;
   }
 
+  /* The headline, split the way the dots are. Two offset copies sit behind the
+     glyphs in the fringe pair; because `.fade-tail` fills the text with a
+     clipped gradient, the copies only ever show at the edges — which is what an
+     aberration is. It arrives wide and settles, once, on load. */
+  .chromatic {
+    text-shadow:
+      -1.5px 0 0 rgba(255, 45, 85, 0.42),
+      1.5px 0 0 rgba(0, 229, 255, 0.42);
+    animation: chromatic-settle 1.5s var(--ease-out-quint) both;
+  }
+
+  @keyframes chromatic-settle {
+    from {
+      text-shadow:
+        -16px 0 0 rgba(255, 45, 85, 0.55),
+        16px 0 0 rgba(0, 229, 255, 0.55);
+    }
+    to {
+      text-shadow:
+        -1.5px 0 0 rgba(255, 45, 85, 0.42),
+        1.5px 0 0 rgba(0, 229, 255, 0.42);
+    }
+  }
+
+  /* A hairline to the fold with a dot running down it. */
+  .scroll-cue {
+    position: relative;
+    display: block;
+    width: 1px;
+    height: 54px;
+    overflow: hidden;
+    background: linear-gradient(to bottom, transparent, var(--color-line-strong), transparent);
+  }
+
+  .scroll-cue::after {
+    content: "";
+    position: absolute;
+    left: -1.5px;
+    width: 4px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--color-paper);
+    animation: scroll-cue 2.6s var(--ease-out-quint) infinite;
+  }
+
+  @keyframes scroll-cue {
+    0% {
+      top: -8px;
+      opacity: 0;
+    }
+    30% {
+      opacity: 1;
+    }
+    100% {
+      top: 54px;
+      opacity: 0;
+    }
+  }
+
   /* ---- Buttons --------------------------------------------------------- */
 
   .btn {
@@ -352,6 +411,97 @@
     border: 1px solid rgba(0, 0, 0, 0.6);
   }
 
+  /* ---- The hero -------------------------------------------------------- */
+
+  /* Holds the WebGL canvas, and carries the fallback grid: if the context never
+     comes up, this background is the field. DotField clears it the moment the
+     program links, so the two are never drawn at once. */
+  .dot-field {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: radial-gradient(
+      circle at center,
+      rgba(255, 255, 255, 0.2) 1.35px,
+      transparent 1.45px
+    );
+    background-size: 32px 32px;
+    /* Merges into the section below instead of stopping at an edge. */
+    mask-image: linear-gradient(to bottom, #000 58%, transparent 96%);
+  }
+
+  .dot-field[data-live="true"] {
+    background-image: none;
+  }
+
+  /* Sits between the field and the copy. Without it the headline is read
+     against moving dots, which is exactly as hard as it sounds. */
+  .hero-scrim {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      46% 40% at 50% 44%,
+      rgba(0, 0, 0, 0.94),
+      rgba(0, 0, 0, 0.7) 55%,
+      transparent 78%
+    );
+  }
+
+  /* The announcement chip above the headline. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    height: 2rem;
+    padding-inline: 0.5rem 0.85rem;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(12px);
+    font-size: 0.8rem;
+    color: var(--color-muted);
+    transition:
+      border-color 0.25s var(--ease-out-quint),
+      color 0.25s var(--ease-out-quint);
+  }
+
+  a.chip:hover {
+    border-color: var(--color-line-strong);
+    color: var(--color-paper);
+  }
+
+  /* ---- Navigation ------------------------------------------------------ */
+
+  .nav {
+    position: fixed;
+    inset-inline: 0;
+    top: 0;
+    z-index: 50;
+    transition:
+      background-color 0.4s var(--ease-out-quint),
+      border-color 0.4s var(--ease-out-quint),
+      backdrop-filter 0.4s var(--ease-out-quint);
+    border-bottom: 1px solid transparent;
+  }
+
+  .nav[data-stuck="true"] {
+    background: rgba(0, 0, 0, 0.72);
+    backdrop-filter: blur(18px) saturate(140%);
+    border-bottom-color: var(--color-line);
+  }
+
+  .nav-link {
+    position: relative;
+    font-size: 0.88rem;
+    color: var(--color-muted);
+    transition: color 0.2s var(--ease-out-quint);
+  }
+
+  .nav-link:hover {
+    color: var(--color-paper);
+  }
+
   /* ---- Page texture ---------------------------------------------------- */
 
   /* Film grain over the whole page. Flat black at these sizes bands on cheap
@@ -362,7 +512,10 @@
     z-index: 60;
     pointer-events: none;
     opacity: 0.035;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    /* Desaturated on purpose: feTurbulence writes the three channels
+       independently, and coloured grain screened over a dim white dot is what
+       turns the field brown. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     mix-blend-mode: screen;
   }
 
