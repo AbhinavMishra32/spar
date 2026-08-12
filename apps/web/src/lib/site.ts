@@ -7,7 +7,7 @@ export const REPO = "https://github.com/AbhinavMishra32/spar";
  * release needs on the site — every asset URL below is derived from it, and the
  * names match what `electron-builder` publishes.
  */
-export const VERSION = "0.3.0";
+export const VERSION = "0.3.1";
 
 const RELEASE = `${REPO}/releases/download/v${VERSION}`;
 

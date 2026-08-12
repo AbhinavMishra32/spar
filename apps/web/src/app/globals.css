@@ -573,6 +573,30 @@
     border-bottom: 1px solid transparent;
   }
 
+  /* At the top of the page the bar is transparent and the hero's dot field is
+     directly behind the links. A blurred bar from the first pixel would be the
+     second thing the page shows, so instead the ground under the nav is faded
+     out — enough that nothing is read against a moving dot, and invisible as a
+     band because it has no edge. It hands over to the real bar on scroll. */
+  .nav::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 -2rem;
+    z-index: -1;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      rgba(0, 0, 0, 0.88),
+      rgba(0, 0, 0, 0.6) 55%,
+      transparent
+    );
+    transition: opacity 0.4s var(--ease-out-quint);
+  }
+
+  .nav[data-stuck="true"]::before {
+    opacity: 0;
+  }
+
   .nav[data-stuck="true"] {
     background: rgba(0, 0, 0, 0.72);
     backdrop-filter: blur(18px) saturate(140%);
