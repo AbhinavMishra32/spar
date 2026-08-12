@@ -7,7 +7,7 @@ export const site = {
   tagline: "A coding gym that watches you work and writes your next exercise.",
   description:
     "Spar records how an attempt actually goes — what you wrote, what you ran, where you stalled — and generates your next challenge against the specific thing it thinks you can't do yet. Tests decide the verdict, never the model.",
-  url: "https://spar.sh",
+  url: "https://tryspar.dev",
   repo: REPO,
   releases: `${REPO}/releases/latest`,
   docs: `${REPO}#readme`,
