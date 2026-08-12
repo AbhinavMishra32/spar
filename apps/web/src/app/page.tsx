@@ -1,5 +1,9 @@
+import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/hero/Hero";
 import { Nav } from "@/components/Nav";
+import { Download } from "@/components/sections/Download";
+import { Edges } from "@/components/sections/Edges";
+import { Faq } from "@/components/sections/Faq";
 import { HowItWorks } from "@/components/sections/HowItWorks";
 import { Languages } from "@/components/sections/Languages";
 import { Models } from "@/components/sections/Models";
@@ -19,7 +23,11 @@ export default function Home() {
         <TheApp />
         <Sources />
         <Models />
+        <Edges />
+        <Download />
+        <Faq />
       </main>
+      <Footer />
     </>
   );
 }
