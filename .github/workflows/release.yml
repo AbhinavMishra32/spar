@@ -40,6 +40,11 @@ jobs:
         with: { version: 10.13.1 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
+      # The fallback suite executes the same Go test command Spar runs for
+      # learners. macOS runners do not guarantee a Go toolchain, so provision
+      # it explicitly instead of silently losing coverage for a shipped path.
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24.x" }
 
       - run: pnpm install --frozen-lockfile
 
