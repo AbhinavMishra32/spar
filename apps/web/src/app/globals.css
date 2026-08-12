@@ -768,6 +768,17 @@
   }
 }
 
+/* Longhands, not the `animation` shorthand: the shorthand resets
+   animation-delay, and the delay is the per-dot stagger that makes the band
+   travel the diagonal rather than the whole grid blinking at once. */
+.wake-on-hover:hover .spar-dot,
+.wake-on-hover:focus-visible .spar-dot {
+  animation-name: spar-dots-wave;
+  animation-duration: 1.5s;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
 /* The mark's own motion, lifted from the desktop app so a loading state on the
    site and in the app are the same object. Each dot departs from and returns to
    its own resting scale, which is what keeps the grid a logo. */

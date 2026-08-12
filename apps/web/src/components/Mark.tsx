@@ -78,17 +78,21 @@ export function Mark({
           cx={dot.cx}
           cy={dot.cy}
           r={radius}
+          className="spar-dot"
           style={{
             transformOrigin: `${dot.cx}px ${dot.cy}px`,
             transform: `scale(${dot.rest})`,
             opacity: dot.tone,
+            /* The stagger is set whether or not anything is running: it is what
+               puts this dot at its own point along the diagonal, and a hover
+               that starts the wave from CSS has no way to work it out. */
+            animationDelay: `${-WAVE_DURATION * (1 - WAVE_TRAVEL * dot.along)}s`,
             ...(animated
               ? {
                   animationName: "spar-dots-wave",
                   animationDuration: `${WAVE_DURATION}s`,
                   animationIterationCount: "infinite",
                   animationTimingFunction: "ease-in-out",
-                  animationDelay: `${-WAVE_DURATION * (1 - WAVE_TRAVEL * dot.along)}s`,
                 }
               : {}),
             ["--dot-rest" as string]: dot.rest,
@@ -100,10 +104,15 @@ export function Mark({
   );
 }
 
-/** The mark beside the wordmark. The one lockup the site uses. */
+/** The mark beside the wordmark. The one lockup the site uses.
+ *
+ *  `wake-on-hover` runs the app's diagonal through the grid while you are
+ *  pointing at it. In the app that wave means Spar is busy; here it is the
+ *  same motion for the same reason — the mark is a thing that moves, and a
+ *  logo that stays dead under the cursor reads as a picture of one. */
 export function Wordmark({ size = 22, animated = false }: { size?: number; animated?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-2.5">
+    <span className="wake-on-hover inline-flex items-center gap-2.5">
       <Mark size={size} animated={animated} />
       <span
         className="font-display text-[1.06rem] leading-none"
