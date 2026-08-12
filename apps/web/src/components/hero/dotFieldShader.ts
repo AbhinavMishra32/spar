@@ -63,6 +63,7 @@ uniform vec2  uDrift;    // parallax offset, CSS px, from the pointer's travel
 uniform vec4  uArcA[ARCS];   // p0.xy, p1.xy
 uniform vec4  uArcB[ARCS];   // p2.xy, p3.xy
 uniform float uArcAge[ARCS]; // seconds since it struck, or below zero for idle
+uniform vec3  uFocus;    // xy of whatever the field is attending to, z how much
 
 out vec4 outColor;
 
@@ -83,7 +84,9 @@ const float ARC_LIFE = 3.8;
 const float ARC_BURST_REACH = 118.0;
 /** How near a dot has to be to the path to be taken up by it, CSS px. Wide, so
  *  the arc has shoulders and is not a one-dot-thick wire. */
-const float ARC_REACH = 30.0;
+const float ARC_REACH = 34.0;
+/** How far the field's attention spreads around a connection, CSS px. */
+const float FOCUS_REACH = 330.0;
 
 /** How fast a click's band travels, CSS px per second, and how long it lives. */
 const float RIPPLE_SPEED = 720.0;
@@ -175,7 +178,7 @@ float arcsAt(vec2 s) {
     // Beat four, over everything.
     float alive = 1.0 - easeOut(over);
 
-    lit += (ends + bridge + shell * 1.15) * alive;
+    lit += (ends * 1.7 + bridge * 1.25 + shell * 1.3) * alive;
   }
   return min(lit, 1.4);
 }
@@ -262,9 +265,19 @@ void main() {
       radius += ripple * uBase * 2.2;
       tone += ripple * 0.85;
 
-      // And whatever an arc has just taken up.
-      radius += arc * uBase * 2.0;
-      tone += arc * 0.95;
+      // And whatever an arc has just taken up. Generous, because this is the
+      // one thing on the field that is supposed to be an event: at the old
+      // weight the connection happened and you could miss it.
+      radius += arc * uBase * 3.4;
+      tone += arc * 1.1;
+
+      // The field leans in. Every dot for some way around a live connection
+      // comes up a little, so the eye is taken there before the thing itself
+      // resolves — the attention arrives before the event does.
+      vec2 toFocus = center - uFocus.xy;
+      float halo = uFocus.z * exp(-dot(toFocus, toFocus) / (FOCUS_REACH * FOCUS_REACH));
+      radius += halo * uBase * 0.7;
+      tone += halo * 0.22;
 
       // Aberration. Strongest in a ring around the pointer — a dot directly
       // under the cursor is the one thing you are looking at, so it stays

@@ -107,6 +107,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const uArcA = uniform("uArcA");
     const uArcB = uniform("uArcB");
     const uArcAge = uniform("uArcAge");
+    const uFocus = uniform("uFocus");
 
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reduced = calm.matches;
@@ -125,6 +126,9 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const ripples = new Float32Array(RIPPLES * 3);
     const rippleAt = new Float64Array(RIPPLES).fill(-99_999);
     let nextRipple = 0;
+    // Where the field is looking, and how hard. Eased, so attention arrives and
+    // leaves rather than cutting.
+    const focus = { x: 0, y: 0, weight: 0 };
     let visible = true;
     let frame = 0;
     const started = performance.now();
@@ -154,22 +158,50 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
         (Math.floor(y / step) + 0.5) * step,
       ];
 
-      const angle = Math.random() * Math.PI * 2;
-      const reach = step * (7 + Math.random() * 7);
-      const from = [0.12 * w + Math.random() * 0.76 * w, 0.12 * h + Math.random() * 0.76 * h];
-      const to = [from[0]! + Math.cos(angle) * reach, from[1]! + Math.sin(angle) * reach];
+      // Both ends have to be on screen with room around them. A connection with
+      // one end off the edge is not a connection, it is a thing leaving.
+      const inset = Math.min(w, h) * 0.14;
+      const pick = (): [number, number] => [
+        inset + Math.random() * (w - inset * 2),
+        inset + Math.random() * (h - inset * 2),
+      ];
 
-      // Perpendicular, for throwing the middle of the path off the straight.
+      // The copy sits in the middle under a scrim, so anything that happens
+      // there happens where it cannot be seen.
+      const clear = (x: number, y: number) => {
+        const dx = (x - w / 2) / (w * 0.3);
+        const dy = (y - h * 0.42) / (h * 0.26);
+        return dx * dx + dy * dy > 1;
+      };
+
+      const min = step * 5;
+      const max = Math.min(w, h) * 0.62;
+      let from = pick();
+      let to = pick();
+      // A handful of tries, then take what we have — this runs on a frame.
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const gap = Math.hypot(to[0] - from[0], to[1] - from[1]);
+        if (gap > min && gap < max && clear(...from) && clear(...to)) break;
+        from = pick();
+        to = pick();
+      }
+
+      // Two bends off the straight line, so they meet by a route rather than
+      // along a ruler — and clamped, so a bend cannot leave the screen either.
+      const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
       const px = -Math.sin(angle);
       const py = Math.cos(angle);
-      const kink = () => (Math.random() - 0.5) * step * 3.2;
+      const bend = () => (Math.random() - 0.5) * step * 3.2;
       const at = (t: number, offset: number): [number, number] =>
-        snap(from[0]! + (to[0]! - from[0]!) * t + px * offset, from[1]! + (to[1]! - from[1]!) * t + py * offset);
+        snap(
+          Math.min(w - inset, Math.max(inset, from[0] + (to[0] - from[0]) * t + px * offset)),
+          Math.min(h - inset, Math.max(inset, from[1] + (to[1] - from[1]) * t + py * offset)),
+        );
 
-      const [x0, y0] = snap(from[0]!, from[1]!);
-      const [x1, y1] = at(0.34, kink());
-      const [x2, y2] = at(0.68, kink());
-      const [x3, y3] = snap(to[0]!, to[1]!);
+      const [x0, y0] = snap(from[0], from[1]);
+      const [x1, y1] = at(0.34, bend());
+      const [x2, y2] = at(0.68, bend());
+      const [x3, y3] = snap(to[0], to[1]);
 
       arcA[slot * 4] = x0;
       arcA[slot * 4 + 1] = y0;
@@ -262,11 +294,41 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       gl.uniform1f(uBase, radius);
       gl.uniform1f(uMotion, reduced ? 0 : 1);
       gl.uniform3fv(uClicks, ripples);
+      // Whichever connection is furthest along its charge takes the field's
+      // attention, and the field pans towards it — the same lean the pointer
+      // gets, borrowed by the event for as long as it lasts.
+      let want = 0;
+      let wantX = 0;
+      let wantY = 0;
+      for (let i = 0; i < ARCS; i++) {
+        const age = arcAge[i] ?? -1;
+        if (age < 0 || age > ARC_LIFE) continue;
+        // In over the charge, out over the settle.
+        const strength = Math.min(1, age / 0.9) * (1 - Math.min(1, Math.max(0, (age - 2.6) / 1.2)));
+        if (strength <= want) continue;
+        want = strength;
+        wantX = ((arcA[i * 4] ?? 0) + (arcB[i * 4 + 2] ?? 0)) / 2;
+        wantY = ((arcA[i * 4 + 1] ?? 0) + (arcB[i * 4 + 3] ?? 0)) / 2;
+      }
+      if (want > focus.weight || focus.weight < 0.01) {
+        focus.x = wantX;
+        focus.y = wantY;
+      }
+      focus.weight += (want - focus.weight) * 0.05;
+      gl.uniform3f(uFocus, focus.x, focus.y, focus.weight);
+
       // How far the pointer is from the middle, in units the layers scale up.
       // Capped, so a cursor parked in a corner leans the field rather than
       // shearing the layers apart.
-      const leanX = Math.max(-1, Math.min(1, (pointer.x - size.w / 2) / (size.w / 2)));
-      const leanY = Math.max(-1, Math.min(1, (pointer.y - size.h / 2) / (size.h / 2)));
+      let leanX = Math.max(-1, Math.min(1, (pointer.x - size.w / 2) / (size.w / 2)));
+      let leanY = Math.max(-1, Math.min(1, (pointer.y - size.h / 2) / (size.h / 2)));
+      if (focus.weight > 0.01) {
+        const pullX = Math.max(-1, Math.min(1, (focus.x - size.w / 2) / (size.w / 2)));
+        const pullY = Math.max(-1, Math.min(1, (focus.y - size.h / 2) / (size.h / 2)));
+        const pull = focus.weight * 0.75;
+        leanX += (pullX - leanX) * pull;
+        leanY += (pullY - leanY) * pull;
+      }
       gl.uniform2f(uDrift, leanX * 11, leanY * 11);
       gl.uniform4fv(uArcA, arcA);
       gl.uniform4fv(uArcB, arcB);
