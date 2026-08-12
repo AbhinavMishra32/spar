@@ -63,6 +63,12 @@ export type PracticeInventory = {
 export type JudgePreference = "source" | "local";
 
 const CACHE_KEY = (source: PracticeSourceId, region: PracticeRegion) => `practice-problem-cache:${source}:${region}`;
+/** A rejected credential is a state transition, not a notification. Keeping the
+ * tombstone outside the keychain lets Settings distinguish "never connected"
+ * from "sign in again", while `readSession` prevents the rejected credential
+ * from being sent again. It is region-specific because .com and .cn are separate
+ * accounts. */
+const EXPIRED_KEY = (source: PracticeSourceId, region: PracticeRegion) => `practice-session-expired:${source}:${region}`;
 /** A statement is good for a fortnight; the learner's status on it is not, which
  *  is why a mount re-reads and a browse does not. */
 const PROBLEM_CACHE_MS = 14 * 24 * 60 * 60 * 1_000;
@@ -72,6 +78,10 @@ export class PracticeService {
   private connections = new Map<PracticeSourceId, PracticeMcpConnection>();
   private gatewayCache = new Map<string, PracticeGateway>();
   private accountCache = new Map<PracticeSourceId, { at: number; account: PracticeAccount | null }>();
+  /** Sign-in is a long-lived browser operation owned by the host. Retaining its
+   *  cancellation handle here lets a region change close the obsolete site's
+   *  window before the new selection becomes authoritative. */
+  private connectionAttempts = new Map<PracticeSourceId, AbortController>();
   private codeforcesBrowser: Promise<CodeforcesBrowser> | null = null;
 
   constructor(
@@ -92,6 +102,7 @@ export class PracticeService {
 
   async setRegion(source: PracticeSourceId, region: PracticeRegion) {
     if (region === this.region(source)) return;
+    this.cancelConnection(source);
     this.store.setSetting(`practice-region:${source}`, region);
     /* The two LeetCodes are separate services with separate accounts and separate
        problem ids, so nothing about the old one survives the switch. */
@@ -110,11 +121,11 @@ export class PracticeService {
    *  halves have to hold: the learner has to have connected it, and they have to
    *  want their code sent there. */
   async judgesSubmissions(source: PracticeSourceId, region: PracticeRegion = this.region(source)): Promise<boolean> {
-    return this.judgePreference(source) === "source" && await this.gatewayFor(source, region).state() === "connected";
+    return this.judgePreference(source) === "source" && await this.stateFor(source, region) === "connected";
   }
 
   async state(source: PracticeSourceId): Promise<PracticeConnectionState> {
-    return this.gatewayFor(source, this.region(source)).state();
+    return this.stateFor(source, this.region(source));
   }
 
   /** Everything Settings draws, in one read. Failures are reported rather than
@@ -166,27 +177,36 @@ export class PracticeService {
    * anything.
    */
   async connect(source: PracticeSourceId): Promise<{ status: "connected"; username: string } | { status: "cancelled" } | { status: "failed"; message: string }> {
+    this.cancelConnection(source);
+    const controller = new AbortController();
+    this.connectionAttempts.set(source, controller);
     const region = this.region(source);
-    const result = source === "leetcode"
-      ? await signInToLeetCode({ region, parent: this.window(), onProgress: (message) => this.emit({ source, state: "disconnected", message }) })
-      : await signInToCodeforces({ parent: this.window(), onProgress: (message) => this.emit({ source, state: "disconnected", message }) });
-    if (result.status !== "connected") return result;
+    try {
+      const result = source === "leetcode"
+        ? await signInToLeetCode({ region, parent: this.window(), signal: controller.signal, onProgress: (message) => this.emit({ source, state: "disconnected", message }) })
+        : await signInToCodeforces({ parent: this.window(), signal: controller.signal, onProgress: (message) => this.emit({ source, state: "disconnected", message }) });
+      if (result.status !== "connected") return result;
 
-    /* The sign-in already asked LeetCode who is signed in and only finished when
-       it answered with a name — so the session is known good before it is stored,
-       and nothing here re-litigates that. Reading the solve counts is a separate,
-       optional step: they are decoration, and letting one of them decide whether
-       the sign-in worked is how a perfectly good session gets thrown away. */
-    await this.saveSession(source, region, result.session);
-    this.reset(source);
-    const account = await this.account(source).catch(() => null);
-    this.emit({ source, state: "connected", message: `Connected as ${result.username}.` });
-    return { status: "connected", username: account?.username ?? result.username };
+      /* The sign-in already asked LeetCode who is signed in and only finished when
+         it answered with a name — so the session is known good before it is stored,
+         and nothing here re-litigates that. Reading the solve counts is a separate,
+         optional step: they are decoration, and letting one of them decide whether
+         the sign-in worked is how a perfectly good session gets thrown away. */
+      await this.saveSession(source, region, result.session);
+      this.reset(source);
+      const account = await this.account(source).catch(() => null);
+      this.emit({ source, state: "connected", message: `Connected as ${result.username}.` });
+      return { status: "connected", username: account?.username ?? result.username };
+    } finally {
+      if (this.connectionAttempts.get(source) === controller) this.connectionAttempts.delete(source);
+    }
   }
 
   async disconnect(source: PracticeSourceId): Promise<void> {
+    this.cancelConnection(source);
     const region = this.region(source);
     await this.clearSession(source, region);
+    this.setSessionExpired(source, region, false);
     /* The browser partition too. Leaving a live session in a jar the learner
        believes they disconnected would be the app lying to them. */
     if (source === "leetcode") await clearLeetCodeSignIn(region); else await clearCodeforcesSignIn();
@@ -202,6 +222,9 @@ export class PracticeService {
       this.clearSession("leetcode", "global"), this.clearSession("leetcode", "cn"), this.clearSession("codeforces", "global"),
       clearLeetCodeSignIn("global"), clearLeetCodeSignIn("cn"), clearCodeforcesSignIn(),
     ]);
+    this.setSessionExpired("leetcode", "global", false);
+    this.setSessionExpired("leetcode", "cn", false);
+    this.setSessionExpired("codeforces", "global", false);
     this.reset();
   }
 
@@ -482,10 +505,7 @@ export class PracticeService {
     if (cached) return cached;
     const options = {
       onExpired: () => {
-        /* One place decides the session is dead, and everything downstream reads
-           it from the connection state rather than from its own failure. */
-        this.accountCache.set(source, { at: Date.now(), account: null });
-        this.emit({ source, state: "expired", message: `${practiceSource(source).name} refused the stored session. Reconnect it in Settings.` });
+        this.markSessionExpired(source, region);
       },
     };
     const gateway = source === "leetcode"
@@ -520,7 +540,13 @@ export class PracticeService {
   /** Stops the real-browser transport before Electron exits. Chrome is a child
    * process, not an Electron window, so closing the app does not close it for us. */
   stop(): void {
+    for (const source of this.connectionAttempts.keys()) this.cancelConnection(source);
     this.reset();
+  }
+
+  private cancelConnection(source: PracticeSourceId): void {
+    this.connectionAttempts.get(source)?.abort();
+    this.connectionAttempts.delete(source);
   }
 
   private async codeforcesFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
@@ -571,6 +597,9 @@ export class PracticeService {
   }
 
   private async readSession(source: PracticeSourceId, region: PracticeRegion): Promise<LeetCodeSession | CodeforcesSession | null> {
+    /* Once rejected, do not keep presenting the same credential to the source.
+       Reconnect verifies and overwrites it; disconnect removes it. */
+    if (this.sessionExpired(source, region)) return null;
     const raw = await this.auth.readSecret(this.keychainAccount(source, region));
     if (!raw) return null;
     try { return JSON.parse(raw) as LeetCodeSession | CodeforcesSession; } catch { return null; }
@@ -578,10 +607,36 @@ export class PracticeService {
 
   private async saveSession(source: PracticeSourceId, region: PracticeRegion, session: LeetCodeSession | CodeforcesSession) {
     await this.auth.saveSecret(this.keychainAccount(source, region), JSON.stringify(session));
+    this.setSessionExpired(source, region, false);
   }
 
   private async clearSession(source: PracticeSourceId, region: PracticeRegion) {
     await this.auth.deleteSecret(this.keychainAccount(source, region));
+  }
+
+  private sessionExpired(source: PracticeSourceId, region: PracticeRegion): boolean {
+    return this.store.getSetting<boolean>(EXPIRED_KEY(source, region), false);
+  }
+
+  private setSessionExpired(source: PracticeSourceId, region: PracticeRegion, expired: boolean): void {
+    this.store.setSetting(EXPIRED_KEY(source, region), expired);
+  }
+
+  /** Makes expiry monotonic until an explicit reconnect or disconnect. The guard
+   * is what breaks the event -> inventory -> event feedback loop in Settings. */
+  private markSessionExpired(source: PracticeSourceId, region: PracticeRegion): void {
+    if (this.sessionExpired(source, region)) return;
+    this.setSessionExpired(source, region, true);
+    this.accountCache.set(source, { at: Date.now(), account: null });
+    this.emit({ source, state: "expired", message: `${practiceSource(source).name} refused the stored session. Reconnect it in Settings.` });
+  }
+
+  private async stateFor(source: PracticeSourceId, region: PracticeRegion): Promise<PracticeConnectionState> {
+    if (this.sessionExpired(source, region)) return "expired";
+    const state = await this.gatewayFor(source, region).state();
+    /* A concurrent identity read may have marked the session while this one was
+       awaiting the network. Never let its older answer resurrect "connected". */
+    return this.sessionExpired(source, region) ? "expired" : state;
   }
 }
 

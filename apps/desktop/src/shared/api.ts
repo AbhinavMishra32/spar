@@ -16,7 +16,7 @@ export const ipc = {
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
   settingsWebSearchEnabled: "settings:web-search-enabled",
-  attemptAbandon: "attempt:abandon", sessionNextChallenge: "session:next-challenge",
+  attemptAbandon: "attempt:abandon", attemptReset: "attempt:reset", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
   sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
@@ -31,6 +31,8 @@ export const ipc = {
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
   restoreRetry: "restore:retry",
+  updateState: "update:state", updateCheck: "update:check", updateDownload: "update:download",
+  updateDismissChangelog: "update:dismiss-changelog",
 } as const;
 
 /* ---- Signing in ---------------------------------------------------------
@@ -323,6 +325,24 @@ export type AgentStreamEvent = {
 export type MenuCommand = "settings" | "new-session" | "command-palette";
 export type SyncState = BootstrapData["syncState"];
 
+/** The updater is owned by Electron's main process. The renderer gets a finite,
+ *  serialisable view of it rather than an `autoUpdater` handle, so it can never
+ *  claim an installer is ready before the process that verified it says so. */
+export type UpdateState = {
+  status: "idle" | "checking" | "available" | "downloading" | "installing" | "current" | "error" | "unsupported";
+  currentVersion: string;
+  version: string | null;
+  notes: string | null;
+  percent: number | null;
+  transferred: number | null;
+  total: number | null;
+  bytesPerSecond: number | null;
+  message: string | null;
+  checkedAt: string | null;
+  /** Present only after an update was installed and this exact version launched. */
+  changelog: { version: string; notes: string } | null;
+};
+
 export interface SparApi {
   bootstrap(): Promise<BootstrapData>;
   createSession(input: z.infer<typeof createSessionInput>): Promise<{ sessionId: string }>;
@@ -341,6 +361,8 @@ export interface SparApi {
   sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
   /** Give up on the active challenge; the session returns to general chat. */
   abandonAttempt(input: { sessionId: string; attemptId: string; reason: string }): Promise<void>;
+  /** Start a clean evidence segment without throwing away the learner's files. */
+  resetAttempt(input: { sessionId: string; attemptId: string }): Promise<void>;
   /** Ask the agent to choose and compile the next challenge for this session. */
   requestNextChallenge(input: { sessionId: string }): Promise<{ runId: string }>;
   /** Sidebar housekeeping. Each resolves once the local store is authoritative;
@@ -428,6 +450,14 @@ export interface SparApi {
   cancelProviderOAuth(flowId: string): Promise<void>;
   openExternal(url: string): Promise<void>;
   setTheme(theme: ThemePreference): Promise<void>;
+  /** Read/check/download the host-owned application update. Downloading is the
+   *  user's consent point; after verification Spar flushes durable work, exits,
+   *  installs, and launches the new version. */
+  updateState(): Promise<UpdateState>;
+  checkForUpdate(): Promise<UpdateState>;
+  downloadUpdate(): Promise<void>;
+  dismissUpdateChangelog(version: string): Promise<void>;
+  onUpdateState(listener: (state: UpdateState) => void): () => void;
   onProviderOAuthEvent(listener: (event: ProviderOAuthEvent) => void): () => void;
   onAgentEvent(listener: (event: AgentStreamEvent) => void): () => void;
   onRunnerEvent(listener: (event: { id: string; stream: "stdout" | "stderr" | "exit"; data: string; exitCode?: number }) => void): () => void;

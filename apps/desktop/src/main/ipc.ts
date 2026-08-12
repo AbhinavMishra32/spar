@@ -203,6 +203,12 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     deps.store.addMessage(sessionId, "system", `The learner gave up on this challenge${reason ? `: ${reason}` : "."}`);
   });
 
+  ipcMain.handle(ipc.attemptReset, (_event, value) => {
+    const input = value as { sessionId?: unknown; attemptId?: unknown };
+    const sessionId = zUuid(input.sessionId); const attemptId = zUuid(input.attemptId);
+    deps.store.resetAttempt(sessionId, attemptId);
+  });
+
   ipcMain.handle(ipc.sessionNextChallenge, async (_event, value) => {
     const sessionId = zUuid((value as { sessionId?: unknown }).sessionId);
     deps.store.setSessionStatus(sessionId, "planning");

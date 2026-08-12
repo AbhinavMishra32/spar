@@ -411,7 +411,10 @@ export class LeetCodeClient {
       );
     }
     const text_ = await response.text();
-    if (looksLikeHtml(text_)) throw new PracticeAuthError("LeetCode returned a web page instead of data, which means this session is not signed in.");
+    if (looksLikeHtml(text_)) {
+      this.onExpired();
+      throw new PracticeAuthError("LeetCode returned a web page instead of data, which means this session is not signed in.");
+    }
     try { return text_ ? JSON.parse(text_) : {}; }
     catch { throw new PracticeSourceError("LeetCode returned a response Spar could not read as JSON."); }
   }

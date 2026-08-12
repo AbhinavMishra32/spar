@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Ellipsis, Gavel, Laptop, Loader2, RotateCw, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CircleAlert, Ellipsis, Gavel, Laptop, Loader2, RotateCw, ShieldCheck, Trash2 } from "lucide-react";
 import type { PracticeInventory, SourceJudgePreference, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -10,44 +10,52 @@ import { message } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SourceGlyph } from "../common/SourceGlyph";
 
+type SourceNote = { tone: "muted" | "error"; text: string };
+
 /**
- * The practice source, in Settings.
+ * Settings is the renderer for practice-source state, not its owner. Connection
+ * sessions stay in the main process and every mutation below goes back through
+ * the typed preload API. Keeping that boundary lets this component reorganise
+ * the information without creating a second, UI-only idea of what is connected
+ * or where a submission will be judged.
  *
- * Built to the same row idiom as the provider list — mark, name, one muted line,
- * one trailing control — because it sits in the same card stack and a block that
- * invents its own layout reads as a different app. The things worth saying that
- * do not fit in one line become their own rows rather than a paragraph or a
- * nested card: this page is a stack of one-line facts, and the LeetCode section
- * has no licence to be an essay in the middle of it.
- *
- * What survived the trim is the one sentence the learner is owed before they
- * hand an app a session to their account, and it is shown while disconnected —
- * which is the only moment it can still inform a decision.
+ * Each provider is a small stack of the same rows Settings uses everywhere else:
+ * identity first, then only the facts and controls that are live for that state.
+ * It deliberately does not introduce a nested dashboard surface — this belongs
+ * to Settings, so its hierarchy comes from hairlines, type and alignment rather
+ * than from a card inside the page's existing card.
  */
 export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
   const [inventory, setInventory] = useState<PracticeInventory[] | null>(null);
   const [busy, setBusy] = useState<{ source: PracticeInventory["source"]; action: string } | null>(null);
-  const [notes, setNotes] = useState<Partial<Record<PracticeInventory["source"], { tone: "muted" | "error"; text: string }>>>({});
+  const [notes, setNotes] = useState<Partial<Record<PracticeInventory["source"], SourceNote>>>({});
+  const readRevision = useRef(0);
 
   const read = useCallback(async () => {
     if (!api) return;
-    setInventory(await api.practiceSources());
+    const revision = ++readRevision.current;
+    const next = await api.practiceSources();
+    /* Events and mutations can overlap. Only the newest read may paint the UI;
+       otherwise an older "connected" response can arrive after "expired" and
+       visually undo the host's newer state. */
+    if (revision === readRevision.current) setInventory(next);
   }, [api]);
 
   useEffect(() => { void read().catch((cause) => setNotes({ leetcode: { tone: "error", text: message(cause) } })); }, [read]);
-  /* The sign-in happens in a window the main process owns, so this row learns it
-     finished by being told rather than by waiting on the call. */
+  /* Sign-in is a main-process-owned window, so completion arrives as an event
+     rather than as renderer state leaking across the credential boundary. */
   useEffect(() => api?.onPracticeSourceEvent((event) => {
     setNotes((current) => ({ ...current, [event.source]: event.state === "connected" ? undefined : { tone: "muted", text: event.message } }));
     void read().catch(() => undefined);
   }), [api, read]);
 
   const act = async (source: PracticeInventory["source"], action: string, run: () => Promise<void>) => {
-    setBusy({ source, action });
+    const operation = { source, action };
+    setBusy(operation);
     setNotes((current) => ({ ...current, [source]: undefined }));
     try { await run(); await read(); }
     catch (cause) { setNotes((current) => ({ ...current, [source]: { tone: "error", text: message(cause) } })); }
-    finally { setBusy(null); }
+    finally { setBusy((current) => current === operation ? null : current); }
   };
 
   const connect = (source: PracticeInventory["source"]) => act(source, "connect", async () => {
@@ -59,40 +67,69 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
     return (
       <Row>
         <SparDots className="text-muted-foreground" pattern="pulse" size={16} />
-        <span className="text-ui text-muted-foreground">Reading the practice source…</span>
+        <span className="text-ui text-muted-foreground">Reading practice sources…</span>
       </Row>
     );
   }
 
   return (
     <>
-      <Row className="items-start flex-col gap-0 py-3">
-        <p className="text-content font-medium">Problem providers</p>
-        <p className="mt-0.5 text-ui text-muted-foreground">Connect any number. Spar and its agent search all of them and keep each problem tied to its own judge.</p>
-      </Row>
-      {inventory.map((item) => {
-        const { account, name, state, source } = item;
-        const connected = state === "connected";
-        const sourceBusy = busy?.source === source;
-        const note = notes[source];
-        return <div className="contents" key={source}>
-      <Row>
+      {inventory.map((item) => (
+        <SourceCard
+          api={api}
+          busy={busy}
+          connect={connect}
+          item={item}
+          key={item.source}
+          note={notes[item.source]}
+          run={act}
+        />
+      ))}
+    </>
+  );
+}
+
+function SourceCard({
+  api,
+  busy,
+  connect,
+  item,
+  note,
+  run,
+}: {
+  api: SparApi | undefined;
+  busy: { source: PracticeInventory["source"]; action: string } | null;
+  connect(source: PracticeInventory["source"]): void;
+  item: PracticeInventory;
+  note: SourceNote | undefined;
+  run(source: PracticeInventory["source"], action: string, task: () => Promise<void>): Promise<void>;
+}) {
+  const { account, name, source, state } = item;
+  const connected = state === "connected";
+  const sourceBusy = busy?.source === source;
+  const progress = note?.tone === "muted" ? note.text : undefined;
+  const failure = note?.tone === "error" ? note.text : item.problem;
+  const summary = connected && account
+    ? `${account.username} · ${account.solved.total.toLocaleString()} solved`
+    : sourceBusy && busy?.action === "connect" && progress
+      ? progress
+      : state === "expired"
+        ? "Sign in again to restore history and submissions."
+        : progress ?? item.description;
+
+  return (
+    <article className="divide-y divide-border">
+      <Row className="gap-3 py-2.5">
         <span className="grid size-6 shrink-0 place-items-center text-foreground/85">
           <SourceGlyph className="size-[1.15rem]" source={source} />
         </span>
+
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <p className="truncate text-content font-medium">{name}</p>
-            {connected && <span className="shrink-0 rounded-full bg-success/12 px-1.5 py-px text-ui-sm font-medium text-success">Connected</span>}
-            {state === "expired" && <span className="shrink-0 rounded-full bg-destructive/12 px-1.5 py-px text-ui-sm font-medium text-destructive">Sign in again</span>}
+          <div className="flex min-w-0 items-center gap-1.5">
+            <h3 className="truncate text-content font-medium">{name}</h3>
+            <Status state={state} />
           </div>
-          <p className="truncate text-ui text-muted-foreground">
-            {connected && account
-              ? `${account.username} · solves here count on your account`
-              : state === "expired"
-                ? "The stored session lapsed, so nothing about you is readable until you reconnect."
-                : `${item.description} You sign in on their page — Spar never sees your password.`}
-          </p>
+          <p className="mt-0.5 truncate text-ui text-muted-foreground">{summary}</p>
         </div>
 
         {connected
@@ -105,96 +142,149 @@ export function PracticeSourceGroup({ api }: { api: SparApi | undefined }) {
                 {sourceBusy ? <Loader2 className="size-4 animate-spin" /> : <Ellipsis className="size-4" />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void connect(source)}><RotateCw />Reconnect account</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => connect(source)}><RotateCw />Reconnect account</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => void act(source, "disconnect", async () => api?.disconnectPracticeSource(source))} variant="destructive">
+                <DropdownMenuItem onSelect={() => void run(source, "disconnect", async () => api?.disconnectPracticeSource(source))} variant="destructive">
                   <Trash2 />Disconnect
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )
           : (
-            <Button disabled={sourceBusy} onClick={() => void connect(source)} size="sm">
-              {busy?.source === source && busy.action === "connect" ? <Loader2 className="size-3.5 animate-spin" /> : "Connect"}
-            </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              {item.regions.length > 1 && (
+                <Segmented
+                  ariaLabel={`${name} site`}
+                  className="w-[10.5rem]"
+                  disabled={sourceBusy && busy?.action !== "connect"}
+                  onChange={(value) => void run(source, "region", async () => api?.setPracticeRegion(source, value as "global" | "cn"))}
+                  options={item.regions.map((region) => ({ value: region.id, label: region.label }))}
+                  value={item.region}
+                />
+              )}
+              <Button disabled={sourceBusy} onClick={() => connect(source)} size="sm">
+                {busy?.source === source && busy.action === "connect" ? <Loader2 className="size-3.5 animate-spin" /> : state === "expired" ? "Reconnect" : "Connect"}
+              </Button>
+            </div>
           )}
       </Row>
 
-      {note && (
-        <Row>
-          <p className={cn("text-ui", note.tone === "error" ? "text-destructive" : "text-muted-foreground")}>{note.text}</p>
+      {failure && (
+        <Row className="min-h-0 items-start gap-2 py-2.5 text-destructive" role="alert">
+          <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+          <p className="text-ui leading-[1.5]">{failure}</p>
         </Row>
       )}
 
-      {/* Their record at the source, drawn rather than listed. Three numbers and
-          a total is a sentence you have to parse; the same thing as a bar is a
-          shape you read at a glance — and it is the same Meter the concept
-          sheets use, so the two readings look like one app. */}
-      {connected && account && (
-        <Row className="flex-col items-stretch gap-0 py-3">
-          <div className="mb-2 flex items-baseline gap-2">
-            <p className="text-content font-medium">Solved on {name}</p>
-            <span className="ml-auto shrink-0 text-ui tabular-nums text-muted-foreground">
-              <span className="font-medium text-foreground">{account.solved.total}</span>
-              {account.available.total ? ` of ${account.available.total.toLocaleString()}` : " solved"}
-            </span>
-          </div>
-          <Meter bands={solvedBands(account)} height="0.375rem" />
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-            {solvedBands(account).filter((band) => band.value > 0).map((band) => <MeterKey band={band} key={band.key} />)}
-            {account.streak > 0 && <span className="text-ui text-muted-foreground">{account.streak}-day streak</span>}
-          </div>
-          {topSkills(account) && (
-            <p className="mt-2 truncate text-ui text-muted-foreground">
-              Most solved under {topSkills(account)}. Spar reads that as what you have met, not what you can do.
-            </p>
-          )}
-        </Row>
-      )}
+      {connected && account
+        ? (
+          <ConnectedSource account={account} api={api} item={item} run={run} sourceBusy={sourceBusy} />
+        )
+        : !failure && !progress && state !== "expired" && (
+          <Row className="min-h-0 items-start gap-2 py-2.5">
+            <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+            <p className="text-ui leading-[1.5] text-muted-foreground">{item.authNote}</p>
+          </Row>
+        )}
+    </article>
+  );
+}
 
-      <Row className="gap-4">
+function ConnectedSource({
+  account,
+  api,
+  item,
+  run,
+  sourceBusy,
+}: {
+  account: NonNullable<PracticeInventory["account"]>;
+  api: SparApi | undefined;
+  item: PracticeInventory;
+  run(source: PracticeInventory["source"], action: string, task: () => Promise<void>): Promise<void>;
+  sourceBusy: boolean;
+}) {
+  const { name, source } = item;
+  const bands = solvedBands(account);
+  const skills = topSkills(account);
+
+  return (
+    <>
+      <Row className="gap-4 py-2.5" role="region" aria-label={`${name} activity`}>
         <div className="min-w-0 flex-1">
-          <p className="text-content font-medium">Grading</p>
-          <p className="mt-0.5 text-ui text-muted-foreground">
-            {item.judgesSubmissions
-              ? `Run checks published examples ${item.capabilities.scratchRun ? `at ${name}` : "on this Mac"}; Submit runs every hidden case ${name} has and records the result on your account.`
-              : connected
-                ? "Your code stays on this machine, checked against each problem's published examples."
-                : `Connect ${name} to have it judge submissions. Until then Spar grades locally.`}
-          </p>
+          <p className="text-content font-medium">Activity</p>
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5">
+            {bands.filter((band) => band.value > 0).map((band) => <MeterKey band={band} className="text-ui" key={band.key} />)}
+            {account.streak > 0 && <span className="text-ui text-muted-foreground">{account.streak}-day streak</span>}
+            {skills && <span className="truncate text-ui text-muted-foreground">Most in {skills}</span>}
+          </div>
+        </div>
+        <div className="w-[13.5rem] shrink-0">
+          <div className="mb-1.5 flex items-baseline justify-between gap-3 text-ui-sm tabular-nums text-muted-foreground">
+            <span><span className="font-medium text-foreground/85">{account.solved.total.toLocaleString()}</span> solved</span>
+            {account.available.total > 0 && <span>of {account.available.total.toLocaleString()}</span>}
+          </div>
+          <Meter bands={bands} height="0.3125rem" total={account.available.total} />
+        </div>
+      </Row>
+
+      <Row className="gap-4 py-2.5" role="region" aria-label={`${name} judging`}>
+        <div className="min-w-0 flex-1">
+          <p className="text-content font-medium">Submission judge</p>
+          <p className="mt-0.5 text-ui text-muted-foreground">{judgeDetail(item)}</p>
         </div>
         <Segmented
-          ariaLabel="Grading"
-          disabled={sourceBusy || !connected}
-          onChange={(value) => void act(source, "judge", async () => api?.setPracticeJudge(source, value as SourceJudgePreference))}
+          ariaLabel={`${name} submission judge`}
+          className="w-[18rem]"
+          disabled={sourceBusy}
+          onChange={(value) => void run(source, "judge", async () => api?.setPracticeJudge(source, value as SourceJudgePreference))}
           options={[{ value: "source", label: name, icon: Gavel }, { value: "local", label: "This Mac", icon: Laptop }]}
           value={item.judgePreference}
         />
       </Row>
 
       {item.regions.length > 1 && (
-        <Row className="gap-4">
+        <Row className="gap-4 py-2.5" role="region" aria-label={`${name} site`}>
           <div className="min-w-0 flex-1">
-            <p className="text-content font-medium">{name} site</p>
-            <p className="mt-0.5 text-ui text-muted-foreground">leetcode.com and leetcode.cn are separate services, with separate accounts and separate problem numbers. Switching disconnects the other.</p>
+            <p className="text-content font-medium">Problem catalogue</p>
+            <p className="mt-0.5 text-ui text-muted-foreground">Switching sites also switches accounts and problem numbers.</p>
           </div>
           <Segmented
             ariaLabel={`${name} site`}
+            className="w-[18rem]"
             disabled={sourceBusy}
-            onChange={(value) => void act(source, "region", async () => api?.setPracticeRegion(source, value as "global" | "cn"))}
+            onChange={(value) => void run(source, "region", async () => api?.setPracticeRegion(source, value as "global" | "cn"))}
             options={item.regions.map((region) => ({ value: region.id, label: region.label }))}
             value={item.region}
           />
         </Row>
       )}
-        </div>;
-      })}
     </>
   );
 }
 
-/** The solve counts as bands, in LeetCode's own three tiers and the same three
- *  tones the rest of the app gives difficulty. */
+function Status({ state }: { state: PracticeInventory["state"] }) {
+  const label = state === "connected" ? "Connected" : state === "expired" ? "Session expired" : "Not connected";
+  return (
+    <span className={cn(
+      "inline-flex shrink-0 items-center gap-1 text-ui-sm font-medium",
+      state === "connected" ? "text-success" : state === "expired" ? "text-destructive" : "text-muted-foreground",
+    )}>
+      <span className="size-1.5 rounded-full bg-current" />
+      {label}
+    </span>
+  );
+}
+
+function judgeDetail(item: PracticeInventory): string {
+  if (item.judgePreference === "local") return "Code stays on this Mac and published examples decide the result.";
+  return item.capabilities.scratchRun
+    ? `Run checks examples at ${item.name}; Submit records the official verdict.`
+    : `Run checks examples on this Mac; Submit records ${item.name}' official verdict.`;
+}
+
+/** The solve counts as bands in the source's difficulty tiers. The Meter gets
+ *  the catalogue total separately: without it, 93 solves incorrectly render as
+ *  100% progress because the component can only normalise against 93. */
 function solvedBands(account: NonNullable<PracticeInventory["account"]>): MeterBand[] {
   return [
     { key: "easy", value: account.solved.easy, className: "bg-success", label: "Easy" },
@@ -203,8 +293,6 @@ function solvedBands(account: NonNullable<PracticeInventory["account"]>): MeterB
   ];
 }
 
-/** The three tags they have solved most under, or nothing. Three because the
- *  line has to stay a line. */
 function topSkills(account: NonNullable<PracticeInventory["account"]>): string {
   return account.skills
     .filter((skill) => skill.solved > 0)
@@ -214,9 +302,6 @@ function topSkills(account: NonNullable<PracticeInventory["account"]>): string {
     .join(", ");
 }
 
-/** The Settings page's own row metrics. Duplicated rather than exported from the
- *  page, because the page importing this and this importing the page is a cycle
- *  nobody needs. */
-function Row({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("flex min-h-[3.375rem] items-center gap-3 px-3.5 py-2", className)}>{children}</div>;
+function Row({ className, ...props }: React.ComponentProps<"div">) {
+  return <div className={cn("flex min-h-[3.375rem] items-center gap-3 px-3.5 py-2", className)} {...props} />;
 }

@@ -11,7 +11,7 @@ import { CloudSyncService } from "./sync.js";
 import { CheckpointService } from "./checkpoints.js";
 import { RestoreService } from "./restore.js";
 import { UtilityClient } from "./utilityClient.js";
-import { startUpdates } from "./updates.js";
+import { UpdateService } from "./updates.js";
 import { executeTrainingTool } from "./trainingTools.js";
 import { WebSearchService } from "./webSearch.js";
 import { recordAgentActivity } from "./agentActivity.js";
@@ -23,6 +23,7 @@ import { themePreferenceSchema } from "../shared/api.js";
 
 let mainWindow: BrowserWindow | null = null;
 let store: LocalStore;
+let updates: UpdateService | null = null;
 
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
@@ -53,6 +54,22 @@ else {
     /* The pull half of sync. Sign-in drives it; this launch path is the resume
        for a device that was interrupted partway through one. */
     const restore=new RestoreService(store,workspaces,auth,origin,(state)=>mainWindow?.webContents.send("restore:state",state));
+    /* One idempotent shutdown path is shared by an ordinary quit and an update.
+       quitAndInstall closes windows before Electron emits before-quit, so waiting
+       until that event to save would race the native installer. The updater
+       explicitly awaits this function first; the later event sees the same
+       settled promise and cannot close SQLite twice. */
+    let shutdown: Promise<void> | null = null;
+    const prepareToExit = () => shutdown ??= (async () => {
+      practice.stop();
+      await checkpoints.flushAll();
+      checkpoints.stop();
+      sync.stop();
+      runner.stop();
+      agent.stop();
+      updates?.stop();
+      store.close();
+    })();
     /* Asked before the window exists so it can open at the size it belongs at.
        Opening large and shrinking once the renderer reports in would read as the
        app correcting a mistake in front of the learner.
@@ -63,14 +80,17 @@ else {
     const signedIn = Boolean(await auth.account());
     const needsRestore = signedIn && !store.getProfile();
     const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : "app" as const;
-    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, checkpoints, restore, web, window: () => mainWindow }); installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); startUpdates(mainWindow);
+    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, checkpoints, restore, web, window: () => mainWindow });
+    updates = new UpdateService(store, () => mainWindow, prepareToExit);
+    updates.installIpc();
+    installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); updates.start();
     /* Started after the window exists, so its progress has somewhere to be
        reported. The renderer holds the restoring screen until this settles. */
     if (needsRestore) void restore.run().then((state) => { if (state !== "failed") fitWindowTo(mainWindow, store.getProfile() ? "app" : "onboarding"); });
     /* Checkpoints are flushed before the store closes: quitting is the one moment
        there is no next debounce tick to wait for, and the session the learner just
        closed the laptop on is exactly the one worth not losing. */
-    app.on("before-quit", () => { practice.stop(); void checkpoints.flushAll().finally(() => { checkpoints.stop(); sync.stop(); runner.stop(); agent.stop(); store.close(); }); });
+    app.on("before-quit", () => { void prepareToExit(); });
     app.on("activate", async () => { if (BrowserWindow.getAllWindows().length === 0) mainWindow = createMainWindow({ stage: !(await auth.account()) ? "sign-in" : store.getProfile() ? "app" : "restoring" }); });
   }).catch((error: unknown) => {
     /* A rejected async Electron event otherwise becomes an unhandled promise and

@@ -3,11 +3,11 @@ import type { Language } from "@spar/domain";
 import cSvg from "simple-icons/icons/c.svg?raw";
 import cppSvg from "simple-icons/icons/cplusplus.svg?raw";
 import goSvg from "simple-icons/icons/go.svg?raw";
-import javaSvg from "simple-icons/icons/openjdk.svg?raw";
-import pythonSvg from "simple-icons/icons/python.svg?raw";
 import rubySvg from "simple-icons/icons/ruby.svg?raw";
 import rustSvg from "simple-icons/icons/rust.svg?raw";
 import swiftSvg from "simple-icons/icons/swift.svg?raw";
+import javaOriginal from "@/assets/languages/java-original.svg";
+import pythonOriginal from "@/assets/languages/python-original.svg";
 import { cn } from "@/lib/utils";
 import { LANGUAGE_BRAND_COLOR } from "@/lib/brand";
 
@@ -17,9 +17,9 @@ import { LANGUAGE_BRAND_COLOR } from "@/lib/brand";
  * two-tone tiles; the other marks come from Simple Icons' maintained vendor
  * paths rather than letter tiles invented by Spar.
  *
- * They carry no visible label. A mark is only worth using where it is faster to
- * recognise than the word, and it is only that if it is never accompanied by the
- * word. The name goes to assistive technology and to the tooltip instead.
+ * The glyph itself carries no visible label. Compact chrome can use the mark
+ * alone with an accessible name; choice surfaces may pair it with visible text
+ * so choosing a language never becomes a logo-memory test.
  */
 type GlyphProps = ComponentProps<"svg">;
 
@@ -37,8 +37,6 @@ function iconPath(svg: string): string {
 }
 
 const LANGUAGE_ICON_PATH: Partial<Record<Language, string>> = {
-  python: iconPath(pythonSvg),
-  java: iconPath(javaSvg),
   c: iconPath(cSvg),
   cpp: iconPath(cppSvg),
   go: iconPath(goSvg),
@@ -66,8 +64,35 @@ export function LanguageGlyph({ className, language, style, ...props }: GlyphPro
     >
       {language === "javascript" && <><path d="M0 0h24v24H0z" fill="currentColor" /><path d={JAVASCRIPT_LETTERS} fill="#111111" /></>}
       {language === "typescript" && <><rect fill="currentColor" height="24" rx="1.125" width="24" /><path d={TYPESCRIPT_LETTERS} fill="#ffffff" /></>}
+      {language === "python" && <image height="24" href={pythonOriginal} width="24" />}
+      {language === "java" && <image height="24" href={javaOriginal} width="24" />}
       {iconPath && <path d={iconPath} fill="currentColor" />}
     </svg>
+  );
+}
+
+/** Selection surfaces use colour as state. Unselected marks stay fully present
+ *  and recognisable, but lose their chroma; the chosen mark gets its real brand
+ *  colour back. Keeping the filter here prevents Settings and onboarding from
+ *  drifting into two different meanings for the same glyph treatment. */
+export function SelectableLanguageGlyph({
+  className,
+  language,
+  selected,
+}: {
+  className?: string;
+  language: Language;
+  selected: boolean;
+}) {
+  return (
+    <LanguageGlyph
+      className={cn(
+        "transition-[filter,opacity] duration-150",
+        !selected && "grayscale contrast-[0.7] brightness-[1.45] opacity-90",
+        className,
+      )}
+      language={language}
+    />
   );
 }
 

@@ -125,16 +125,29 @@ jobs:
           APPLE_ID_INPUT: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD_INPUT: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID_INPUT: ${{ secrets.APPLE_TEAM_ID }}
+          WINDOWS_CERTIFICATE_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          RELEASE_TAG: ${{ needs.verify.outputs.tag }}
         run: |
-          if [ -n "$MACOS_CERTIFICATE_BASE64" ]; then
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            if [ -z "$MACOS_CERTIFICATE_BASE64" ] || [ -z "$MACOS_CERTIFICATE_PASSWORD" ] || [ -z "$APPLE_ID_INPUT" ] || [ -z "$APPLE_APP_SPECIFIC_PASSWORD_INPUT" ] || [ -z "$APPLE_TEAM_ID_INPUT" ]; then
+              echo "::error title=Missing macOS release identity::Self-updating macOS releases must be signed and notarized. Configure the MACOS_CERTIFICATE_*, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, and APPLE_TEAM_ID secrets."
+              exit 1
+            fi
             export CSC_LINK="$MACOS_CERTIFICATE_BASE64"
             export CSC_KEY_PASSWORD="$MACOS_CERTIFICATE_PASSWORD"
             export APPLE_ID="$APPLE_ID_INPUT"
             export APPLE_APP_SPECIFIC_PASSWORD="$APPLE_APP_SPECIFIC_PASSWORD_INPUT"
             export APPLE_TEAM_ID="$APPLE_TEAM_ID_INPUT"
+          elif [ "${{ matrix.platform }}" = "windows" ]; then
+            if [ -z "$WINDOWS_CERTIFICATE_BASE64" ] || [ -z "$WINDOWS_CERTIFICATE_PASSWORD" ]; then
+              echo "::error title=Missing Windows release identity::Self-updating Windows releases must be Authenticode signed. Configure WINDOWS_CERTIFICATE_BASE64 and WINDOWS_CERTIFICATE_PASSWORD."
+              exit 1
+            fi
+            export CSC_LINK="$WINDOWS_CERTIFICATE_BASE64"
+            export CSC_KEY_PASSWORD="$WINDOWS_CERTIFICATE_PASSWORD"
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false
-            echo "::warning title=Unsigned build::MACOS_CERTIFICATE_BASE64 is not set, so this build is unsigned and Gatekeeper will warn on first launch."
           fi
           # electron-builder is invoked directly rather than through a package
           # script: forwarding flags via `pnpm run x -- --publish never` did not
@@ -146,7 +159,28 @@ jobs:
           # extraMetadata writes the origin into the packaged package.json, which
           # is the only way a build-time value survives into a downloaded app.
           pnpm exec electron-builder ${{ matrix.flag }} --publish never \
+            -c.releaseInfo.releaseNotesFile="../../.github/release-notes/${RELEASE_TAG}.md" \
             -c.extraMetadata.sparHostedApiOrigin="$SPAR_HOSTED_API_ORIGIN"
+
+      # This YAML is the updater API. An installer can exist while the feed is
+      # missing notes or the correct architecture, so validate the contract
+      # before uploading anything a running app could discover.
+      - name: Verify update feed
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          case "${{ matrix.platform }}" in
+            macos) FEED=dist-release/latest-mac.yml ;;
+            windows) FEED=dist-release/latest.yml ;;
+            linux) FEED=dist-release/latest-linux.yml ;;
+          esac
+          test -s "$FEED"
+          grep -q "^version: ${{ needs.verify.outputs.version }}$" "$FEED"
+          grep -q "^releaseNotes:" "$FEED"
+          if [ "${{ matrix.platform }}" = "macos" ]; then
+            grep -q -- "-arm64-mac.zip" "$FEED"
+            grep -q -- "-mac.zip" "$FEED"
+          fi
 
       # latest*.yml is what electron-updater reads, so it is a release asset like
       # any installer, not a build leftover.

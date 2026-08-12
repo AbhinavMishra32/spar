@@ -13,6 +13,7 @@ import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import TypeScriptWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import { MotionConfig } from "motion/react";
 import { App } from "./App";
+import { UpdateExperience } from "./components/updates/UpdateExperience";
 import { defineEditorThemes } from "./lib/monaco-theme";
 import "./theme.css";
 
@@ -43,6 +44,7 @@ createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <MotionConfig reducedMotion="user">
       <App />
+      {window.spar && <UpdateExperience api={window.spar} />}
     </MotionConfig>
   </React.StrictMode>,
 );

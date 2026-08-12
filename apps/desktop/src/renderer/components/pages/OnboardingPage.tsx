@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { message } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useProviders } from "../../hooks/use-providers";
-import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
+import { LanguageGlyph, LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
 import { CodeChefGlyph, CodeforcesGlyph, HackerRankGlyph, LeetCodeGlyph } from "../common/SourceGlyph";
 import { SparDots, SparDotsLine } from "../common/SparDots";
@@ -343,6 +343,8 @@ export function OnboardingPage({
 
   // The options are numbered on screen, so the number keys have to work. Typing
   // into the free-text steps must not be read as a choice, hence the kind guard.
+  // A keyboard has no single "10" key: the tenth option is 0, matching the
+  // physical number row instead of advertising a shortcut that cannot fire.
   const options = step.kind === "one" && step.id === "experience" ? EXPERIENCE.length
     : step.kind === "one" ? LANGUAGES.length
     : step.kind === "many" ? FOCUS.length
@@ -356,8 +358,8 @@ export function OnboardingPage({
     if (!options) return;
     const listener = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const choice = Number(event.key);
-      if (!Number.isInteger(choice) || choice < 1 || choice > options) return;
+      const choice = event.key === "0" && options === 10 ? 10 : Number(event.key);
+      if (!Number.isInteger(choice) || choice < 1 || choice > Math.min(options, 10)) return;
       event.preventDefault();
       const position = choice - 1;
       if (step.id === "experience") setExperience(EXPERIENCE[position]!.value);
@@ -409,7 +411,7 @@ export function OnboardingPage({
             : step.kind === "text"
               ? "Return to continue"
               : options
-                ? `Press 1–${options} to choose${step.kind === "many" ? ", or several" : ""}`
+                ? `${options === 10 ? "Press 1–9 or 0" : `Press 1–${options}`} to choose${step.kind === "many" ? ", or several" : ""}`
                 : "")}
       </p>
       {index > 0 && (
@@ -430,7 +432,14 @@ export function OnboardingPage({
           fields do. */}
       <div aria-hidden className="auth-field text-foreground" />
 
-      <motion.div className="app-no-drag relative w-full max-w-[23rem]" layout transition={PANEL}>
+      <motion.div
+        className={cn(
+          "app-no-drag relative w-full",
+          phase === "intake" && step.id === "language" ? "max-w-[34rem]" : "max-w-[23rem]",
+        )}
+        layout
+        transition={PANEL}
+      >
         <motion.div className="flex flex-col items-center gap-3.5" layout="position" transition={PANEL}>
           <div className="flex items-center justify-center gap-2.5">
             <SparDots key={pass} pattern={awake ? "pass" : "still"} size={26} />
@@ -554,17 +563,28 @@ export function OnboardingPage({
               )}
 
               {phase === "intake" && step.id === "language" && (
-                <div className={GROUP}>
+                <div aria-label="Challenge language" className={cn(GROUP, "grid grid-cols-5")} role="radiogroup">
                   {LANGUAGES.map((option, position) => (
-                    <OptionRow
-                      index={position + 1}
+                    <button
+                      aria-checked={language === option}
+                      aria-label={LANGUAGE_LABEL[option]}
+                      className={cn(
+                        "relative flex h-[4.5rem] min-w-0 flex-col items-center justify-center gap-1.5 px-2 outline-none transition-colors hover:bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] focus-visible:bg-[color-mix(in_oklab,var(--foreground)_5%,transparent)]",
+                        position >= 5 && "border-t border-border",
+                        position % 5 !== 0 && "border-l border-border",
+                        language === option && "bg-[color-mix(in_oklab,var(--foreground)_7%,transparent)]",
+                      )}
                       key={option}
                       onClick={() => setLanguage(option)}
-                      selected={language === option}
-                      trailing={<LanguageGlyph className="size-3.5 shrink-0 text-muted-foreground" language={option} />}
+                      role="radio"
+                      type="button"
                     >
-                      {LANGUAGE_LABEL[option]}
-                    </OptionRow>
+                      <span aria-hidden className="absolute left-2 top-1.5 text-ui-sm tabular-nums text-muted-foreground/55">
+                        {position === 9 ? 0 : position + 1}
+                      </span>
+                      <SelectableLanguageGlyph className="size-6" language={option} selected={language === option} />
+                      <span className={cn("w-full truncate text-center text-ui text-foreground", language === option && "font-medium")}>{LANGUAGE_LABEL[option]}</span>
+                    </button>
                   ))}
                 </div>
               )}

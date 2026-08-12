@@ -11,6 +11,7 @@ import type {
   PracticeRegion, PracticeSearchInput, PracticeSourceCapabilities, PracticeSourceId, PracticeSubmission,
   PracticeVerdict,
 } from "./types.js";
+import { PracticeAuthError } from "./types.js";
 
 /**
  * One source, behind the operations everything else needs from it.
@@ -78,7 +79,13 @@ export class LeetCodeGateway implements PracticeGateway {
        as expired rather than thrown, because the caller is usually drawing a row
        in Settings and an exception would read as the source being down. */
     try { return await this.client.whoami() ? "connected" : "expired"; }
-    catch { return "expired"; }
+    catch (error) {
+      /* A transport failure is not evidence that a credential expired. Let the
+         host surface the reachability error instead of turning one flaky read
+         into a false auth transition. */
+      if (error instanceof PracticeAuthError) return "expired";
+      throw error;
+    }
   }
 
   async capabilities(): Promise<PracticeSourceCapabilities> {
@@ -133,7 +140,11 @@ export class CodeforcesGateway implements PracticeGateway {
 
   async state(): Promise<PracticeConnectionState> {
     if (!await this.readSession()) return "disconnected";
-    try { return await this.client.whoami() ? "connected" : "expired"; } catch { return "expired"; }
+    try { return await this.client.whoami() ? "connected" : "expired"; }
+    catch (error) {
+      if (error instanceof PracticeAuthError) return "expired";
+      throw error;
+    }
   }
   async capabilities() { return effectiveCapabilities(this.sourceId, await this.state() === "connected"); }
   account() { return this.client.account(); }

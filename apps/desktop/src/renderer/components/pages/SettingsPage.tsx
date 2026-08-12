@@ -21,11 +21,12 @@ import { message } from "@/lib/format";
 import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { refreshProviders } from "../../hooks/use-providers";
-import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
+import { LanguageGlyph, LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
 import { SparWordmark } from "../common/SparWordmark";
 import { AboutSpar } from "../settings/AboutSpar";
 import { PracticeSourceGroup } from "../settings/PracticeSource";
+import { UpdateSettings } from "../settings/UpdateSettings";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
@@ -545,32 +546,41 @@ export function SettingsPage({
         </Group>
 
         <Group label="Training">
-          <Row className="gap-4 py-2.5">
+          <Row className="items-center gap-6 py-3">
             <div className="min-w-0 flex-1">
-              <p className="text-content font-medium">Language for new sessions</p>
-              <p className="mt-0.5 text-ui text-muted-foreground">The default every session starts in. Asking for another language inside a session still wins.</p>
+              <p className="text-content font-medium">Default language</p>
+              <p className="mt-0.5 max-w-[20rem] text-ui leading-[1.55] text-muted-foreground">New sessions start here. Asking for another language in a session still wins.</p>
             </div>
-            {/* Marks, not names: three of them side by side is exactly where a logo
-                beats a word, and the name still reaches the pointer and the reader. */}
-            <div className="flex shrink-0 gap-1" role="radiogroup" aria-label="Language for new sessions">
+
+            {/* A compact two-row matrix keeps ten choices inside a normal setting
+                row. The colour and shape identify the languages; the accessible
+                name and native tooltip spell them out without making ten labels
+                compete with the setting itself. */}
+            <div
+              aria-busy={languageBusy}
+              aria-label="Default language for new sessions"
+              className="grid w-[13.5rem] shrink-0 grid-cols-5 gap-1"
+              role="radiogroup"
+            >
               {LANGUAGES.map((option) => (
                 <button
                   aria-checked={language === option}
                   aria-label={LANGUAGE_LABEL[option]}
                   className={cn(
-                    "grid size-9 place-items-center rounded-[var(--radius-lg)] transition-all duration-150",
-                    languageBusy && "pointer-events-none opacity-60",
+                    "grid size-10 place-items-center rounded-[var(--radius-lg)] outline-none transition-[background-color,box-shadow,transform] duration-150 hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-[0.96]",
                     language === option
-                      ? "bg-accent text-foreground shadow-[inset_0_0_0_1px_var(--border-strong)]"
-                      : "text-muted-foreground/60 hover:bg-accent/50 hover:text-foreground",
+                      ? "bg-accent shadow-[inset_0_0_0_1px_var(--border-strong),var(--app-shadow-card)]"
+                      : "",
+                    languageBusy && "opacity-60",
                   )}
+                  disabled={languageBusy || !api}
                   key={option}
                   onClick={() => language !== option && changeLanguage(option)}
                   role="radio"
                   title={LANGUAGE_LABEL[option]}
                   type="button"
                 >
-                  <LanguageGlyph className="size-[1.15rem]" language={option} />
+                  <SelectableLanguageGlyph className="size-[1.3rem]" language={option} selected={language === option} />
                 </button>
               ))}
             </div>
@@ -623,6 +633,10 @@ export function SettingsPage({
             and grouping it with them would imply the agent could run on it. */}
         <Group label="Web search">
           <WebSearchRow api={api} />
+        </Group>
+
+        <Group label="Updates">
+          <UpdateSettings api={api} />
         </Group>
 
         <Group label="Runtime boundary">

@@ -64,11 +64,13 @@ export function practiceSignInSession(region: PracticeRegion): Session {
 export async function signInToLeetCode(input: {
   region: PracticeRegion;
   parent: BrowserWindow | null;
+  /** Aborted when Settings changes region or the app shuts down. */
+  signal?: AbortSignal;
   /** Progress for the Settings row, so the learner is not watching a dead button
    *  while a window they may have sent behind the app waits for them. */
   onProgress?: (message: string) => void;
 }): Promise<PracticeSignInResult> {
-  const { region, parent, onProgress } = input;
+  const { region, parent, signal, onProgress } = input;
   const source = practiceSource("leetcode");
   const partition = practiceSignInSession(region);
 
@@ -100,6 +102,7 @@ export async function signInToLeetCode(input: {
       settled = true;
       clearInterval(poll);
       clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       window.removeAllListeners("closed");
       if (!window.isDestroyed()) window.close();
       resolve(result);
@@ -132,6 +135,9 @@ export async function signInToLeetCode(input: {
     const poll = setInterval(() => { void attempt(); }, POLL_MS);
 
     const timer = setTimeout(() => finish({ status: "failed", message: `The ${source.name} sign-in window timed out after ten minutes.` }), TIMEOUT_MS);
+    const abort = () => finish({ status: "cancelled" });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) return abort();
 
     window.once("ready-to-show", () => window.show());
     window.on("closed", () => {
@@ -177,7 +183,7 @@ export type CodeforcesSignInResult =
  * It never attaches to the learner's normal browser profile. Completion is read
  * from the signed-in Codeforces page: its profile link names the handle and its
  * CSRF meta tag is required for an explicit later submission. */
-export async function signInToCodeforces(input: { parent: BrowserWindow | null; onProgress?: (message: string) => void }): Promise<CodeforcesSignInResult> {
+export async function signInToCodeforces(input: { parent: BrowserWindow | null; signal?: AbortSignal; onProgress?: (message: string) => void }): Promise<CodeforcesSignInResult> {
   const source = practiceSource("codeforces");
   input.onProgress?.(`Opening ${source.name} in your browser…`);
   const launched = await launchCodeforcesBrowser(path.join(app.getPath("userData"), "codeforces-browser"))
@@ -189,7 +195,7 @@ export async function signInToCodeforces(input: { parent: BrowserWindow | null; 
     let checking = false;
     let challengeReported = false;
     let signInReported = false;
-    const finish = (result: CodeforcesSignInResult) => { if (settled) return; settled = true; clearInterval(poll); clearTimeout(timer); void browser.close(); resolve(result); };
+    const finish = (result: CodeforcesSignInResult) => { if (settled) return; settled = true; clearInterval(poll); clearTimeout(timer); input.signal?.removeEventListener("abort", abort); void browser.close(); resolve(result); };
     const attempt = async () => {
       if (checking) return false;
       if (browser.closed) { finish({ status: "cancelled" }); return false; }
@@ -212,6 +218,9 @@ export async function signInToCodeforces(input: { parent: BrowserWindow | null; 
     };
     const poll = setInterval(() => { void attempt(); }, POLL_MS);
     const timer = setTimeout(() => finish({ status: "failed", message: `The ${source.name} sign-in window timed out after ten minutes.` }), TIMEOUT_MS);
+    const abort = () => finish({ status: "cancelled" });
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted) return abort();
     void attempt();
   });
 }

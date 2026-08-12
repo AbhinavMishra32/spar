@@ -36,18 +36,18 @@ release is rebuilt after a packaging failure.
 
 ## Signing
 
-Signing is opt-in. When `MACOS_CERTIFICATE_BASE64` is present in the repository
-secrets the macOS job signs with it, and passes `APPLE_ID`,
-`APPLE_APP_SPECIFIC_PASSWORD`, and `APPLE_TEAM_ID` through for notarization. When
-it is absent the job sets `CSC_IDENTITY_AUTO_DISCOVERY=false`, logs a warning, and
-produces an unsigned build rather than failing — so the result never depends on
-whatever happens to be in the runner's keychain.
+Signing is mandatory for macOS and Windows releases. This is not cosmetic:
+`electron-updater` verifies that a replacement binary belongs to the same
+publisher before handing it to the native installer. Publishing an unsigned
+installer would therefore publish an update that the in-app experience cannot
+honestly promise to install.
 
-Unsigned builds run, but they carry the download quarantine flag, so first launch
-needs a right-click → *Open* on macOS or *Run anyway* on Windows. Say so in the
-release notes for as long as that is true.
-
-Windows builds are unsigned in all cases; there is no certificate for them yet.
+The macOS job requires `MACOS_CERTIFICATE_BASE64`,
+`MACOS_CERTIFICATE_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and
+`APPLE_TEAM_ID`. It signs with Developer ID and notarizes with Apple. The Windows
+job requires `WINDOWS_CERTIFICATE_BASE64` and
+`WINDOWS_CERTIFICATE_PASSWORD` for Authenticode signing. A missing release
+identity fails its platform job before an unsigned artifact can reach GitHub.
 
 ## Icons
 
@@ -58,7 +58,19 @@ AppKit and only the macOS job has it. Regenerate them on a Mac with
 
 ## Updates
 
-Packaged builds check for updates only when `SPAR_ENABLE_UPDATES=1` is set.
-`latest*.yml` is published with every release regardless, so enabling the flag in
-a later build finds a complete update feed behind it. Update artifacts are
-signature-checked before installation and install on quit.
+Every packaged build checks the GitHub release feed after launch and every six
+hours while it remains open. The notification asks before downloading; there is
+no setting that can silently disable checks. After the learner accepts, Spar
+shows byte-level progress, waits for signature/checksum verification, flushes
+active checkpoints, then closes, installs, and relaunches.
+
+The same `.github/release-notes/v<version>.md` file used for the GitHub release is
+embedded into every `latest*.yml` feed. The app stores those notes with the
+download and shows them only after that exact version launches successfully.
+Fresh installations do not receive a fake post-update changelog.
+
+Each package job validates its feed before upload: version parity, embedded
+release notes, and both Apple Silicon and Intel ZIP entries on macOS. Linux
+self-update is available to AppImage installations; package-manager installs
+continue to follow their package manager when the runtime reports self-update as
+unsupported.

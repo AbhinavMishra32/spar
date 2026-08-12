@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Clock3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { duration } from "../../../shared/attemptReplay";
 
@@ -36,10 +37,7 @@ export function AttemptClock({ startedAt, completedAt }: { startedAt: string; co
       )}
       title={running ? "Time on this attempt — every moment in your solve replay is measured from here" : "Time this attempt took"}
     >
-      <span className="relative grid size-1.5 place-items-center">
-        <span className={cn("size-1.5 rounded-full", running ? "bg-[var(--success)]" : "bg-muted-foreground/40")} />
-        {running && <span className="absolute size-1.5 animate-ping rounded-full bg-[var(--success)]/70" />}
-      </span>
+      <Clock3 className="size-3.5" aria-hidden="true" />
       {duration(elapsed)}
     </span>
   );
