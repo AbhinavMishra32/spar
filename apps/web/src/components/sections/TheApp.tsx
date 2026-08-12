@@ -4,14 +4,6 @@ import { Shot } from "@/components/Shot";
 import { Spotlight } from "@/components/Spotlight";
 import { cn } from "@/lib/cn";
 
-/** The mechanical check every generated challenge has to survive. */
-const PROOFS = [
-  "the reference solution passes every test, visible and hidden",
-  "deliberately broken solutions pass the visible tests — proving the visible suite is genuinely incomplete",
-  "those broken versions fail the hidden tests",
-  "the files, commands and language all agree with each other",
-];
-
 function Card({ children, className }: { children: React.ReactNode; className?: string }) {
   return <Spotlight className={cn("flex h-full flex-col", className)}>{children}</Spotlight>;
 }
@@ -37,20 +29,13 @@ export function TheApp() {
       <div className="mt-14 grid gap-4 md:grid-cols-12">
         <Reveal className="md:col-span-7">
           <Card className="p-6 sm:p-8 md:p-10">
-            <Heading>Challenges proven before you ever see them.</Heading>
+            <Heading>Written for you, and nobody else.</Heading>
             <Body>
-              Nobody else is getting your exercise, so you can&rsquo;t look it up. And before one reaches you
-              it has to survive a mechanical check:
+              Every challenge is generated against the target Spar picked for you, so nobody else is getting
+              your exercise and there is nothing to look up. The files, the commands and the language all have
+              to agree before it is set — and the suite has to survive the check above.
             </Body>
-            <ul className="mt-7 space-y-3.5 border-t border-line pt-7">
-              {PROOFS.map((proof) => (
-                <li key={proof} className="flex gap-3.5 text-[0.9rem] leading-relaxed text-muted">
-                  <span aria-hidden className="mt-[0.42rem] size-1.5 shrink-0 rounded-full bg-paper/70" />
-                  {proof}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-7 text-[0.9rem] text-paper">
+            <p className="mt-7 border-t border-line pt-7 font-display text-[1.06rem] leading-snug text-paper">
               You will never lose twenty minutes to a broken problem.
             </p>
           </Card>

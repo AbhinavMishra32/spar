@@ -10,6 +10,7 @@ import { HowItWorks } from "@/components/sections/HowItWorks";
 import { LadderField } from "@/components/sections/Ladder";
 import { Languages } from "@/components/sections/Languages";
 import { Models } from "@/components/sections/Models";
+import { ProofRun } from "@/components/sections/Proof";
 import { Sources } from "@/components/sections/Sources";
 import { TheAgent } from "@/components/sections/TheAgent";
 import { TheApp } from "@/components/sections/TheApp";
@@ -33,6 +34,7 @@ export default async function Home() {
         <LadderField />
         <Workspace />
         <HowItWorks />
+        <ProofRun />
         <TheApp />
         <TheAgent />
         <Sources />

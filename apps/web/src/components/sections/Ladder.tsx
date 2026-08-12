@@ -143,7 +143,7 @@ export function LadderField() {
           // one per channel, pushed apart along the row. Where they agree you
           // get white; where they don't you get the fringe. Additive blending
           // is what makes the overlap add back up to white.
-          const split = radius * 0.34 * (0.25 + 0.75 * toDiagonal);
+          const split = radius * 0.27 * (0.25 + 0.75 * toDiagonal);
           ctx.globalAlpha = tone;
           ctx.fillStyle = "#ff0000";
           ctx.beginPath();

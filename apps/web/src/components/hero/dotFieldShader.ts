@@ -17,6 +17,12 @@
  * **It answers a click.** A band travels out from where you pressed, swelling
  * dots as it passes and taking the aberration with it.
  *
+ * **Two dots find each other.** Every so often, two dots somewhere in the grid
+ * pick themselves out and swell; the dots between them then light in from both
+ * ends and meet in the middle; a small ring opens where they met; and all of it
+ * lets go. Nothing is ever drawn between them — no line, no bolt. It is dots
+ * the whole way through, which is the only way it belongs to this page.
+ *
  * Kept in its own file because it is the one piece of this site that is a
  * program rather than markup, and it is easier to read whole.
  */
@@ -38,6 +44,9 @@ precision highp float;
  *  that cancels what you are doing the moment you do it again is not one. */
 #define RIPPLES 7
 
+/** How many arcs can be travelling at once. */
+#define ARCS 3
+
 
 uniform vec2  uRes;      // viewport, CSS px
 uniform float uDpr;      // device pixel ratio the canvas is backed at
@@ -49,6 +58,11 @@ uniform float uBase;     // resting dot radius at full tone, CSS px
 uniform float uMotion;   // 0 when the visitor asked for reduced motion
 uniform vec3  uClicks[RIPPLES]; // per ripple: xy where it landed, z its age
 uniform vec2  uDrift;    // parallax offset, CSS px, from the pointer's travel
+// An arc is a four-point path through the grid. Two vec4s carry the points and
+// one float carries its age; nothing carries a line, because there isn't one.
+uniform vec4  uArcA[ARCS];   // p0.xy, p1.xy
+uniform vec4  uArcB[ARCS];   // p2.xy, p3.xy
+uniform float uArcAge[ARCS]; // seconds since it struck, or below zero for idle
 
 out vec4 outColor;
 
@@ -57,6 +71,20 @@ const float INFLUENCE = 215.0;
 /** Where the aberration ring sits relative to the pointer, and how wide it is. */
 const float RING_AT = 110.0;
 const float RING_WIDTH = 92.0;
+/** The four beats, in seconds. The charge is the long one on purpose: two dots
+ *  quietly swelling for over a second is what makes the join read as something
+ *  that was coming rather than something that flashed. */
+const float ARC_CHARGE = 1.3;
+const float ARC_JOIN = 0.85;
+const float ARC_BURST = 0.5;
+const float ARC_SETTLE = 1.15;
+const float ARC_LIFE = 3.8;
+/** How far the burst's ring opens before it is gone, CSS px. */
+const float ARC_BURST_REACH = 118.0;
+/** How near a dot has to be to the path to be taken up by it, CSS px. Wide, so
+ *  the arc has shoulders and is not a one-dot-thick wire. */
+const float ARC_REACH = 30.0;
+
 /** How fast a click's band travels, CSS px per second, and how long it lives. */
 const float RIPPLE_SPEED = 720.0;
 const float RIPPLE_LIFE = 2.1;
@@ -64,6 +92,92 @@ const float RIPPLE_LIFE = 2.1;
 /** Antialiased coverage of a disc of radius r, at offset d from its centre. */
 float disc(vec2 d, float r) {
   return 1.0 - smoothstep(r - 1.1, r + 1.1, length(d));
+}
+
+/** How far along a segment a point sits, and how far off it. */
+vec2 segment(vec2 p, vec2 a, vec2 b) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-4), 0.0, 1.0);
+  return vec2(h * length(ba), length(pa - ba * h));
+}
+
+float easeOut(float t) {
+  return 1.0 - pow(1.0 - t, 3.0);
+}
+
+/** Two dots finding each other, in four beats.
+ *
+ *  Nothing is ever drawn between them. Every frame of this is dots — which ones
+ *  are lit, how big they are, and when their turn comes — because the mark is a
+ *  grid of dots and anything laid over it in a different medium is a second
+ *  thing on the page rather than the same thing doing something.
+ *
+ *    charge  two dots somewhere in the field pick themselves out and swell,
+ *            slowly, while nothing else happens. This is the beat that makes
+ *            the rest read as deliberate rather than ambient.
+ *    join    the dots between them light in from both ends at once and meet in
+ *            the middle. Both ends moving is what makes it a connection rather
+ *            than a signal being sent one way.
+ *    burst   a small ring opens from where they met and is gone almost at once.
+ *    settle  everything lets go together, slower than it arrived.
+ */
+float arcsAt(vec2 s) {
+  float lit = 0.0;
+  for (int i = 0; i < ARCS; i++) {
+    float age = uArcAge[i];
+    if (age < 0.0 || age > ARC_LIFE) continue;
+
+    vec2 p0 = uArcA[i].xy;
+    vec2 p1 = uArcA[i].zw;
+    vec2 p2 = uArcB[i].xy;
+    vec2 p3 = uArcB[i].zw;
+
+    float l0 = length(p1 - p0);
+    float l1 = length(p2 - p1);
+    float l2 = length(p3 - p2);
+    float total = max(l0 + l1 + l2, 1e-4);
+
+    // Nearest point on the route, and how far along the route it is.
+    vec2 a = segment(s, p0, p1);
+    vec2 b = segment(s, p1, p2);
+    vec2 c = segment(s, p2, p3);
+    float across = a.y;
+    float along = a.x;
+    if (b.y < across) { across = b.y; along = l0 + b.x; }
+    if (c.y < across) { across = c.y; along = l0 + l1 + c.x; }
+
+    // The four beats, each a 0..1 of its own.
+    float charge = clamp(age / ARC_CHARGE, 0.0, 1.0);
+    float join = clamp((age - ARC_CHARGE) / ARC_JOIN, 0.0, 1.0);
+    float burst = clamp((age - ARC_CHARGE - ARC_JOIN) / ARC_BURST, 0.0, 1.0);
+    float over = clamp((age - ARC_CHARGE - ARC_JOIN - ARC_BURST) / ARC_SETTLE, 0.0, 1.0);
+
+    float near = exp(-(across * across) / (ARC_REACH * ARC_REACH));
+    float atStart = exp(-(dot(s - p0, s - p0)) / (ARC_REACH * ARC_REACH));
+    float atEnd = exp(-(dot(s - p3, s - p3)) / (ARC_REACH * ARC_REACH));
+
+    // Beat one. Slow, and only the two of them.
+    float ends = (atStart + atEnd) * (0.15 + 0.85 * easeOut(charge));
+
+    // Beat two. Depth is zero at either end and one in the middle, so a single
+    // front fills the route inwards from both sides at the same time.
+    float u = along / total;
+    float depth = min(u, 1.0 - u) * 2.0;
+    float reach = easeOut(join);
+    float bridge = near * smoothstep(depth, depth + 0.14, reach);
+
+    // Beat three, from where the two halves met.
+    vec2 met = (p1 + p2) * 0.5;
+    float ring = easeOut(burst) * ARC_BURST_REACH;
+    float shell = exp(-pow((length(s - met) - ring) / 26.0, 2.0)) * (1.0 - burst) * step(0.001, burst);
+
+    // Beat four, over everything.
+    float alive = 1.0 - easeOut(over);
+
+    lit += (ends + bridge + shell * 1.15) * alive;
+  }
+  return min(lit, 1.4);
 }
 
 /** Every live ripple, summed.
@@ -104,6 +218,7 @@ void main() {
   edge = edge * edge * 1.7;
 
   float ripple = ripplesAt(s);
+  float arc = arcsAt(s);
 
   vec2 toPointer = s - uPointer;
   vec2 dir = normalize(toPointer + vec2(1e-4));
@@ -147,6 +262,10 @@ void main() {
       radius += ripple * uBase * 2.2;
       tone += ripple * 0.85;
 
+      // And whatever an arc has just taken up.
+      radius += arc * uBase * 2.0;
+      tone += arc * 0.95;
+
       // Aberration. Strongest in a ring around the pointer — a dot directly
       // under the cursor is the one thing you are looking at, so it stays
       // white and the split happens around it.
@@ -162,7 +281,7 @@ void main() {
       // Every term is a fraction of the dot's own radius, so the proportion
       // holds as the field swells, and a 2px offset never tears a 1.5px
       // resting dot into three separate coloured ones.
-      vec2 shift = dir * radius * (0.42 * ring + 0.18 * edge + 0.32 * ripple);
+      vec2 shift = dir * radius * (0.34 * ring + 0.14 * edge + 0.26 * ripple);
 
       tone = clamp(tone, 0.0, 1.0);
       acc = max(acc, tone * vec3(

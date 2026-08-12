@@ -16,6 +16,17 @@ type Props = {
  *  little, which is what makes the field feel like a surface. */
 const EASE = 0.12;
 
+/** Clicks that can be in the air at once — must match the shader's RIPPLES. */
+const RIPPLES = 7;
+/** Arcs travelling at once — must match the shader's ARCS. */
+const ARCS = 2;
+/** How long an arc lives, and the gap before that slot strikes again. An arc is
+ *  punctuation: rare enough that it stays a thing that happened. Two slots this
+ *  far apart put one somewhere on the screen every eight seconds or so, which
+ *  is about as often as you can have it before it turns into weather. */
+const ARC_LIFE = 3.8;
+const ARC_GAP = [11, 22] as const;
+
 function compile(gl: WebGL2RenderingContext, type: number, source: string) {
   const shader = gl.createShader(type);
   if (!shader) return null;
@@ -93,6 +104,9 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const uMotion = uniform("uMotion");
     const uClicks = uniform("uClicks");
     const uDrift = uniform("uDrift");
+    const uArcA = uniform("uArcA");
+    const uArcB = uniform("uArcB");
+    const uArcAge = uniform("uArcAge");
 
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
     let reduced = calm.matches;
@@ -108,13 +122,65 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     // waves; only the eighth one back is taken away from you, by which time it
     // has left the screen. Each slot is x, y, and the timestamp it landed at —
     // the age the shader wants is worked out per frame.
-    const RIPPLES = 7;
     const ripples = new Float32Array(RIPPLES * 3);
     const rippleAt = new Float64Array(RIPPLES).fill(-99_999);
     let nextRipple = 0;
     let visible = true;
     let frame = 0;
     const started = performance.now();
+
+    // Arcs: two vec4s of path points each, plus an age. Every slot keeps its
+    // own next-strike time, so they never fall into a rhythm.
+    const arcA = new Float32Array(ARCS * 4);
+    const arcB = new Float32Array(ARCS * 4);
+    const arcAge = new Float32Array(ARCS).fill(-1);
+    const arcDue = new Array<number>(ARCS).fill(0);
+    for (let i = 0; i < ARCS; i++) {
+      // Staggered from the first frame, so the hero does not open on three at
+      // once and then nothing for ten seconds.
+      arcDue[i] = 1800 + i * 7000 + Math.random() * 5000;
+    }
+
+    /** Picks the two dots and the route between them.
+     *
+     *  Every point is snapped to a dot's own centre, including the two bends in
+     *  the middle. That is what keeps this belonging to the grid rather than
+     *  sitting on top of it: the route has no positions of its own, only dots
+     *  it passes through. The bends are pushed off the straight line so the two
+     *  meet by a route rather than along a ruler. */
+    function strike(slot: number, w: number, h: number, step: number) {
+      const snap = (x: number, y: number): [number, number] => [
+        (Math.floor(x / step) + 0.5) * step,
+        (Math.floor(y / step) + 0.5) * step,
+      ];
+
+      const angle = Math.random() * Math.PI * 2;
+      const reach = step * (7 + Math.random() * 7);
+      const from = [0.12 * w + Math.random() * 0.76 * w, 0.12 * h + Math.random() * 0.76 * h];
+      const to = [from[0]! + Math.cos(angle) * reach, from[1]! + Math.sin(angle) * reach];
+
+      // Perpendicular, for throwing the middle of the path off the straight.
+      const px = -Math.sin(angle);
+      const py = Math.cos(angle);
+      const kink = () => (Math.random() - 0.5) * step * 3.2;
+      const at = (t: number, offset: number): [number, number] =>
+        snap(from[0]! + (to[0]! - from[0]!) * t + px * offset, from[1]! + (to[1]! - from[1]!) * t + py * offset);
+
+      const [x0, y0] = snap(from[0]!, from[1]!);
+      const [x1, y1] = at(0.34, kink());
+      const [x2, y2] = at(0.68, kink());
+      const [x3, y3] = snap(to[0]!, to[1]!);
+
+      arcA[slot * 4] = x0;
+      arcA[slot * 4 + 1] = y0;
+      arcA[slot * 4 + 2] = x1;
+      arcA[slot * 4 + 3] = y1;
+      arcB[slot * 4] = x2;
+      arcB[slot * 4 + 1] = y2;
+      arcB[slot * 4 + 2] = x3;
+      arcB[slot * 4 + 3] = y3;
+      arcAge[slot] = 0;
+    }
 
     function resize() {
       const canvas = canvasRef.current;
@@ -168,6 +234,25 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
         ripples[i * 3 + 2] = reduced ? 999 : (now - (rippleAt[i] ?? -99_999)) / 1000;
       }
 
+      // Each arc runs its life out and then books its own next strike, which is
+      // what keeps three of them from ever settling into a rhythm.
+      const elapsed = now - started;
+      for (let i = 0; i < ARCS; i++) {
+        if (reduced) {
+          arcAge[i] = -1;
+          continue;
+        }
+        if (elapsed < (arcDue[i] ?? 0)) continue;
+        const age = (elapsed - (arcDue[i] ?? 0)) / 1000;
+        if (age > ARC_LIFE) {
+          arcAge[i] = -1;
+          arcDue[i] = elapsed + (ARC_GAP[0] + Math.random() * (ARC_GAP[1] - ARC_GAP[0])) * 1000;
+        } else {
+          if (arcAge[i] === -1) strike(i, size.w, size.h, spacing);
+          arcAge[i] = age;
+        }
+      }
+
       gl.uniform2f(uRes, size.w, size.h);
       gl.uniform1f(uDpr, size.dpr);
       gl.uniform2f(uPointer, pointer.x, pointer.y);
@@ -183,6 +268,9 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       const leanX = Math.max(-1, Math.min(1, (pointer.x - size.w / 2) / (size.w / 2)));
       const leanY = Math.max(-1, Math.min(1, (pointer.y - size.h / 2) / (size.h / 2)));
       gl.uniform2f(uDrift, leanX * 11, leanY * 11);
+      gl.uniform4fv(uArcA, arcA);
+      gl.uniform4fv(uArcB, arcB);
+      gl.uniform1fv(uArcAge, arcAge);
 
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
