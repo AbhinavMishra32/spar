@@ -1,7 +1,7 @@
 import { markDots, markRadius } from "@/components/Mark";
 import { Reveal } from "@/components/Reveal";
 import { Section, SectionHead } from "@/components/Section";
-import { PROVIDER_PATHS, type ProviderId } from "@/components/icons";
+import { PROVIDER_PATHS, ProviderGlyph, type ProviderId } from "@/components/icons";
 
 type Source = {
   id: ProviderId;
@@ -42,13 +42,34 @@ export function Sources() {
   return (
     <Section>
       <SectionHead
-        index="04"
+        index="05"
         label="Practice sources"
         title="Spar writes most of your challenges. It does not have to write all of them."
         lede="Connect LeetCode or Codeforces and the agent can set you real problems alongside the ones it invents — chosen against the same target, tagged into the same ability ledger, sitting in the same history."
       />
 
-      <Reveal delay={90} className="mt-14">
+      {/* Below `sm` the diagram would be 340px wide, which puts its labels at
+          about five pixels. The same three facts, as rows. */}
+      <div className="mt-12 grid gap-3 sm:hidden">
+        {SOURCES.map((source) => (
+          <div
+            key={source.id}
+            className="flex items-center gap-4 rounded-xl border border-line bg-surface px-5 py-4"
+            style={source.live ? undefined : { opacity: 0.5 }}
+          >
+            <ProviderGlyph id={source.id} className="size-5 shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-[0.95rem] leading-tight">{source.name}</span>
+              <span className="mt-1 block font-mono text-[10px] tracking-[0.14em] text-ghost uppercase">
+                {source.live ? "connected" : "planned"}
+              </span>
+            </span>
+            <span className="shrink-0 text-[0.8rem] text-faint">{source.note}</span>
+          </div>
+        ))}
+      </div>
+
+      <Reveal delay={90} className="mt-14 hidden sm:block">
         <div className="card overflow-hidden p-4 sm:p-8">
           <svg
             viewBox="0 0 1000 380"

@@ -36,7 +36,7 @@ export function TheApp() {
 
       <div className="mt-14 grid gap-4 md:grid-cols-12">
         <Reveal className="md:col-span-7">
-          <Card className="p-8 md:p-10">
+          <Card className="p-6 sm:p-8 md:p-10">
             <Heading>Challenges proven before you ever see them.</Heading>
             <Body>
               Every challenge is generated for the target Spar picked, so nobody else is getting your exercise
@@ -59,7 +59,7 @@ export function TheApp() {
         </Reveal>
 
         <Reveal delay={90} className="md:col-span-5">
-          <Card className="justify-between p-8 md:p-10">
+          <Card className="justify-between p-6 sm:p-8 md:p-10">
             <div>
               <Heading>Verdicts nothing can talk out of you.</Heading>
               <Body>
@@ -75,7 +75,7 @@ export function TheApp() {
         </Reveal>
 
         <Reveal className="md:col-span-5">
-          <Card className="overflow-hidden p-8 pb-0 md:p-10 md:pb-0">
+          <Card className="overflow-hidden p-6 pb-0 sm:p-8 sm:pb-0 md:p-10 md:pb-0">
             <Heading>The ability ledger.</Heading>
             <Body>
               The page that answers &ldquo;what am I actually good at now&rdquo;. An <em>earned</em> ability is
@@ -93,7 +93,7 @@ export function TheApp() {
         </Reveal>
 
         <Reveal delay={90} className="md:col-span-7">
-          <Card className="p-8 md:p-10">
+          <Card className="p-6 sm:p-8 md:p-10">
             <Heading>Concepts you can interrogate.</Heading>
             <Body>
               Every challenge is tagged with what it exercises. Hover any tag, anywhere in the app, and you get
@@ -111,7 +111,7 @@ export function TheApp() {
         </Reveal>
 
         <Reveal className="md:col-span-7">
-          <Card className="overflow-hidden p-8 pb-0 md:p-10 md:pb-0">
+          <Card className="overflow-hidden p-6 pb-0 sm:p-8 sm:pb-0 md:p-10 md:pb-0">
             <Heading>Nothing is thrown away.</Heading>
             <Body>
               Every challenge Spar has ever written for you stays, filterable by open, passed or replaced —
@@ -129,7 +129,7 @@ export function TheApp() {
         </Reveal>
 
         <Reveal delay={90} className="md:col-span-5">
-          <Card className="justify-between p-8 md:p-10">
+          <Card className="justify-between p-6 sm:p-8 md:p-10">
             <div>
               <Heading>Real problems, when a real problem fits.</Heading>
               <Body>

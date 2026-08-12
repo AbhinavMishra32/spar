@@ -33,7 +33,7 @@ export function HowItWorks() {
       <ol className="mt-16 grid gap-px overflow-hidden rounded-2xl border border-line bg-line md:grid-cols-2">
         {STEPS.map((step, index) => (
           <Reveal key={step.title} delay={(index % 2) * 90}>
-            <li className="flex h-full flex-col gap-4 bg-ink p-8 md:p-10">
+            <li className="flex h-full flex-col gap-4 bg-ink p-6 sm:p-8 md:p-10">
               <span className="font-mono text-[11px] tracking-[0.2em] text-ghost">
                 {String(index + 1).padStart(2, "0")}
               </span>

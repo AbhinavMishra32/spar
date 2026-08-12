@@ -35,7 +35,7 @@
   --font-sans: var(--face-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: var(--face-mono), ui-monospace, "SF Mono", Menlo, monospace;
 
-  --text-display: clamp(2.9rem, 7.4vw, 6rem);
+  --text-display: clamp(2.45rem, 6.4vw, 5.2rem);
   --text-title: clamp(2rem, 4.2vw, 3.4rem);
   --text-lede: clamp(1.02rem, 1.35vw, 1.2rem);
 
@@ -87,6 +87,12 @@
     letter-spacing: var(--brand-tracking, -0.035em);
     line-height: 0.98;
     text-wrap: balance;
+  }
+
+  h1 {
+    /* Two lines that want to sit as a block, so they are set tighter than a
+       heading that has to breathe inside a section. */
+    line-height: 0.94;
   }
 
   p {
@@ -175,6 +181,15 @@
   .edge::after {
     right: max(calc(50% - var(--shell) / 2), 0px);
     translate: 50% -50%;
+  }
+
+  @media (max-width: 900px) {
+    /* No rails to sit on down here, and on the edge of the screen half of each
+       crosshair is off it. */
+    .edge::before,
+    .edge::after {
+      display: none;
+    }
   }
 
   /* ---- Labels and type ------------------------------------------------- */
@@ -484,6 +499,24 @@
     box-shadow:
       0 -1px 0 rgba(255, 255, 255, 0.12) inset,
       0 -30px 120px -30px rgba(255, 255, 255, 0.09);
+  }
+
+  @media (max-width: 640px) {
+    /* A phone is already too narrow to read the app's chrome, so the window is
+       pushed past both edges and the tilt comes off — at this width the
+       perspective reads as a rendering fault rather than as depth. */
+    .hero-window {
+      perspective: none;
+      padding-inline: 0;
+      max-width: none;
+    }
+
+    .hero-window > * {
+      transform: none;
+      width: 168%;
+      margin-inline: -34%;
+      mask-image: linear-gradient(to bottom, #000 46%, transparent 96%);
+    }
   }
 
   /* Each phase the agent announces replaces the last one. */

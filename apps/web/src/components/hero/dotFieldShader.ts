@@ -33,6 +33,12 @@ void main() {
 export const FRAGMENT_SHADER = /* glsl */ `#version 300 es
 precision highp float;
 
+/** How many clicks are in the air at once. The oldest is overwritten, so you
+ *  can keep clicking and keep getting waves — the field is a toy, and a toy
+ *  that cancels what you are doing the moment you do it again is not one. */
+#define RIPPLES 7
+
+
 uniform vec2  uRes;      // viewport, CSS px
 uniform float uDpr;      // device pixel ratio the canvas is backed at
 uniform vec2  uPointer;  // smoothed pointer, CSS px, y down
@@ -41,7 +47,7 @@ uniform float uTime;     // seconds
 uniform float uSpacing;  // grid step, CSS px
 uniform float uBase;     // resting dot radius at full tone, CSS px
 uniform float uMotion;   // 0 when the visitor asked for reduced motion
-uniform vec3  uClick;    // xy of the last click, z = seconds since it landed
+uniform vec3  uClicks[RIPPLES]; // per ripple: xy where it landed, z its age
 uniform vec2  uDrift;    // parallax offset, CSS px, from the pointer's travel
 
 out vec4 outColor;
@@ -52,12 +58,30 @@ const float INFLUENCE = 215.0;
 const float RING_AT = 110.0;
 const float RING_WIDTH = 92.0;
 /** How fast a click's band travels, CSS px per second, and how long it lives. */
-const float RIPPLE_SPEED = 780.0;
-const float RIPPLE_LIFE = 1.7;
+const float RIPPLE_SPEED = 720.0;
+const float RIPPLE_LIFE = 2.1;
 
 /** Antialiased coverage of a disc of radius r, at offset d from its centre. */
 float disc(vec2 d, float r) {
   return 1.0 - smoothstep(r - 1.1, r + 1.1, length(d));
+}
+
+/** Every live ripple, summed.
+ *
+ *  Measured at the fragment rather than at each dot's centre, so it is computed
+ *  once for the whole neighbourhood instead of seven times inside a nine-cell
+ *  loop. At the width these bands run, a dot cannot tell the difference. */
+float ripplesAt(vec2 s) {
+  float total = 0.0;
+  for (int i = 0; i < RIPPLES; i++) {
+    float age = uClicks[i].z;
+    if (age >= RIPPLE_LIFE) continue;
+    float front = (distance(s, uClicks[i].xy) - age * RIPPLE_SPEED) / 105.0;
+    total += exp(-front * front) * (1.0 - age / RIPPLE_LIFE);
+  }
+  // Overlapping fronts should build, but two arriving together must not blow
+  // the dot out to a white blob.
+  return min(total, 1.6);
 }
 
 /** The layer behind: sparser, dimmer, and further from the pointer's parallax.
@@ -78,6 +102,8 @@ void main() {
   // looking like a flat halftone.
   float edge = length(s - uRes * 0.5) / max(uRes.x, uRes.y);
   edge = edge * edge * 1.7;
+
+  float ripple = ripplesAt(s);
 
   vec2 toPointer = s - uPointer;
   vec2 dir = normalize(toPointer + vec2(1e-4));
@@ -117,15 +143,9 @@ void main() {
       radius += prox * uBase * 2.6;
       tone += prox * 1.25;
 
-      // The click's band.
-      float age = uClick.z;
-      float ripple = 0.0;
-      if (age < RIPPLE_LIFE) {
-        float front = (distance(center, uClick.xy) - age * RIPPLE_SPEED) / 110.0;
-        ripple = exp(-front * front) * (1.0 - age / RIPPLE_LIFE);
-        radius += ripple * uBase * 2.2;
-        tone += ripple * 0.85;
-      }
+      // The bands from every click still in the air.
+      radius += ripple * uBase * 2.2;
+      tone += ripple * 0.85;
 
       // Aberration. Strongest in a ring around the pointer — a dot directly
       // under the cursor is the one thing you are looking at, so it stays

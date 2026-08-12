@@ -35,7 +35,7 @@ export function Models() {
   return (
     <Section id="models">
       <SectionHead
-        index="05"
+        index="06"
         label="Bring your own model"
         title="Spar is a client for whatever model you want to drive it with."
         lede="It doesn't ship one and doesn't resell one. There is no Spar subscription — you point it at a model you already pay for or run yourself, and change your mind whenever you like."

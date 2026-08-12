@@ -64,7 +64,7 @@ export function Download() {
           const Glyph = GLYPHS[build.platform as keyof typeof GLYPHS];
           return (
             <Reveal key={build.platform} delay={index * 80}>
-              <div className="flex h-full flex-col rounded-2xl border border-line bg-surface p-7">
+              <div className="flex h-full flex-col rounded-2xl border border-line bg-surface p-6 sm:p-7">
                 <Glyph className="size-5 text-paper" />
                 <h3 className="mt-5 text-[1.1rem]">{build.platform}</h3>
                 <p className="mt-1.5 font-mono text-[11px] tracking-[0.1em] text-ghost">{build.detail}</p>

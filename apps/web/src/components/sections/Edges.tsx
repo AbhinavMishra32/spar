@@ -34,7 +34,7 @@ export function Edges() {
       <div className="grid gap-12 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-20">
         <div>
           <SectionHead
-            index="06"
+            index="07"
             label="The edges"
             title="What it doesn't do yet."
             lede="Worth knowing before you download, rather than after."

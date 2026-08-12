@@ -91,7 +91,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const uSpacing = uniform("uSpacing");
     const uBase = uniform("uBase");
     const uMotion = uniform("uMotion");
-    const uClick = uniform("uClick");
+    const uClicks = uniform("uClicks");
     const uDrift = uniform("uDrift");
 
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -104,8 +104,14 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
     const target = { x: -9999, y: -9999 };
     let active = 0;
     let activeTarget = 0;
-    let click: [number, number, number] = [0, 0, 999];
-    let clickAt = -999;
+    // A ring of clicks rather than one. Keep clicking and you keep getting
+    // waves; only the eighth one back is taken away from you, by which time it
+    // has left the screen. Each slot is x, y, and the timestamp it landed at —
+    // the age the shader wants is worked out per frame.
+    const RIPPLES = 7;
+    const ripples = new Float32Array(RIPPLES * 3);
+    const rippleAt = new Float64Array(RIPPLES).fill(-99_999);
+    let nextRipple = 0;
     let visible = true;
     let frame = 0;
     const started = performance.now();
@@ -158,8 +164,9 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       pointer.y += (target.y - pointer.y) * EASE;
       active += (wanted - active) * EASE;
 
-      const age = (now - clickAt) / 1000;
-      click[2] = age;
+      for (let i = 0; i < RIPPLES; i++) {
+        ripples[i * 3 + 2] = reduced ? 999 : (now - (rippleAt[i] ?? -99_999)) / 1000;
+      }
 
       gl.uniform2f(uRes, size.w, size.h);
       gl.uniform1f(uDpr, size.dpr);
@@ -169,7 +176,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       gl.uniform1f(uSpacing, spacing);
       gl.uniform1f(uBase, radius);
       gl.uniform1f(uMotion, reduced ? 0 : 1);
-      gl.uniform3f(uClick, click[0], click[1], reduced ? 999 : age);
+      gl.uniform3fv(uClicks, ripples);
       // How far the pointer is from the middle, in units the layers scale up.
       // Capped, so a cursor parked in a corner leans the field rather than
       // shearing the layers apart.
@@ -205,8 +212,15 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const rect = canvas.getBoundingClientRect();
-      click = [event.clientX - rect.left, event.clientY - rect.top, 0];
-      clickAt = performance.now();
+      const slot = nextRipple;
+      nextRipple = (nextRipple + 1) % RIPPLES;
+      ripples[slot * 3] = event.clientX - rect.left;
+      ripples[slot * 3 + 1] = event.clientY - rect.top;
+      rippleAt[slot] = performance.now();
+      // A tap is also the first time a touch device has pointed at anything,
+      // and it should take the swell with it rather than only sending a wave.
+      target.x = event.clientX - rect.left;
+      target.y = event.clientY - rect.top;
     }
 
     function onLeave() {
