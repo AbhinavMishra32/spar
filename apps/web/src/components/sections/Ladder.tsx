@@ -36,9 +36,11 @@ const ACTS = [
   },
 ];
 
-/** Grid size. Fewer columns on a phone, where the same count would be mush. */
-const COLS = { wide: 19, narrow: 9 };
-const ROWS = { wide: 11, narrow: 13 };
+/** Target spacing, near the hero field's own, with the column and row counts
+ *  derived from it. Fixing the counts instead makes the dots grow with the
+ *  container, and on a wide screen that is a handful of enormous circles rather
+ *  than a grid. */
+const STEP = 34;
 
 /** Stable per-dot pseudo-randomness — the same field on every visit. */
 function evidence(col: number, row: number) {
@@ -91,9 +93,8 @@ export function LadderField() {
       const travel = rect.height - window.innerHeight;
       const p = travel <= 0 ? 0 : Math.min(1, Math.max(0, -rect.top / travel));
 
-      const narrow = size.w < 640;
-      const cols = narrow ? COLS.narrow : COLS.wide;
-      const rows = narrow ? ROWS.narrow : ROWS.wide;
+      const cols = Math.max(7, Math.min(40, Math.round(size.w / STEP)));
+      const rows = Math.max(6, Math.min(24, Math.round(size.h / STEP)));
 
       // The two crossfades between the three acts.
       const toEvidence = smoothstep(0.14, 0.46, p);
@@ -102,7 +103,7 @@ export function LadderField() {
       const step = Math.min(size.w / (cols + 1), size.h / (rows + 1));
       const originX = (size.w - step * (cols - 1)) / 2;
       const originY = (size.h - step * (rows - 1)) / 2;
-      const base = step * 0.13;
+      const base = step * 0.1;
 
       ctx.clearRect(0, 0, size.w, size.h);
       ctx.globalCompositeOperation = "lighter";
@@ -120,13 +121,13 @@ export function LadderField() {
 
           // Act two: what the attempts actually showed. Same grid, no longer
           // uniform — a few cleared cleanly, most somewhere in between.
-          const evidenceR = base * (0.3 + 2.1 * ev * ev);
+          const evidenceR = base * (0.3 + 1.9 * ev * ev);
           const evidenceTone = 0.12 + 0.8 * ev * ev;
 
           // Act three: the mark's own taper, at the scale of the whole field.
           // Brightest along the leading diagonal, falling away from it.
           const offDiagonal = Math.abs(u - v);
-          const diagonalR = base * (2.2 - 2.0 * offDiagonal);
+          const diagonalR = base * (2.0 - 1.8 * offDiagonal);
           const diagonalTone = Math.max(0, 1 - 1.15 * offDiagonal);
 
           const radius = lerp(lerp(ladderR, evidenceR, toEvidence), diagonalR, toDiagonal);
@@ -194,7 +195,7 @@ export function LadderField() {
       <div className="sticky top-0 flex h-svh flex-col items-center justify-center overflow-hidden">
         <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden />
         {/* Keeps the copy off the brightest part of the field. */}
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(46%_34%_at_50%_52%,rgba(0,0,0,0.9),transparent_78%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(52%_40%_at_50%_52%,rgba(0,0,0,0.94),rgba(0,0,0,0.72)_58%,transparent_82%)]" />
 
         <div className="shell relative z-10 text-center">
           {/* Stacked, so the box never resizes as one line replaces another. */}

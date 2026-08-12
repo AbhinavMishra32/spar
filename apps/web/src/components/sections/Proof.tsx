@@ -15,6 +15,11 @@ import { useEffect, useRef } from "react";
  * the visible tests looks like a bug in the page until the hidden rows catch
  * it, which is exactly the argument: a hidden test only means something if the
  * visible ones could be passed without it.
+ *
+ * The suite has a column of the layout to itself. It used to be a full-bleed
+ * canvas with the copy floating over it, which put a wall of dots directly
+ * behind the words — unreadable, and it made the grid a background rather than
+ * the diagram it is.
  */
 
 const ACTS = [
@@ -35,8 +40,10 @@ const ACTS = [
   },
 ];
 
-const COLS = { wide: 16, narrow: 8 };
-/** Three rows you are shown, three you are not. */
+/** Roughly the spacing the hero's field runs at, so the two read as one system.
+ *  Columns are derived from it rather than fixed, or the dots grow with the
+ *  container and a wide screen gets a handful of enormous circles. */
+const STEP = 26;
 const VISIBLE_ROWS = 3;
 const HIDDEN_ROWS = 3;
 
@@ -75,14 +82,16 @@ export function ProofRun() {
     function draw() {
       frame = requestAnimationFrame(draw);
       const wrap = wrapRef.current;
-      if (!wrap || !ctx) return;
+      if (!wrap || !ctx || size.w === 0) return;
 
       const rect = wrap.getBoundingClientRect();
       const travel = rect.height - window.innerHeight;
       const p = travel <= 0 ? 0 : Math.min(1, Math.max(0, -rect.top / travel));
 
-      const cols = size.w < 640 ? COLS.narrow : COLS.wide;
       const rows = VISIBLE_ROWS + HIDDEN_ROWS;
+      const cols = Math.max(6, Math.min(34, Math.round(size.w / STEP)));
+      const step = size.w / (cols + 1);
+      const base = step * 0.17;
 
       // Each act is a pass over the suite, left to right. The front is where
       // that run has got to; a dot behind it has been decided, one ahead of it
@@ -91,22 +100,31 @@ export function ProofRun() {
       const broken = smoothstep(0.4, 0.66, p);
       const hidden = smoothstep(0.74, 0.96, p);
 
-      const step = Math.min(size.w / (cols + 1.5), size.h / (rows + 3));
+      // The gap between the halves, and room above each for its label.
+      const gap = step * 1.9;
+      const label = 22;
+      const gridH = step * (rows - 1) + gap + label * 2;
       const originX = (size.w - step * (cols - 1)) / 2;
-      // The gap between the two halves, so they read as two suites not one.
-      const split = step * 0.9;
-      const gridH = step * (rows - 1) + split;
-      const originY = (size.h - gridH) / 2;
-      const base = step * 0.15;
+      const originY = (size.h - gridH) / 2 + label;
 
       ctx.clearRect(0, 0, size.w, size.h);
+      ctx.font = "500 10px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.letterSpacing = "0.18em";
+
+      // Labels are drawn into the canvas rather than positioned over it, so
+      // they cannot drift away from the rows they name.
+      ctx.fillStyle = "rgba(255,255,255,0.42)";
+      ctx.globalAlpha = 0.35 + 0.65 * reference;
+      ctx.fillText("VISIBLE TESTS", originX, originY - 12);
+      ctx.globalAlpha = 0.35 + 0.65 * Math.max(reference, hidden);
+      ctx.fillText("HIDDEN TESTS", originX, originY + step * VISIBLE_ROWS + gap - 12);
+      ctx.globalAlpha = 1;
 
       for (let row = 0; row < rows; row++) {
         const isHidden = row >= VISIBLE_ROWS;
         for (let col = 0; col < cols; col++) {
           const x = originX + col * step;
-          const y = originY + row * step + (isHidden ? split : 0);
-          // Where this column sits in a left-to-right run.
+          const y = originY + row * step + (isHidden ? gap + label : 0);
           const front = cols > 1 ? col / (cols - 1) : 0;
           const reached = (run: number) => smoothstep(front * 0.85, front * 0.85 + 0.18, run);
 
@@ -121,29 +139,29 @@ export function ProofRun() {
           const lit = Math.max(passRef, passBroken, failHidden);
           if (lit <= 0.01) {
             // Not yet reached: the case exists, it just has no verdict.
-            ctx.globalAlpha = 0.16;
+            ctx.globalAlpha = 0.14;
             ctx.fillStyle = "#ffffff";
             ctx.beginPath();
-            ctx.arc(x, y, base * 0.55, 0, Math.PI * 2);
+            ctx.arc(x, y, base * 0.5, 0, Math.PI * 2);
             ctx.fill();
             continue;
           }
 
-          const radius = base * lerp(0.55, 1, lit);
+          const radius = base * lerp(0.5, 1, lit);
           if (failHidden > 0.01) {
-            // A failure is the one place this page uses colour as fill. It has
-            // earned it: this is the moment the check does its job.
+            // A failure is the one place this page uses colour as a fill. It
+            // has earned it: this is the moment the check does its job.
             ctx.globalAlpha = failHidden;
             ctx.fillStyle = "#ff2d55";
             ctx.beginPath();
-            ctx.arc(x, y, radius * 1.1, 0, Math.PI * 2);
+            ctx.arc(x, y, radius, 0, Math.PI * 2);
             ctx.fill();
-            ctx.globalAlpha = failHidden * 0.28;
+            ctx.globalAlpha = failHidden * 0.22;
             ctx.beginPath();
-            ctx.arc(x, y, radius * 2.6, 0, Math.PI * 2);
+            ctx.arc(x, y, radius * 2.4, 0, Math.PI * 2);
             ctx.fill();
           } else {
-            ctx.globalAlpha = lit;
+            ctx.globalAlpha = 0.28 + 0.72 * lit;
             ctx.fillStyle = "#ffffff";
             ctx.beginPath();
             ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -162,12 +180,6 @@ export function ProofRun() {
         node.style.opacity = String(calm.matches ? (index === 0 ? 1 : 0) : shown);
         node.style.transform = `translateY(${(1 - shown) * 12}px)`;
       }
-
-      // The row labels come up with the half they belong to.
-      const visibleLabel = wrap.querySelector<HTMLElement>("[data-half='visible']");
-      const hiddenLabel = wrap.querySelector<HTMLElement>("[data-half='hidden']");
-      if (visibleLabel) visibleLabel.style.opacity = String(0.25 + 0.75 * reference);
-      if (hiddenLabel) hiddenLabel.style.opacity = String(0.25 + 0.75 * Math.max(reference, hidden));
     }
 
     const observer = new ResizeObserver(resize);
@@ -183,16 +195,15 @@ export function ProofRun() {
 
   return (
     <div ref={wrapRef} className="edge relative h-[280svh]">
-      <div className="sticky top-0 flex h-svh flex-col items-center justify-center overflow-hidden">
-        <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" aria-hidden />
-
-        <div className="shell relative z-10 grid w-full gap-10 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
-          <div className="relative min-h-[13rem]">
+      <div className="sticky top-0 flex h-svh items-center overflow-hidden">
+        <div className="shell grid w-full items-center gap-12 lg:grid-cols-[minmax(0,25rem)_minmax(0,1fr)] lg:gap-16">
+          <div>
             <p className="eyebrow">
               <span data-index>[04]</span>
               Proven before you see it
             </p>
-            <div className="relative mt-7 grid">
+            {/* Stacked, so the block never resizes as one line replaces another. */}
+            <div className="relative mt-7 grid min-h-[10rem]">
               {ACTS.map((act, index) => (
                 <div
                   key={act.label}
@@ -203,7 +214,7 @@ export function ProofRun() {
                   <p className="font-mono text-[10.5px] tracking-[0.2em] text-faint uppercase">
                     {act.label}
                   </p>
-                  <p className="mt-4 font-display text-[clamp(1.35rem,2.4vw,1.95rem)] leading-[1.16]">
+                  <p className="mt-4 font-display text-[clamp(1.3rem,2.2vw,1.8rem)] leading-[1.16]">
                     {act.line}
                   </p>
                 </div>
@@ -211,20 +222,14 @@ export function ProofRun() {
             </div>
           </div>
 
-          {/* The two halves, named beside the rows they label. */}
-          <div className="hidden flex-col justify-center gap-[7.5rem] pt-2 lg:flex">
-            <p
-              data-half="visible"
-              className="font-mono text-[10px] tracking-[0.22em] text-faint uppercase transition-opacity"
-            >
-              Visible tests
-            </p>
-            <p
-              data-half="hidden"
-              className="font-mono text-[10px] tracking-[0.22em] text-faint uppercase transition-opacity"
-            >
-              Hidden tests
-            </p>
+          {/* The suite gets its own column, and nothing is set over it. */}
+          <div className="h-[15rem] w-full sm:h-[17rem]">
+            <canvas
+              ref={canvasRef}
+              className="h-full w-full"
+              role="img"
+              aria-label="A test suite drawn as dots: the visible cases above the hidden ones. The reference solution passes both, a deliberately broken version passes the visible cases, and the hidden cases catch it."
+            />
           </div>
         </div>
       </div>

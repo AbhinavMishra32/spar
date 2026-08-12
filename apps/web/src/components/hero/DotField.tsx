@@ -9,6 +9,13 @@ type Props = {
   spacing?: number;
   /** Resting dot radius in CSS px, before the pointer gets to it. */
   radius?: number;
+  /** Element whose box the dots lift around, or null where there is nothing in
+   *  the field to seat. Queried on layout, not per frame. */
+  seat?: string | null;
+  /** Fraction of the canvas height arcs are allowed to strike in. The hero's
+   *  lower half is behind the app window and under the mask; a panel that ends
+   *  where its dots end can use all of it. */
+  arcZone?: number;
   className?: string;
 };
 
@@ -49,7 +56,13 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string) {
  * browser has no WebGL2, the element keeps a plain CSS dot grid instead — the
  * page is still the page, it just holds still.
  */
-export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
+export function DotField({
+  spacing = 32,
+  radius = 2.9,
+  seat: seatSelector = ".hero-window > *",
+  arcZone = 0.52,
+  className,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -157,7 +170,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       // the app window sits over and the part the mask has already faded out.
       // An arc down there happens where nobody can see it, so the whole event
       // is kept to the band where the field is actually legible.
-      const zone = Math.min(h * 0.52, window.innerHeight * 0.94);
+      const zone = Math.min(h * arcZone, window.innerHeight * 0.94);
       const snap = (x: number, y: number): [number, number] => [
         (Math.floor(x / step) + 0.5) * step,
         (Math.floor(y / step) + 0.5) * step,
@@ -241,7 +254,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       // relative to the other, so this only has to be measured when the layout
       // changes. getBoundingClientRect gives the box after the perspective
       // tilt, which is the box you actually see.
-      const window_ = document.querySelector(".hero-window > *");
+      const window_ = seatSelector ? document.querySelector(seatSelector) : null;
       if (!window_) {
         seat.halfW = -1;
         return;
@@ -416,7 +429,7 @@ export function DotField({ spacing = 32, radius = 2.9, className }: Props) {
       gl.deleteShader(fragment);
       if (wrap) delete wrap.dataset.live;
     };
-  }, [spacing, radius]);
+  }, [spacing, radius, seatSelector, arcZone]);
 
   return (
     <div ref={wrapRef} className={cn("dot-field", className)} aria-hidden>

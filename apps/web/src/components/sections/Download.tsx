@@ -2,6 +2,7 @@ import { DownloadButton } from "@/components/DownloadButton";
 import { Mark } from "@/components/Mark";
 import { Reveal } from "@/components/Reveal";
 import { Section } from "@/components/Section";
+import { DotField } from "@/components/hero/DotField";
 import { AppleGlyph, ArrowGlyph, LinuxGlyph, WindowsGlyph } from "@/components/icons";
 import type { Release } from "@/lib/release";
 import { site } from "@/lib/site";
@@ -24,18 +25,13 @@ export function Download({ release }: { release: Release }) {
   return (
     <Section id="download">
       <Reveal>
-        <div className="beam-border relative overflow-hidden rounded-3xl border border-line bg-surface px-6 py-16 text-center sm:px-12">
-          {/* A quiet echo of the hero, so the page closes where it opened. */}
-          <div
-            aria-hidden
-            className="pointer-events-none absolute inset-0 opacity-[0.55]"
-            style={{
-              backgroundImage:
-                "radial-gradient(circle at center, rgba(255,255,255,0.16) 1.2px, transparent 1.3px)",
-              backgroundSize: "30px 30px",
-              maskImage: "radial-gradient(60% 70% at 50% 50%, transparent 20%, #000 90%)",
-            }}
-          />
+        <div className="beam-border relative isolate overflow-hidden rounded-3xl border border-line bg-surface px-6 py-20 text-center sm:px-12 sm:py-24">
+          {/* The page opened on the field and closes on it — the same dots, the
+              same swell under the cursor, arcs and all. A CSS halftone stood in
+              here before, and a still picture of the field in the one place the
+              page is asking for something reads as the moment it gave up. */}
+          <DotField spacing={30} radius={2.7} seat={null} arcZone={1} className="dot-field--panel" />
+          <div className="panel-scrim" aria-hidden />
 
           <div className="relative">
             <Mark size={34} animated className="mx-auto" />
@@ -59,16 +55,49 @@ export function Download({ release }: { release: Release }) {
         </div>
       </Reveal>
 
-      <div className="mt-4 grid gap-4 md:grid-cols-3">
-        {release.builds.map((build, index) => {
-          const Glyph = GLYPHS[build.platform as keyof typeof GLYPHS];
-          return (
-            <Reveal key={build.platform} delay={index * 80}>
-              <div className="flex h-full flex-col rounded-2xl border border-line bg-surface p-6 sm:p-7">
-                <Glyph className="size-5 text-paper" />
-                <h3 className="mt-5 text-[1.1rem]">{build.platform}</h3>
-                <p className="mt-1.5 font-mono text-[11px] tracking-[0.1em] text-ghost">{build.detail}</p>
-                <div className="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-5">
+      {/* Every build, as a manifest rather than as three cards. Three cards
+          side by side ask you to compare them, and there is nothing to compare:
+          you are on one of these machines and you want that row. A list with the
+          version and the source above it reads the way a release page reads. */}
+      <Reveal className="mt-10">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-line pb-3">
+          <p className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
+            All builds — v{release.version}
+          </p>
+          <a
+            href={site.releases}
+            target="_blank"
+            rel="noreferrer"
+            className="group inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.16em] text-ghost uppercase transition-colors hover:text-paper"
+          >
+            Checksums and notes on GitHub
+            <ArrowGlyph className="size-3 transition-transform group-hover:translate-x-0.5" />
+          </a>
+        </div>
+
+        <ul className="divide-y divide-line border-b border-line">
+          {release.builds.map((build) => {
+            const Glyph = GLYPHS[build.platform as keyof typeof GLYPHS];
+            return (
+              <li
+                key={build.platform}
+                className="flex flex-col gap-4 py-5 transition-colors hover:bg-white/[0.015] sm:flex-row sm:items-center sm:gap-6 sm:px-2"
+              >
+                <Glyph className="size-[17px] shrink-0 text-paper" />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-[1.02rem] leading-none">{build.platform}</h3>
+                  <p className="mt-2 font-mono text-[11px] tracking-[0.1em] text-ghost">{build.detail}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-5">
+                  {build.alt ? (
+                    <a
+                      href={build.alt.href}
+                      download=""
+                      className="font-mono text-[11px] tracking-[0.1em] text-faint transition-colors hover:text-paper"
+                    >
+                      {build.alt.label}
+                    </a>
+                  ) : null}
                   <a
                     href={build.href}
                     download=""
@@ -77,23 +106,14 @@ export function Download({ release }: { release: Release }) {
                     Download
                     <ArrowGlyph className="size-3.5 transition-transform group-hover:translate-x-0.5" />
                   </a>
-                  {build.alt ? (
-                    <a
-                      href={build.alt.href}
-                      download=""
-                      className="text-[0.9rem] text-faint transition-colors hover:text-paper"
-                    >
-                      {build.alt.label}
-                    </a>
-                  ) : null}
                 </div>
-              </div>
-            </Reveal>
-          );
-        })}
-      </div>
+              </li>
+            );
+          })}
+        </ul>
+      </Reveal>
 
-      <div className="mt-16 grid gap-10 border-t border-line pt-12 md:grid-cols-2 md:gap-16">
+      <div className="mt-14 grid gap-10 md:grid-cols-2 md:gap-16">
         {NEEDS.map((need, index) => (
           <Reveal key={need.title} delay={index * 90}>
             <h3 className="text-[1.1rem]">{need.title}</h3>

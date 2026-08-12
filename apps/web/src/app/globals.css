@@ -508,6 +508,29 @@
     background-image: none;
   }
 
+  /* The same field inside a panel rather than behind a fold. A panel ends where
+     its own border is, so the mask closes in from every edge instead of falling
+     away downwards — dots cut off against a rounded corner read as a texture
+     that was cropped, not a field the panel is sitting in. */
+  .dot-field--panel {
+    background-size: 30px 30px;
+    mask-image: radial-gradient(115% 125% at 50% 50%, #000 38%, transparent 84%);
+  }
+
+  /* What the copy is read against. Same job as .hero-scrim, tighter, because a
+     panel gives the words less room to get clear of the grid. */
+  .panel-scrim {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      46% 52% at 50% 50%,
+      rgba(0, 0, 0, 0.94),
+      rgba(0, 0, 0, 0.62) 55%,
+      transparent 82%
+    );
+  }
+
   /* Sits between the field and the copy. Without it the headline is read
      against moving dots, which is exactly as hard as it sounds. */
   .hero-scrim {
