@@ -6,138 +6,271 @@ import { PROVIDER_PATHS, ProviderGlyph, type ProviderId } from "@/components/ico
 type Source = {
   id: ProviderId;
   name: string;
-  /** Vertical centre of its tile, in the diagram's own coordinates. */
-  cy: number;
+  /** What it is actually good for, in the app's own terms. */
+  note: string;
   /** Connected today, or listed in the app as planned. */
   live: boolean;
-  note: string;
 };
 
 const SOURCES: readonly Source[] = [
-  { id: "leetcode", name: "LeetCode", cy: 89, live: true, note: "Judged there. Run there too." },
-  { id: "codeforces", name: "Codeforces", cy: 190, live: true, note: "Judged there." },
-  { id: "hackerrank", name: "HackerRank", cy: 291, live: false, note: "Planned." },
+  { id: "leetcode", name: "LeetCode", note: "Submit and run, both on their judge", live: true },
+  { id: "codeforces", name: "Codeforces", note: "Submit to their judge; examples run here", live: true },
+  { id: "hackerrank", name: "HackerRank", note: "Shown in the app as planned", live: false },
 ];
 
-/** Tile geometry, shared by the rects and the beams that meet them. */
-const TILE = { x: 20, w: 200, h: 74 };
-const CORE = { x: 430, y: 125, w: 150, h: 130 };
-const LEDGER = { x: 800, w: 180, h: 74, cy: 190 };
+const PRODUCED = [
+  {
+    title: "Your attempt",
+    /** Fits inside the tile at 9.5px mono; `long` is for the stacked layout. */
+    note: "graded by the tests",
+    long: "Graded by the tests, never by the agent",
+  },
+  {
+    title: "Attempt history",
+    note: "every run kept",
+    long: "Every run kept, nothing thrown away",
+  },
+];
 
-function beam(cy: number) {
-  const from = TILE.x + TILE.w;
-  const to = CORE.x;
-  const mid = (from + to) / 2;
-  return `M${from},${cy} C${mid},${cy} ${mid},190 ${to},190`;
+/* The geometry, in one place, because the wires have to land on the tiles
+   exactly. Every path below is derived from these — there are no typed-in
+   coordinates left to drift out of step with a tile that moved. */
+const IN = { x: 24, w: 214, h: 74, ys: [100, 198, 296] } as const;
+const CORE = { x: 424, y: 122, w: 158, h: 150 } as const;
+const OUT = { x: 764, w: 212, h: 74, ys: [140, 268] } as const;
+/** The centre line every wire meets the agent on. */
+const AXIS = 198;
+
+const CORE_MID = CORE.x + CORE.w / 2;
+const IN_EDGE = IN.x + IN.w;
+const CORE_EDGE = CORE.x + CORE.w;
+
+/** A source's wire, curving in to meet the agent on the centre line. */
+function wireIn(cy: number) {
+  const mid = (IN_EDGE + CORE.x) / 2;
+  return `M${IN_EDGE},${cy} C${mid},${cy} ${mid},${AXIS} ${CORE.x},${AXIS}`;
 }
 
+/** The agent's wire, fanning back out to what the turn produced. */
+function wireOut(cy: number) {
+  const mid = (CORE_EDGE + OUT.x) / 2;
+  return `M${CORE_EDGE},${AXIS} C${mid},${AXIS} ${mid},${cy} ${OUT.x},${cy}`;
+}
+
+/** History, back round to the next target. Rounded corners, not mitred ones. */
+const LOOP_Y = 392;
+const LOOP_X = OUT.x + OUT.w / 2;
+const LOOP = [
+  `M${LOOP_X},${OUT.ys[1]! + OUT.h / 2}`,
+  `L${LOOP_X},${LOOP_Y - 14}`,
+  `Q${LOOP_X},${LOOP_Y} ${LOOP_X - 14},${LOOP_Y}`,
+  `L${CORE_MID + 14},${LOOP_Y}`,
+  `Q${CORE_MID},${LOOP_Y} ${CORE_MID},${LOOP_Y - 14}`,
+  `L${CORE_MID},${CORE.y + CORE.h}`,
+].join(" ");
+
+/** The loop's label sits on the middle of the horizontal run it interrupts. */
+const LABEL_X = (CORE_MID + LOOP_X) / 2;
+const LABEL_W = 232;
+
 /**
- * Where Spar's own challenges and other people's problems meet.
+ * Where a challenge comes from, and where it ends up.
  *
- * Drawn as one SVG rather than positioned tiles with an overlay: the beams have
- * to land exactly on the edge of each tile, and any layout where the wires and
- * the boxes are measured separately drifts apart the moment the column resizes.
+ * Drawn as one SVG rather than tiles with an overlay: the wires have to land
+ * exactly on the edge of each tile, and any layout that measures the boxes and
+ * the wires separately drifts apart the moment the column resizes.
+ *
+ * The loop underneath is the point of the diagram. A left-to-right pipe would
+ * say Spar fetches problems from somewhere and hands them to you, which is what
+ * every other practice site does. What it actually does is read what your
+ * attempt proved and let that set the next target — so the last wire goes back
+ * to where the first one started.
  */
 export function Sources() {
   return (
-    <Section>
+    <Section id="sources">
       <SectionHead
         index="05"
         label="Practice sources"
         title="Spar writes most of your challenges. It does not have to write all of them."
-        lede="Connect LeetCode or Codeforces and real problems arrive against the same target, in the same ledger, in the same history."
+        lede="Connect LeetCode or Codeforces and real problems arrive against the same target, in the same history, judged by the people who wrote them."
       />
 
-      {/* Below `sm` the diagram would be 340px wide, which puts its labels at
-          about five pixels. The same three facts, as rows. */}
-      <div className="mt-12 grid gap-3 sm:hidden">
-        {SOURCES.map((source) => (
-          <div
-            key={source.id}
-            className="flex items-center gap-4 rounded-xl border border-line bg-surface px-5 py-4"
-            style={source.live ? undefined : { opacity: 0.5 }}
-          >
-            <ProviderGlyph id={source.id} className="size-5 shrink-0" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-[0.95rem] leading-tight">{source.name}</span>
-              <span className="mt-1 block font-mono text-[10px] tracking-[0.14em] text-ghost uppercase">
-                {source.live ? "connected" : "planned"}
+      {/* Below `sm` the diagram would be 1000 units wide in a 340px column,
+          which puts its labels at about five pixels. The same flow, stacked. */}
+      <div className="mt-12 sm:hidden">
+        <p className="font-mono text-[10px] tracking-[0.2em] text-ghost uppercase">Sources</p>
+        <div className="mt-3 grid gap-2">
+          {SOURCES.map((source) => (
+            <div
+              key={source.id}
+              className={`flex items-center gap-3.5 rounded-xl border border-line bg-surface px-4 py-3.5 ${
+                source.live ? "" : "opacity-45"
+              }`}
+            >
+              <ProviderGlyph id={source.id} className="size-[18px] shrink-0" />
+              <span className="min-w-0">
+                <span className="block text-[0.92rem] leading-tight">{source.name}</span>
+                <span className="mt-0.5 block text-[0.78rem] text-faint">{source.note}</span>
               </span>
-            </span>
-            <span className="shrink-0 text-[0.8rem] text-faint">{source.note}</span>
-          </div>
-        ))}
+            </div>
+          ))}
+        </div>
+
+        <p className="my-4 text-center font-mono text-[10px] tracking-[0.16em] text-ghost">
+          ↓ searched first, every turn
+        </p>
+
+        <div className="rounded-xl border border-line-strong bg-white/[0.05] px-4 py-4 text-center">
+          <p className="text-[0.95rem]">Spar picks the target</p>
+          <p className="mt-1 text-[0.78rem] text-faint">Assign what it found, or write one for you</p>
+        </div>
+
+        <p className="my-4 text-center font-mono text-[10px] tracking-[0.16em] text-ghost">↓</p>
+
+        <div className="grid gap-2">
+          {PRODUCED.map((item) => (
+            <div key={item.title} className="rounded-xl border border-line bg-surface px-4 py-3.5">
+              <p className="text-[0.92rem] leading-tight">{item.title}</p>
+              <p className="mt-0.5 text-[0.78rem] text-faint">{item.long}</p>
+            </div>
+          ))}
+        </div>
+
+        <p className="mt-5 text-center font-mono text-[10px] tracking-[0.14em] text-faint">
+          ↺ what you prove sets the next target
+        </p>
       </div>
 
       <Reveal delay={90} className="mt-14 hidden sm:block">
-        <div className="card overflow-hidden p-4 sm:p-8">
+        <div className="card overflow-hidden p-4 sm:p-6">
           <svg
-            viewBox="0 0 1000 380"
+            viewBox="0 0 1000 430"
             className="h-auto w-full"
             role="img"
-            aria-label="LeetCode and Codeforces feed problems into Spar, which files what you prove into one ability ledger. HackerRank is planned."
+            aria-label="LeetCode and Codeforces feed problems to Spar, which searches them before writing its own. What it sets becomes your attempt, graded by the tests, and lands in one attempt history — which sets the next target. HackerRank is planned."
           >
             <defs>
-              {/* The beam's head is bright and its tail falls away, so the dash
-                  reads as something travelling rather than a moving stripe. */}
+              {/* The head is bright and the tail falls away, so the dash reads as
+                  something travelling rather than as a moving stripe. */}
               <linearGradient id="beam-head" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#fff" stopOpacity="0" />
-                <stop offset="55%" stopColor="#00e5ff" stopOpacity="0.55" />
-                <stop offset="100%" stopColor="#fff" stopOpacity="0.95" />
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0" />
+                <stop offset="60%" stopColor="#00e5ff" stopOpacity="0.5" />
+                <stop offset="100%" stopColor="#ffffff" stopOpacity="0.95" />
               </linearGradient>
+              <radialGradient id="core-glow">
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.11" />
+                <stop offset="100%" stopColor="#ffffff" stopOpacity="0" />
+              </radialGradient>
             </defs>
 
-            {SOURCES.map((source, index) => {
-              const cy = source.cy;
-              return (
-                <g key={source.id} opacity={source.live ? 1 : 0.42}>
-                  <rect
-                    x={TILE.x}
-                    y={cy - TILE.h / 2}
-                    width={TILE.w}
-                    height={TILE.h}
-                    rx={16}
-                    className="fill-white/[0.03] stroke-line"
-                    strokeWidth={1}
+            <text x={IN.x} y={40} className="fill-ghost font-mono text-[10px] tracking-[0.2em]">
+              SOURCES
+            </text>
+            <text x={CORE.x} y={40} className="fill-ghost font-mono text-[10px] tracking-[0.2em]">
+              THE AGENT
+            </text>
+            <text x={OUT.x} y={40} className="fill-ghost font-mono text-[10px] tracking-[0.2em]">
+              YOUR EVIDENCE
+            </text>
+
+            {/* Wires first, so every tile sits on top of the line it ends. */}
+            <g fill="none">
+              {SOURCES.map((source, index) => (
+                <path
+                  key={source.id}
+                  d={wireIn(IN.ys[index]!)}
+                  className="stroke-line"
+                  strokeWidth={1}
+                  opacity={source.live ? 1 : 0.5}
+                />
+              ))}
+              {OUT.ys.map((cy) => (
+                <path key={cy} d={wireOut(cy)} className="stroke-line" strokeWidth={1} />
+              ))}
+              <path d={LOOP} className="stroke-line" strokeWidth={1} strokeDasharray="3 5" />
+
+              {/* The pulses. Every beam declares pathLength, so one animation
+                  drives wires of four different lengths at the same apparent
+                  speed — and, more to the point, actually crosses all of them.
+                  In user units a 26-long dash on a 210-long path is only on
+                  screen for the last few percent of its travel, which is why
+                  this used to look like only LeetCode was connected. */}
+              {SOURCES.map((source, index) =>
+                source.live ? (
+                  <path
+                    key={source.id}
+                    d={wireIn(IN.ys[index]!)}
+                    pathLength={100}
+                    className="beam"
+                    stroke="url(#beam-head)"
+                    strokeWidth={1.8}
+                    strokeLinecap="round"
+                    style={{ animationDelay: `${index * 1.15}s` }}
                   />
-                  <g transform={`translate(46 ${cy - 12}) scale(1)`} className="fill-paper">
-                    <path d={PROVIDER_PATHS[source.id]} transform="scale(1)" />
+                ) : null,
+              )}
+              {OUT.ys.map((cy, index) => (
+                <path
+                  key={cy}
+                  d={wireOut(cy)}
+                  pathLength={100}
+                  className="beam"
+                  stroke="url(#beam-head)"
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                  style={{ animationDelay: `${1.7 + index * 0.5}s` }}
+                />
+              ))}
+              <path
+                d={LOOP}
+                pathLength={100}
+                className="beam"
+                stroke="url(#beam-head)"
+                strokeWidth={1.6}
+                strokeLinecap="round"
+                style={{ animationDelay: "2.9s" }}
+              />
+            </g>
+
+            {SOURCES.map((source, index) => {
+              const cy = IN.ys[index]!;
+              return (
+                <g key={source.id} className="group" opacity={source.live ? 1 : 0.42}>
+                  <rect
+                    x={IN.x}
+                    y={cy - IN.h / 2}
+                    width={IN.w}
+                    height={IN.h}
+                    rx={16}
+                    strokeWidth={1}
+                    className="fill-surface stroke-line transition-colors duration-300 group-hover:stroke-line-strong"
+                  />
+                  <g transform={`translate(${IN.x + 22} ${cy - 11}) scale(0.92)`} className="fill-paper">
+                    <path d={PROVIDER_PATHS[source.id]} />
                   </g>
-                  <text x={84} y={cy - 1} className="fill-paper font-sans text-[15px]">
+                  <text x={IN.x + 58} y={cy - 3} className="fill-paper font-sans text-[14px]">
                     {source.name}
                   </text>
-                  <text x={84} y={cy + 17} className="fill-faint font-mono text-[10.5px]">
+                  <text x={IN.x + 58} y={cy + 15} className="fill-faint font-mono text-[9.5px]">
                     {source.live ? "connected" : "planned"}
                   </text>
-
-                  {/* The wire, and the pulse that runs down it. */}
-                  <path d={beam(cy)} className="stroke-line" strokeWidth={1} fill="none" />
-                  {source.live ? (
-                    <path
-                      d={beam(cy)}
-                      className="beam"
-                      stroke="url(#beam-head)"
-                      strokeWidth={1.6}
-                      strokeLinecap="round"
-                      fill="none"
-                      style={{ animationDelay: `${index * 1.15}s` }}
-                    />
-                  ) : null}
                 </g>
               );
             })}
 
-            {/* Spar itself. */}
+            {/* The agent. */}
+            <circle cx={CORE_MID} cy={AXIS} r={150} fill="url(#core-glow)" />
             <rect
               x={CORE.x}
               y={CORE.y}
               width={CORE.w}
               height={CORE.h}
-              rx={22}
-              className="fill-white/[0.05] stroke-line-strong"
+              rx={24}
               strokeWidth={1}
+              className="fill-surface-2 stroke-line-strong"
             />
-            <g transform={`translate(${CORE.x + CORE.w / 2 - 26} ${CORE.y + 26}) scale(0.52)`}>
+            <g transform={`translate(${CORE_MID - 27} ${CORE.y + 26}) scale(0.54)`}>
               {markDots.map((dot) => (
                 <circle
                   key={dot.key}
@@ -150,44 +283,62 @@ export function Sources() {
               ))}
             </g>
             <text
-              x={CORE.x + CORE.w / 2}
-              y={CORE.y + CORE.h - 24}
+              x={CORE_MID}
+              y={CORE.y + 110}
               textAnchor="middle"
               className="fill-paper font-display text-[17px]"
             >
               Spar
             </text>
-
-            {/* And out the other side. */}
-            <path
-              d={`M${CORE.x + CORE.w},190 L${LEDGER.x},190`}
-              className="stroke-line"
-              strokeWidth={1}
-              fill="none"
-            />
-            <path
-              d={`M${CORE.x + CORE.w},190 L${LEDGER.x},190`}
-              className="beam"
-              stroke="url(#beam-head)"
-              strokeWidth={1.6}
-              strokeLinecap="round"
-              fill="none"
-              style={{ animationDelay: "0.6s" }}
-            />
-            <rect
-              x={LEDGER.x}
-              y={LEDGER.cy - LEDGER.h / 2}
-              width={LEDGER.w}
-              height={LEDGER.h}
-              rx={16}
-              className="fill-white/[0.03] stroke-line"
-              strokeWidth={1}
-            />
-            <text x={LEDGER.x + 24} y={LEDGER.cy - 1} className="fill-paper font-sans text-[15px]">
-              One ledger
+            <text
+              x={CORE_MID}
+              y={CORE.y + 130}
+              textAnchor="middle"
+              className="fill-faint font-mono text-[9px] tracking-[0.06em]"
+            >
+              searches, then writes
             </text>
-            <text x={LEDGER.x + 24} y={LEDGER.cy + 17} className="fill-faint font-mono text-[10.5px]">
-              same evidence
+
+            {PRODUCED.map((item, index) => {
+              const cy = OUT.ys[index]!;
+              return (
+                <g key={item.title}>
+                  <rect
+                    x={OUT.x}
+                    y={cy - OUT.h / 2}
+                    width={OUT.w}
+                    height={OUT.h}
+                    rx={16}
+                    strokeWidth={1}
+                    className="fill-surface stroke-line"
+                  />
+                  <text x={OUT.x + 22} y={cy - 3} className="fill-paper font-sans text-[14px]">
+                    {item.title}
+                  </text>
+                  <text x={OUT.x + 22} y={cy + 15} className="fill-faint font-mono text-[9.5px]">
+                    {item.note}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* The loop's label, in a gap punched out of the dashed line —
+                centred on the run it interrupts, and only as wide as it needs
+                to be, or the knockout reaches past the loop's own corner. */}
+            <rect
+              x={LABEL_X - LABEL_W / 2}
+              y={LOOP_Y - 11}
+              width={LABEL_W}
+              height={22}
+              className="fill-ink"
+            />
+            <text
+              x={LABEL_X}
+              y={LOOP_Y + 4}
+              textAnchor="middle"
+              className="fill-faint font-mono text-[10px] tracking-[0.04em]"
+            >
+              what you prove sets the next target
             </text>
           </svg>
         </div>

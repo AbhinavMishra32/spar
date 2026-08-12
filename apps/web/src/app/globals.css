@@ -617,17 +617,27 @@
 
   /* ---- Wires and beams ------------------------------------------------- */
 
-  /* A pulse travelling along an SVG path. One long gap and one short dash, so
-     what you see is a head moving down a wire rather than a marching stripe. */
+  /* A pulse travelling along an SVG path. One short dash and a gap longer than
+     the path, so what you see is a head moving down a wire rather than a
+     marching stripe.
+     
+     Every beam path sets pathLength="100", which is what makes one animation
+     correct for wires of different lengths: the dash and its travel are then
+     percentages of whatever path they are on. Written in user units instead,
+     the offset has to be tuned per path — and a dash sized for the longest
+     wire spends almost all of its cycle off the end of the shortest one, which
+     reads as that wire being dead rather than as a timing bug. */
   .beam {
-    stroke-dasharray: 26 320;
-    stroke-dashoffset: 346;
-    animation: beam-run 3.4s linear infinite;
+    stroke-dasharray: 13 100;
+    animation: beam-run 3.6s linear infinite;
   }
 
   @keyframes beam-run {
+    from {
+      stroke-dashoffset: 13;
+    }
     to {
-      stroke-dashoffset: 0;
+      stroke-dashoffset: -100;
     }
   }
 
