@@ -3,8 +3,8 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
+import { baselineStateSchema, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -50,12 +50,17 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      seen the state and asked for it, so this is no longer a loop the app is
      driving by itself. */
   const clearAutoResume = (sessionId: string) => autoResumedPlanning.delete(sessionId);
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() }));
+  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() }));
   ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
      to clean up to make the error go away. */
   ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); if(!await deps.providers.available())throw new Error(NO_PROVIDER); const created=deps.store.createSession(input.goal);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);await startAgentTurn(created.sessionId,`Start a new adaptive session for this learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
+  ipcMain.handle(ipc.tracksCreate, async (_event,value)=>{const input=createTrackInput.parse(value);if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createTrack(input.goal,input.title);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal);await startAgentTurn(created.sessionId,`Establish the initial direction for this Track: ${input.goal}. Read the global learner model first. Do not write a permanent syllabus; choose the next training intent and one well-matched challenge.`,"learner",coldStart?"cold-start":"session-start");return created;});
+  ipcMain.handle(ipc.tracksActive,(_event,value)=>deps.store.setActiveTrack(zUuid(value)));
+  ipcMain.handle(ipc.trainingMode,(_event,value)=>deps.store.setTrainingMode(trainingModeSchema.parse(value)));
+  ipcMain.handle(ipc.baselineState,(_event,value)=>deps.store.setBaseline(baselineStateSchema.partial().parse(value) as Partial<BaselineState>));
+  ipcMain.handle(ipc.learningEngine,()=>deps.store.learningEngineSnapshot());
   /**
    * SQLite is the durable owner of an active challenge. A workspace can be
    * absent after an interrupted restore or an older checkpoint that carried no
