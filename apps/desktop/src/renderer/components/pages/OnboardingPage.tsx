@@ -17,7 +17,7 @@ import { PANEL, STEP, TEXT, useMarkPass } from "../auth/arrival";
 import { SparWordmark } from "../common/SparWordmark";
 import { ProviderConnectDialog, type Provider } from "../settings/ProviderConnectDialog";
 
-type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider" | "source";
+type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider" | "source" | "baseline";
 
 type Step = {
   id: StepId;
@@ -27,7 +27,7 @@ type Step = {
   /** One line under the question, where a question needs a reason. */
   caption?: string;
   /** Free-text steps open straight into the field; the rest list options. */
-  kind: "text" | "one" | "many" | "provider" | "source";
+  kind: "text" | "one" | "many" | "provider" | "source" | "baseline";
   placeholder?: string;
   optional?: boolean;
 };
@@ -57,6 +57,7 @@ const STEPS: Step[] = [
      have been using it. Skipping is a real answer and costs nothing — every
      challenge is then one Spar writes. */
   { id: "source", header: "Problems", question: "Connect a problem provider?", caption: "Optional. Spar writes its own challenges either way.", kind: "source", optional: true },
+  { id: "baseline", header: "Baseline", question: "Build your baseline?", caption: "A few adaptive programming challenges give Spar enough direct evidence to personalize well. It is not a fixed exam, and you can stop or skip it.", kind: "baseline", optional: true },
 ];
 
 const EXPERIENCE: Array<{ value: LearnerProfile["experience"]; label: string; hint: string }> = [
@@ -223,6 +224,7 @@ export function OnboardingPage({
   const [suggestions, setSuggestions] = useState<{ source: "agent" | "starter"; suggestions: SessionSuggestion[] } | null>(null);
   const [picked, setPicked] = useState<number | null>(null);
   const [saved, setSaved] = useState<LearnerProfile | null>(null);
+  const [baselinePlanned,setBaselinePlanned]=useState(false);
 
   const { pass, awake, rouse } = useMarkPass(busy);
   const step = STEPS[index]!;
@@ -293,6 +295,7 @@ export function OnboardingPage({
     if (id === "weakness") return weakness.trim() || null;
     if (id === "language") return language ? LANGUAGE_LABEL[language] : null;
     if (id === "source") return sources.length ? sources.map((entry) => entry.username).join(", ") : null;
+    if (id === "baseline") return baselinePlanned ? "Build my baseline" : null;
     if (!runnable) return null;
     return connected.length ? connected.map((provider) => provider.name).join(", ") : "Ready";
   };
@@ -309,6 +312,7 @@ export function OnboardingPage({
     setError("");
     try {
       setSaved(await api.saveProfile({ name: name.trim(), experience, focus, weakness: weakness.trim(), language }));
+      await api.setBaseline({status:baselinePlanned?"in-progress":"skipped"});
     } catch (cause) {
       setError(message(cause));
       setBusy(false);
@@ -687,6 +691,13 @@ export function OnboardingPage({
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {phase === "intake" && step.id === "baseline" && (
+                <div className={GROUP}>
+                  <OptionRow hint="Spar changes each calibration challenge from the evidence in the one before it." index={1} onClick={()=>setBaselinePlanned(true)} selected={baselinePlanned}>Build my baseline</OptionRow>
+                  <OptionRow hint="Personalized training stays limited and Today will keep a quiet reminder." index={2} onClick={()=>setBaselinePlanned(false)} selected={!baselinePlanned}>Skip for now</OptionRow>
                 </div>
               )}
 

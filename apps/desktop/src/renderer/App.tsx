@@ -570,7 +570,9 @@ export function App() {
           {page === "settings" && (
             <SettingsPage
               api={api}
+              baseline={data.baseline}
               language={data.profile.language}
+              onBaseline={beginBaseline}
               onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
               onSignedOut={signedOut}
               onThemeChange={changeTheme}
