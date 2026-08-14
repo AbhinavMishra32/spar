@@ -250,3 +250,42 @@ it("pushes the onboarding profile so another machine can skip intake",()=>{const
   store.saveProfile({name:"Abhinav",experience:"senior",focus:[],weakness:"",language:"cpp",completedAt:new Date().toISOString()});
   expect(store.pendingSync().map((item)=>item.kind)).toContain("profile-save");
 }finally{store.close();}});
+
+describe("adaptive product state",()=>{
+  it("keeps Tracks separate from the one global learner model",()=>{const store=new LocalStore(":memory:");try{
+    const typescript=store.createTrack("Become extremely strong at TypeScript and understand the language deeply");
+    const interviews=store.createTrack("Prepare seriously for algorithmic interviews");
+    const target=store.setTrainingTarget(typescript.sessionId,{ability:"Invariant restoration",specificGap:"Restore validity after every mutation",desiredEvidence:"Uses a loop until valid",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    expect(store.listTracks()).toHaveLength(2);
+    expect(store.activeTrack()?.id).toBe(interviews.track.id);
+    expect(store.abilityStates()).toEqual([expect.objectContaining({abilityId:target.abilityId,trainingStatus:"unknown"})]);
+    store.setActiveTrack(typescript.track.id);
+    expect(store.abilityStates()[0]?.abilityId).toBe(target.abilityId);
+  }finally{store.close();}});
+
+  it("turns linked attempts into confidence without treating one event as mastery",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeat restoration",desiredEvidence:"Shrinks until every condition is valid",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const question=store.createQuestion(sessionId,design("Restore repeatedly"),{valid:true});
+    const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nDirect execution worked once; transfer is untested.",summary:"Direct execution worked once; transfer is untested.",status:"developing",evidenceEventIds:[event.id]});
+    expect(store.abilityStates()[0]).toMatchObject({evidenceCount:1,trainingStatus:"training",proficiency:0.55});
+    expect(store.abilityStates()[0]!.confidence).toBeLessThan(0.5);
+    expect(store.learnerProgress().rating.provisional).toBe(true);
+  }finally{store.close();}});
+
+  it("persists baseline, training mode and an inspectable Today decision",()=>{const store=new LocalStore(":memory:");try{
+    const created=store.createTrack("Climb Codeforces while keeping practice targeted","Codeforces Climb");
+    const target=store.setTrainingTarget(created.sessionId,{ability:"Graph recognition",specificGap:"Recognize implicit graph structure",desiredEvidence:"Models states and transitions independently",avoidTesting:["advanced syntax"],action:"diagnose"});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    store.createQuestion(created.sessionId,design("Hidden transit map"),{valid:true});
+    store.setBaseline({status:"in-progress",confidence:0.3,directEvidenceCount:1});
+    store.setTrainingMode({kind:"focus",focus:"Graphs"});
+    const today=store.todayRecommendation();
+    expect(today).toMatchObject({trackTitle:"Codeforces Climb",challengeTitle:"Hidden transit map",abilityTitle:"Graph recognition",intent:"diagnose",mode:{kind:"focus",focus:"Graphs"}});
+    expect(store.getBaseline()).toMatchObject({status:"in-progress",directEvidenceCount:1});
+    expect(store.learningEngineSnapshot()).toMatchObject({model:{schemaVersion:4},activeTrack:{id:created.track.id}});
+  }finally{store.close();}});
+});
