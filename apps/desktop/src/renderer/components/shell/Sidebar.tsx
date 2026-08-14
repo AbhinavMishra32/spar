@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
+import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, Library, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
 import type { SessionSummary } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -30,6 +30,7 @@ export type SessionActions = {
 const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "today", label: "Today", icon: Waypoints },
   { id: "tracks", label: "Tracks", icon: Target },
+  { id: "problems", label: "Problems", icon: Library },
   { id: "progress", label: "Progress", icon: Map },
   { id: "history", label: "History", icon: History },
 ];
