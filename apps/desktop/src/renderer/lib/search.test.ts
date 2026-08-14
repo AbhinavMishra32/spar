@@ -6,6 +6,7 @@ function session(over: Partial<SessionSummary> & { id: string; title: string }):
   return {
     originalGoal: "",
     objective: "",
+    context: "training",
     status: "active",
     currentFocus: [],
     completedQuestions: 0,

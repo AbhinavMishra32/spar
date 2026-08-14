@@ -12,9 +12,14 @@ jobs:
         with: { version: 10.13.1 }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
+      # The fallback suite executes every language through the same real runner
+      # used by generated challenges. macos-15 no longer guarantees a Go binary,
+      # so make CI match the release workflow instead of silently depending on
+      # the hosted image contents.
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.24.x" }
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --filter @spar/desktop verify:build
-

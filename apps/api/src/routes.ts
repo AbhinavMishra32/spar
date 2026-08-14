@@ -49,6 +49,19 @@ export function installRoutes(app: FastifyInstance, db: Database, storage?: Obje
       .onConflictDoUpdate({ target: userSettings.userId, set: { settings: sql`${userSettings.settings} || ${JSON.stringify({ profile: parsed.data })}::jsonb`, updatedAt: now } });
     return reply.code(204).send();
   });
+  /* The adaptive model is a versioned derived document. Raw attempts continue
+     to use their append-only tables; keeping this projection together makes a
+     cross-device restore atomic and prevents half-restored policy decisions. */
+  app.put("/v1/learning-state", async (request, reply) => {
+    const user = await requireUser(request);
+    const body = request.body;
+    if (!body || typeof body !== "object" || Array.isArray(body) || (body as { version?: unknown }).version !== 1)
+      return reply.code(400).send({ error: "Invalid learning state" });
+    const now = new Date();
+    await db.insert(userSettings).values({ userId: user.id, settings: { learningState: body }, createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: userSettings.userId, set: { settings: sql`${userSettings.settings} || ${JSON.stringify({ learningState: body })}::jsonb`, updatedAt: now } });
+    return reply.code(204).send();
+  });
   app.get("/v1/sessions", async (request) => { const user=await requireUser(request); return db.select().from(sessions).where(eq(sessions.userId,user.id)).orderBy(desc(sessions.updatedAt)); });
   app.get("/v1/challenges",async(request)=>{const user=await requireUser(request);return db.select({id:questions.id,sessionId:questions.sessionId,ordinal:questions.ordinal,title:questions.title,language:questions.language,difficulty:questions.difficulty,status:questions.status,replacesQuestionId:questions.replacesQuestionId,createdAt:questions.createdAt,updatedAt:questions.updatedAt}).from(questions).innerJoin(sessions,eq(questions.sessionId,sessions.id)).where(eq(sessions.userId,user.id)).orderBy(desc(questions.updatedAt));});
   app.get("/v1/abilities",async(request)=>{const user=await requireUser(request);return db.select({id:abilityDocuments.id,status:abilityDocuments.status,currentVersion:abilityDocuments.currentVersion,lastObservedAt:abilityDocuments.lastObservedAt,updatedAt:abilityDocuments.updatedAt}).from(abilityDocuments).where(eq(abilityDocuments.userId,user.id)).orderBy(desc(abilityDocuments.updatedAt));});
@@ -168,6 +181,7 @@ export function installRoutes(app: FastifyInstance, db: Database, storage?: Obje
     const profile=learnerProfileSchema.safeParse(settings[0]?.settings?.profile);
     return {
       profile:profile.success?profile.data:null,
+      learningState:settings[0]?.settings?.learningState??null,
       concepts,
       abilities:abilityRows.map((row)=>({...row,markdown:markdownFor.get(`${row.id}:${row.version}`)??""})),
       sessions:sessionRows,

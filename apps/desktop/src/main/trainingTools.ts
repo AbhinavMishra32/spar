@@ -389,13 +389,15 @@ function conceptTags(value: unknown): ConceptTagInput[] {
 /** The parts of an ability write that are optional on both ability tools, kept in
  *  one place so `propose_ability_update` and `upsert_ability` cannot drift into
  *  supporting different halves of what an ability is. */
-function abilityClaim(value: Record<string, unknown>): { summary?: string; practice?: string[]; concepts?: ConceptTagInput[]; status?: AbilityStatus } {
+function abilityClaim(value: Record<string, unknown>): { summary?: string; practice?: string[]; concepts?: ConceptTagInput[]; status?: AbilityStatus; evidence?: Array<{eventId:string;statement:string;polarity:"supporting"|"contradictory"|"neutral";independence:"independent"|"assisted"|"unknown";strength:number}>; pattern?:{title:string;description:string;status:"observation"|"hypothesis"|"pattern"|"monitoring"|"resolved";evidenceEventIds:string[]} } {
   const status = abilityStatusSchema.safeParse(value.status);
   return {
     ...(typeof value.summary === "string" ? { summary: value.summary } : {}),
     ...(Array.isArray(value.practice) ? { practice: stringList(value.practice) } : {}),
     ...(Array.isArray(value.concepts) ? { concepts: conceptTags(value.concepts) } : {}),
     ...(status.success ? { status: status.data } : {}),
+    ...(Array.isArray(value.evidence) ? { evidence: value.evidence.flatMap((item)=>{if(!item||typeof item!=="object")return[];const row=item as Record<string,unknown>;if(typeof row.eventId!=="string"||typeof row.statement!=="string")return[];return[{eventId:row.eventId,statement:row.statement,polarity:row.polarity==="supporting"||row.polarity==="contradictory"?row.polarity:"neutral",independence:row.independence==="independent"||row.independence==="assisted"?row.independence:"unknown",strength:typeof row.strength==="number"?row.strength:0.5}];}) } : {}),
+    ...(value.pattern&&typeof value.pattern==="object"?{pattern:value.pattern as {title:string;description:string;status:"observation"|"hypothesis"|"pattern"|"monitoring"|"resolved";evidenceEventIds:string[]}}:{}),
   };
 }
 

@@ -48,12 +48,12 @@ Grab the build for your machine from the
 
 | Your machine | Download |
 | --- | --- |
-| Mac, Apple silicon (M1 and later) | `Spar-0.3.1-arm64.dmg` |
-| Mac, Intel | `Spar-0.3.1.dmg` |
-| Windows | `Spar-0.3.1-x64.exe` |
-| Linux | `Spar-0.3.1-x86_64.AppImage` or `Spar-0.3.1-amd64.deb` |
+| Mac, Apple silicon (M1 and later) | `Spar-0.4.0-arm64.dmg` |
+| Mac, Intel | `Spar-0.4.0.dmg` |
+| Windows | `Spar-0.4.0-x64.exe` |
+| Linux | `Spar-0.4.0-x86_64.AppImage` or `Spar-0.4.0-amd64.deb` |
 
-**v0.3.1 builds are not code-signed yet.** Your operating system will say so, in
+**v0.4.0 builds are not code-signed yet.** Your operating system will say so, in
 its usual alarming way. On a Mac, right-click the app and choose *Open* the first
 time rather than double-clicking it, or run
 `xattr -d com.apple.quarantine /Applications/Spar.app`. On Windows, choose *More

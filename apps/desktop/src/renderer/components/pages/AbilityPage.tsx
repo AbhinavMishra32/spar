@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowUpRight, ChevronRight, Dumbbell, Layers3, Sparkles, Target } from "lucide-react";
-import type { AbilityDetail, AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary } from "@spar/domain";
+import { ArrowLeft, ArrowUpRight, ChevronRight, Dumbbell, Layers3, Sparkles, Target, TrendingUp } from "lucide-react";
+import type { AbilityDetail, AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary, LearnerProgress } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { relativeTime, shortTime } from "@/lib/format";
@@ -43,6 +43,7 @@ export function AbilityPage({
   onOpenConcept,
   onOpenSession,
   onPractise,
+  progress,
 }: {
   abilities: AbilityHistorySummary[];
   api: SparApi | undefined;
@@ -51,6 +52,7 @@ export function AbilityPage({
   onOpenConcept(slug: string): void;
   onOpenSession(sessionId: string): void;
   onPractise(input: { abilityId?: string; conceptSlug?: string; drill?: string }): void;
+  progress: LearnerProgress;
 }) {
   const [view, setView] = useState<View>("abilities");
   const [openAbility, setOpenAbility] = useState<string | null>(null);
@@ -79,9 +81,9 @@ export function AbilityPage({
       <div className="mx-auto w-full max-w-[62rem] px-18 pb-16 pt-8">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Abilities</h1>
+            <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Progress</h1>
             <p className="mt-1 max-w-[38rem] text-content text-muted-foreground">
-              What your submissions show you can do, and the concepts underneath them. Spar grants an ability once deterministic outcomes back it — never from one attempt.
+              What Spar thinks your work means: demonstrated performance, active training, uncertainty, and the evidence behind each belief.
             </p>
           </div>
           <ViewSwitch<View>
@@ -95,6 +97,8 @@ export function AbilityPage({
             value={view}
           />
         </div>
+
+        <ProgressOverview progress={progress} />
 
         {view === "abilities" ? (
           <AbilitiesView
@@ -117,6 +121,40 @@ export function AbilityPage({
 function Count({ value }: { value: number }) {
   if (!value) return null;
   return <span className="tabular-nums text-ui-sm text-muted-foreground/70">{value}</span>;
+}
+
+function ProgressOverview({ progress }: { progress: LearnerProgress }) {
+  const training = progress.abilities.filter((ability) => ability.trainingStatus === "training" || ability.trainingStatus === "diagnosing");
+  const strengths = progress.abilities.filter((ability) => ability.trainingStatus === "monitoring" && ability.proficiency >= 0.75);
+  const uncertain = progress.abilities.filter((ability) => ability.confidence < 0.45);
+  return <section className="mt-6 grid gap-3 lg:grid-cols-[1.35fr_1fr]">
+    <div className="rounded-xl border border-border bg-card px-5 py-4 shadow-[var(--app-shadow-card)]">
+      <div className="flex items-start justify-between gap-4">
+        <div><p className="text-ui font-medium text-muted-foreground">Spar Rating</p><div className="mt-1 flex items-baseline gap-2"><strong className="text-[2rem] font-semibold tabular-nums tracking-[-0.04em]">{progress.rating.rating}</strong>{progress.rating.provisional && <span className="rounded-md bg-accent px-1.5 py-0.5 text-ui-sm font-medium text-muted-foreground">Provisional</span>}</div><p className="mt-1 text-ui text-muted-foreground">{progress.rating.reason}</p></div>
+        <TrendingUp className="size-5 text-muted-foreground" />
+      </div>
+      <RatingChart points={progress.ratingHistory} />
+    </div>
+    <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-[var(--app-shadow-card)]">
+      <ProgressRow label="Currently training" names={training.map((item) => item.title)} value={training.length} />
+      <ProgressRow label="Strengths" names={strengths.map((item) => item.title)} value={strengths.length} />
+      <ProgressRow label="Needs more evidence" names={uncertain.map((item) => item.title)} value={uncertain.length} />
+      <ProgressRow label="Active patterns" names={progress.patterns.filter((item) => item.status === "pattern" || item.status === "hypothesis").map((item) => item.title)} value={progress.patterns.filter((item) => item.status === "pattern" || item.status === "hypothesis").length} last />
+    </div>
+    {progress.notices.length > 0 && <div className="rounded-xl border border-border bg-card px-4 py-3 shadow-[var(--app-shadow-card)] lg:col-span-2"><p className="text-ui font-medium text-muted-foreground">Spar noticed</p><div className="mt-2 grid gap-3 sm:grid-cols-2">{progress.notices.slice(0,2).map((notice)=><div key={notice.id}><p className="text-ui font-medium">{notice.title}</p><p className="mt-0.5 text-ui leading-5 text-muted-foreground">{notice.body}</p></div>)}</div></div>}
+  </section>;
+}
+
+function ProgressRow({ label, names, value, last = false }: { label: string; names: string[]; value: number; last?: boolean }) {
+  return <div className={cn("flex items-start gap-3 py-2.5", !last && "border-b border-border")}><span className="min-w-0 flex-1"><span className="block text-ui font-medium">{label}</span><span className="mt-0.5 block truncate text-ui-sm text-muted-foreground">{names.slice(0,2).join(", ") || "Nothing yet"}</span></span><span className="tabular-nums text-content font-medium">{value}</span></div>;
+}
+
+function RatingChart({ points }: { points: LearnerProgress["ratingHistory"] }) {
+  const values = points.length > 1 ? points : [points[0]!, { ...points[0]!, id: `${points[0]!.id}-current` }];
+  const min = Math.min(...values.map((point) => point.rating)) - 20;
+  const max = Math.max(...values.map((point) => point.rating)) + 20;
+  const coordinates = values.map((point,index) => `${(index/(values.length-1))*100},${38-((point.rating-min)/(max-min))*32}`).join(" ");
+  return <svg aria-label="Spar Rating over time" className="mt-4 h-11 w-full overflow-visible" preserveAspectRatio="none" role="img" viewBox="0 0 100 40"><path d="M0 39H100" stroke="currentColor" className="text-border" strokeWidth="0.8" /><polyline fill="none" points={coordinates} stroke="currentColor" className="text-foreground/70" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" vectorEffect="non-scaling-stroke" /></svg>;
 }
 
 function AbilitiesView({
@@ -376,11 +414,18 @@ function AbilityDetailView({
         )}
 
         <dl className="mt-4 flex flex-wrap gap-x-6 gap-y-2">
+          {detail?.machine && <Stat label="Confidence" value={`${Math.round(detail.machine.confidence * 100)}%`} />}
+          {detail?.machine && <Stat label="Training status" value={trainingStatus(detail.machine.trainingStatus)} />}
+          {detail?.machine && <Stat label="Trend" value={detail.machine.trend} />}
           <Stat label="Evidence links" value={String(ability.evidenceCount)} />
           <Stat label="Challenges passed" value={detail ? `${passed} of ${detail.evidence.length}` : "…"} />
           <Stat label="Version" value={`v${ability.version}`} />
           <Stat label={ability.earnedAt ? "Earned" : "Introduced"} value={relativeTime(ability.earnedAt ?? ability.updatedAt)} />
         </dl>
+
+        {detail?.machine?.nextVerification && <section className="mt-6 rounded-xl border border-border bg-card px-4 py-3 shadow-[var(--app-shadow-card)]"><SectionLabel>What Spar wants to verify next</SectionLabel><p className="text-content leading-6 text-foreground/85">{detail.machine.nextVerification}</p></section>}
+
+        {detail?.patterns.length ? <section className="mt-6"><SectionLabel>Patterns</SectionLabel><div className="flex flex-col gap-2">{detail.patterns.map((pattern)=><div className="rounded-lg border border-border px-3 py-2.5" key={pattern.id}><div className="flex items-center justify-between gap-3"><p className="text-ui font-medium">{pattern.title}</p><span className="text-ui-sm capitalize text-muted-foreground">{pattern.status}</span></div><p className="mt-1 text-ui leading-5 text-muted-foreground">{pattern.description}</p></div>)}</div></section> : null}
 
         {ability.concepts.length > 0 && (
           <section className="mt-6">
@@ -432,8 +477,10 @@ function AbilityDetailView({
           )}
         </section>
 
+        {detail?.learnerEvidence.length ? <section className="mt-6"><SectionLabel>Ability timeline</SectionLabel><div className="relative ml-1 flex flex-col gap-0 border-l border-border pl-4">{detail.learnerEvidence.map((item)=><div className="relative pb-4" key={item.id}><span className="absolute -left-[1.18rem] top-1 size-2 rounded-full border border-border bg-background" /><div className="flex items-baseline justify-between gap-3"><p className="text-ui leading-5 text-foreground/85">{item.statement}</p><span className="shrink-0 text-ui-sm text-muted-foreground">{shortTime(item.occurredAt)}</span></div><p className="mt-0.5 text-ui-sm capitalize text-muted-foreground">{item.polarity} · {item.independence}</p></div>)}</div></section> : null}
+
         <section className="mt-6">
-          <SectionLabel>What earned it</SectionLabel>
+          <SectionLabel>Related attempts</SectionLabel>
           {detail ? (
             detail.evidence.length ? (
               <div className="flex flex-col">
@@ -582,3 +629,4 @@ function AreaStanding({ concept }: { concept: ConceptSummary }) {
 function firstLine(markdown: string): string {
   return markdown.replace(/^#+\s*.*$/gm, "").replace(/\s+/g, " ").trim().slice(0, 220) || "No description recorded yet.";
 }
+function trainingStatus(value: string) { return ({ unknown: "Unknown", diagnosing: "Being diagnosed", training: "Actively trained", monitoring: "Monitoring" } as Record<string,string>)[value] ?? value; }

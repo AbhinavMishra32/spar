@@ -9,7 +9,9 @@ import { Sidebar, type Page, type SessionActions } from "./components/shell/Side
 import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
 import { SearchPalette } from "./components/common/SearchPalette";
-import { HomePage } from "./components/pages/HomePage";
+import { TodayPage } from "./components/pages/TodayPage";
+import { BaselinePage } from "./components/pages/BaselinePage";
+import { TracksPage } from "./components/pages/TracksPage";
 import { ProblemsPage } from "./components/pages/ProblemsPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
@@ -31,8 +33,11 @@ const api: SparApi | undefined = window.spar;
 
 /** Pages the shell puts a plain toolbar over. "workspace" and "challenge" draw
  *  their own, because both carry a back button and their own actions. */
-const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge">, string> = {
-  home: "Home",
+const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge" | "baseline">, string> = {
+  today: "Today",
+  tracks: "Tracks",
+  progress: "Progress",
+  history: "History",
   problems: "Problems",
   sessions: "Sessions",
   ability: "Abilities",
@@ -43,7 +48,7 @@ const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge">, string> = {
 export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState<Page>("home");
+  const [page, setPage] = useState<Page>("today");
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   /* Which challenge the standalone page is showing. Held here rather than inside
      the challenges list so navigating away and back does not silently keep a
@@ -53,7 +58,7 @@ export function App() {
      the history list and the problem library — and a Back button that always lands
      on Challenges would take a learner who started on Problems somewhere they have
      never been, then leave them to find their way back. */
-  const [challengeFrom, setChallengeFrom] = useState<Extract<Page, "problems" | "challenges">>("challenges");
+  const [challengeFrom, setChallengeFrom] = useState<Extract<Page, "problems" | "history">>("history");
   const [opening, setOpening] = useState(false);
   /* Every agent turn in flight, by the session it belongs to — not just the one
      the workspace is showing. A turn is started from a session and then survives
@@ -107,9 +112,9 @@ export function App() {
     });
   }, []);
 
-  const openSession = useCallback(async (id: string) => {
+  const openSession = useCallback(async (id: string, destination: "workspace" | "baseline" = "workspace") => {
     if (!api) return;
-    setPage("workspace");
+    setPage(destination);
     setOpening(true);
     try {
       const next = await api.openSession(id);
@@ -127,6 +132,18 @@ export function App() {
       setOpening(false);
     }
   }, []);
+
+  const beginBaseline = useCallback(async () => {
+    if (!api) return;
+    setOpening(true);
+    setError(null);
+    try {
+      const created = await api.startBaseline();
+      await refresh();
+      await openSession(created.sessionId, "baseline");
+    } catch (cause) { setError(message(cause)); }
+    finally { setOpening(false); }
+  }, [openSession, refresh]);
 
   /* Starting a session is reachable before the shell exists: the last step of
      onboarding opens the sparring session the learner picked, so this has to be
@@ -149,7 +166,7 @@ export function App() {
      here because the sign-in page is returned long before `signedOut` is. */
   const signedIn = useCallback(async () => {
     setError(null);
-    setPage("home");
+    setPage("today");
     await refresh();
   }, [refresh]);
 
@@ -197,7 +214,7 @@ export function App() {
         // The summaries every card is drawn from are re-read whichever session
         // finished; only the open one needs its detail re-opened.
         if (detailRef.current?.summary.id === sessionId) {
-          void openSession(sessionId).catch((cause) => setError(message(cause))).finally(() => clearRun(sessionId, event.runId));
+          void openSession(sessionId, detailRef.current.summary.context === "baseline" ? "baseline" : "workspace").catch((cause) => setError(message(cause))).finally(() => clearRun(sessionId, event.runId));
         } else clearRun(sessionId, event.runId);
         void refresh().catch(() => undefined);
         return;
@@ -217,7 +234,7 @@ export function App() {
   // A planning session has no challenge to show yet, so poll until one exists.
   useEffect(() => {
     if (!detail || detail.question || detail.pendingLearnerQuestion || detail.summary.status !== "planning") return;
-    const timer = setInterval(() => void openSession(detail.summary.id).catch(() => undefined), 1_800);
+    const timer = setInterval(() => void openSession(detail.summary.id, detail.summary.context === "baseline" ? "baseline" : "workspace").catch(() => undefined), 1_800);
     return () => clearInterval(timer);
   }, [detail, openSession]);
 
@@ -228,7 +245,7 @@ export function App() {
       const key = event.key.toLowerCase();
       if (key === "n") {
         event.preventDefault();
-        setPage("home");
+        setPage("today");
         setDetail(null);
       }
       if (key === "k") {
@@ -257,7 +274,7 @@ export function App() {
         setDetail(null);
       }
       if (command === "new-session") {
-        setPage("home");
+        setPage("today");
         setDetail(null);
       }
     });
@@ -302,6 +319,7 @@ export function App() {
       <OnboardingPage
         api={api}
         displayName={data.account.displayName}
+        onBaseline={beginBaseline}
         onDone={async (profile) => { setData((current) => (current ? { ...current, profile } : current)); await refresh(); }}
         onStartSession={start}
       />
@@ -319,7 +337,7 @@ export function App() {
   const conceptSummaries = new Map(data.concepts.map((entry) => [entry.slug, entry]));
 
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
-  const openChallenge = (id: string, from: Extract<Page, "problems" | "challenges"> = "challenges") => {
+  const openChallenge = (id: string, from: Extract<Page, "problems" | "history"> = "history") => {
     setChallengeId(id);
     setChallengeFrom(from);
     setPage("challenge");
@@ -375,7 +393,7 @@ export function App() {
     remove: (session) => void mutateSession(async (sdk) => {
       if (detailRef.current?.summary.id === session.id) {
         setDetail(null);
-        setPage("home");
+        setPage("today");
       }
       clearRun(session.id);
       await sdk.deleteSession(session.id);
@@ -389,8 +407,9 @@ export function App() {
       attemptId: detail.question.attemptId,
       reason,
     });
+    if(detail.summary.context==="baseline")await api.requestNextChallenge({sessionId:detail.summary.id});
     clearRun(detail.summary.id);
-    await openSession(detail.summary.id);
+    await openSession(detail.summary.id,detail.summary.context==="baseline"?"baseline":"workspace");
     await refresh();
   };
 
@@ -408,8 +427,25 @@ export function App() {
   const signedOut = async () => {
     setRuns({});
     setDetail(null);
-    setPage("home");
+    setPage("today");
     setError(null);
+    await refresh();
+  };
+
+  const createTrack = async (input: { goal: string; title?: string }) => {
+    if (!api) return;
+    setOpening(true); setError(null);
+    try {
+      const created = await api.createTrack(input);
+      await refresh();
+      await openSession(created.sessionId);
+    } catch (cause) { setError(message(cause)); }
+    finally { setOpening(false); }
+  };
+
+  const setTrainingMode = async (mode: BootstrapData["trainingMode"]) => {
+    if (!api) return;
+    await api.setTrainingMode(mode);
     await refresh();
   };
 
@@ -427,12 +463,12 @@ export function App() {
           activeSessionId={detail?.summary.id}
           onCollapse={toggleSidebar}
           onCommandPalette={() => setPalette(true)}
-          onNewSession={() => navigate("home")}
+          onNewSession={() => navigate("tracks")}
           onOpenSession={open}
           onPage={navigate}
           page={page}
           sessionActions={sessionActions}
-          sessions={data.sessions}
+          sessions={data.sessions.filter((session) => session.context !== "baseline")}
           syncState={data.syncState}
         />
       </div>
@@ -469,11 +505,11 @@ export function App() {
         className={cn(
           "app-pane relative flex min-w-0 flex-1 flex-col",
           sidebar && "app-content-pane",
-          (page === "workspace" || page === "challenge") && "app-pane-glass",
+          (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
         )}
       >
-        {page !== "workspace" && page !== "challenge" && (
-          <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge">]} />
+        {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
+          <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge" | "baseline">]} />
         )}
 
         {error && (
@@ -487,7 +523,9 @@ export function App() {
         )}
 
         <div className="min-h-0 flex-1">
-          {page === "home" && <HomePage api={api} busy={opening} data={data} onOpen={open} onOpenSettings={() => navigate("settings")} onStart={(goal) => void start(goal)} onViewAll={() => navigate("sessions")} runs={runs} />}
+          {page === "today" && <TodayPage busy={opening} data={data} onBaseline={beginBaseline} onCreateTrack={() => navigate("tracks")} onMode={setTrainingMode} onOpen={open} />}
+          {page === "baseline" && <BaselinePage api={api} busy={opening} dark={dark} data={data} detail={detail} onAbandon={abandon} onBack={() => navigate("today")} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
+          {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={open} onSelect={async (trackId) => { if (!api) return; await api.setActiveTrack(trackId); await refresh(); }} />}
           {page === "problems" && (
             <ProblemsPage
               api={api}
@@ -496,8 +534,8 @@ export function App() {
               onStartProblem={startProblem}
             />
           )}
-          {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions} />}
-          {page === "ability" && (
+          {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
+          {(page === "progress" || page === "ability") && (
             <AbilityPage
               abilities={data.abilities}
               api={api}
@@ -506,9 +544,10 @@ export function App() {
               onOpenConcept={setConcept}
               onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
               onPractise={practise}
+              progress={data.progress}
             />
           )}
-          {page === "challenges" && (
+          {(page === "history" || page === "challenges") && (
             <ChallengesPage
               api={api}
               challenges={data.challenges}
@@ -531,7 +570,9 @@ export function App() {
           {page === "settings" && (
             <SettingsPage
               api={api}
+              baseline={data.baseline}
               language={data.profile.language}
+              onBaseline={beginBaseline}
               onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
               onSignedOut={signedOut}
               onThemeChange={changeTheme}
@@ -558,7 +599,7 @@ export function App() {
                       dark={dark}
                       detail={detail}
                       onAbandon={abandon}
-                      onBack={() => navigate("home")}
+                      onBack={() => navigate("today")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
@@ -570,7 +611,7 @@ export function App() {
                     <ChatView
                       api={api}
                       detail={detail}
-                      onBack={() => navigate("home")}
+                      onBack={() => navigate("today")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
@@ -581,7 +622,7 @@ export function App() {
                     <PlanningView
                       api={api}
                       detail={detail}
-                      onBack={() => navigate("home")}
+                      onBack={() => navigate("today")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
@@ -600,14 +641,14 @@ export function App() {
       <SearchPalette
         challenges={data.challenges}
         concepts={data.concepts}
-        onNewSession={() => navigate("home")}
+        onNewSession={() => navigate("tracks")}
         onOpenChallenge={openChallenge}
         onOpenChange={setPalette}
         onOpenConcept={setConcept}
         onOpenSession={open}
         onPage={navigate}
         open={palette}
-        sessions={data.sessions}
+        sessions={data.sessions.filter((session) => session.context !== "baseline")}
       />
 
       <ConceptSheet

@@ -54,7 +54,7 @@ export class RestoreService {
     if (!token) return this.settle("idle");
     this.settle("pending");
     try {
-      const manifest = await this.get<RestoredAccount & { sessions: Array<{ id: string; updatedAt: string }> }>("/v1/restore/manifest", token);
+      const manifest = await this.get<RestoredAccount & { sessions: Array<{ id: string; updatedAt: string }>; learningState?: unknown }>("/v1/restore/manifest", token);
       this.store.restoreAccount({ profile: manifest.profile, concepts: manifest.concepts ?? [], abilities: manifest.abilities ?? [] });
       /* Newest first, and sessions this device already holds at or beyond the
          cloud's version are never fetched. The common case — a reinstall while
@@ -70,6 +70,10 @@ export class RestoreService {
            full of sessions whose editors are empty. */
         for (const bundle of sessions) await this.writeWorkspace(bundle);
       }
+      /* The learner model points at restored sessions, attempts and events, so
+         it is deliberately applied last. The store also refuses this cloud
+         snapshot when local adaptive state is waiting to sync. */
+      this.store.restoreLearningState(manifest.learningState);
       return this.settle("done");
     } catch {
       return this.settle("failed");

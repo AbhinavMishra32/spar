@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, ExternalLink, Ellipsis, Globe, KeyRound, Laptop, Loader2, Lock, LogOut, Moon, Plus, RotateCw, Sun, Trash2 } from "lucide-react";
-import { LANGUAGES as SUPPORTED_LANGUAGES, type Language } from "@spar/domain";
+import { BrainCircuit, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
+import { LANGUAGES as SUPPORTED_LANGUAGES, type BaselineState, type Language } from "@spar/domain";
 import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -31,6 +31,10 @@ import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
+type SettingsSection = "account" | "models" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
+const SETTINGS_NAV: Array<{id:SettingsSection;label:string;icon:React.ComponentType<{className?:string}>}>=[
+  {id:"account",label:"Account",icon:UserRound},{id:"models",label:"Models",icon:BrainCircuit},{id:"connections",label:"Connections",icon:Link2},{id:"learning",label:"Learning",icon:Settings2},{id:"privacy",label:"Data & Privacy",icon:Eye},{id:"appearance",label:"Appearance",icon:Palette},{id:"advanced",label:"Learning Engine",icon:Globe},
+];
 
 const LANGUAGES: Language[] = [...SUPPORTED_LANGUAGES];
 
@@ -414,12 +418,27 @@ function ConnectRow({ available, onPick }: { available: Provider[]; onPick(provi
   );
 }
 
+function LearningEngineInspector({ api }: { api: SparApi | undefined }) {
+  const [snapshot,setSnapshot]=useState<Record<string,unknown>|null>(null);
+  const [failure,setFailure]=useState("");
+  const read=useCallback(()=>{if(!api)return;setFailure("");void api.learningEngine().then(setSnapshot).catch((cause)=>setFailure(message(cause)));},[api]);
+  useEffect(read,[read]);
+  const model=snapshot?.model as Record<string,unknown>|undefined;
+  return <><Group label="Learning Engine">
+    <Row><div className="min-w-0 flex-1"><p className="text-content font-medium">Internal learner system</p><p className="mt-0.5 text-ui text-muted-foreground">Structured state, evidence, patterns, training decisions, rating history, and model metadata. This is inspectability—not a normal training surface.</p></div><Button onClick={read} size="sm" variant="outline"><RotateCw data-icon="inline-start" />Refresh</Button></Row>
+    <Row><div className="grid w-full grid-cols-3 gap-4 text-ui"><div><p className="text-muted-foreground">Schema</p><p className="mt-0.5 font-mono">v{String(model?.schemaVersion??"…")}</p></div><div><p className="text-muted-foreground">Policy</p><p className="mt-0.5 truncate font-mono">{String(model?.policyVersion??"…")}</p></div><div><p className="text-muted-foreground">Registry</p><p className="mt-0.5 truncate font-mono">{String(model?.abilityRegistry??"…")}</p></div></div></Row>
+  </Group>
+  <Group label="Raw snapshot"><div className="max-h-[30rem] overflow-auto p-3.5">{failure?<p className="text-ui text-destructive">{failure}</p>:snapshot?<pre className="whitespace-pre-wrap break-words font-mono text-[0.68rem] leading-5 text-muted-foreground">{JSON.stringify(snapshot,null,2)}</pre>:<p className="flex items-center gap-2 text-ui text-muted-foreground"><SparDots pattern="pulse" size={16} />Reading learner state…</p>}</div></Group></>;
+}
+
 export function SettingsPage({
   api,
   language,
   onLanguageChange,
   onSignedOut,
   onThemeChange,
+  baseline,
+  onBaseline,
   theme,
 }: {
   api: SparApi | undefined;
@@ -427,6 +446,8 @@ export function SettingsPage({
   onLanguageChange(language: Language): void;
   onSignedOut(): Promise<void>;
   onThemeChange(theme: ThemePreference): Promise<void>;
+  baseline: BaselineState;
+  onBaseline(): void;
   theme: ThemePreference;
 }) {
   const [inventory, setInventory] = useState<ProviderInventory | null>(null);
@@ -436,6 +457,7 @@ export function SettingsPage({
   const [themeBusy, setThemeBusy] = useState(false);
   const [languageBusy, setLanguageBusy] = useState(false);
   const [accountAction, setAccountAction] = useState<"sign-out" | "delete" | null>(null);
+  const [section, setSection] = useState<SettingsSection>("account");
 
   /* Through the shared store, not the bridge directly: connecting here has to
      retire the "no model provider" notice on the composer waiting behind this
@@ -493,16 +515,22 @@ export function SettingsPage({
   };
 
   return (
-    <div className="app-scroll h-full overflow-y-auto">
+    <div className="flex h-full min-h-0">
+      <aside className="w-[12.5rem] shrink-0 border-r border-border bg-muted/20 px-3 py-5">
+        <nav className="flex flex-col gap-0.5" aria-label="Settings sections">
+          {SETTINGS_NAV.map(({id,label,icon:Icon})=><button className={cn("flex h-8 items-center gap-2 rounded-lg px-2.5 text-ui text-left outline-none transition-colors",section===id?"bg-accent font-medium text-foreground":"text-muted-foreground hover:bg-accent/60 hover:text-foreground")} key={id} onClick={()=>setSection(id)} type="button"><Icon className="size-4" />{label}</button>)}
+        </nav>
+      </aside>
+      <div className="app-scroll min-w-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[42rem] px-6 pb-20 pt-9">
         <h1 className="text-[1.55rem] font-semibold tracking-[-0.035em]">Settings</h1>
-        <p className="mt-1 text-content text-muted-foreground">{`Appearance and model runtime for this ${deviceNoun}.`}</p>
+        <p className="mt-1 text-content text-muted-foreground">{SETTINGS_NAV.find((item)=>item.id===section)?.label}</p>
 
         {error && !selected && (
           <p className="mt-5 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui text-destructive">{error}</p>
         )}
 
-        <Group label="Appearance">
+        {section === "appearance" && <Group label="Appearance">
           <Row className="gap-4 py-2.5">
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Theme</p>
@@ -524,9 +552,11 @@ export function SettingsPage({
               value={theme}
             />
           </Row>
-        </Group>
+        </Group>}
 
-        <Group label="Training">
+        {section === "learning" && <><Group label="Baseline">
+          <Row><div className="min-w-0 flex-1"><p className="text-content font-medium">Build your baseline</p><p className="mt-0.5 text-ui text-muted-foreground">{baseline.status === "complete" ? `Complete · ${Math.round(baseline.confidence*100)}% confidence from ${baseline.directEvidenceCount} direct calibration attempts.` : "Direct adaptive calibration is required before personalization can fully begin."}</p></div><Button onClick={onBaseline} size="sm" variant="outline">{baseline.status === "not-started" || baseline.status === "skipped" ? "Begin" : baseline.status === "complete" ? "Recalibrate" : "Continue"}</Button></Row>
+        </Group><Group label="Training preferences">
           <Row className="items-center gap-6 py-3">
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Default language</p>
@@ -566,9 +596,9 @@ export function SettingsPage({
               ))}
             </div>
           </Row>
-        </Group>
+        </Group></>}
 
-        <Group label="Providers">
+        {section === "models" && <><Group label="Providers">
           {!inventory && (
             <Row>
               <SparDots className="text-muted-foreground" pattern="pulse" size={16} />
@@ -606,21 +636,21 @@ export function SettingsPage({
         {/* Not under Providers, and deliberately above Web search: this is where
             the problems come from, which is a bigger fact about how Spar behaves
             than either of the things below it. */}
-        <Group label="Practice sources">
+        <Group label="Web search">
+          <WebSearchRow api={api} />
+        </Group></>}
+
+        {section === "connections" && <Group label="Practice sources">
           <PracticeSourceGroup api={api} />
-        </Group>
+        </Group>}
 
         {/* Its own group rather than a row under Providers: this is not a model,
             and grouping it with them would imply the agent could run on it. */}
-        <Group label="Web search">
-          <WebSearchRow api={api} />
-        </Group>
-
-        <Group label="Updates">
+        {section === "appearance" && <Group label="Updates">
           <UpdateSettings api={api} />
-        </Group>
+        </Group>}
 
-        <Group label="Account">
+        {section === "account" && <><Group label="Account">
           <Row>
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Sign out</p>
@@ -628,6 +658,9 @@ export function SettingsPage({
             </div>
             <Button onClick={() => setAccountAction("sign-out")} size="sm" variant="secondary"><LogOut />Sign out</Button>
           </Row>
+        </Group><AboutSpar /></>}
+
+        {section === "privacy" && <Group label="Data & Privacy">
           <Row>
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Delete account</p>
@@ -635,9 +668,10 @@ export function SettingsPage({
             </div>
             <Button onClick={() => setAccountAction("delete")} size="sm" variant="destructive"><Trash2 />Delete account</Button>
           </Row>
-        </Group>
+        </Group>}
 
-        <AboutSpar />
+        {section === "advanced" && <LearningEngineInspector api={api} />}
+      </div>
       </div>
 
       <ProviderConnectDialog api={api} onClose={() => setSelected(null)} onConnected={refresh} provider={selected} />

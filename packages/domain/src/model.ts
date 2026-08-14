@@ -69,6 +69,8 @@ export type Question = z.infer<typeof questionSchema>;
 
 export const sessionSummarySchema = z.object({
   id,
+  trackId: id.nullable().optional(),
+  context: z.enum(["training", "baseline"]).default("training"),
   title: z.string().min(1),
   originalGoal: z.string().min(1),
   objective: z.string(),
@@ -217,6 +219,7 @@ export const challengeHistorySummarySchema = z.object({
   attemptCount: z.number().int().nonnegative(),
   testRunCount: z.number().int().nonnegative(),
   lastOutcome: z.enum(["passed", "failed", "abandoned", "replaced"]).nullable(),
+  assistance: z.enum(["independent", "assisted", "unknown"]).optional(),
   /** What this challenge was about. Ordered primary first, so a row that only has
    *  room for one chip shows the one the challenge was actually aimed at. */
   concepts: z.array(conceptTagSchema),
@@ -319,8 +322,137 @@ export const abilityDetailSchema = z.object({
     outcome: z.enum(["passed", "failed", "abandoned", "replaced", "open"]),
     occurredAt: isoDate,
   })),
+  machine: z.lazy(() => learnerAbilityStateSchema).optional(),
+  learnerEvidence: z.array(z.lazy(() => learnerEvidenceSchema)).default([]),
+  patterns: z.array(z.lazy(() => learnerPatternSchema)).default([]),
 });
 export type AbilityDetail = z.infer<typeof abilityDetailSchema>;
+
+/* --------------------------------------------------------------------------
+ * Adaptive training product model
+ * --------------------------------------------------------------------------
+ *
+ * Sessions remain the execution container: transcript, workspace and attempts.
+ * A Track is the longer-lived learner intent that may own many such sessions.
+ * All Tracks point at the same ability/evidence ledger; none owns a private copy
+ * of learner state.
+ */
+export const trackStatusSchema = z.enum(["active", "paused", "completed"]);
+export const trackSchema = z.object({
+  id,
+  title: z.string().min(1).max(80),
+  goal: z.string().min(3).max(1000),
+  status: trackStatusSchema,
+  emphasis: z.array(z.string()).default([]),
+  priorities: z.array(z.string()).default([]),
+  investigating: z.array(id).default([]),
+  monitoring: z.array(id).default([]),
+  createdAt: isoDate,
+  updatedAt: isoDate,
+});
+export type Track = z.infer<typeof trackSchema>;
+
+export const learnerAbilityTrainingStatusSchema = z.enum(["unknown", "diagnosing", "training", "monitoring"]);
+export const learnerAbilityTrendSchema = z.enum(["improving", "stable", "declining", "unknown"]);
+export const learnerAbilityStateSchema = z.object({
+  abilityId: id,
+  title: z.string().min(1),
+  proficiency: z.number().min(0).max(1),
+  confidence: z.number().min(0).max(1),
+  evidenceCount: z.number().int().nonnegative(),
+  lastEvidenceAt: isoDate.nullable(),
+  trainingStatus: learnerAbilityTrainingStatusSchema,
+  trend: learnerAbilityTrendSchema,
+  currentBelief: z.string(),
+  nextVerification: z.string(),
+  updatedAt: isoDate,
+});
+export type LearnerAbilityState = z.infer<typeof learnerAbilityStateSchema>;
+
+export const evidencePolaritySchema = z.enum(["supporting", "contradictory", "neutral"]);
+export const learnerEvidenceSchema = z.object({
+  id,
+  abilityId: id,
+  attemptId: id.nullable(),
+  eventId: id.nullable(),
+  statement: z.string().min(1),
+  polarity: evidencePolaritySchema,
+  independence: z.enum(["independent", "assisted", "unknown"]),
+  strength: z.number().min(0).max(1),
+  occurredAt: isoDate,
+});
+export type LearnerEvidence = z.infer<typeof learnerEvidenceSchema>;
+
+export const patternStatusSchema = z.enum(["observation", "hypothesis", "pattern", "monitoring", "resolved"]);
+export const learnerPatternSchema = z.object({
+  id,
+  title: z.string().min(1),
+  description: z.string(),
+  abilityId: id.nullable(),
+  status: patternStatusSchema,
+  evidenceCount: z.number().int().nonnegative(),
+  lastObservedAt: isoDate.nullable(),
+  updatedAt: isoDate,
+});
+export type LearnerPattern = z.infer<typeof learnerPatternSchema>;
+
+export const trainingModeSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("recommended") }),
+  z.object({ kind: z.literal("focus"), focus: z.string().min(1).max(80) }),
+  z.object({ kind: z.literal("explore") }),
+  z.object({ kind: z.literal("source"), source: z.enum(["leetcode", "codeforces", "spar"]) }),
+  z.object({ kind: z.literal("quick") }),
+]);
+export type TrainingMode = z.infer<typeof trainingModeSchema>;
+
+export const baselineStateSchema = z.object({
+  status: z.enum(["not-started", "in-progress", "complete", "skipped"]),
+  confidence: z.number().min(0).max(1),
+  directEvidenceCount: z.number().int().nonnegative(),
+  importedEvidenceCount: z.number().int().nonnegative(),
+  completedAt: isoDate.nullable(),
+  sessionId: id.nullable().default(null),
+});
+export type BaselineState = z.infer<typeof baselineStateSchema>;
+
+export const sparNoticeSchema = z.object({ id, title: z.string(), body: z.string(), createdAt: isoDate });
+export type SparNotice = z.infer<typeof sparNoticeSchema>;
+
+export const ratingPointSchema = z.object({
+  id,
+  rating: z.number().int().min(0),
+  provisional: z.boolean(),
+  reason: z.string(),
+  occurredAt: isoDate,
+});
+export type RatingPoint = z.infer<typeof ratingPointSchema>;
+
+export const todayRecommendationSchema = z.object({
+  id,
+  trackId: id,
+  trackTitle: z.string(),
+  sessionId: id.nullable(),
+  questionId: id.nullable(),
+  challengeTitle: z.string(),
+  abilityId: id.nullable(),
+  abilityTitle: z.string(),
+  intent: pedagogicalActionSchema,
+  source: z.enum(["leetcode", "codeforces", "spar"]),
+  reason: z.string(),
+  reasoning: z.array(z.string()),
+  mode: trainingModeSchema,
+  createdAt: isoDate,
+});
+export type TodayRecommendation = z.infer<typeof todayRecommendationSchema>;
+
+export const learnerProgressSchema = z.object({
+  rating: ratingPointSchema,
+  ratingHistory: z.array(ratingPointSchema),
+  abilities: z.array(learnerAbilityStateSchema),
+  patterns: z.array(learnerPatternSchema),
+  notices: z.array(sparNoticeSchema),
+});
+export type LearnerProgress = z.infer<typeof learnerProgressSchema>;
 
 /**
  * An option is its own sentence and nothing else.

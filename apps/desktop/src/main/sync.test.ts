@@ -24,6 +24,11 @@ describe("outbox routing", () => {
     expect(route("profile-save", profile)).toEqual({ path: "/v1/profile", method: "PUT", body: profile });
   });
 
+  it("sends the versioned adaptive projection as one account document", () => {
+    const state = { version: 1, tracks: [], abilityState: [] };
+    expect(route("learning-state", state)).toEqual({ path: "/v1/learning-state", method: "PUT", body: state });
+  });
+
   it("batches transcript messages under the session they belong to", () => {
     const payload = { sessionId: "s1", messages: [{ id: "m1", role: "agent", body: "Hello", createdAt: "2026-01-01T00:00:00.000Z", activity: [] }] };
     expect(route("agent-message", payload)).toEqual({ path: "/v1/agent-messages", method: "POST", body: payload });

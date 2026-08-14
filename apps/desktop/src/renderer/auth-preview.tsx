@@ -113,7 +113,7 @@ function Harness() {
           serverConfigured
         />
       ) : (
-        <OnboardingPage api={api} displayName="abhinav" onDone={async () => undefined} onStartSession={async () => undefined} />
+        <OnboardingPage api={api} displayName="abhinav" onBaseline={async () => undefined} onDone={async () => undefined} onStartSession={async () => undefined} />
       )}
     </div>
   );

@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { LocalStore } from "./store.js";
 import type { QuestionDesign } from "@spar/domain";
 
 const design=(title:string):QuestionDesign=>({title,language:"javascript",kind:"function",statement:"Implement the target behavior while preserving the declared invariant through every transition.",starterFiles:{"src/index.js":"export function solve(){ throw new Error(\"implement\") }"},referenceFiles:{"src/index.js":"export function solve(){ return true }"},visibleTests:{"tests/visible.test.js":"// visible"},hiddenTests:{"tests/hidden.test.js":"// hidden"},knownIncorrectFiles:[{"src/index.js":"export function solve(){ return false }"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["returns before restoring the invariant"]});
 
 it("persists the device theme across store reloads",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-theme-"));const database=path.join(directory,"state.sqlite3");try{const first=new LocalStore(database);first.setSetting("theme","dark");first.close();const reopened=new LocalStore(database);try{expect(reopened.getSetting("theme","system")).toBe("dark");}finally{reopened.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
+
+it("migrates legacy sessions into one living Track instead of one Track each",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-track-migration-"));const database=path.join(directory,"state.sqlite3");try{const before=new LocalStore(database);before.createSession("Practise arrays");before.createSession("Trace the JavaScript runtime");before.close();const legacy=new Database(database);legacy.prepare("UPDATE sessions SET track_id=NULL").run();legacy.prepare("DELETE FROM tracks").run();legacy.prepare("DELETE FROM settings WHERE key='active-track-id'").run();legacy.close();const migrated=new LocalStore(database);try{expect(migrated.listTracks()).toEqual([expect.objectContaining({title:"General practice"})]);const trackIds=new Set(migrated.listSessions().map((session)=>session.trackId));expect(trackIds.size).toBe(1);expect(trackIds.has(migrated.activeTrack()?.id??"")).toBe(true);}finally{migrated.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
 
 it("clears learner data without erasing device preferences",()=>{const store=new LocalStore(":memory:");try{store.setSetting("theme","dark");const {sessionId}=store.createSession("Practise JavaScript arrays");store.setTrainingTarget(sessionId,{ability:"Arrays",specificGap:"Filter values",desiredEvidence:"Uses filter",avoidTesting:[]});store.createQuestion(sessionId,design("Filter values"),{valid:true});store.clearAccountData();expect(store.listSessions()).toEqual([]);expect(store.listAbilities()).toEqual([]);expect(store.getSetting("theme","system")).toBe("dark");}finally{store.close();}});
 
@@ -250,3 +253,96 @@ it("pushes the onboarding profile so another machine can skip intake",()=>{const
   store.saveProfile({name:"Abhinav",experience:"senior",focus:[],weakness:"",language:"cpp",completedAt:new Date().toISOString()});
   expect(store.pendingSync().map((item)=>item.kind)).toContain("profile-save");
 }finally{store.close();}});
+
+describe("adaptive product state",()=>{
+  it("keeps baseline calibration out of Tracks and ordinary session navigation",()=>{const store=new LocalStore(":memory:");try{
+    const training=store.createTrack("Become reliable at backend problem solving","Backend Problem Solving");
+    const baseline=store.createBaselineSession();
+    expect(store.listTracks()).toEqual([expect.objectContaining({id:training.track.id})]);
+    expect(store.activeTrack()?.id).toBe(training.track.id);
+    expect(store.readSession(baseline.sessionId)?.summary).toMatchObject({context:"baseline",trackId:null,title:"Baseline"});
+    expect(store.getBaseline()).toMatchObject({status:"in-progress",sessionId:baseline.sessionId});
+    expect(store.createBaselineSession()).toEqual(baseline);
+  }finally{store.close();}});
+
+  it("keeps Tracks separate from the one global learner model",()=>{const store=new LocalStore(":memory:");try{
+    const typescript=store.createTrack("Become extremely strong at TypeScript and understand the language deeply");
+    const interviews=store.createTrack("Prepare seriously for algorithmic interviews");
+    const target=store.setTrainingTarget(typescript.sessionId,{ability:"Invariant restoration",specificGap:"Restore validity after every mutation",desiredEvidence:"Uses a loop until valid",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    expect(store.listTracks()).toHaveLength(2);
+    expect(store.activeTrack()?.id).toBe(interviews.track.id);
+    expect(store.abilityStates()).toEqual([expect.objectContaining({abilityId:target.abilityId,trainingStatus:"unknown"})]);
+    store.setActiveTrack(typescript.track.id);
+    expect(store.abilityStates()[0]?.abilityId).toBe(target.abilityId);
+  }finally{store.close();}});
+
+  it("turns linked attempts into confidence without treating one event as mastery",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeat restoration",desiredEvidence:"Shrinks until every condition is valid",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const question=store.createQuestion(sessionId,design("Restore repeatedly"),{valid:true});
+    const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nDirect execution worked once; transfer is untested.",summary:"Direct execution worked once; transfer is untested.",status:"developing",evidenceEventIds:[event.id]});
+    expect(store.abilityStates()[0]).toMatchObject({evidenceCount:1,trainingStatus:"training",proficiency:0.55});
+    expect(store.abilityStates()[0]!.confidence).toBeLessThan(0.5);
+    expect(store.learnerProgress().rating.provisional).toBe(true);
+  }finally{store.close();}});
+
+  it("persists baseline, training mode and an inspectable Today decision",()=>{const store=new LocalStore(":memory:");try{
+    const created=store.createTrack("Climb Codeforces while keeping practice targeted","Codeforces Climb");
+    const target=store.setTrainingTarget(created.sessionId,{ability:"Graph recognition",specificGap:"Recognize implicit graph structure",desiredEvidence:"Models states and transitions independently",avoidTesting:["advanced syntax"],action:"diagnose"});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    store.createQuestion(created.sessionId,design("Hidden transit map"),{valid:true});
+    store.setBaseline({status:"in-progress",confidence:0.3,directEvidenceCount:1});
+    store.setTrainingMode({kind:"focus",focus:"Graphs"});
+    const today=store.todayRecommendation();
+    expect(today).toMatchObject({trackTitle:"Codeforces Climb",challengeTitle:"Hidden transit map",abilityTitle:"Graph recognition",intent:"diagnose",mode:{kind:"focus",focus:"Graphs"}});
+    expect(store.getBaseline()).toMatchObject({status:"in-progress",directEvidenceCount:1});
+    expect(store.learningEngineSnapshot()).toMatchObject({model:{schemaVersion:4},activeTrack:{id:created.track.id}});
+  }finally{store.close();}});
+
+  it("requires independent attempts before promoting an observation to a pattern",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Improve boundary-case reasoning");
+    const target=store.setTrainingTarget(sessionId,{ability:"Boundary-case reasoning",specificGap:"Empty and singleton inputs",desiredEvidence:"Handles boundaries before the main loop",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const first=store.createQuestion(sessionId,design("Empty sequence"),{valid:true});
+    const firstEvidence=store.appendNextEvent({id:randomUUID(),attemptId:first.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nAn empty-input miss happened once.",evidenceEventIds:[firstEvidence.id],evidence:[{eventId:firstEvidence.id,statement:"The empty input bypassed the intended initialization.",polarity:"contradictory",independence:"independent",strength:0.7}],pattern:{title:"Boundary assumptions",description:"Initialization assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id]}});
+    expect(store.listPatterns()[0]?.status).toBe("hypothesis");
+    store.completeAttempt(first.attemptId,"failed");
+    store.setTrainingTarget(sessionId,{ability:"Boundary-case reasoning",specificGap:"Zero-length state",desiredEvidence:"Separates empty state from the ordinary transition",avoidTesting:[]});
+    const second=store.createQuestion(sessionId,design("Empty event stream"),{valid:true});
+    const secondEvidence=store.appendNextEvent({id:randomUUID(),attemptId:second.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nThe same assumption appeared in a different structure.",evidenceEventIds:[secondEvidence.id],evidence:[{eventId:secondEvidence.id,statement:"The empty stream repeated the non-empty initialization assumption.",polarity:"contradictory",independence:"independent",strength:0.8}],pattern:{title:"Boundary assumptions",description:"Initialization repeatedly assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id,secondEvidence.id]}});
+    expect(store.listPatterns()[0]).toMatchObject({status:"pattern",evidenceCount:2});
+  }finally{store.close();}});
+
+  it("compacts and restores the account-wide adaptive projection",()=>{const source=new LocalStore(":memory:");const restored=new LocalStore(":memory:");try{
+    const created=source.createTrack("Become deeply fluent in the TypeScript type system","TypeScript Depth");
+    const target=source.setTrainingTarget(created.sessionId,{ability:"Generic constraint design",specificGap:"Constrain inference without widening",desiredEvidence:"Preserves the caller's narrow type",avoidTesting:[]});
+    source.ensureAbility(target.abilityId,target.abilityTitle);
+    source.setBaseline({status:"in-progress",confidence:0.4,directEvidenceCount:1});
+    source.setTrainingMode({kind:"focus",focus:"TypeScript"});
+    // Several adaptive writes still produce one latest projection. Attempt
+    // events remain separate rows and are deliberately not compacted this way.
+    expect(source.pendingSync().filter((item)=>item.kind==="learning-state")).toHaveLength(1);
+
+    const ability=source.listAbilities()[0]!;
+    restored.restoreAccount({profile:null,concepts:[],abilities:[{id:ability.id,title:ability.title,markdown:ability.markdown,summary:ability.summary,practice:ability.practice,earnedAt:ability.earnedAt,conceptSlugs:[],status:ability.status,version:ability.version,updatedAt:ability.updatedAt,evidenceEventIds:[]}]});
+    restored.restoreLearningState(source.cloudLearningState());
+    expect(restored.listTracks()).toEqual([expect.objectContaining({title:"TypeScript Depth"})]);
+    expect(restored.activeTrack()?.id).toBe(created.track.id);
+    expect(restored.getBaseline()).toMatchObject({status:"in-progress",directEvidenceCount:1});
+    expect(restored.getTrainingMode()).toEqual({kind:"focus",focus:"TypeScript"});
+    expect(restored.abilityStates()).toEqual([expect.objectContaining({abilityId:target.abilityId,trainingStatus:"unknown"})]);
+    expect(restored.pendingSync()).toEqual([]);
+  }finally{source.close();restored.close();}});
+
+  it("keeps local adaptive work when the cloud projection is older",()=>{const store=new LocalStore(":memory:");try{
+    const local=store.createTrack("Prepare seriously for systems interviews","Systems Interview Preparation");
+    store.restoreLearningState({version:1,tracks:[{id:randomUUID(),title:"Old cloud track",goal:"Old goal",status:"active",emphasis:[],priorities:[],investigating:[],monitoring:[],createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"}]});
+    expect(store.activeTrack()?.id).toBe(local.track.id);
+    expect(store.listTracks().map((track)=>track.title)).not.toContain("Old cloud track");
+  }finally{store.close();}});
+});

@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { canonicalWorkspacePath } from "./workspacePath.js";
-import { attemptEventSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type SessionDetail, type SessionSuggestion } from "@spar/domain";
+import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
+  tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
   /* The window reports its own state; the main process decides when that becomes
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
@@ -71,6 +72,7 @@ export type AuthRequest = z.infer<typeof authRequestInput>;
 export type AuthResult = { status: "signed-in" } | { status: "code-sent"; purpose: AuthCodePurpose };
 
 export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000) });
+export const createTrackInput = z.object({ goal: z.string().trim().min(3).max(1000), title: z.string().trim().min(1).max(80).optional() });
 /* Sidebar housekeeping. Titles are capped where the generated one is capped, so a
    renamed session cannot outgrow the row it has to fit in. */
 export const sessionRenameInput = z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(80) });
@@ -282,7 +284,7 @@ export type SourceRunReport = {
 /** Emitted whenever a source's connection changes under the app's feet. */
 export type PracticeSourceEvent = { source: z.infer<typeof sourceIdSchema>; state: PracticeSourceState; message: string };
 
-export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** How far the pull half of sync has got. The shell gates on this before it
    *  gates on `profile`: a signed-in device with no local profile has either not
    *  finished restoring or could not reach the server, and treating either as "no
@@ -346,6 +348,12 @@ export type UpdateState = {
 export interface SparApi {
   bootstrap(): Promise<BootstrapData>;
   createSession(input: z.infer<typeof createSessionInput>): Promise<{ sessionId: string }>;
+  createTrack(input: z.infer<typeof createTrackInput>): Promise<{ track: Track; sessionId: string }>;
+  setActiveTrack(trackId: string): Promise<Track | null>;
+  setTrainingMode(mode: z.infer<typeof trainingModeSchema>): Promise<TrainingMode>;
+  setBaseline(input: Partial<z.infer<typeof baselineStateSchema>>): Promise<BaselineState>;
+  startBaseline(): Promise<{ sessionId: string }>;
+  learningEngine(): Promise<Record<string, unknown>>;
   openSession(sessionId: string): Promise<SessionDetail | null>;
   /** Tell the main process how this session's window is arranged. It folds this
    *  into the checkpoint it writes on its own schedule, along with the workspace

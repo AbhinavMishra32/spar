@@ -17,7 +17,7 @@ import { PANEL, STEP, TEXT, useMarkPass } from "../auth/arrival";
 import { SparWordmark } from "../common/SparWordmark";
 import { ProviderConnectDialog, type Provider } from "../settings/ProviderConnectDialog";
 
-type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider" | "source";
+type StepId = "name" | "experience" | "focus" | "weakness" | "language" | "provider" | "source" | "baseline";
 
 type Step = {
   id: StepId;
@@ -27,7 +27,7 @@ type Step = {
   /** One line under the question, where a question needs a reason. */
   caption?: string;
   /** Free-text steps open straight into the field; the rest list options. */
-  kind: "text" | "one" | "many" | "provider" | "source";
+  kind: "text" | "one" | "many" | "provider" | "source" | "baseline";
   placeholder?: string;
   optional?: boolean;
 };
@@ -57,6 +57,7 @@ const STEPS: Step[] = [
      have been using it. Skipping is a real answer and costs nothing — every
      challenge is then one Spar writes. */
   { id: "source", header: "Problems", question: "Connect a problem provider?", caption: "Optional. Spar writes its own challenges either way.", kind: "source", optional: true },
+  { id: "baseline", header: "Baseline", question: "Build your baseline?", caption: "A few adaptive programming challenges give Spar enough direct evidence to personalize well. It is not a fixed exam, and you can stop or skip it.", kind: "baseline", optional: true },
 ];
 
 const EXPERIENCE: Array<{ value: LearnerProfile["experience"]; label: string; hint: string }> = [
@@ -196,11 +197,13 @@ export function OnboardingPage({
   api,
   displayName,
   onDone,
+  onBaseline,
   onStartSession,
 }: {
   api: SparApi | undefined;
   displayName: string;
   onDone(profile: LearnerProfile): Promise<void>;
+  onBaseline(): Promise<void>;
   onStartSession(goal: string): Promise<void>;
 }) {
   const [index, setIndex] = useState(0);
@@ -221,6 +224,7 @@ export function OnboardingPage({
   const [suggestions, setSuggestions] = useState<{ source: "agent" | "starter"; suggestions: SessionSuggestion[] } | null>(null);
   const [picked, setPicked] = useState<number | null>(null);
   const [saved, setSaved] = useState<LearnerProfile | null>(null);
+  const [baselinePlanned,setBaselinePlanned]=useState(false);
 
   const { pass, awake, rouse } = useMarkPass(busy);
   const step = STEPS[index]!;
@@ -291,6 +295,7 @@ export function OnboardingPage({
     if (id === "weakness") return weakness.trim() || null;
     if (id === "language") return language ? LANGUAGE_LABEL[language] : null;
     if (id === "source") return sources.length ? sources.map((entry) => entry.username).join(", ") : null;
+    if (id === "baseline") return baselinePlanned ? "Build my baseline" : null;
     if (!runnable) return null;
     return connected.length ? connected.map((provider) => provider.name).join(", ") : "Ready";
   };
@@ -307,11 +312,13 @@ export function OnboardingPage({
     setError("");
     try {
       setSaved(await api.saveProfile({ name: name.trim(), experience, focus, weakness: weakness.trim(), language }));
+      await api.setBaseline({status:baselinePlanned?"in-progress":"skipped"});
     } catch (cause) {
       setError(message(cause));
       setBusy(false);
       return;
     }
+    if(baselinePlanned){setSuggestions({source:"starter",suggestions:[]});setBusy(false);setPhase("sparring");return;}
     setPhase("reading");
     const drafted = await api.suggestSessions().catch(() => null);
     setSuggestions(drafted ?? { source: "starter", suggestions: [] });
@@ -327,7 +334,8 @@ export function OnboardingPage({
     setError("");
     try {
       await onDone(saved);
-      if (goal) await onStartSession(goal);
+      if(baselinePlanned)await onBaseline();
+      else if (goal) await onStartSession(goal);
     } catch (cause) {
       setError(message(cause));
       setBusy(false);
@@ -462,7 +470,9 @@ export function OnboardingPage({
                   ? step.question
                   : phase === "reading"
                     ? `One moment, ${name.trim().split(" ")[0] || "there"}.`
-                    : drafted.length
+                    : baselinePlanned
+                      ? "Ready for your first probe?"
+                      : drafted.length
                       ? "Where would you like to start?"
                       : "Start a session in your own words."}
               </h1>
@@ -471,7 +481,9 @@ export function OnboardingPage({
                   ? step.caption ?? ""
                   : phase === "reading"
                     ? "Spar is reading what you told it and drafting a few places to begin."
-                    : drafted.length
+                    : baselinePlanned
+                      ? "Spar will choose one small coding task, observe how you solve it, and adapt the next probe from that evidence."
+                      : drafted.length
                       ? suggestions?.source === "starter"
                         ? "Starting points, until Spar has watched you work."
                         : "Drafted from your intake. Pick one, or write your own once you are inside."
@@ -682,6 +694,13 @@ export function OnboardingPage({
                 </div>
               )}
 
+              {phase === "intake" && step.id === "baseline" && (
+                <div className={GROUP}>
+                  <OptionRow hint="Spar changes each calibration challenge from the evidence in the one before it." index={1} onClick={()=>setBaselinePlanned(true)} selected={baselinePlanned}>Build my baseline</OptionRow>
+                  <OptionRow hint="Personalized training stays limited and Today will keep a quiet reminder." index={2} onClick={()=>setBaselinePlanned(false)} selected={!baselinePlanned}>Skip for now</OptionRow>
+                </div>
+              )}
+
               {phase === "intake" && step.id === "provider" && (
                 <>
                   {/* Said before the list, not after a failed Begin: connecting one
@@ -718,7 +737,7 @@ export function OnboardingPage({
             ) : phase === "sparring" ? (
               <>
                 <Button className="mt-3 h-11 w-full text-[0.8125rem]" disabled={busy || (drafted.length > 0 && picked === null)} onClick={() => void leave(drafted.length ? drafted[picked ?? 0]?.goal : undefined)} size="lg" type="button">
-                  {busy ? "Opening Spar…" : drafted.length ? "Start sparring" : "Open Spar"}
+                  {busy ? "Opening Spar…" : baselinePlanned ? "Start baseline" : drafted.length ? "Start sparring" : "Open Spar"}
                   {!busy && <ArrowRight data-icon="inline-end" />}
                 </Button>
                 <p aria-live="polite" className={cn("mt-2.5 min-h-4 text-center text-ui", error ? "text-destructive" : "text-muted-foreground/70")} role="status">

@@ -9,6 +9,12 @@ function launchFlag(name: string, fallback: string) {
 const api: SparApi = {
   bootstrap: () => ipcRenderer.invoke(ipc.bootstrap),
   createSession: (input) => ipcRenderer.invoke(ipc.sessionsCreate, input),
+  createTrack: (input) => ipcRenderer.invoke(ipc.tracksCreate, input),
+  setActiveTrack: (trackId) => ipcRenderer.invoke(ipc.tracksActive, trackId),
+  setTrainingMode: (mode) => ipcRenderer.invoke(ipc.trainingMode, mode),
+  setBaseline: (input) => ipcRenderer.invoke(ipc.baselineState, input),
+  startBaseline: () => ipcRenderer.invoke(ipc.baselineStart),
+  learningEngine: () => ipcRenderer.invoke(ipc.learningEngine),
   openSession: (sessionId) => ipcRenderer.invoke(ipc.sessionsOpen, sessionId),
   saveWorkspaceState: (input) => ipcRenderer.invoke(ipc.workspaceStateSave, input),
   appendAttemptEvent: (input) => ipcRenderer.invoke(ipc.attemptAppend, input),

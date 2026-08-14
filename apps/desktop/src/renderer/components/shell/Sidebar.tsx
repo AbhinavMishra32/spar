@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, LayoutGrid, Library, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
+import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, Library, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
 import type { SessionSummary } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -12,11 +12,10 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Meter } from "@/components/ui/meter";
 import { SparWordmark } from "../common/SparWordmark";
 
-/* "challenge" is one challenge opened on its own, out of the history list. Like
-   "workspace" it draws its own toolbar and is not a destination in the nav — the
-   sidebar highlights "challenges" while it is up, because that is where it came
-   from and where Back returns to. */
-export type Page = "home" | "problems" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
+/* "challenge" is one challenge opened from History or Problems. Like
+   "workspace" it draws its own toolbar and is not a destination in the nav; the
+   parent destination is kept by App so Back returns to the surface it came from. */
+export type Page = "today" | "baseline" | "tracks" | "progress" | "history" | "problems" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
 
 /** What the sidebar can do to a session. Every one of these is a write the main
  *  process owns, so the row reports intent and never edits its own copy. */
@@ -29,14 +28,11 @@ export type SessionActions = {
 };
 
 const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "home", label: "Home", icon: Waypoints },
-  /* Second, directly under Home, because the two are the two ways in: describe a
-     goal and let the agent choose, or choose yourself. Everything below them is a
-     record of what has already happened. */
+  { id: "today", label: "Today", icon: Waypoints },
+  { id: "tracks", label: "Tracks", icon: Target },
   { id: "problems", label: "Problems", icon: Library },
-  { id: "sessions", label: "Sessions", icon: LayoutGrid },
-  { id: "ability", label: "Abilities", icon: Map },
-  { id: "challenges", label: "Challenges", icon: History },
+  { id: "progress", label: "Progress", icon: Map },
+  { id: "history", label: "History", icon: History },
 ];
 
 /* 30px tall on a 13px label, cornered at --radius-lg, inset 8px from the sidebar's
@@ -213,7 +209,7 @@ export function Sidebar({
                  keeps the label constant and moves the highlight. */
               // A single challenge is a page under Challenges, so the section
               // stays lit rather than the nav going blank while it is open.
-              page === id || (id === "challenges" && page === "challenge")
+              page === id || (id === "today" && page === "baseline") || (id === "history" && page === "challenge")
                 ? "bg-[var(--sidebar-accent-active)]"
                 : "hover:bg-[var(--sidebar-accent)]",
             )}
