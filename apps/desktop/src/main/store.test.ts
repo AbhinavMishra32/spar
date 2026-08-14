@@ -252,6 +252,16 @@ it("pushes the onboarding profile so another machine can skip intake",()=>{const
 }finally{store.close();}});
 
 describe("adaptive product state",()=>{
+  it("keeps baseline calibration out of Tracks and ordinary session navigation",()=>{const store=new LocalStore(":memory:");try{
+    const training=store.createTrack("Become reliable at backend problem solving","Backend Problem Solving");
+    const baseline=store.createBaselineSession();
+    expect(store.listTracks()).toEqual([expect.objectContaining({id:training.track.id})]);
+    expect(store.activeTrack()?.id).toBe(training.track.id);
+    expect(store.readSession(baseline.sessionId)?.summary).toMatchObject({context:"baseline",trackId:null,title:"Baseline"});
+    expect(store.getBaseline()).toMatchObject({status:"in-progress",sessionId:baseline.sessionId});
+    expect(store.createBaselineSession()).toEqual(baseline);
+  }finally{store.close();}});
+
   it("keeps Tracks separate from the one global learner model",()=>{const store=new LocalStore(":memory:");try{
     const typescript=store.createTrack("Become extremely strong at TypeScript and understand the language deeply");
     const interviews=store.createTrack("Prepare seriously for algorithmic interviews");

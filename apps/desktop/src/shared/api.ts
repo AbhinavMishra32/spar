@@ -4,7 +4,7 @@ import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfile
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
-  tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", learningEngine: "learning:engine",
+  tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
   /* The window reports its own state; the main process decides when that becomes
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
@@ -352,6 +352,7 @@ export interface SparApi {
   setActiveTrack(trackId: string): Promise<Track | null>;
   setTrainingMode(mode: z.infer<typeof trainingModeSchema>): Promise<TrainingMode>;
   setBaseline(input: Partial<z.infer<typeof baselineStateSchema>>): Promise<BaselineState>;
+  startBaseline(): Promise<{ sessionId: string }>;
   learningEngine(): Promise<Record<string, unknown>>;
   openSession(sessionId: string): Promise<SessionDetail | null>;
   /** Tell the main process how this session's window is arranged. It folds this

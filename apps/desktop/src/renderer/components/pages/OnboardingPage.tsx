@@ -196,11 +196,13 @@ export function OnboardingPage({
   api,
   displayName,
   onDone,
+  onBaseline,
   onStartSession,
 }: {
   api: SparApi | undefined;
   displayName: string;
   onDone(profile: LearnerProfile): Promise<void>;
+  onBaseline(): Promise<void>;
   onStartSession(goal: string): Promise<void>;
 }) {
   const [index, setIndex] = useState(0);
@@ -312,6 +314,7 @@ export function OnboardingPage({
       setBusy(false);
       return;
     }
+    if(baselinePlanned){setSuggestions({source:"starter",suggestions:[]});setBusy(false);setPhase("sparring");return;}
     setPhase("reading");
     const drafted = await api.suggestSessions().catch(() => null);
     setSuggestions(drafted ?? { source: "starter", suggestions: [] });
@@ -327,7 +330,8 @@ export function OnboardingPage({
     setError("");
     try {
       await onDone(saved);
-      if (goal) await onStartSession(goal);
+      if(baselinePlanned)await onBaseline();
+      else if (goal) await onStartSession(goal);
     } catch (cause) {
       setError(message(cause));
       setBusy(false);
@@ -462,7 +466,9 @@ export function OnboardingPage({
                   ? step.question
                   : phase === "reading"
                     ? `One moment, ${name.trim().split(" ")[0] || "there"}.`
-                    : drafted.length
+                    : baselinePlanned
+                      ? "Ready for your first probe?"
+                      : drafted.length
                       ? "Where would you like to start?"
                       : "Start a session in your own words."}
               </h1>
@@ -471,7 +477,9 @@ export function OnboardingPage({
                   ? step.caption ?? ""
                   : phase === "reading"
                     ? "Spar is reading what you told it and drafting a few places to begin."
-                    : drafted.length
+                    : baselinePlanned
+                      ? "Spar will choose one small coding task, observe how you solve it, and adapt the next probe from that evidence."
+                      : drafted.length
                       ? suggestions?.source === "starter"
                         ? "Starting points, until Spar has watched you work."
                         : "Drafted from your intake. Pick one, or write your own once you are inside."
@@ -718,7 +726,7 @@ export function OnboardingPage({
             ) : phase === "sparring" ? (
               <>
                 <Button className="mt-3 h-11 w-full text-[0.8125rem]" disabled={busy || (drafted.length > 0 && picked === null)} onClick={() => void leave(drafted.length ? drafted[picked ?? 0]?.goal : undefined)} size="lg" type="button">
-                  {busy ? "Opening Spar…" : drafted.length ? "Start sparring" : "Open Spar"}
+                  {busy ? "Opening Spar…" : baselinePlanned ? "Start baseline" : drafted.length ? "Start sparring" : "Open Spar"}
                   {!busy && <ArrowRight data-icon="inline-end" />}
                 </Button>
                 <p aria-live="polite" className={cn("mt-2.5 min-h-4 text-center text-ui", error ? "text-destructive" : "text-muted-foreground/70")} role="status">

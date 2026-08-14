@@ -28,14 +28,17 @@ export type PaletteAction = { id: "new-session"; label: string; keywords: string
 
 /** A destination in the nav. The pages that draw their own toolbar are not here:
  *  a workspace and a single challenge are things you open, not places you go. */
-export type PalettePlace = { page: Exclude<Page, "workspace" | "challenge">; label: string; keywords: string };
+export type PalettePlace = { page: Exclude<Page, "workspace" | "challenge" | "baseline">; label: string; keywords: string };
 
 export const PALETTE_ACTIONS: PaletteAction[] = [
   { id: "new-session", label: "Start a session", keywords: "new create begin spar practice goal" },
 ];
 
 export const PALETTE_PLACES: PalettePlace[] = [
-  { page: "home", label: "Home", keywords: "dashboard overview start" },
+  { page: "today", label: "Today", keywords: "home recommendation next practice" },
+  { page: "tracks", label: "Tracks", keywords: "goals training direction" },
+  { page: "progress", label: "Progress", keywords: "abilities rating patterns evidence" },
+  { page: "history", label: "History", keywords: "attempts challenges completed incomplete" },
   { page: "problems", label: "Problems", keywords: "practice browse library leetcode codeforces solve pick" },
   { page: "sessions", label: "Sessions", keywords: "all list" },
   { page: "ability", label: "Abilities", keywords: "map skills evidence what i can do" },

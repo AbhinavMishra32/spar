@@ -69,6 +69,8 @@ export type Question = z.infer<typeof questionSchema>;
 
 export const sessionSummarySchema = z.object({
   id,
+  trackId: id.nullable().optional(),
+  context: z.enum(["training", "baseline"]).default("training"),
   title: z.string().min(1),
   originalGoal: z.string().min(1),
   objective: z.string(),
@@ -405,6 +407,7 @@ export const baselineStateSchema = z.object({
   directEvidenceCount: z.number().int().nonnegative(),
   importedEvidenceCount: z.number().int().nonnegative(),
   completedAt: isoDate.nullable(),
+  sessionId: id.nullable().default(null),
 });
 export type BaselineState = z.infer<typeof baselineStateSchema>;
 

@@ -13,6 +13,7 @@ const api: SparApi = {
   setActiveTrack: (trackId) => ipcRenderer.invoke(ipc.tracksActive, trackId),
   setTrainingMode: (mode) => ipcRenderer.invoke(ipc.trainingMode, mode),
   setBaseline: (input) => ipcRenderer.invoke(ipc.baselineState, input),
+  startBaseline: () => ipcRenderer.invoke(ipc.baselineStart),
   learningEngine: () => ipcRenderer.invoke(ipc.learningEngine),
   openSession: (sessionId) => ipcRenderer.invoke(ipc.sessionsOpen, sessionId),
   saveWorkspaceState: (input) => ipcRenderer.invoke(ipc.workspaceStateSave, input),
