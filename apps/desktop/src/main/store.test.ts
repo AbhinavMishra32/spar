@@ -3,12 +3,15 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import Database from "better-sqlite3";
 import { LocalStore } from "./store.js";
 import type { QuestionDesign } from "@spar/domain";
 
 const design=(title:string):QuestionDesign=>({title,language:"javascript",kind:"function",statement:"Implement the target behavior while preserving the declared invariant through every transition.",starterFiles:{"src/index.js":"export function solve(){ throw new Error(\"implement\") }"},referenceFiles:{"src/index.js":"export function solve(){ return true }"},visibleTests:{"tests/visible.test.js":"// visible"},hiddenTests:{"tests/hidden.test.js":"// hidden"},knownIncorrectFiles:[{"src/index.js":"export function solve(){ return false }"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["returns before restoring the invariant"]});
 
 it("persists the device theme across store reloads",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-theme-"));const database=path.join(directory,"state.sqlite3");try{const first=new LocalStore(database);first.setSetting("theme","dark");first.close();const reopened=new LocalStore(database);try{expect(reopened.getSetting("theme","system")).toBe("dark");}finally{reopened.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
+
+it("migrates legacy sessions into one living Track instead of one Track each",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-track-migration-"));const database=path.join(directory,"state.sqlite3");try{const before=new LocalStore(database);before.createSession("Practise arrays");before.createSession("Trace the JavaScript runtime");before.close();const legacy=new Database(database);legacy.prepare("UPDATE sessions SET track_id=NULL").run();legacy.prepare("DELETE FROM tracks").run();legacy.prepare("DELETE FROM settings WHERE key='active-track-id'").run();legacy.close();const migrated=new LocalStore(database);try{expect(migrated.listTracks()).toEqual([expect.objectContaining({title:"General practice"})]);const trackIds=new Set(migrated.listSessions().map((session)=>session.trackId));expect(trackIds.size).toBe(1);expect(trackIds.has(migrated.activeTrack()?.id??"")).toBe(true);}finally{migrated.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
 
 it("clears learner data without erasing device preferences",()=>{const store=new LocalStore(":memory:");try{store.setSetting("theme","dark");const {sessionId}=store.createSession("Practise JavaScript arrays");store.setTrainingTarget(sessionId,{ability:"Arrays",specificGap:"Filter values",desiredEvidence:"Uses filter",avoidTesting:[]});store.createQuestion(sessionId,design("Filter values"),{valid:true});store.clearAccountData();expect(store.listSessions()).toEqual([]);expect(store.listAbilities()).toEqual([]);expect(store.getSetting("theme","system")).toBe("dark");}finally{store.close();}});
 
@@ -313,5 +316,33 @@ describe("adaptive product state",()=>{
     const secondEvidence=store.appendNextEvent({id:randomUUID(),attemptId:second.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
     store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nThe same assumption appeared in a different structure.",evidenceEventIds:[secondEvidence.id],evidence:[{eventId:secondEvidence.id,statement:"The empty stream repeated the non-empty initialization assumption.",polarity:"contradictory",independence:"independent",strength:0.8}],pattern:{title:"Boundary assumptions",description:"Initialization repeatedly assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id,secondEvidence.id]}});
     expect(store.listPatterns()[0]).toMatchObject({status:"pattern",evidenceCount:2});
+  }finally{store.close();}});
+
+  it("compacts and restores the account-wide adaptive projection",()=>{const source=new LocalStore(":memory:");const restored=new LocalStore(":memory:");try{
+    const created=source.createTrack("Become deeply fluent in the TypeScript type system","TypeScript Depth");
+    const target=source.setTrainingTarget(created.sessionId,{ability:"Generic constraint design",specificGap:"Constrain inference without widening",desiredEvidence:"Preserves the caller's narrow type",avoidTesting:[]});
+    source.ensureAbility(target.abilityId,target.abilityTitle);
+    source.setBaseline({status:"in-progress",confidence:0.4,directEvidenceCount:1});
+    source.setTrainingMode({kind:"focus",focus:"TypeScript"});
+    // Several adaptive writes still produce one latest projection. Attempt
+    // events remain separate rows and are deliberately not compacted this way.
+    expect(source.pendingSync().filter((item)=>item.kind==="learning-state")).toHaveLength(1);
+
+    const ability=source.listAbilities()[0]!;
+    restored.restoreAccount({profile:null,concepts:[],abilities:[{id:ability.id,title:ability.title,markdown:ability.markdown,summary:ability.summary,practice:ability.practice,earnedAt:ability.earnedAt,conceptSlugs:[],status:ability.status,version:ability.version,updatedAt:ability.updatedAt,evidenceEventIds:[]}]});
+    restored.restoreLearningState(source.cloudLearningState());
+    expect(restored.listTracks()).toEqual([expect.objectContaining({title:"TypeScript Depth"})]);
+    expect(restored.activeTrack()?.id).toBe(created.track.id);
+    expect(restored.getBaseline()).toMatchObject({status:"in-progress",directEvidenceCount:1});
+    expect(restored.getTrainingMode()).toEqual({kind:"focus",focus:"TypeScript"});
+    expect(restored.abilityStates()).toEqual([expect.objectContaining({abilityId:target.abilityId,trainingStatus:"unknown"})]);
+    expect(restored.pendingSync()).toEqual([]);
+  }finally{source.close();restored.close();}});
+
+  it("keeps local adaptive work when the cloud projection is older",()=>{const store=new LocalStore(":memory:");try{
+    const local=store.createTrack("Prepare seriously for systems interviews","Systems Interview Preparation");
+    store.restoreLearningState({version:1,tracks:[{id:randomUUID(),title:"Old cloud track",goal:"Old goal",status:"active",emphasis:[],priorities:[],investigating:[],monitoring:[],createdAt:"2026-01-01T00:00:00.000Z",updatedAt:"2026-01-01T00:00:00.000Z"}]});
+    expect(store.activeTrack()?.id).toBe(local.track.id);
+    expect(store.listTracks().map((track)=>track.title)).not.toContain("Old cloud track");
   }finally{store.close();}});
 });

@@ -22,6 +22,7 @@ export function route(kind:string,value:Record<string,unknown>):{path:string;met
   if(kind==="question-create")return{path:"/v1/challenges",method:"POST",body:value};
   if(kind==="ability-upsert")return{path:"/v1/abilities",method:"POST",body:value};
   if(kind==="profile-save")return{path:"/v1/profile",method:"PUT",body:value};
+  if(kind==="learning-state")return{path:"/v1/learning-state",method:"PUT",body:value};
   if(kind==="agent-message")return{path:"/v1/agent-messages",method:"POST",body:value};
   if(kind==="concept-create")return{path:"/v1/concepts",method:"POST",body:value};
   if(kind==="checkpoint")return{path:`/v1/sessions/${value.sessionId}/checkpoints/${value.version}`,method:"PUT",body:value};
