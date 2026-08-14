@@ -544,6 +544,7 @@ export function App() {
               onOpenConcept={setConcept}
               onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
               onPractise={practise}
+              progress={data.progress}
             />
           )}
           {(page === "history" || page === "challenges") && (

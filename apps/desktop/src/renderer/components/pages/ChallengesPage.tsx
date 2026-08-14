@@ -126,6 +126,7 @@ function ChallengeCard({
             {item.testRunCount} test run{item.testRunCount === 1 ? "" : "s"}
             <span className="mx-1.5 text-muted-foreground/40">·</span>
             {item.attemptCount} attempt{item.attemptCount === 1 ? "" : "s"}
+            {item.assistance && item.assistance !== "unknown" && <><span className="mx-1.5 text-muted-foreground/40">·</span>{item.assistance === "assisted" ? "Assisted" : "Independent"}</>}
           </p>
 
           {/* What the challenge was about, and the way into the rest of the
@@ -225,9 +226,9 @@ export function ChallengesPage({
   return (
     <div className="app-scroll h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[62rem] px-18 pb-16 pt-8">
-        <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Challenges</h1>
+        <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">History</h1>
         <p className="mt-1 text-content text-muted-foreground">
-          Every generated challenge, attempt, test run, submission, and adaptive replacement stays in your account
+          What you did: sourced and generated challenges, complete and incomplete attempts, assistance, test runs, submissions, and adaptive replacements.
           history. Open one to read it again, or to practise it without touching the session it came from.
         </p>
 

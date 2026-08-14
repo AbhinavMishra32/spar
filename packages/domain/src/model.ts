@@ -219,6 +219,7 @@ export const challengeHistorySummarySchema = z.object({
   attemptCount: z.number().int().nonnegative(),
   testRunCount: z.number().int().nonnegative(),
   lastOutcome: z.enum(["passed", "failed", "abandoned", "replaced"]).nullable(),
+  assistance: z.enum(["independent", "assisted", "unknown"]).optional(),
   /** What this challenge was about. Ordered primary first, so a row that only has
    *  room for one chip shows the one the challenge was actually aimed at. */
   concepts: z.array(conceptTagSchema),
@@ -321,6 +322,9 @@ export const abilityDetailSchema = z.object({
     outcome: z.enum(["passed", "failed", "abandoned", "replaced", "open"]),
     occurredAt: isoDate,
   })),
+  machine: z.lazy(() => learnerAbilityStateSchema).optional(),
+  learnerEvidence: z.array(z.lazy(() => learnerEvidenceSchema)).default([]),
+  patterns: z.array(z.lazy(() => learnerPatternSchema)).default([]),
 });
 export type AbilityDetail = z.infer<typeof abilityDetailSchema>;
 

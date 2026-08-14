@@ -298,4 +298,20 @@ describe("adaptive product state",()=>{
     expect(store.getBaseline()).toMatchObject({status:"in-progress",directEvidenceCount:1});
     expect(store.learningEngineSnapshot()).toMatchObject({model:{schemaVersion:4},activeTrack:{id:created.track.id}});
   }finally{store.close();}});
+
+  it("requires independent attempts before promoting an observation to a pattern",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Improve boundary-case reasoning");
+    const target=store.setTrainingTarget(sessionId,{ability:"Boundary-case reasoning",specificGap:"Empty and singleton inputs",desiredEvidence:"Handles boundaries before the main loop",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const first=store.createQuestion(sessionId,design("Empty sequence"),{valid:true});
+    const firstEvidence=store.appendNextEvent({id:randomUUID(),attemptId:first.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nAn empty-input miss happened once.",evidenceEventIds:[firstEvidence.id],evidence:[{eventId:firstEvidence.id,statement:"The empty input bypassed the intended initialization.",polarity:"contradictory",independence:"independent",strength:0.7}],pattern:{title:"Boundary assumptions",description:"Initialization assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id]}});
+    expect(store.listPatterns()[0]?.status).toBe("hypothesis");
+    store.completeAttempt(first.attemptId,"failed");
+    store.setTrainingTarget(sessionId,{ability:"Boundary-case reasoning",specificGap:"Zero-length state",desiredEvidence:"Separates empty state from the ordinary transition",avoidTesting:[]});
+    const second=store.createQuestion(sessionId,design("Empty event stream"),{valid:true});
+    const secondEvidence=store.appendNextEvent({id:randomUUID(),attemptId:second.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nThe same assumption appeared in a different structure.",evidenceEventIds:[secondEvidence.id],evidence:[{eventId:secondEvidence.id,statement:"The empty stream repeated the non-empty initialization assumption.",polarity:"contradictory",independence:"independent",strength:0.8}],pattern:{title:"Boundary assumptions",description:"Initialization repeatedly assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id,secondEvidence.id]}});
+    expect(store.listPatterns()[0]).toMatchObject({status:"pattern",evidenceCount:2});
+  }finally{store.close();}});
 });
