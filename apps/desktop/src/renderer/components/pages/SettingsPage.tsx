@@ -608,7 +608,13 @@ export function SettingsPage({
           </p>
         )}
       </aside>
-      <div className="app-scroll min-w-0 flex-1 overflow-y-auto rounded-[var(--radius-2xl)] border border-border bg-card shadow-[var(--app-shadow-card)]">
+      {/* The sheet is the ground, not the material. Everything on it — the
+          provider cards, the rows, the switches — is a raised surface, so the
+          sheet has to sit *under* card level or the stack inverts and the cards
+          read as holes cut into a lighter page. `surface-under` is the app's
+          recessed step: a hair grey in light, a step darker than the window in
+          dark, and in both cases the thing a card can be lifted off. */}
+      <div className="app-scroll min-w-0 flex-1 overflow-y-auto rounded-[var(--radius-2xl)] border border-border bg-[var(--color-background-surface-under)] shadow-[inset_0_1px_2px_oklch(0%_0_0/4%)]">
       {/* Wide top padding rather than a title bar: the heading sits in air, which
           is what makes it read as the page's name rather than as the first row
           of the list under it. */}

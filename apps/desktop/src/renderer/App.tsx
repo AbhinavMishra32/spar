@@ -18,7 +18,7 @@ import { ProblemsPage } from "./components/pages/ProblemsPage";
 import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
-import { AbilityPage } from "./components/pages/AbilityPage";
+import { ProgressPage } from "./components/pages/ProgressPage";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
 import { ConceptSheet } from "./components/concepts/ConceptSheet";
 import { ChallengePage } from "./components/pages/ChallengePage";
@@ -612,7 +612,7 @@ export function App() {
         )}
 
         <div className="min-h-0 flex-1">
-          {page === "today" && <TodayPage busy={opening} data={data} onBaseline={beginBaseline} onCreateTrack={() => navigate("tracks")} onMode={setTrainingMode} onOpen={open} />}
+          {page === "today" && <TodayPage busy={opening} data={data} onBaseline={beginBaseline} onCreateTrack={() => navigate("tracks")} onMode={setTrainingMode} onOpen={open} onProgress={() => navigate("progress")} />}
           {page === "baseline" && <BaselinePage api={api} busy={opening} dark={dark} data={data} detail={detail} onAbandon={abandon} onBack={() => navigate("today")} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
           {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
           {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
@@ -630,7 +630,7 @@ export function App() {
           {page === "visualizer" && <VisualizerPage api={api} dark={dark} onError={setError} />}
           {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
           {(page === "progress" || page === "ability") && (
-            <AbilityPage
+            <ProgressPage
               abilities={data.abilities}
               api={api}
               challenges={data.challenges}

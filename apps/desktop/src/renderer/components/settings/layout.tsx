@@ -46,10 +46,12 @@ export function SettingsGroup({ className, ...props }: React.ComponentProps<"div
     <div
       {...props}
       className={cn(
-        /* Inset into the sheet rather than raised off it. The page is already
-           a card; a second card on top of it at the same elevation reads as two
-           unrelated surfaces that happen to be stacked. */
-        "-mx-1 divide-y divide-border overflow-hidden rounded-[var(--radius-2xl)] border border-border bg-background [&+&]:mt-2",
+        /* Raised off the sheet, because the sheet is the ground. A group is the
+           only material on this page you actually operate — every switch and
+           select lives in one — so it takes the card surface and the card's
+           contact shadow, and the recessed sheet under it is what makes the
+           lift readable at all. */
+        "-mx-1 divide-y divide-border overflow-hidden rounded-[var(--radius-2xl)] border-[length:var(--hairline)] border-[var(--border-surface-strong)] bg-[var(--surface-primary)] [&+&]:mt-2",
         className,
       )}
     />
