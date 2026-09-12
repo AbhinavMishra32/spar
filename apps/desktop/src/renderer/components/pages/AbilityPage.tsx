@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ChevronRight, Dumbbell } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Dumbbell } from "lucide-react";
 import type { AbilityDetail as AbilityDetailData, AbilityHistorySummary, ConceptSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,7 @@ export function AbilityDetail({
   summaries: Map<string, ConceptSummary>;
 }) {
   const [detail, setDetail] = useState<AbilityDetailData | null>(null);
+  const [notes, setNotes] = useState(false);
 
   useEffect(() => {
     setDetail(null);
@@ -91,7 +92,7 @@ export function AbilityDetail({
         </div>
       </header>
 
-      {ability.summary && <p className="mt-4 text-content leading-[1.7] text-foreground/85">{ability.summary}</p>}
+      {ability.summary && <p className="mt-4 line-clamp-3 text-content leading-[1.7] text-foreground/85">{ability.summary}</p>}
 
       {/* The measurements, inline. Proficiency and confidence are the two halves
           of the model and are drawn identically on purpose — the whole point is
@@ -128,13 +129,14 @@ export function AbilityDetail({
         </div>
       )}
 
-      {detail?.machine?.currentBelief && (
-        <Band title="Belief">
-          <p className="text-content leading-[1.7] text-foreground/85">{detail.machine.currentBelief}</p>
-          {detail.machine.nextVerification && (
-            <p className="mt-2 text-ui leading-[1.65] text-muted-foreground">Checking next: {detail.machine.nextVerification}</p>
-          )}
-        </Band>
+      {/* One actionable line, not a belief paragraph. What Spar currently
+          thinks is already the summary above; what it has not checked yet is
+          the only thing on this page the learner could not have guessed. */}
+      {detail?.machine?.nextVerification && (
+        <p className="mt-4 text-ui leading-[1.65] text-muted-foreground">
+          <span className="text-foreground/70">Checking next: </span>
+          {detail.machine.nextVerification}
+        </p>
       )}
 
       <Band title="Practice">
@@ -192,53 +194,79 @@ export function AbilityDetail({
         )}
       </Band>
 
-      {detail?.learnerEvidence.length ? (
-        <Band title="Evidence">
-          <div className="flex flex-col gap-2.5">
-            {detail.learnerEvidence.map((item) => (
-              <div className="flex items-baseline gap-2.5" key={item.id}>
-                <span
-                  className={cn(
-                    "mt-1.5 size-1.5 shrink-0 rounded-full",
-                    item.polarity === "supporting" ? "bg-[var(--success)]" : item.polarity === "contradictory" ? "bg-destructive" : "bg-muted-foreground/50",
-                  )}
-                />
-                <span className="min-w-0 flex-1 text-ui leading-[1.6] text-foreground/85">{item.statement}</span>
-                <span className="shrink-0 text-ui-sm capitalize text-muted-foreground/65">{item.independence}</span>
-                <span className="shrink-0 tabular-nums text-ui-sm text-muted-foreground/65">{shortTime(item.occurredAt)}</span>
-              </div>
-            ))}
-          </div>
-        </Band>
-      ) : null}
+      {/* Everything long-form behind one toggle, shut. The belief statement,
+          the evidence log and the agent's own working notes are three ways of
+          saying what the summary at the top already said, and stacking them on
+          the page turned an ability into an essay about itself. They are worth
+          keeping and not worth reading by default. */}
+      {(detail?.machine?.currentBelief || detail?.learnerEvidence.length || detail?.patterns.length || ability.markdown.trim()) && (
+        <div className="mt-8 border-t-[length:var(--hairline)] border-[var(--border-surface-strong)] pt-4">
+          <button
+            aria-expanded={notes}
+            className="inline-flex items-center gap-1 text-ui text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => setNotes((open) => !open)}
+            type="button"
+          >
+            Spar's working notes
+            <ChevronDown className={cn("size-3 transition-transform", notes && "rotate-180")} />
+          </button>
 
-      {/* The one place a pattern's own prose belongs, because this is the ability
-          it was written against. */}
-      {detail?.patterns.length ? (
-        <Band title="Patterns">
-          <div className="flex flex-col gap-3">
-            {detail.patterns.map((pattern) => (
-              <div key={pattern.id}>
-                <div className="flex items-baseline justify-between gap-3">
-                  <p className="min-w-0 text-ui">{pattern.title}</p>
-                  <span className="shrink-0 text-ui-sm capitalize text-muted-foreground/65">{pattern.status}</span>
+          {notes && (
+            <div className="mt-4 flex flex-col gap-6">
+              {detail?.machine?.currentBelief && (
+                <section>
+                  <h2 className="mb-1.5 text-ui text-muted-foreground">Belief</h2>
+                  <p className="text-ui leading-[1.7] text-foreground/85">{detail.machine.currentBelief}</p>
+                </section>
+              )}
+
+              {detail?.learnerEvidence.length ? (
+                <section>
+                  <h2 className="mb-1.5 text-ui text-muted-foreground">Evidence</h2>
+                  <div className="flex flex-col gap-2.5">
+                    {detail.learnerEvidence.map((item) => (
+                      <div className="flex items-baseline gap-2.5" key={item.id}>
+                        <span
+                          className={cn(
+                            "mt-1.5 size-1.5 shrink-0 rounded-full",
+                            item.polarity === "supporting" ? "bg-[var(--success)]" : item.polarity === "contradictory" ? "bg-destructive" : "bg-muted-foreground/50",
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 text-ui leading-[1.6] text-foreground/85">{item.statement}</span>
+                        <span className="shrink-0 tabular-nums text-ui-sm text-muted-foreground/65">{shortTime(item.occurredAt)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {detail?.patterns.length ? (
+                <section>
+                  <h2 className="mb-1.5 text-ui text-muted-foreground">Patterns</h2>
+                  <div className="flex flex-col gap-3">
+                    {detail.patterns.map((pattern) => (
+                      <div key={pattern.id}>
+                        <div className="flex items-baseline justify-between gap-3">
+                          <p className="min-w-0 text-ui">{pattern.title}</p>
+                          <span className="shrink-0 text-ui-sm capitalize text-muted-foreground/65">{pattern.status}</span>
+                        </div>
+                        {pattern.description && <p className="mt-0.5 text-ui leading-[1.6] text-muted-foreground">{pattern.description}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {ability.markdown.trim() && (
+                <div className="text-ui leading-[1.7] text-muted-foreground">
+                  <Markdown source={ability.markdown} />
                 </div>
-                {pattern.description && <p className="mt-0.5 text-ui leading-[1.6] text-muted-foreground">{pattern.description}</p>}
-              </div>
-            ))}
-          </div>
-        </Band>
-      ) : null}
-
-      {/* Last, and labelled as notes: this is the agent's working document, and
-          the learner reading their own ledger should meet the claim first. */}
-      {ability.markdown.trim() && (
-        <Band className="mt-8 border-t-[length:var(--hairline)] border-[var(--border-surface-strong)] pt-6" title="Notes">
-          <div className="text-ui leading-[1.7] text-muted-foreground">
-            <Markdown source={ability.markdown} />
-          </div>
-        </Band>
+              )}
+            </div>
+          )}
+        </div>
       )}
+
     </Page>
   );
 }
