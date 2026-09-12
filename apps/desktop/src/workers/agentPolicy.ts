@@ -50,6 +50,58 @@ export const WEB_TOOLS = ["web_search", "web_fetch"];
  * nothing does not pay a round trip per session for tools that can only answer
  * "not connected".
  */
+/**
+ * The execution visualiser, loaded on demand.
+ *
+ * `open_visualizer` is always on the table and the other four are not, which is
+ * the whole arrangement in one line. Spar can trace a program and draw every
+ * value in it at any step, and telling the agent how to use that well takes
+ * several hundred words — how to find the step that matters, when a picture
+ * beats a paragraph, why it must never draw a working solution to the challenge
+ * the learner is on. Carrying that in every turn's context would be paying for
+ * it on turns that only set a challenge.
+ *
+ * So the gate tool costs one line until the agent decides this is a turn about
+ * state, and its result is the briefing plus the four tools that do the work.
+ * The stage machine reads the same signal the model does — the gate having been
+ * called this turn — so "the skill is loaded" is a fact about the transcript
+ * rather than a flag someone has to remember to clear.
+ */
+export const VISUALIZER_GATE = "open_visualizer";
+export const VISUALIZER_SKILL_TOOLS = ["visualize_run", "visualize_read_step", "visualize_find", "visualize_explain"];
+export const VISUALIZER_TOOLS = [VISUALIZER_GATE, ...VISUALIZER_SKILL_TOOLS];
+
+/** The visualiser tools a stage may offer right now: the gate, plus the toolkit
+ *  once the gate has answered. */
+function visualizerStageTools(outcomes: Map<string, unknown[]>): string[] {
+  return (outcomes.get(VISUALIZER_GATE)?.length ?? 0) > 0 ? VISUALIZER_TOOLS : [VISUALIZER_GATE];
+}
+
+/** How many visualiser calls one deterministic turn may spend before the stage
+ *  stops offering them. Enough to open it, trace, find the step and show it,
+ *  with room for a second look — and finite, because an attempt-complete turn
+ *  has an ability to update and a challenge to set after this. */
+const VISUALIZER_TURN_BUDGET = 8;
+
+/**
+ * The visualiser, offered inside a required stage.
+ *
+ * Withdrawn once it has been spent, and once a picture has actually been shown:
+ * a turn that has drawn its diagram has had its use of this, and leaving the
+ * tools on the table invites a second one nobody asked for.
+ */
+function visualizerOffer(outcomes: Map<string, unknown[]>): string[] {
+  /* Bounded by calls, not by having drawn once. "Show me that again with the
+     other input" is a reasonable thing to be asked immediately after a diagram,
+     and a turn that answers it by saying the visualiser is gone is worse than a
+     turn that spends two more calls. */
+  const spent = VISUALIZER_TOOLS.reduce((total, name) => total + (outcomes.get(name)?.length ?? 0), 0);
+  if (spent >= VISUALIZER_TURN_BUDGET) return [];
+  const offered = visualizerStageTools(outcomes);
+  // The gate answers once; asking again returns the same briefing.
+  return (outcomes.get(VISUALIZER_GATE)?.length ?? 0) > 0 ? offered.filter((name) => name !== VISUALIZER_GATE) : offered;
+}
+
 export const SOURCE_READ_TOOLS = ["search_practice_problems", "read_practice_problem", "read_practice_source", "read_practice_progress", "read_practice_submissions"];
 export const SOURCE_TOOLS = [...SOURCE_READ_TOOLS, "assign_practice_problem"];
 
@@ -58,7 +110,7 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
   const source = practiceSource ? SOURCE_TOOLS : [];
   if (turnKind === "cold-start") return new Set(["search_learner_model", "search_attempt_history", "ask_user_question"]);
   if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
-  if (turnKind === "attempt-complete") return new Set(["replay_attempt", "inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
+  if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, "replay_attempt", "inspect_current_attempt", "evaluate_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
   /* Both ways of changing the challenge, because "give me a real problem instead"
      is a revision request like any other. Withholding the assignment here was a
      dead end with one exit: the agent could not hand over the LeetCode problem the
@@ -67,7 +119,7 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
      along. A sourced problem supersedes rather than edits, which the store already
      records as a replacement. */
   if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question", ...source]);
-  return new Set(["read_session", ...(hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), ...source, "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
+  return new Set([...VISUALIZER_TOOLS, "read_session", ...(hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), ...source, "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
 }
 
 /**
@@ -133,6 +185,11 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   if (turnKind === "learner-message" && playableQuestion) return { activeTools: [], toolChoice: "none" };
   if (turnKind === "learner-message") return {
     activeTools: [
+      /* Offered on every ordinary turn, because "why does this do that" is an
+         ordinary turn. A learner stuck on state rarely says "show me a diagram";
+         they say "I thought i was 3 here", and the agent has to be able to reach
+         for the picture on its own from that. */
+      ...visualizerStageTools(outcomes),
       "read_session",
       ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]),
       /* The source stays available in full even mid-challenge. The reads because
@@ -147,7 +204,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     toolChoice: "auto",
   };
   if (turnKind === "cold-start") {
-    const retrieval = ["search_learner_model", "search_attempt_history"].find((name) => !completed(name));
+    const retrieval = nextRetrieval(outcomes, ["search_learner_model", "search_attempt_history"]);
     if (retrieval) return { activeTools: [retrieval], toolChoice: "required" };
     if (!completed("ask_user_question")) return { activeTools: ["ask_user_question"], toolChoice: "required" };
     return { activeTools: [], toolChoice: "none" };
@@ -165,7 +222,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
        first target could not see what it had already asked, and every new goal
        re-derived the same off-by-one loop repair from the one ability the ledger
        happened to contain — twelve times, across four unrelated goals. */
-    const retrieval = ["search_learner_model", "search_attempt_history", "search_challenge_history"].find((name) => !completed(name));
+    const retrieval = nextRetrieval(outcomes, ["search_learner_model", "search_attempt_history", "search_challenge_history"]);
     if (retrieval) return { activeTools: [retrieval], toolChoice: "required" };
     if (hasRetrievedAbility(outcomes) && !completed("read_ability") && !completed("set_session_objective")) return { activeTools: ["read_ability"], toolChoice: "required" };
     /* One optional look outward, before the objective fixes what this session is
@@ -210,9 +267,37 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
      judgement about that. `search_concept_evidence` sits between the wider
      search and the next target because after the target is chosen it can no
      longer change the aim. */
-  for (const stage of [["replay_attempt", "evaluate_attempt"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["search_concept_evidence"]]) {
+  /**
+   * The solution was sent back, so this turn is over.
+   *
+   * Everything below this point writes down what was learned from a finished
+   * attempt and aims the next one. Neither applies to an attempt the agent has
+   * just reopened: there is no ability to update from a solution that is being
+   * rewritten, and setting a new challenge on top of the one the learner has
+   * been asked to redo is the opposite of what the review just said.
+   */
+  if ((outcomes.get("review_solution") ?? []).some(reworked)) return { activeTools: [], toolChoice: "none" };
+
+  /* The review comes after the evidence and before anything is written down.
+     It needs the replay and the code to judge how the challenge was solved, and
+     everything after it — the ability, the decision, the next target — is only
+     worth writing if the attempt actually counts. */
+  for (const stage of [["replay_attempt", "evaluate_attempt"], ["inspect_current_attempt"], ["review_solution"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["search_concept_evidence"]]) {
     const next = stage.find((name) => !completed(name));
-    if (next) return { activeTools: [next], toolChoice: "required" };
+    if (!next) continue;
+    /* One place in this sequence where the visualiser is offered, and it is
+       here on purpose. The replay and the deterministic evaluation are both in
+       hand — so the agent knows what went wrong — and nothing has been written
+       down yet. This is the moment where "your loop exits one step early" can
+       stop being a sentence and become the step where it exits.
+       
+       Offered alongside a required tool rather than as a stage of its own,
+       because an `auto` stage that the model declines ends the turn, and ending
+       an attempt-complete turn before the ability is updated would lose the
+       evidence the attempt was for. Picking either advances the phase. */
+    return next === "propose_ability_update"
+      ? { activeTools: [...visualizerOffer(outcomes), next], toolChoice: "required" }
+      : { activeTools: [next], toolChoice: "required" };
   }
   /* The one stage with a real choice in it. Everything needed to aim the next
      question has been read by now, so the agent either aims it or says that the
@@ -221,6 +306,12 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   if (!completed("set_training_target")) return { activeTools: ["ask_user_question", "set_training_target"], toolChoice: "required" };
   if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };
   return challengeStage();
+}
+
+/** Whether one recorded `review_solution` outcome sent the solution back. */
+function reworked(entry: unknown): boolean {
+  const result = entry && typeof entry === "object" ? (entry as { result?: unknown }).result : null;
+  return Boolean(result && typeof result === "object" && (result as { review?: unknown }).review === "rework");
 }
 
 function latestCompilationFailure(attempts: unknown[]): string {
@@ -237,6 +328,44 @@ function latestCompilationFailure(attempts: unknown[]): string {
     const item = check as Record<string, unknown>;
     return item.passed === false ? [`${String(item.name ?? "validation")}: ${String(item.detail ?? "failed")}`] : [];
   }).join("; ").slice(0, 800);
+}
+
+/** Whether one recorded tool outcome came back with anything in it.
+ *
+ *  Every retrieval tool answers with a single named collection — `passages`,
+ *  `attempts`, `challenges` — so "did this find something" is one shape, read
+ *  once, rather than a special case per tool. An outcome that is not a
+ *  collection at all counts as a hit: the conservative direction is to keep
+ *  retrieving, never to stop early on a shape this does not recognise. */
+function retrievalFound(entry: unknown): boolean {
+  if (!entry || typeof entry !== "object") return true;
+  const result = (entry as { result?: unknown }).result;
+  if (Array.isArray(result)) return result.length > 0;
+  if (!result || typeof result !== "object") return true;
+  const rows = Object.values(result as Record<string, unknown>).filter(Array.isArray);
+  return rows.length ? rows.some((row) => (row as unknown[]).length > 0) : true;
+}
+
+/**
+ * The next retrieval stage to require, or nothing when the ledger has already
+ * answered.
+ *
+ * Retrieval is sequential and each stage is required, which on a Track whose
+ * ledger is empty meant three forced round-trips to be told "nothing" three
+ * times — the learner watches "Checking relevant hashmap abilities", "Checking
+ * relevant hashmap attempts", "Checking prior hashmap challenge coverage" go by
+ * and none of them can return anything, because an empty Track has no abilities,
+ * no attempts and therefore no challenges either. The first empty answer is the
+ * whole answer.
+ *
+ * Only a clean sweep stops it: one hit anywhere means the ledger has something
+ * to say and the remaining stages are worth their round-trip. This bounds the
+ * cold path without narrowing the warm one.
+ */
+function nextRetrieval(outcomes: Map<string, unknown[]>, stages: readonly string[]): string | undefined {
+  const done = stages.filter((name) => (outcomes.get(name)?.length ?? 0) > 0);
+  if (done.length && done.every((name) => (outcomes.get(name) ?? []).every((entry) => !retrievalFound(entry)))) return undefined;
+  return stages.find((name) => (outcomes.get(name)?.length ?? 0) === 0);
 }
 
 function hasRetrievedAbility(outcomes: Map<string, unknown[]>) {

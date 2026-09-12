@@ -10,7 +10,8 @@ const build = await context({
   entryPoints: {
     "main/main": "src/main/main.ts",
     "workers/agent": "src/workers/agent.ts",
-    "workers/runner": "src/workers/runner.ts"
+    "workers/runner": "src/workers/runner.ts",
+    "workers/tracer": "src/workers/tracer.ts"
   },
   outdir: outputDirectory,
   bundle: true,

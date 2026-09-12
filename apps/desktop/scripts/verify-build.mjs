@@ -2,9 +2,9 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
- * Checks the built output for the two faults that have actually shipped.
+ * Checks the built output for the faults that have actually shipped.
  *
- * Both were invisible to typecheck, tests, and packaging itself, and both
+ * Each was invisible to typecheck, tests, and packaging itself, and both
  * produced an app that installs, opens a window, and then cannot work:
  *
  *   the preload was never built for release, so the renderer had no bridge and
@@ -44,10 +44,27 @@ if (!html) {
 }
 
 if (!sized("main/main.js")) problems.push("dist/main/main.js is missing or empty");
+if (!sized("workers/tracer.js")) problems.push("dist/workers/tracer.js is missing or empty");
+
+/* The third fault of the same shape, found the same way: the visualiser spawns
+   `python3` on a `tracer.py` that is *copied* into the visualiser package's
+   `dist` by a build step, not compiled there. Nothing typechecks a copied file,
+   so a dist left behind by an earlier build keeps working — it is a valid,
+   older tracer — and the app fails at the first feature the newer one added.
+   Comparing against the source is the whole check: they are meant to be the
+   same bytes, and any difference means the copy did not run. */
+const tracer = resolve(projectRoot, "../../packages/visualizer");
+const shipped = resolve(tracer, "dist/languages/python/tracer.py");
+const authored = resolve(tracer, "src/languages/python/tracer.py");
+if (!existsSync(shipped)) {
+  problems.push("packages/visualizer/dist/languages/python/tracer.py is missing — run the visualiser's build");
+} else if (existsSync(authored) && readFileSync(shipped, "utf8") !== readFileSync(authored, "utf8")) {
+  problems.push("packages/visualizer/dist/languages/python/tracer.py is stale — it does not match its source");
+}
 
 if (problems.length > 0) {
   for (const problem of problems) console.error(`::error::${problem}`);
   console.error(`\n${problems.length} problem(s) that would ship a build that cannot start.`);
   process.exit(1);
 }
-console.log("Built output looks launchable: preload bridge, relative assets, main entry.");
+console.log("Built output looks launchable: preload bridge, relative assets, main entry, current tracer.");

@@ -5,6 +5,7 @@ import type { SparApi } from "../../../shared/api";
 import { message } from "@/lib/format";
 import { Toolbar } from "../shell/Toolbar";
 import { AgentThread } from "../agent/AgentThread";
+import { useStopTurn } from "@/hooks/use-stop-turn";
 import { Composer } from "../agent/Composer";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
@@ -36,6 +37,7 @@ export function ChatView({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const streaming = run?.status === "streaming";
+  const stop = useStopTurn(detail.summary.id, onError);
 
   const send = async () => {
     const body = draft.trim();
@@ -132,6 +134,7 @@ export function ChatView({
             busy={busy || streaming}
             onChange={setDraft}
             {...(onOpenSettings ? { onOpenSettings } : {})}
+            onStop={stop}
             onSubmit={() => void send()}
             placeholder="Ask the agent anything…"
             trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}

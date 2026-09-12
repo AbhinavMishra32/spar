@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { LayoutGrid, Search } from "lucide-react";
 import type { ChallengeHistorySummary, SessionSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
@@ -22,6 +22,9 @@ export function SessionsPage({
   challenges,
   runs,
   onOpen,
+  title = "Sessions",
+  description = "Durable learning journeys, generated one evidence target at a time.",
+  action,
 }: {
   api: SparApi | undefined;
   sessions: SessionSummary[];
@@ -29,6 +32,9 @@ export function SessionsPage({
   /** Agent turns in flight, by session. Cards for these report the live work. */
   runs: Record<string, AgentRun>;
   onOpen(session: SessionSummary): void;
+  title?: string;
+  description?: string;
+  action?: ReactNode;
 }) {
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -49,10 +55,13 @@ export function SessionsPage({
       {/* The same measure the challenge history uses: the two "everything you
           have" pages are siblings, and their cards should be one width. */}
       <div className="mx-auto w-full max-w-[62rem] px-18 pb-16 pt-8">
-        <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Sessions</h1>
-        <p className="mt-1 text-content text-muted-foreground">
-          Durable learning journeys, generated one evidence target at a time.
-        </p>
+        <header className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="truncate text-[1.35rem] font-semibold tracking-[-0.03em]">{title}</h1>
+            <p className="mt-1 max-w-[42rem] text-content text-muted-foreground">{description}</p>
+          </div>
+          {action}
+        </header>
 
         <div className="mt-5 flex items-center gap-2">
           <div className="inline-flex rounded-lg border border-border bg-[var(--color-background-elevated-secondary)] p-0.5">
@@ -104,7 +113,7 @@ export function SessionsPage({
               description={
                 sessions.length
                   ? "Clear the filter or search term to see the rest of your sessions."
-                  : "Sessions appear here once you give the agent a learning goal."
+                  : "Sessions appear here once you start work in this Track."
               }
             />
           )}

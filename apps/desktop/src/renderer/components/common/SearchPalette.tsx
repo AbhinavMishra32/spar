@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { History, LayoutGrid, Library, Map, Plus, Search, Settings, Target, Waypoints } from "lucide-react";
+import { Eye, History, LayoutGrid, Library, Map, Plus, Search, Settings, Target, Waypoints } from "lucide-react";
 import type { ChallengeHistorySummary, ConceptSummary, SessionSummary } from "@spar/domain";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { LANGUAGE_LABEL } from "@/components/common/LanguageGlyph";
@@ -177,9 +177,11 @@ function Hint({ keys, children }: { keys: string; children: string }) {
 const PLACE_ICON: Record<PalettePlace["page"], React.ComponentType<{ className?: string }>> = {
   today: Waypoints,
   tracks: Target,
+  track: Target,
   progress: Map,
   history: History,
   problems: Library,
+  visualizer: Eye,
   sessions: LayoutGrid,
   ability: Map,
   challenges: History,

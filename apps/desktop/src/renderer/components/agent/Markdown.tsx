@@ -1,107 +1,33 @@
-import { Fragment, memo, useMemo, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useState } from "react";
+import { useCodeTheme } from "@/hooks/use-code-theme";
+import { highlight, type Span } from "@/lib/highlight";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { parseReference, Reference, useMarkdownLinks } from "./MarkdownLinks";
+import { parse, type Block } from "./markdownBlocks";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 
-/** Blocks the renderer understands. Anything unrecognised falls through as a paragraph. */
-type Block =
-  | { kind: "code"; language: string; body: string }
-  | { kind: "heading"; level: number; body: string }
-  | { kind: "list"; ordered: boolean; items: string[] }
-  | { kind: "quote"; body: string }
-  | { kind: "rule" }
-  | { kind: "paragraph"; body: string };
-
-const FENCE = /^```(\w*)\s*$/;
-const HEADING = /^(#{1,4})\s+(.*)$/;
-const BULLET = /^\s*[-*+]\s+(.*)$/;
-const ORDERED = /^\s*\d+[.)]\s+(.*)$/;
-const QUOTE = /^>\s?(.*)$/;
-
-function parse(source: string): Block[] {
-  const lines = source.replace(/\r\n/g, "\n").split("\n");
-  const blocks: Block[] = [];
-  let paragraph: string[] = [];
-
-  const flush = () => {
-    if (!paragraph.length) return;
-    blocks.push({ kind: "paragraph", body: paragraph.join("\n").trim() });
-    paragraph = [];
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index]!;
-    const fence = FENCE.exec(line);
-    if (fence) {
-      flush();
-      const body: string[] = [];
-      index += 1;
-      while (index < lines.length && !FENCE.test(lines[index]!)) {
-        body.push(lines[index]!);
-        index += 1;
-      }
-      blocks.push({ kind: "code", language: fence[1] || "text", body: body.join("\n") });
-      continue;
-    }
-
-    if (!line.trim()) {
-      flush();
-      continue;
-    }
-
-    if (/^\s*(---|___|\*\*\*)\s*$/.test(line)) {
-      flush();
-      blocks.push({ kind: "rule" });
-      continue;
-    }
-
-    const heading = HEADING.exec(line);
-    if (heading) {
-      flush();
-      blocks.push({ kind: "heading", level: heading[1]!.length, body: heading[2]! });
-      continue;
-    }
-
-    const quote = QUOTE.exec(line);
-    if (quote) {
-      flush();
-      const body = [quote[1]!];
-      while (index + 1 < lines.length && QUOTE.test(lines[index + 1]!)) {
-        index += 1;
-        body.push(QUOTE.exec(lines[index]!)![1]!);
-      }
-      blocks.push({ kind: "quote", body: body.join("\n") });
-      continue;
-    }
-
-    const bullet = BULLET.exec(line);
-    const ordered = ORDERED.exec(line);
-    if (bullet || ordered) {
-      flush();
-      const isOrdered = Boolean(ordered);
-      const items = [(bullet ?? ordered)![1]!];
-      while (index + 1 < lines.length) {
-        const next = lines[index + 1]!;
-        const nextMatch = isOrdered ? ORDERED.exec(next) : BULLET.exec(next);
-        if (!nextMatch) break;
-        index += 1;
-        items.push(nextMatch[1]!);
-      }
-      blocks.push({ kind: "list", ordered: isOrdered, items });
-      continue;
-    }
-
-    paragraph.push(line);
-  }
-
-  flush();
-  return blocks;
-}
-
-/** Inline spans: `code`, **bold**, *italic*, and bare links rendered as plain text. */
-function Inline({ text }: { text: string }) {
+/** Inline spans: `code`, **bold**, *italic*, and real links.
+ *
+ *  Exported because the thread is not the only place agent prose appears. A
+ *  question the agent asks is written in the same language as the message
+ *  before it, references and all, and rendering it as a bare string is what
+ *  made `[[file:main.py|main.py]]` show up literally in the question card. */
+export function Inline({ text }: { text: string }) {
   const nodes = useMemo(() => {
-    const pattern = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)/g;
+    /* References first, so a `[[file:a_b.c|x]]` is not torn apart by the
+       emphasis rule looking at its underscores. */
+    /* `[label](url)` sits between the references and the emphasis rules: after,
+       so `[[file:a|b]]` still wins its own brackets, and before, so a title with
+       an asterisk in it is not torn in half. Bare URLs are matched last, and
+       only after the bracketed form has had its chance at them.
+       
+       Until this existed the agent's own citations printed as their markdown —
+       `[SolveWithPython version](https://…)` — which is the one thing a reader
+       cannot use: the link is right there and unclickable, and the URL is
+       spelled out in the middle of a sentence. */
+    const pattern =
+      /(\[\[(?:concept|file):[^\]]+\]\])|(\[[^\]\n]*\]\((?:https?:\/\/|mailto:)[^\s)]+\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)|(https?:\/\/[^\s<>()[\]"']+)/g;
     const result: Array<{ key: string; node: React.ReactNode }> = [];
     let cursor = 0;
     let match: RegExpExecArray | null;
@@ -110,12 +36,48 @@ function Inline({ text }: { text: string }) {
         result.push({ key: `t${cursor}`, node: text.slice(cursor, match.index) });
       }
       const value = match[0];
-      if (value.startsWith("`")) {
-        result.push({ key: `c${match.index}`, node: <code className="code-inline">{value.slice(1, -1)}</code> });
+      const reference = value.startsWith("[[") ? parseReference(value) : null;
+      if (reference) {
+        result.push({
+          key: `r${match.index}`,
+          node: <Reference kind={reference.kind} label={reference.label} target={reference.target} />,
+        });
+      } else if (value.startsWith("[")) {
+        const split = value.indexOf("](");
+        const label = value.slice(1, split);
+        const href = value.slice(split + 2, -1);
+        result.push({ key: `l${match.index}`, node: <Hyperlink href={href} label={label || linkText(href)} /> });
+      } else if (/^https?:\/\//.test(value)) {
+        /* A URL written out in prose. Shown as its host and path rather than in
+           full: the query string of a documentation link is longer than the
+           sentence around it and says nothing. */
+        result.push({ key: `u${match.index}`, node: <Hyperlink href={value} label={linkText(value)} /> });
+      } else if (value.startsWith("`")) {
+        result.push({ key: `c${match.index}`, node: <InlineCode body={value.slice(1, -1)} /> });
       } else if (value.startsWith("**")) {
-        result.push({ key: `b${match.index}`, node: <strong className="font-semibold">{value.slice(2, -2)}</strong> });
+        /* Recursed, not printed. Emphasis wins the match at its own index, so a
+           reference or a code span inside it was consumed whole and rendered as
+           the raw string — which is why `[[file:main.py|main.py]]` showed as
+           itself the moment it appeared inside a bold sentence. The inner text
+           is strictly shorter and its delimiters are stripped, so this
+           terminates. */
+        result.push({
+          key: `b${match.index}`,
+          node: (
+            <strong className="font-semibold">
+              <Inline text={value.slice(2, -2)} />
+            </strong>
+          ),
+        });
       } else {
-        result.push({ key: `i${match.index}`, node: <em>{value.slice(1, -1)}</em> });
+        result.push({
+          key: `i${match.index}`,
+          node: (
+            <em>
+              <Inline text={value.slice(1, -1)} />
+            </em>
+          ),
+        });
       }
       cursor = match.index + value.length;
     }
@@ -132,9 +94,121 @@ function Inline({ text }: { text: string }) {
   );
 }
 
+/**
+ * Inline code, coloured by the same theme the editor uses.
+ *
+ * A fenced block names its language; an inline span cannot, so this takes the
+ * project's — a snippet in a Python project is Python. When there is no
+ * language to guess with, or the fragment does not parse as one, the spans come
+ * back uncoloured and it renders exactly as it did before: a plain chip. That
+ * fallback is why this is safe to run on every `torch.zeros` in a transcript.
+ */
+/**
+ * A web link in agent prose.
+ *
+ * A button rather than an anchor, because the window refuses to navigate — an
+ * `<a href>` in the renderer either does nothing or replaces the app with a web
+ * page, and neither is what following a citation should do. The surface around
+ * the transcript hands down the door via `onOpenUrl`; where it has not, the link
+ * renders as its label in plain text, which is what the prose said anyway.
+ */
+function Hyperlink({ href, label }: { href: string; label: string }) {
+  const links = useMarkdownLinks();
+  if (!links.onOpenUrl) return <span className="text-foreground/85">{label}</span>;
+
+  return (
+    <button
+      className="cursor-default rounded-[3px] text-foreground underline decoration-foreground/30 decoration-1 underline-offset-[3px] transition-colors outline-none hover:decoration-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+      onClick={() => links.onOpenUrl?.(href)}
+      title={href}
+      type="button"
+    >
+      {label}
+    </button>
+  );
+}
+
+/** A URL as a person would read it out: the site, and the path if it says
+ *  something. No scheme, no `www.`, no query string. */
+function linkText(href: string): string {
+  try {
+    const url = new URL(href);
+    const path = url.pathname.replace(/\/$/, "");
+    const shown = `${url.host.replace(/^www\./, "")}${path}`;
+    return shown.length > 48 ? `${shown.slice(0, 47)}…` : shown;
+  } catch {
+    return href;
+  }
+}
+
+function InlineCode({ body }: { body: string }) {
+  const { language } = useMarkdownLinks();
+  const { theme } = useCodeTheme();
+  const [spans, setSpans] = useState<Span[] | null>(null);
+
+  useEffect(() => {
+    if (!language) return;
+    let alive = true;
+    void highlight(body, language).then((next) => {
+      if (alive) setSpans(next);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [body, language]);
+
+  return (
+    <code className="code-inline">
+      {spans
+        ? spans.map((span, index) => (
+            <span key={index} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>
+              {span.text}
+            </span>
+          ))
+        : body}
+    </code>
+  );
+}
+
+/**
+ * A fenced block, coloured by the shared code theme.
+ *
+ * The plain text renders first and is replaced when the grammar resolves, so a
+ * block that is still streaming is readable rather than blank. Rendered as
+ * elements rather than as HTML — there is no markup to inject, only text and a
+ * colour.
+ */
+function Colorized({ body, language }: { body: string; language: string }) {
+  const { theme } = useCodeTheme();
+  const [spans, setSpans] = useState<Span[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void highlight(body, language).then((next) => { if (alive) setSpans(next); });
+    return () => { alive = false; };
+  }, [body, language]);
+
+  return (
+    <pre className="app-scroll overflow-x-auto px-2.5 py-2 text-[0.75rem] leading-[1.55] text-[var(--code-foreground)]">
+      {/* Plain until the grammar resolves, so a block that is still streaming is
+          readable rather than blank. Rendered as elements rather than as HTML —
+          there is no markup to inject, only text and a colour. */}
+      <code>
+        {spans
+          ? spans.map((span, index) => (
+              <span key={index} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>
+                {span.text}
+              </span>
+            ))
+          : body}
+      </code>
+    </pre>
+  );
+}
+
 function CodeBlock({ language, body }: { language: string; body: string }) {
   const [copied, setCopied] = useState(false);
-  // A fence can say anything — `bash`, `json`, `text`. Only the three Spar trains
+  // A fence can say anything — `bash`, `json`, `text`. Only the three Construct trains
   // in have a mark; the rest keep the tag they were written with.
   const marked = languageOf(language);
   const copy = () => {
@@ -159,9 +233,7 @@ function CodeBlock({ language, body }: { language: string; body: string }) {
           {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
         </button>
       </div>
-      <pre className="app-scroll overflow-x-auto px-2.5 py-2 text-[0.75rem] leading-[1.55] text-[var(--code-foreground)]">
-        <code>{body}</code>
-      </pre>
+      <Colorized body={body} language={language} />
     </div>
   );
 }
@@ -171,27 +243,29 @@ export const Markdown = memo(function Markdown({ source, className }: { source: 
 
   return (
     <div
-      className={cn(
-        // A bare UUID or long path must wrap rather than widen the column.
-        "min-w-0 text-content leading-[1.62] [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className,
-      )}
+      /* The scale lives in `.md-prose` — ChatGPT's own, lifted from its
+         stylesheet. Sizing and spacing are not set here so that every surface
+         rendering agent prose shares one system rather than each carrying its
+         own guesses. */
+      className={cn("md-prose min-w-0", className)}
     >
       {blocks.map((block, index) => {
         switch (block.kind) {
           case "code":
             return <CodeBlock key={index} body={block.body} language={block.language} />;
           case "heading": {
-            const size = block.level <= 1 ? "text-[0.95rem]" : block.level === 2 ? "text-[0.875rem]" : "text-content";
+            /* A real heading element, not a bolded paragraph: the scale keys off
+               the tag, and a screen reader has nothing to go on otherwise. */
+            const Tag = (["h1", "h2", "h3", "h4", "h5", "h6"] as const)[Math.min(5, Math.max(1, block.level)) - 1]!;
             return (
-              <p key={index} className={cn("mt-4 mb-1.5 font-semibold tracking-tight", size)}>
+              <Tag key={index}>
                 <Inline text={block.body} />
-              </p>
+              </Tag>
             );
           }
           case "list":
             return block.ordered ? (
-              <ol key={index} className="my-2 list-decimal space-y-1 pl-5 marker:text-muted-foreground">
+              <ol key={index}>
                 {block.items.map((item, itemIndex) => (
                   <li key={itemIndex}>
                     <Inline text={item} />
@@ -199,7 +273,7 @@ export const Markdown = memo(function Markdown({ source, className }: { source: 
                 ))}
               </ol>
             ) : (
-              <ul key={index} className="my-2 list-disc space-y-1 pl-5 marker:text-muted-foreground">
+              <ul key={index}>
                 {block.items.map((item, itemIndex) => (
                   <li key={itemIndex}>
                     <Inline text={item} />
@@ -209,15 +283,56 @@ export const Markdown = memo(function Markdown({ source, className }: { source: 
             );
           case "quote":
             return (
-              <blockquote key={index} className="my-2 border-l-2 border-border pl-3 text-muted-foreground">
+              <blockquote key={index}>
                 <Inline text={block.body} />
               </blockquote>
             );
+          case "table":
+            /* Scrolls inside its own box rather than widening the column. A
+               table in a chat panel is nearly always wider than the panel, and
+               a message that pushes the whole transcript sideways is worse than
+               one you drag two inches. */
+            return (
+              <div className="app-scroll -mx-1 my-2 overflow-x-auto px-1" key={index}>
+                <table className="w-full min-w-max border-collapse text-left">
+                  <thead>
+                    <tr>
+                      {block.header.map((cell, cellIndex) => (
+                        <th
+                          className="hairline-b px-2 py-1 font-semibold whitespace-nowrap text-foreground"
+                          key={cellIndex}
+                          scope="col"
+                        >
+                          <Inline text={cell} />
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {block.rows.map((row, rowIndex) => (
+                      <tr key={rowIndex}>
+                        {row.map((cell, cellIndex) => (
+                          <td
+                            className={cn(
+                              "px-2 py-1 align-top text-foreground/85",
+                              rowIndex < block.rows.length - 1 && "hairline-b",
+                            )}
+                            key={cellIndex}
+                          >
+                            <Inline text={cell} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            );
           case "rule":
-            return <hr key={index} className="my-3 border-t border-border" />;
+            return <hr key={index} />;
           default:
             return (
-              <p key={index} className="my-2 whitespace-pre-wrap">
+              <p key={index}>
                 <Inline text={block.body} />
               </p>
             );

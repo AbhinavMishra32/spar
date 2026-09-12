@@ -6,7 +6,28 @@ export type ValidationRun = { exitCode: number; stdout: string; stderr: string; 
 export type ValidationRunner = (files: Record<string,string>, command: string, limits: { timeoutMs: number; memoryMb: number }) => Promise<ValidationRun>;
 export type ValidationReport = { id: string; valid: boolean; contentHash: string; checks: Array<{ name: string; passed: boolean; detail: string }>; validatedAt: string };
 
-export async function compileQuestion(untrustedDesign: unknown, run: ValidationRunner): Promise<{ design: QuestionDesign; report: ValidationReport }> {
+/** Cases the reference must actually pass before a challenge is publishable.
+ *  Not reachable by hand, which is the point — see the `case volume` check. */
+const MIN_EXECUTED_CASES = 24;
+/** Named, readable cases in the visible file: the contract the learner reads. */
+const MIN_VISIBLE_CASES = 4;
+
+/**
+ * Who wrote the candidate, which is the one thing the case-volume bar depends
+ * on.
+ *
+ * The bar exists to break a habit of the model's: three hand-written cases,
+ * which grade nothing. It does not apply to `host` — designs Spar itself wrote,
+ * which today means the fixed fallback exercise published after every model
+ * candidate has been rejected, and the fixtures that exercise the other checks.
+ * Holding the last safety net to a generated sweep in ten languages would put it
+ * at the mercy of ten toolchains for no teaching gain. Everything else in this
+ * file applies to both, and the exemption is named at the call site rather than
+ * inferred here.
+ */
+export type DesignOrigin = "authored" | "host";
+
+export async function compileQuestion(untrustedDesign: unknown, run: ValidationRunner, origin: DesignOrigin = "authored"): Promise<{ design: QuestionDesign; report: ValidationReport }> {
   let design = normalizeDesign(normalizeFileDescriptors(questionDesignSchema.parse(untrustedDesign)));
 
   // Shape is checked before anything is executed. A candidate whose tests can
@@ -43,6 +64,41 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
   checks.push({ name: "visible test agreement", passed: visibleOnly.exitCode === 0, detail: summarize(visibleOnly) });
   checks.push(structuredResultCheck("visible case results", visibleOnly, "passed"));
   checks.push({ name: "targeted hidden coverage", passed: design.hiddenTests && Object.keys(design.hiddenTests).length > 0 && design.expectedFailureSignatures.length > 0, detail: `${Object.keys(design.hiddenTests).length} hidden files cover ${design.expectedFailureSignatures.length} expected signatures` });
+  /**
+   * How many cases actually ran.
+   *
+   * Measured from the reference run's own verdicts rather than counted off the
+   * test source, so it is the number of cases that executed and agreed, not the
+   * number somebody claims to have written. Three hand-written cases is what a
+   * challenge tends to arrive with, and three cases is not a grader: it is a
+   * spot check that a wrong solution passes routinely and a right one fails on
+   * an edge nobody thought of. Real judges run hundreds, and they do not write
+   * hundreds by hand — they generate inputs and check them against a slow,
+   * obviously-correct oracle.
+   *
+   * The floor is deliberately reachable by exactly that and not by anything
+   * else: nobody types twenty-four cases, so meeting it means a loop over
+   * generated inputs, which is the thing worth requiring.
+   */
+  const volume = structuredVerdicts(`${reference.stdout}\n${reference.stderr}`);
+  checks.push({
+    name: "case volume",
+    passed: origin === "host" || volume.total >= MIN_EXECUTED_CASES,
+    detail: volume.total >= MIN_EXECUTED_CASES
+      ? `${volume.total} cases executed against the reference`
+      : `Only ${volume.total} cases ran; at least ${MIN_EXECUTED_CASES} are required. Add a generated sweep to hiddenTests: loop over inputs built from a seeded pseudo-random generator, compute the expected answer with a brute-force oracle written inside the test file, and emit one verdict line per case with the input in the case name. Keep the curated cases too — the sweep finds what you did not think of, the curated ones say what the problem means.`,
+  });
+  /* Curated cases are a separate requirement from volume, and pointed the other
+     way: a suite that is only a sweep tells the learner nothing about what the
+     problem means. The visible file is the contract they read. */
+  const curated = structuredVerdicts(`${visibleOnly.stdout}\n${visibleOnly.stderr}`);
+  checks.push({
+    name: "curated visible cases",
+    passed: origin === "host" || curated.total >= MIN_VISIBLE_CASES,
+    detail: curated.total >= MIN_VISIBLE_CASES
+      ? `${curated.total} named visible cases state the contract`
+      : `Only ${curated.total} visible cases. Write at least ${MIN_VISIBLE_CASES} named by hand — the ordinary case, each boundary, and the one that separates the right idea from the plausible wrong one. A generated sweep does not belong in the visible file.`,
+  });
   checks.push({ name: "accidental difficulty budget", passed: design.accidentalDifficulty.length <= 3, detail: design.accidentalDifficulty.join(", ") || "No incidental complexity declared" });
   const contentHash = createHash("sha256").update(stableJson(design)).digest("hex");
   return { design, report: { id: randomUUID(), valid: checks.every((check) => check.passed), contentHash, checks, validatedAt: new Date().toISOString() } };

@@ -27,6 +27,18 @@ export function normalizeAgentStreamPart(part: Record<string, unknown>): Normali
   if (type === "reasoning-end") return { type: "reasoning", text: "", phase: "end" };
   if (type === "error") return { type: "error", text: errorText(part.error ?? part) };
 
+  /* A rejected tool call, kept rather than collapsed.
+   *
+   * Everything else here is protocol mechanics — host tool calls already report
+   * the real activity — but this one part carries the only account of *why* a
+   * call did not land: the schema path that failed, the field that was missing.
+   * Dropping it is what made a stalled phase unfixable, both for the model,
+   * which was told only "that was not valid", and for whoever read the log
+   * afterwards. So the fault text rides along in `detail`, where the phase loop
+   * reads it and quotes it back in the retry. */
+  if (type.includes("tool") && (type.includes("error") || type.includes("repair"))) {
+    return { type: "status", text: "", detail: `${type}:${String(part.toolName ?? "tool")}:${errorText(part.error ?? part)}` };
+  }
   // Provider stream parts describe protocol mechanics, not work. Host tool
   // calls already report the real activity, so these remain status trace data.
   if (type.includes("tool")) {

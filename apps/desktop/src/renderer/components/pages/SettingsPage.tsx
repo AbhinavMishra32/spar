@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch";
 import { message } from "@/lib/format";
 import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { SettingsGroup, SettingsHeader, SettingsRow, SettingsSection } from "../settings/layout";
 import { refreshProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
@@ -32,9 +33,52 @@ import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
 type SettingsSection = "account" | "models" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
-const SETTINGS_NAV: Array<{id:SettingsSection;label:string;icon:React.ComponentType<{className?:string}>}>=[
-  {id:"account",label:"Account",icon:UserRound},{id:"models",label:"Models",icon:BrainCircuit},{id:"connections",label:"Connections",icon:Link2},{id:"learning",label:"Learning",icon:Settings2},{id:"privacy",label:"Data & Privacy",icon:Eye},{id:"appearance",label:"Appearance",icon:Palette},{id:"advanced",label:"Learning Engine",icon:Globe},
+type NavItem = { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> };
+
+/**
+ * Seven destinations under three headings.
+ *
+ * Seven unlabelled rows floating at the top of a tall empty column read as an
+ * unfinished screen, and the fix is to say what the seven are rather than to
+ * invent an eighth. The division is the honest one: two pages about this copy
+ * of Spar and the person signed into it, three about the machinery that reads
+ * and teaches, two about what is kept.
+ */
+const SETTINGS_NAV: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: "Spar",
+    items: [
+      { id: "account", label: "Account", icon: UserRound },
+      { id: "appearance", label: "Appearance", icon: Palette },
+    ],
+  },
+  {
+    label: "Training",
+    items: [
+      { id: "models", label: "Models", icon: BrainCircuit },
+      { id: "learning", label: "Learning", icon: Settings2 },
+      { id: "connections", label: "Connections", icon: Link2 },
+    ],
+  },
+  {
+    label: "Your record",
+    items: [
+      { id: "privacy", label: "Data & Privacy", icon: Eye },
+      { id: "advanced", label: "Learning Engine", icon: Globe },
+    ],
+  },
 ];
+
+/** Flat, for the one question the groups cannot answer: what this page is called. */
+const SETTINGS_PAGES: NavItem[] = SETTINGS_NAV.flatMap((group) => group.items);
+
+/* One string, because every row in the list has to agree about its height, its
+   resting colour, and what selection does to it — a row that disagrees is
+   visible immediately. */
+const NAV_ITEM = "flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-ui outline-none transition-colors";
+
+/** Resolved in the main process before the window paints, so it is already here. */
+const buildInfo = window.spar?.build;
 
 const LANGUAGES: Language[] = [...SUPPORTED_LANGUAGES];
 
@@ -177,19 +221,19 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
 
 /** A labelled stack of rows. The label sits above the card, not inside it — the
  *  card is then one uninterrupted surface instead of a header plus a body. */
+/* The page's own two names for the shared vocabulary, kept so every existing
+   row reads the same as it did. `Group` is a section and its card together,
+   which is what every group on this page happens to be. */
 function Group({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className={cn("mt-7", className)}>
-      <h2 className="mb-2 px-0.5 text-ui font-medium text-muted-foreground">{label}</h2>
-      <div className="overflow-hidden rounded-[var(--radius-2xl)] border border-border bg-card shadow-[var(--app-shadow-card)]">
-        <div className="divide-y divide-border">{children}</div>
-      </div>
-    </section>
+    <SettingsSection title={label}>
+      <SettingsGroup className={className}>{children}</SettingsGroup>
+    </SettingsSection>
   );
 }
 
 function Row({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("flex min-h-[3.375rem] items-center gap-3 px-3.5 py-2", className)}>{children}</div>;
+  return <SettingsRow className={className}>{children}</SettingsRow>;
 }
 
 /** Bare mark, no tile — the glyph reads as a logo rather than a favicon. */
@@ -515,20 +559,72 @@ export function SettingsPage({
   };
 
   return (
-    <div className="flex h-full min-h-0">
-      <aside className="w-[12.5rem] shrink-0 border-r border-border bg-muted/20 px-3 py-5">
-        <nav className="flex flex-col gap-0.5" aria-label="Settings sections">
-          {SETTINGS_NAV.map(({id,label,icon:Icon})=><button className={cn("flex h-8 items-center gap-2 rounded-lg px-2.5 text-ui text-left outline-none transition-colors",section===id?"bg-accent font-medium text-foreground":"text-muted-foreground hover:bg-accent/60 hover:text-foreground")} key={id} onClick={()=>setSection(id)} type="button"><Icon className="size-4" />{label}</button>)}
+    /* Two surfaces, not one. The nav sits on the window's own ground — it is
+       chrome, and chrome belongs to the window — while the page it points at is
+       a sheet laid on top, the same card every other content pane gets. A
+       settings screen drawn as one flat field reads as a web page that happened
+       to open here rather than as a place in the app. */
+    <div className="flex h-full min-h-0 gap-1.5 py-1.5 pr-1.5">
+      {/* Narrow, and padded only on the leading edge: the rows are the column,
+          so the space between them and the page belongs to the page. */}
+      <aside className="relative flex h-full w-[12.5rem] shrink-0 flex-col pl-2 pt-1">
+        {/* No search field. Seven destinations is a list you read, not one you
+            query. */}
+        <nav aria-label="Settings sections" className="app-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-1">
+          {SETTINGS_NAV.map((group) => (
+            <section key={group.label}>
+              {/* The same heading the page's own sections wear, one step
+                  quieter, and inset to the rows rather than spaced away from
+                  them — a 28px band on the same left edge as the glyphs, so the
+                  column reads as one ruled list instead of headings floating
+                  above groups of buttons. */}
+              <h2 className="flex h-7 items-center pl-2.5 text-ui-sm font-medium text-muted-foreground/70">{group.label}</h2>
+              <ul className="flex flex-col gap-0.5">
+                {group.items.map(({ id, label, icon: Icon }) => (
+                  <li key={id}>
+                    <button
+                      className={cn(NAV_ITEM, section === id ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
+                      onClick={() => setSection(id)}
+                      type="button"
+                    >
+                      <Icon className="size-4" />
+                      {label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
         </nav>
+
+        {/* The bottom of the column, and the reason it no longer reads as empty:
+            a list that ends in mid-air looks unfinished, one that ends on a line
+            of type looks placed. It also answers from anywhere in Settings the
+            question the About panel answers only from Account. */}
+        {buildInfo && (
+          <p className="shrink-0 pb-1 pl-2.5 pt-3 text-ui-sm text-muted-foreground/60">
+            Spar {buildInfo.version}
+            {!buildInfo.packaged && " · dev"}
+          </p>
+        )}
       </aside>
-      <div className="app-scroll min-w-0 flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[42rem] px-6 pb-20 pt-9">
-        <h1 className="text-[1.55rem] font-semibold tracking-[-0.035em]">Settings</h1>
-        <p className="mt-1 text-content text-muted-foreground">{SETTINGS_NAV.find((item)=>item.id===section)?.label}</p>
+      <div className="app-scroll min-w-0 flex-1 overflow-y-auto rounded-[var(--radius-2xl)] border border-border bg-card shadow-[var(--app-shadow-card)]">
+      {/* Wide top padding rather than a title bar: the heading sits in air, which
+          is what makes it read as the page's name rather than as the first row
+          of the list under it. */}
+      <div className="mx-auto w-full max-w-[42rem] px-8 pb-32 pt-16">
+        <SettingsHeader>
+          <h1>{SETTINGS_PAGES.find((item) => item.id === section)?.label ?? "Settings"}</h1>
+        </SettingsHeader>
 
         {error && !selected && (
-          <p className="mt-5 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui text-destructive">{error}</p>
+          <p className="mb-6 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui text-destructive">{error}</p>
         )}
+
+        {/* One rhythm for the whole page. Each group used to carry its own top
+            margin, which meant the gap between two groups depended on which
+            ones happened to be rendered. */}
+        <div className="space-y-8">
 
         {section === "appearance" && <Group label="Appearance">
           <Row className="gap-4 py-2.5">
@@ -671,6 +767,7 @@ export function SettingsPage({
         </Group>}
 
         {section === "advanced" && <LearningEngineInspector api={api} />}
+        </div>
       </div>
       </div>
 

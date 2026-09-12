@@ -73,6 +73,13 @@ export function languageFor(path: string): string {
   if (path.endsWith(".tsx")) return "typescript";
   if (path.endsWith(".js") || path.endsWith(".mjs")) return "javascript";
   if (path.endsWith(".cpp") || path.endsWith(".cc") || path.endsWith(".h")) return "cpp";
+  if (path.endsWith(".py")) return "python";
+  if (path.endsWith(".java")) return "java";
+  if (path.endsWith(".c")) return "c";
+  if (path.endsWith(".go")) return "go";
+  if (path.endsWith(".rs")) return "rust";
+  if (path.endsWith(".swift")) return "swift";
+  if (path.endsWith(".rb")) return "ruby";
   if (path.endsWith(".json")) return "json";
   if (path.endsWith(".md")) return "markdown";
   return "plaintext";

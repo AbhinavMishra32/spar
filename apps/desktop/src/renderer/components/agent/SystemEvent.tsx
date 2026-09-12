@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, ChevronRight, Info, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { UNDER_LABEL } from "./ActivityRow";
 
 /**
  * Some persisted "system" messages are orchestration prompts addressed to the
@@ -48,15 +49,19 @@ function Row({
   tone?: "muted" | "success" | "destructive";
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-2 px-1.5 py-1 text-ui-sm">
-      <Icon
-        className={cn(
-          "size-3 shrink-0",
-          tone === "success" ? "text-[var(--success)]" : tone === "destructive" ? "text-destructive" : "text-muted-foreground/70",
-        )}
-      />
+    /* The transcript's own gutter, so a system line starts where every other
+       row's label starts instead of a few pixels short of it. */
+    <div className="-mx-1 flex min-w-0 items-center gap-1.5 pb-2 text-ui-sm">
+      <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
+        <Icon
+          className={cn(
+            "size-3.5",
+            tone === "success" ? "text-[var(--success)]" : tone === "destructive" ? "text-destructive" : "text-muted-foreground/85",
+          )}
+        />
+      </span>
       <span className="shrink-0 font-medium text-muted-foreground">{title}</span>
-      {meta && <span className="min-w-0 flex-1 truncate text-muted-foreground/65">{meta}</span>}
+      {meta && <span className="min-w-0 flex-1 truncate text-muted-foreground">{meta}</span>}
     </div>
   );
 }
@@ -66,19 +71,21 @@ function Collapsible({ body }: { body: string }) {
   return (
     <div className="min-w-0">
       <button
-        className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-ui-sm transition-colors hover:bg-accent/60"
+        className="-mx-1 flex w-full min-w-0 items-center gap-1.5 pb-2 text-left text-ui-sm text-muted-foreground transition-colors hover:text-foreground"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <Info className="size-3 shrink-0 text-muted-foreground/70" />
+        <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
+          <Info className="size-4 text-muted-foreground/85" />
+        </span>
         <span className="shrink-0 font-medium text-muted-foreground">System</span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground/65">{body}</span>
-        <ChevronRight className={cn("size-3 shrink-0 text-muted-foreground/50 transition-transform", open && "rotate-90")} />
+        <span className="min-w-0 flex-1 truncate text-muted-foreground">{body}</span>
+        <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
       </button>
       {/* Flush with the trigger, like every other disclosure in the transcript:
           the expanded text is the same event in full, not a child of it. */}
       {open && (
-        <p className="min-w-0 break-words px-1.5 py-1 text-ui-sm leading-[1.6] text-muted-foreground/80">
+        <p className="min-w-0 break-words pb-2 text-ui-sm leading-[1.6] text-muted-foreground/80" style={{ paddingLeft: UNDER_LABEL }}>
           {body}
         </p>
       )}

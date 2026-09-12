@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 
 const TURN_KINDS: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message", "challenge-revision"];
 
@@ -33,6 +33,36 @@ describe("Training Agent controller policy", () => {
     expect(completionInstruction("session-start",local)).toContain("compact micro-lesson");
     expect(completionInstruction("session-start",local)).toContain("never describe it as a real");
     expect(completionInstruction("session-start",sourced)).toContain("connected-provider problem");
+  });
+
+  it("stops requiring retrieval once the ledger has answered with nothing", () => {
+    /* A Track with no evidence has no abilities, no attempts, and therefore no
+       challenges either. Asking all three was three forced round-trips to be
+       told "nothing" three times, which the learner watches go past. */
+    const empty = { result: { passages: [] } };
+    const outcomes = new Map<string, unknown[]>([["search_learner_model", [empty]]]);
+    const stage = nextToolStage("session-start", outcomes, 15, {});
+    expect(stage.activeTools).not.toContain("search_attempt_history");
+    expect(stage.activeTools).not.toContain("search_challenge_history");
+    // It has moved on to the work, not stalled.
+    expect(stage.activeTools).toContain("set_session_objective");
+  });
+
+  it("keeps retrieving while any stage has found something", () => {
+    // One hit means the ledger has something to say; the rest earn their trip.
+    const outcomes = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [{ id: "a" }] } }]]]);
+    expect(nextToolStage("session-start", outcomes, 15, {}).activeTools).toEqual(["search_attempt_history"]);
+  });
+
+  it("does not stop early on a result shape it cannot read", () => {
+    // The conservative direction is to keep retrieving, never to skip on a guess.
+    const outcomes = new Map<string, unknown[]>([["search_learner_model", [{ result: "unexpected" }]]]);
+    expect(nextToolStage("session-start", outcomes, 15, {}).activeTools).toEqual(["search_attempt_history"]);
+  });
+
+  it("bounds cold-start retrieval the same way", () => {
+    const outcomes = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [] } }]]]);
+    expect(nextToolStage("cold-start", outcomes, 15, {}).activeTools).toEqual(["ask_user_question"]);
   });
 
   it("lets the single agent choose tools or prose for learner chat", () => {
@@ -90,6 +120,89 @@ describe("Training Agent controller policy", () => {
     }
   });
 
+  /**
+   * The visualiser is a skill: one line of context until it is wanted.
+   *
+   * Both halves matter. Offering the four working tools up front would put their
+   * schemas and the briefing behind them in every turn Spar runs, which is what
+   * the gate exists to avoid. Never offering them would make the gate a tool
+   * whose result the agent cannot act on.
+   */
+  describe("the execution visualiser", () => {
+    const chat = (outcomes: Array<[string, unknown[]]> = []) => nextToolStage("learner-message", new Map(outcomes), 15, { hasActiveQuestion: true }).activeTools;
+
+    it("offers only the gate on an ordinary turn", () => {
+      const offered = chat();
+      expect(offered).toContain(VISUALIZER_GATE);
+      expect(offered.filter((name) => VISUALIZER_SKILL_TOOLS.includes(name))).toEqual([]);
+    });
+
+    it("offers the whole toolkit once the gate has answered", () => {
+      const offered = chat([[VISUALIZER_GATE, [{ result: { loaded: true } }]]]);
+      for (const tool of VISUALIZER_TOOLS) expect(offered).toContain(tool);
+    });
+
+    /* Same rule as every other staged tool: staging one the turn never built is
+       a silent retry loop rather than an error. */
+    it("builds every visualiser tool it can stage", () => {
+      for (const turnKind of ["learner-message", "attempt-complete"] as AgentTurnKind[]) {
+        const built = allowedTools(turnKind, true, false, false);
+        for (const tool of VISUALIZER_TOOLS) expect(built.has(tool), `${turnKind} builds ${tool}`).toBe(true);
+      }
+    });
+
+    /**
+     * The attempt-complete turn is the other place it belongs, and its stage
+     * machine is fully deterministic — so the visualiser rides alongside a
+     * required tool rather than as a stage the model could decline, which would
+     * end the turn before the ability was ever updated.
+     */
+    it("offers the visualiser beside the ability update, once the evidence is in hand", () => {
+      const graded = (extra: Array<[string, unknown[]]> = []) => new Map<string, unknown[]>([
+        ["replay_attempt", [{ result: {} }]],
+        ["evaluate_attempt", [{ result: {} }]],
+        ["inspect_current_attempt", [{ result: {} }]],
+        ["review_solution", [{ result: { review: "accepted" } }]],
+        ["read_ability", [{ result: {} }]],
+        ...extra,
+      ]);
+      const stage = nextToolStage("attempt-complete", graded());
+      expect(stage.toolChoice).toBe("required");
+      expect(stage.activeTools).toEqual([VISUALIZER_GATE, "propose_ability_update"]);
+      // Taking the offer does not lose the required tool, so the phase still advances.
+      expect(nextToolStage("attempt-complete", graded([[VISUALIZER_GATE, [{ result: {} }]]])).activeTools)
+        .toEqual([...VISUALIZER_SKILL_TOOLS, "propose_ability_update"]);
+    });
+
+    /* Offered beside a required tool, the usual "you already called this"
+       withdrawal does not apply — so a call budget is what stops a turn
+       spending itself on the visualiser instead of on the learner's record.
+       Deliberately not "stop once it has drawn something": being asked to draw
+       it again is a normal thing to happen straight after a diagram, and a turn
+       that answers that by saying the visualiser is gone is the worse failure. */
+    it("stops offering it once the turn has spent its budget on it", () => {
+      const graded: Array<[string, unknown[]]> = [
+        ["replay_attempt", [{ result: {} }]], ["evaluate_attempt", [{ result: {} }]],
+        ["inspect_current_attempt", [{ result: {} }]], ["review_solution", [{ result: { review: "accepted" } }]],
+        ["read_ability", [{ result: {} }]],
+      ];
+      const spend = (calls: number) => new Map<string, unknown[]>([
+        ...graded,
+        [VISUALIZER_GATE, [{ result: {} }]],
+        ["visualize_run", Array.from({ length: calls }, () => ({ result: {} }))],
+      ]);
+      expect(nextToolStage("attempt-complete", spend(1)).activeTools).toContain("visualize_explain");
+      expect(nextToolStage("attempt-complete", spend(12)).activeTools).toEqual(["propose_ability_update"]);
+    });
+
+    /* A turn whose job is to set a challenge has nothing to visualise and a
+       learner who is not looking at the conversation yet. */
+    it("stays out of the turns that only set up a session", () => {
+      expect(allowedTools("cold-start").has(VISUALIZER_GATE)).toBe(false);
+      expect(allowedTools("session-start").has(VISUALIZER_GATE)).toBe(false);
+    });
+  });
+
   /* Reaching outside the learner's own record is offered, never demanded. A
      planning turn with no key must not stage a tool that can only answer "not
      set up", and one with a key must still be able to decline and commit. */
@@ -120,7 +233,10 @@ describe("Training Agent controller policy", () => {
     // The agent was structurally blind here: `search_challenge_history` existed
     // but no stage required it, so a session's first target was chosen from the
     // ability ledger alone and every goal re-derived the same challenge.
-    const outcomes = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [] } }]], ["search_attempt_history", [{ result: { attempts: [] } }]]]);
+    /* A ledger with something in it: the repetition this stage exists to prevent
+       is only possible once there is a history to repeat. An empty ledger takes
+       the bounded path instead, which is asserted separately. */
+    const outcomes = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [{ id: "ability" }] } }]], ["search_attempt_history", [{ result: { attempts: [] } }]]]);
     expect(nextToolStage("session-start", outcomes).activeTools).toEqual(["search_challenge_history"]);
   });
 
@@ -133,7 +249,14 @@ describe("Training Agent controller policy", () => {
     expect(stage().activeTools).toEqual(["replay_attempt"]);
     settle("replay_attempt");
     expect(stage().activeTools).toEqual(["evaluate_attempt"]);
-    for (const name of ["evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) settle(name);
+    settle("evaluate_attempt");
+    /* The code, then the judgement about how it was written. Both come before
+       anything is written down, because a solution that is about to be sent
+       back has no ability update and no next challenge to its name. */
+    expect(stage().activeTools).toEqual(["inspect_current_attempt"]);
+    settle("inspect_current_attempt");
+    expect(stage().activeTools).toEqual(["review_solution"]);
+    for (const name of ["review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) settle(name);
 
     // The only stage with a choice: aim the next question, or ask about what the
     // trace could not explain.
@@ -246,6 +369,8 @@ describe("practice sources in the stage machine", () => {
     const outcomes = new Map<string, unknown[]>([
       ["replay_attempt", [{ result: { report: "log" } }]],
       ["evaluate_attempt", [{ result: {} }]],
+      ["inspect_current_attempt", [{ result: {} }]],
+      ["review_solution", [{ result: { review: "accepted" } }]],
       ["read_ability", [{ result: {} }]],
       ["propose_ability_update", [{ result: { committed: true } }]],
       ["commit_session_decision", [{ result: { committed: true } }]],
@@ -273,6 +398,29 @@ describe("practice sources in the stage machine", () => {
     // Replacing a challenge in place is still the only way to edit one.
     expect(stage.activeTools).toContain("replace_current_question");
     expect(stage.activeTools).not.toContain("create_question");
+  });
+
+  /* The review is the only stage that can end an attempt-complete turn early,
+     and it has to be able to: everything after it is a record of a finished
+     attempt, and the attempt has just been reopened. */
+  it("ends the turn when the review sends the solution back", () => {
+    const outcomes = new Map<string, unknown[]>([
+      ["replay_attempt", [{ result: {} }]],
+      ["evaluate_attempt", [{ result: {} }]],
+      ["inspect_current_attempt", [{ result: {} }]],
+      ["review_solution", [{ result: { review: "rework", reopened: true } }]],
+    ]);
+    expect(nextToolStage("attempt-complete", outcomes)).toEqual({ activeTools: [], toolChoice: "none" });
+  });
+
+  it("carries on through the record when the review accepts", () => {
+    const outcomes = new Map<string, unknown[]>([
+      ["replay_attempt", [{ result: {} }]],
+      ["evaluate_attempt", [{ result: {} }]],
+      ["inspect_current_attempt", [{ result: {} }]],
+      ["review_solution", [{ result: { review: "accepted" } }]],
+    ]);
+    expect(nextToolStage("attempt-complete", outcomes).activeTools).toEqual(["read_ability"]);
   });
 
   it("makes a revision turn choose between a real problem and one it writes", () => {

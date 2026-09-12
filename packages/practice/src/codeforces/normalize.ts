@@ -40,7 +40,7 @@ export function normalizeCodeforcesProblem(problem: CodeforcesProblemWire, html:
   const statement = extractProblemStatement(html);
   const examples = extractSamples(html);
   const topicTags = (problem.tags ?? []).map((name) => ({ slug: name, name }));
-  const languages: PracticeProblem["languages"] = (["javascript", "typescript", "cpp"] as Language[]).map((language) => ({ language, slug: CODEFORCES_LANGUAGE_SLUG[language], starter: starter(language) }));
+  const languages: PracticeProblem["languages"] = (["javascript", "typescript", "python", "cpp"] as Language[]).map((language) => ({ language, slug: CODEFORCES_LANGUAGE_SLUG[language], starter: starter(language) }));
   return {
     ...summary,
     region: "global",
@@ -63,6 +63,7 @@ export function casesForCodeforcesProblem(problem: PracticeProblem): PracticeCas
 export const CODEFORCES_LANGUAGE_SLUG: Record<Language, string> = {javascript:"javascript",typescript:"typescript",python:"python",java:"java",c:"c",cpp:"cpp",go:"go",rust:"rust",swift:"swift",ruby:"ruby"};
 
 function starter(language: Language): string {
+  if (language === "python") return "import sys\n\ndata = sys.stdin.read().split()\n# Parse input, solve the problem, and print the answer.\n";
   if (language === "cpp") return "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n  ios::sync_with_stdio(false);\n  cin.tie(nullptr);\n\n  // Read input, solve the problem, and print the answer.\n  return 0;\n}";
   if (language === "typescript") return "import * as fs from \"fs\";\n\nconst input: string = fs.readFileSync(0, \"utf8\").trim();\n// Parse input, solve the problem, and print the answer.\nvoid input;";
   return "const fs = require(\"fs\");\n\nconst input = fs.readFileSync(0, \"utf8\").trim();\n// Parse input, solve the problem, and print the answer.\nvoid input;";

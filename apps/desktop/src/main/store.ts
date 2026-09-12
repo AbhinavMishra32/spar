@@ -2,13 +2,13 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { challengeFileEntries, codePreview } from "./challengeFiles.js";
-import { askUserQuestionRequestSchema, baselineStateSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
+import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
 
 type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null };
 const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at";
 type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:Language; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; replaces_question_id:string|null; source_ref:string|null; created_at:string };
 type ConceptRow = { id:string; slug:string; title:string; kind:string; parent_slug:string|null; description:string };
-type TrackRow = { id:string;title:string;goal:string;status:Track["status"];emphasis:string;priorities:string;investigating:string;monitoring:string;created_at:string;updated_at:string };
+type TrackRow = { id:string;title:string;goal:string;status:Track["status"];language:string|null;emphasis:string;priorities:string;investigating:string;monitoring:string;created_at:string;updated_at:string };
 type EvidenceInterpretation={eventId:string;statement:string;polarity:LearnerEvidence["polarity"];independence:LearnerEvidence["independence"];strength:number};
 type PatternInterpretation={title:string;description:string;status:LearnerPattern["status"];evidenceEventIds:string[]};
 
@@ -98,8 +98,8 @@ export class LocalStore {
          someone who just failed it try next. */
       CREATE TABLE IF NOT EXISTS practice_problem_links (source TEXT NOT NULL, region TEXT NOT NULL, from_slug TEXT NOT NULL, to_slug TEXT NOT NULL, relation TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', difficulty TEXT, PRIMARY KEY (source, region, from_slug, to_slug, relation));
       CREATE INDEX IF NOT EXISTS practice_problem_links_to_idx ON practice_problem_links(source, region, to_slug);
-      /* Tracks describe intent; the tables below describe the one global learner.
-         No learner-state table carries a track id by design. */
+      /* A Track is a workspace boundary. Sessions, ability memory, notices and
+         rating all resolve through it; account/profile preferences remain global. */
       CREATE TABLE IF NOT EXISTS tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, goal TEXT NOT NULL, status TEXT NOT NULL, emphasis TEXT NOT NULL DEFAULT '[]', priorities TEXT NOT NULL DEFAULT '[]', investigating TEXT NOT NULL DEFAULT '[]', monitoring TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learner_ability_state (ability_id TEXT PRIMARY KEY REFERENCES ability_documents(id) ON DELETE CASCADE, proficiency REAL NOT NULL, confidence REAL NOT NULL, evidence_count INTEGER NOT NULL, last_evidence_at TEXT, training_status TEXT NOT NULL, trend TEXT NOT NULL, current_belief TEXT NOT NULL, next_verification TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS learner_evidence (id TEXT PRIMARY KEY, ability_id TEXT NOT NULL REFERENCES ability_documents(id) ON DELETE CASCADE, attempt_id TEXT, event_id TEXT, statement TEXT NOT NULL, polarity TEXT NOT NULL, independence TEXT NOT NULL, strength REAL NOT NULL, occurred_at TEXT NOT NULL, UNIQUE(ability_id,event_id));
@@ -108,6 +108,12 @@ export class LocalStore {
       CREATE TABLE IF NOT EXISTS learner_notices (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, dismissed_at TEXT);
       CREATE TABLE IF NOT EXISTS rating_points (id TEXT PRIMARY KEY, rating INTEGER NOT NULL, provisional INTEGER NOT NULL, reason TEXT NOT NULL, occurred_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS training_decisions (id TEXT PRIMARY KEY, track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, session_id TEXT, ability_id TEXT, intent TEXT NOT NULL, reason TEXT NOT NULL, mode TEXT NOT NULL, candidate_snapshot TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);
+      /* A picture the agent built into an explanation, kept because the
+         explanation outlives the turn. The transcript stores only this row's id,
+         so a message from three weeks ago still draws its own diagram instead of
+         degrading into a sentence about a picture that used to be there. The
+         payload is a slice of a trace, not the trace. */
+      CREATE TABLE IF NOT EXISTS agent_visualizations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, title TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
     `);
     this.ensureColumn("questions", "replaces_question_id", "TEXT");
     /* Where a challenge came from, as one JSON column rather than eight. Null for
@@ -121,6 +127,10 @@ export class LocalStore {
     this.ensureColumn("ability_documents", "summary", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("ability_documents", "practice", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn("ability_documents", "earned_at", "TEXT");
+    this.ensureColumn("ability_documents", "track_id", "TEXT");
+    this.ensureColumn("tracks", "language", "TEXT");
+    this.ensureColumn("learner_notices", "track_id", "TEXT");
+    this.ensureColumn("rating_points", "track_id", "TEXT");
     this.seedConcepts();
     // Filing, not activity: a timestamp rather than a flag so the sidebar can
     // order the shelf it produces without a second column to keep in step.
@@ -139,22 +149,26 @@ export class LocalStore {
     const legacyIntakes=this.db.prepare("SELECT session_id,question FROM session_intake WHERE status='pending'").all() as Array<{session_id:string;question:string}>;
     const updateIntake=this.db.prepare("UPDATE session_intake SET question=? WHERE session_id=?");
     this.db.transaction(()=>{for(const row of legacyIntakes){try{askUserQuestionRequestSchema.parse(JSON.parse(row.question));}catch{updateIntake.run(JSON.stringify(legacyQuestionRequest(row.question)),row.session_id);}}})();
+    this.normalizeLegacyBaseline();
     this.backfillTracks();
+    this.migrateLegacyTrackWorkspaces();
+    this.backfillLearningTracks();
     this.ensureRating();
   }
 
   /** Pinned first, then last touched. Archived rows stay in the list — they are
    *  filed away, not deleted, and their attempts still count toward progress. */
   listSessions(): SessionSummary[] { return (this.db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY (pinned_at IS NULL), updated_at DESC`).all() as SessionRow[]).map(row => this.toSession(row)); }
-  createSession(goal: string, trackId?: string): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;const resolvedTrack=trackId??this.createTrackRecord(goal,title).id;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id) VALUES (?,?,?,?,?,'[]','[]',0,?,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now,resolvedTrack);this.setActiveTrack(resolvedTrack);this.enqueue("session-create",{sessionId,goal,title,trackId:resolvedTrack,createdAt:now});this.queueLearningState();return{sessionId}; }
+  createSession(goal: string, trackId?: string): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;const resolvedTrack=trackId??this.activeTrack()?.id??this.createTrackRecord(goal,title).id;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id) VALUES (?,?,?,?,?,'[]','[]',0,?,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now,resolvedTrack);this.setActiveTrack(resolvedTrack);this.enqueue("session-create",{sessionId,goal,title,trackId:resolvedTrack,createdAt:now});this.queueLearningState();return{sessionId}; }
 
   createBaselineSession(){const baseline=this.getBaseline();if(baseline.sessionId&&this.readSession(baseline.sessionId))return{sessionId:baseline.sessionId};const sessionId=randomUUID();const now=new Date().toISOString();const goal="Establish a direct adaptive programming baseline.";this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,context) VALUES (?,?,?,?,?,'[]','[]',0,?,?,NULL,'baseline')").run(sessionId,"Baseline",goal,"Calibrate current problem-solving ability with the smallest useful sequence of direct coding probes.","planning",now,now);this.enqueue("session-create",{sessionId,goal,title:"Baseline",context:"baseline",createdAt:now});const importedEvidenceCount=Math.max(baseline.importedEvidenceCount,this.abilityStates().reduce((sum,item)=>sum+item.evidenceCount,0));this.setBaseline({status:"in-progress",sessionId,importedEvidenceCount});return{sessionId};}
 
-  createTrack(goal:string,title?:string){const track=this.createTrackRecord(goal,title);const session=this.createSession(goal,track.id);return{track,sessionId:session.sessionId};}
+  createTrack(goal:string,title?:string,language?:Language|null){const track=this.createTrackRecord(goal,title,language);const session=this.createSession(goal,track.id);return{track,sessionId:session.sessionId};}
   listTracks():Track[]{return (this.db.prepare("SELECT * FROM tracks ORDER BY status='active' DESC,updated_at DESC").all() as TrackRow[]).map((row)=>this.toTrack(row));}
   activeTrack():Track|null{const selected=this.getSetting<string>("active-track-id","");const row=(selected?this.db.prepare("SELECT * FROM tracks WHERE id=?").get(selected):undefined) as TrackRow|undefined;const fallback=row??this.db.prepare("SELECT * FROM tracks WHERE status='active' ORDER BY updated_at DESC LIMIT 1").get() as TrackRow|undefined;return fallback?this.toTrack(fallback):null;}
+  trackIdForSession(sessionId:string){const row=this.db.prepare("SELECT track_id FROM sessions WHERE id=?").get(sessionId) as {track_id:string|null}|undefined;return row?.track_id??null;}
   setActiveTrack(trackId:string){const row=this.db.prepare("SELECT id FROM tracks WHERE id=?").get(trackId);if(!row)throw new Error("Track not found");this.setSetting("active-track-id",trackId);this.queueLearningState();return this.activeTrack();}
-  updateTrack(trackId:string,input:Partial<Pick<Track,"title"|"goal"|"status"|"emphasis"|"priorities">>){const current=this.db.prepare("SELECT * FROM tracks WHERE id=?").get(trackId) as TrackRow|undefined;if(!current)throw new Error("Track not found");const now=new Date().toISOString();this.db.prepare("UPDATE tracks SET title=?,goal=?,status=?,emphasis=?,priorities=?,updated_at=? WHERE id=?").run(input.title?.trim()||current.title,input.goal?.trim()||current.goal,input.status??current.status,JSON.stringify(input.emphasis??JSON.parse(current.emphasis)),JSON.stringify(input.priorities??JSON.parse(current.priorities)),now,trackId);this.queueLearningState();return this.activeTrack()?.id===trackId?this.activeTrack():this.toTrack(this.db.prepare("SELECT * FROM tracks WHERE id=?").get(trackId) as TrackRow);}
+  updateTrack(trackId:string,input:Partial<Pick<Track,"title"|"goal"|"status"|"language"|"emphasis"|"priorities">>){const current=this.db.prepare("SELECT * FROM tracks WHERE id=?").get(trackId) as TrackRow|undefined;if(!current)throw new Error("Track not found");const now=new Date().toISOString();this.db.prepare("UPDATE tracks SET title=?,goal=?,status=?,language=?,emphasis=?,priorities=?,updated_at=? WHERE id=?").run(input.title?.trim()||current.title,input.goal?.trim()||current.goal,input.status??current.status,input.language===undefined?current.language:input.language,JSON.stringify(input.emphasis??JSON.parse(current.emphasis)),JSON.stringify(input.priorities??JSON.parse(current.priorities)),now,trackId);this.queueLearningState();return this.activeTrack()?.id===trackId?this.activeTrack():this.toTrack(this.db.prepare("SELECT * FROM tracks WHERE id=?").get(trackId) as TrackRow);}
 
   readSession(id: string): SessionDetail | null {
     const row=this.db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions WHERE id=?`).get(id) as SessionRow|undefined;if(!row)return null;
@@ -163,7 +177,28 @@ export class LocalStore {
     // An abandoned challenge stops being the session's live question, which is
     // what returns the app to general chat until the learner asks for another.
     if(question&&question.status!=="abandoned"){const target=this.db.prepare("SELECT * FROM training_targets WHERE id=?").get(question.training_target_id) as Record<string,unknown>;const attempt=this.db.prepare("SELECT * FROM attempts WHERE question_id=? ORDER BY started_at DESC LIMIT 1").get(question.id) as {id:string;latest_event_sequence:number;started_at:string;completed_at:string|null}|undefined;const design=JSON.parse(question.design) as QuestionDesign;if(attempt)events=this.readAttempt(attempt.id);if(attempt)active={id:question.id,sessionId:id,trainingTargetId:question.training_target_id,ordinal:question.ordinal,title:question.title,statement:question.statement,language:question.language,kind:question.kind,status:question.status,difficulty:question.difficulty,replacesQuestionId:question.replaces_question_id,createdAt:question.created_at,abilityId:String(target.ability_id),abilityTitle:String(target.ability_title),specificGap:String(target.specific_gap),desiredEvidence:String(target.desired_evidence),avoidTesting:JSON.parse(String(target.avoid_testing)) as string[],files:challengeFileEntries(design).map(({path,language,readOnly})=>({path,language,readOnly})),visibleTestFiles:Object.keys(design.visibleTests),concepts:this.questionConcepts(question.id),source:parseSourceRef(question.source_ref),attemptId:attempt.id,attemptStartedAt:events[0]?.occurredAt??attempt.started_at,attemptCompletedAt:attempt.completed_at,latestEventSequence:attempt.latest_event_sequence};}
-    const messages=(this.db.prepare("SELECT id,role,body,created_at,activity FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string;activity:string|null}>).map(m=>({id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity)}));
+    /**
+     * The transcript, with the expensive half of it windowed.
+     *
+     * A message's `activity` is the whole account of the turn behind it: up to
+     * eighty steps, each carrying reasoning text and the arguments and results
+     * of a tool call. It is a few hundred bytes of reply and tens of kilobytes
+     * of everything else. This is read again on every turn that finishes, and a
+     * session with a hundred messages in it was parsing and handing the renderer
+     * tens of megabytes of JSON each time, which it then held as React state and
+     * drew — the "long chat makes it slow and huge" complaint, exactly.
+     *
+     * Only the recent tail is loaded. Older turns keep their reply, which is
+     * what the transcript is actually made of, and report how many steps they
+     * have on disk so the row can offer to fetch them. Nothing is deleted; this
+     * is about what is resident, not what is kept.
+     */
+    const rows=this.db.prepare("SELECT id,role,body,created_at,activity FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string;activity:string|null}>;
+    const windowStart=Math.max(0,rows.length-TRANSCRIPT_ACTIVITY_WINDOW);
+    const messages=rows.map((m,index)=>{
+      if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0};
+      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:[],activityCount:countActivity(m.activity)};
+    });
     return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
 
@@ -179,7 +214,7 @@ export class LocalStore {
       ORDER BY t.created_at DESC LIMIT 1
     `).get(sessionId,input.ability,input.specificGap,input.desiredEvidence,avoidTesting,action) as Record<string,unknown>|undefined;
     if(duplicate)return normalizeTarget(duplicate);
-    const id=randomUUID();const existing=this.db.prepare("SELECT id FROM ability_documents WHERE lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(input.ability) as {id:string}|undefined;const abilityId=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO training_targets VALUES (?,?,?,?,?,?,?,?,?)").run(id,sessionId,abilityId,input.ability,input.specificGap,input.desiredEvidence,avoidTesting,action,now);this.db.prepare("UPDATE sessions SET current_focus=?,updated_at=? WHERE id=?").run(JSON.stringify([input.ability]),now,sessionId);return{id,sessionId,abilityId,abilityTitle:input.ability,specificGap:input.specificGap,desiredEvidence:input.desiredEvidence,avoidTesting:input.avoidTesting,action,createdAt:now};
+    const id=randomUUID();const trackId=this.trackIdForSession(sessionId);const existing=this.db.prepare("SELECT id FROM ability_documents WHERE track_id IS ? AND lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(trackId,input.ability) as {id:string}|undefined;const abilityId=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO training_targets VALUES (?,?,?,?,?,?,?,?,?)").run(id,sessionId,abilityId,input.ability,input.specificGap,input.desiredEvidence,avoidTesting,action,now);this.db.prepare("UPDATE sessions SET current_focus=?,updated_at=? WHERE id=?").run(JSON.stringify([input.ability]),now,sessionId);return{id,sessionId,abilityId,abilityTitle:input.ability,specificGap:input.specificGap,desiredEvidence:input.desiredEvidence,avoidTesting:input.avoidTesting,action,createdAt:now};
   }
   latestTarget(sessionId:string){return this.db.prepare("SELECT * FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string,unknown>|undefined;}
   createQuestion(sessionId:string,design:QuestionDesign,report:unknown,options:{replacesQuestionId?:string|null;concepts?:ConceptTagInput[];source?:ChallengeSource|null}={}){const target=this.latestTarget(sessionId);if(!target)throw new Error("A persisted training target is required before question creation");const id=randomUUID();const attemptId=randomUUID();const now=new Date().toISOString();const ordinal=(this.db.prepare("SELECT COALESCE(MAX(ordinal),0)+1 value FROM questions WHERE session_id=?").get(sessionId) as {value:number}).value;const tagged=this.db.transaction(()=>{this.db.prepare("INSERT INTO questions (id,session_id,training_target_id,ordinal,title,statement,language,kind,status,difficulty,design,validation_report,created_at,replaces_question_id,source_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id,sessionId,String(target.id),ordinal,design.title,design.statement,design.language,design.kind,"active",design.difficulty??"developing",JSON.stringify(design),JSON.stringify(report),now,options.replacesQuestionId??null,options.source?JSON.stringify(options.source):null);this.db.prepare("INSERT INTO attempts VALUES (?,?,?,?,?,?,NULL)").run(attemptId,id,sessionId,"active",0,now);const event={id:randomUUID(),attemptId,sequence:0,type:"attempt_started",occurredAt:now,payload:{questionId:id,...(options.replacesQuestionId?{replacesQuestionId:options.replacesQuestionId}:{})},source:"system",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);
@@ -194,8 +229,11 @@ export class LocalStore {
   /* The transcript syncs. Everything else the cloud holds is what Spar concluded;
      this is what was actually said, and a session restored without its thread
      reads as amnesia rather than as history. */
+  /** One older turn's steps, fetched when the learner opens it. The window keeps
+   *  them out of memory; this is how they come back. */
+  messageActivity(messageId:string):AgentActivityStep[]{const row=this.db.prepare("SELECT activity FROM agent_messages WHERE id=?").get(messageId) as {activity:string|null}|undefined;return parseActivity(row?.activity??null);}
   addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[]){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity));this.enqueue("agent-message",{sessionId,messages:[value]});return value;}
-  hasLearnerEvidence(){const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents").get() as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts WHERE status='completed'").get() as {count:number}).count;return abilities>0||completed>0;}
+  hasLearnerEvidence(trackId?:string|null){const scope=this.learningTrackId(trackId);if(!scope)return false;const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents WHERE track_id=?").get(scope) as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts a JOIN sessions s ON s.id=a.session_id WHERE a.status='completed' AND s.track_id=?").get(scope) as {count:number}).count;return abilities>0||completed>0;}
   /**
    * Evidence that can calibrate this goal, rather than any row sharing a generic
    * word with it.  Session routing used to reuse the fuzzy search helpers here.
@@ -213,15 +251,16 @@ export class LocalStore {
    * The agent still receives the broader fuzzy results after routing, where it
    * can use prerequisite history without mistaking it for topic mastery.
    */
-  hasRelevantLearnerEvidence(goal:string){
+  hasRelevantLearnerEvidence(goal:string,trackId?:string|null){
+    const scope=this.learningTrackId(trackId);if(!scope)return false;
     const terms=evidenceTerms(goal);
     if(!terms.length)return false;
     const threshold=Math.min(2,terms.length);
-    const abilities=this.db.prepare("SELECT title,markdown,status,evidence_ids FROM ability_documents ORDER BY updated_at DESC LIMIT 200").all() as Array<{title:string;markdown:string;status:string;evidence_ids:string}>;
+    const abilities=this.db.prepare("SELECT title,markdown,status,evidence_ids FROM ability_documents WHERE track_id=? ORDER BY updated_at DESC LIMIT 200").all(scope) as Array<{title:string;markdown:string;status:string;evidence_ids:string}>;
     if(abilities.some((row)=>(row.status!=="uncertain"||parseStringArray(row.evidence_ids).length>0)&&evidenceRelevance(`${row.title}\n${row.markdown}`,terms)>=threshold))return true;
-    const events=this.db.prepare(`SELECT q.title,e.type,e.payload FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id
+    const events=this.db.prepare(`SELECT q.title,e.type,e.payload FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id JOIN sessions s ON s.id=a.session_id
       WHERE e.type<>'attempt_started' AND e.sequence>=(SELECT MAX(start.sequence) FROM attempt_events start WHERE start.attempt_id=e.attempt_id AND start.type='attempt_started')
-      ORDER BY e.occurred_at DESC LIMIT 500`).all() as Array<{title:string;type:string;payload:string}>;
+        AND s.track_id=? ORDER BY e.occurred_at DESC LIMIT 500`).all(scope) as Array<{title:string;type:string;payload:string}>;
     return events.some((row)=>evidenceRelevance(`${row.title}\n${row.type}\n${row.payload}`,terms)>=threshold);
   }
   setPendingIntake(sessionId:string,input:AskUserQuestionInput){const existing=this.db.prepare("SELECT question,status,answer FROM session_intake WHERE session_id=?").get(sessionId) as {question:string;status:string;answer:string|null}|undefined;if(existing?.status==="answered"){let request:AskUserQuestionRequest;try{request=askUserQuestionRequestSchema.parse(JSON.parse(existing.question));}catch{request=legacyQuestionRequest(existing.question);}return{request,status:"answered" as const,answer:existing.answer};}const now=new Date().toISOString();const request=askUserQuestionRequestSchema.parse({id:randomUUID(),...input});this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,JSON.stringify(request),now);return{request,status:"pending" as const};}
@@ -243,11 +282,11 @@ export class LocalStore {
     })();
   }
   commitDecision(sessionId:string,input:{action:string;reason:string}){const value={id:randomUUID(),...input,createdAt:new Date().toISOString()};this.db.prepare("INSERT INTO session_decisions VALUES (?,?,?,?,?)").run(value.id,sessionId,value.action,value.reason,value.createdAt);return value;}
-  searchLearner(query:string,limit:number){const terms=searchTerms(query);if(!terms.length)return[];const rows=this.db.prepare("SELECT id,title,markdown,version,status,updated_at FROM ability_documents ORDER BY updated_at DESC LIMIT 200").all() as Array<{id:string;title:string;markdown:string;version:number;status:string;updated_at:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.markdown}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updated_at.localeCompare(a.row.updated_at)).slice(0,limit).map(item=>item.row);}
+  searchLearner(query:string,limit:number,trackId?:string|null){const terms=searchTerms(query);const scope=this.learningTrackId(trackId);if(!terms.length||!scope)return[];const rows=this.db.prepare("SELECT id,title,markdown,version,status,updated_at FROM ability_documents WHERE track_id=? ORDER BY updated_at DESC LIMIT 200").all(scope) as Array<{id:string;title:string;markdown:string;version:number;status:string;updated_at:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.markdown}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updated_at.localeCompare(a.row.updated_at)).slice(0,limit).map(item=>item.row);}
   readAbility(id:string){return this.db.prepare("SELECT * FROM ability_documents WHERE id=?").get(id)??null;}
-  searchAttempts(query:string,limit:number){const terms=searchTerms(query);if(!terms.length)return[];const rows=this.db.prepare(`SELECT e.attempt_id,e.type,e.occurred_at,e.payload,q.title FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id
+  searchAttempts(query:string,limit:number,trackId?:string|null){const terms=searchTerms(query);const scope=this.learningTrackId(trackId);if(!terms.length||!scope)return[];const rows=this.db.prepare(`SELECT e.attempt_id,e.type,e.occurred_at,e.payload,q.title FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id JOIN sessions s ON s.id=a.session_id
     WHERE e.sequence>=(SELECT MAX(start.sequence) FROM attempt_events start WHERE start.attempt_id=e.attempt_id AND start.type='attempt_started')
-    ORDER BY e.occurred_at DESC LIMIT 500`).all() as Array<{attempt_id:string;type:string;occurred_at:string;payload:string;title:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.type}\n${row.payload}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.occurred_at.localeCompare(a.row.occurred_at)).slice(0,limit).map(item=>item.row);}
+      AND s.track_id=? ORDER BY e.occurred_at DESC LIMIT 500`).all(scope) as Array<{attempt_id:string;type:string;occurred_at:string;payload:string;title:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.type}\n${row.payload}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.occurred_at.localeCompare(a.row.occurred_at)).slice(0,limit).map(item=>item.row);}
   /** Only the latest evidence segment is readable. A reset is another durable
    * `attempt_started` marker, so synced rows stay append-only while every agent
    * search and replay shares the same hard visibility boundary. */
@@ -259,6 +298,16 @@ export class LocalStore {
   attemptSubject(attemptId:string){const row=this.db.prepare("SELECT q.id question_id,q.title,q.language,q.statement,q.ordinal,a.status,a.started_at,a.completed_at,s.id session_id FROM attempts a JOIN questions q ON q.id=a.question_id JOIN sessions s ON s.id=a.session_id WHERE a.id=?").get(attemptId) as {question_id:string;title:string;language:string;statement:string;ordinal:number;status:string;started_at:string;completed_at:string|null;session_id:string}|undefined;return row??null;}
   submissionBundle(attemptId:string){const row=this.db.prepare("SELECT a.id attempt_id,a.session_id,a.latest_event_sequence,q.id question_id,q.language,q.design FROM attempts a JOIN questions q ON q.id=a.question_id WHERE a.id=? AND a.status='active'").get(attemptId) as {attempt_id:string;session_id:string;latest_event_sequence:number;question_id:string;language:Language;design:string}|undefined;return row?{...row,design:JSON.parse(row.design) as QuestionDesign}:null;}
   completeAttempt(attemptId:string,_outcome:"passed"|"failed"){const now=new Date().toISOString();this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id FROM attempts WHERE id=?").get(attemptId) as {question_id:string;session_id:string}|undefined;if(!attempt)throw new Error("Attempt not found");this.db.prepare("UPDATE attempts SET status='completed',completed_at=? WHERE id=?").run(now,attemptId);this.db.prepare("UPDATE questions SET status='completed' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(now,attempt.session_id);})();}
+  /**
+   * A completed attempt, put back.
+   *
+   * The submission passed every case, so the attempt closed — and then the
+   * review found it was not solved the way the challenge required. Reopening is
+   * the honest record of that: the run that passed stays in the log, the review
+   * that rejected it is appended after, and the learner gets their challenge
+   * back rather than a new one that quietly asks the same thing again.
+   */
+  reopenAttempt(attemptId:string,reason:string){const now=new Date().toISOString();return this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id,latest_event_sequence FROM attempts WHERE id=?").get(attemptId) as {question_id:string;session_id:string;latest_event_sequence:number}|undefined;if(!attempt)throw new Error("Attempt not found");const event={id:randomUUID(),attemptId,sequence:attempt.latest_event_sequence+1,type:"attempt_started",occurredAt:now,payload:{questionId:attempt.question_id,reopened:true,reason},source:"agent",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);this.db.prepare("UPDATE attempts SET status='active',completed_at=NULL,latest_event_sequence=? WHERE id=?").run(event.sequence,attemptId);this.db.prepare("UPDATE questions SET status='active' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET status='active',updated_at=? WHERE id=?").run(now,attempt.session_id);this.enqueue("attempt-event",event);return{sessionId:attempt.session_id,questionId:attempt.question_id};})();}
   resetAttempt(sessionId:string,attemptId:string){const attempt=this.db.prepare("SELECT question_id FROM attempts WHERE id=? AND session_id=? AND status='active'").get(attemptId,sessionId) as {question_id:string}|undefined;if(!attempt)throw new Error("No active attempt to reset in this session");return this.appendNextEvent({id:randomUUID(),attemptId,type:"attempt_started",occurredAt:new Date().toISOString(),payload:{questionId:attempt.question_id,reset:true},source:"learner",schemaVersion:1});}
   /** The learner gave up. Records why, then leaves the session in chat mode. */
   abandonAttempt(attemptId:string,reason:string,source:"learner"|"agent"="learner",outcome:"abandoned"|"replaced"="abandoned"){const now=new Date().toISOString();return this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id,latest_event_sequence FROM attempts WHERE id=? AND status='active'").get(attemptId) as {question_id:string;session_id:string;latest_event_sequence:number}|undefined;if(!attempt)throw new Error("No active attempt to abandon");const event={id:randomUUID(),attemptId,sequence:attempt.latest_event_sequence+1,type:"attempt_completed",occurredAt:now,payload:{outcome,reason},source,schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);this.db.prepare("UPDATE attempts SET status='completed',completed_at=?,latest_event_sequence=? WHERE id=?").run(now,event.sequence,attemptId);this.db.prepare("UPDATE questions SET status='abandoned' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET status='paused',updated_at=? WHERE id=?").run(now,attempt.session_id);this.enqueue("attempt-event",event);return{sessionId:attempt.session_id,questionId:attempt.question_id};})();}
@@ -278,8 +327,8 @@ export class LocalStore {
      rather than declared as foreign keys, so they are removed by hand. */
   deleteSession(sessionId:string){return this.db.transaction(()=>{const row=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!row)return false;this.db.prepare("DELETE FROM attempt_events WHERE attempt_id IN (SELECT id FROM attempts WHERE session_id=?)").run(sessionId);this.db.prepare("DELETE FROM checkpoints WHERE session_id=?").run(sessionId);this.db.prepare("DELETE FROM sessions WHERE id=?").run(sessionId);this.enqueue("session-delete",{sessionId});return true;})();}
   updateAbility(input:{abilityId:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation}){const target=this.db.prepare("SELECT ability_title FROM training_targets WHERE ability_id=? ORDER BY created_at DESC LIMIT 1").get(input.abilityId) as {ability_title:string}|undefined;const existing=this.abilityRow(input.abilityId);return this.writeAbility({id:input.abilityId,title:existing?.title??target?.ability_title??"Observed ability",...input},existing);}
-  upsertAbility(input:{title:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation}){const found=this.db.prepare("SELECT id FROM ability_documents WHERE lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(input.title) as {id:string}|undefined;const existing=found?this.abilityRow(found.id):undefined;return this.writeAbility({id:existing?.id??randomUUID(),...input},existing);}
-  ensureAbility(id:string,title:string){const now=new Date().toISOString();this.db.prepare("INSERT OR IGNORE INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at) VALUES (?,?,?,?,?,?,?,?,?,NULL)").run(id,title,`# ${title}\n\nIntroduced as an active learning target. Evidence is still uncertain.`,1,"uncertain",now,"[]","",'[]');this.reconcileAbilityState(id);return this.readAbility(id);}
+  upsertAbility(input:{title:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation},trackId?:string|null){const scope=this.learningTrackId(trackId);if(scope===null&&trackId===undefined)throw new Error("A Track is required before writing learner memory");const found=this.db.prepare("SELECT id FROM ability_documents WHERE track_id IS ? AND lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(scope,input.title) as {id:string}|undefined;const existing=found?this.abilityRow(found.id):undefined;return this.writeAbility({id:existing?.id??randomUUID(),trackId:scope,...input},existing);}
+  ensureAbility(id:string,title:string,trackId?:string|null){const scope=trackId===undefined?(this.trackIdForAbilityTarget(id)??this.learningTrackId()):this.learningTrackId(trackId);if(scope===null&&trackId===undefined)throw new Error("A Track is required before writing learner memory");const now=new Date().toISOString();this.db.prepare("INSERT OR IGNORE INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at,track_id) VALUES (?,?,?,?,?,?,?,?,?,NULL,?)").run(id,title,`# ${title}\n\nIntroduced as an active learning target. Evidence is still uncertain.`,1,"uncertain",now,"[]","",'[]',scope);this.reconcileAbilityState(id);return this.readAbility(id);}
   /**
    * One ability version. An ability is the thing the learner is told they have,
    * so this owns the two facts the UI is not allowed to guess: the status, which
@@ -287,7 +336,7 @@ export class LocalStore {
    * stamped once when evidence first supported it and never moved afterwards —
    * the date it was earned, not the date the document was last edited.
    */
-  private writeAbility(input:{id:string;title:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation},existing?:AbilityRow){
+  private writeAbility(input:{id:string;trackId?:string|null;title:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation},existing?:AbilityRow){
     const now=new Date().toISOString();
     const evidenceIds=[...new Set([...(existing?JSON.parse(existing.evidence_ids) as string[]:[]),...input.evidenceEventIds])];
     const version=(existing?.version??0)+1;
@@ -301,7 +350,8 @@ export class LocalStore {
     const summary=input.summary?.trim()||existing?.summary||"";
     const practice=input.practice?.length?input.practice.map((item)=>item.trim()).filter(Boolean).slice(0,4):(existing?JSON.parse(existing.practice) as string[]:[]);
     this.db.transaction(()=>{
-      this.db.prepare("INSERT INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,markdown=excluded.markdown,version=excluded.version,status=excluded.status,updated_at=excluded.updated_at,evidence_ids=excluded.evidence_ids,summary=excluded.summary,practice=excluded.practice,earned_at=excluded.earned_at").run(input.id,input.title,input.markdown,version,status,now,JSON.stringify(evidenceIds),summary,JSON.stringify(practice),earnedAt);
+      const owner=input.trackId!==undefined?input.trackId:(existing?.track_id??this.learningTrackId());
+      this.db.prepare("INSERT INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at,track_id) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,markdown=excluded.markdown,version=excluded.version,status=excluded.status,updated_at=excluded.updated_at,evidence_ids=excluded.evidence_ids,summary=excluded.summary,practice=excluded.practice,earned_at=excluded.earned_at,track_id=excluded.track_id").run(input.id,input.title,input.markdown,version,status,now,JSON.stringify(evidenceIds),summary,JSON.stringify(practice),earnedAt,owner);
       // Concepts are replaced rather than merged: the set is the agent's current
       // claim about what this ability covers, and a stale concept left attached
       // would keep pulling unrelated challenges into its evidence.
@@ -318,14 +368,60 @@ export class LocalStore {
     this.queueLearningState();
     return {id:input.id,title:input.title,version,status,summary,practice,earnedAt,evidenceEventIds:evidenceIds,concepts:this.abilityConcepts(input.id),updatedAt:now};
   }
-  listAbilities():AbilityHistorySummary[]{const concepts=this.abilityConceptRows();return (this.db.prepare("SELECT id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at FROM ability_documents ORDER BY (earned_at IS NULL), updated_at DESC").all() as AbilityRow[]).map((row)=>this.toAbility(row,concepts.get(row.id)??[]));}
+  listAbilities(trackId?:string|null):AbilityHistorySummary[]{const scope=this.learningTrackId(trackId);if(!scope)return[];const concepts=this.abilityConceptRows();return (this.db.prepare("SELECT id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at,track_id FROM ability_documents WHERE track_id=? ORDER BY (earned_at IS NULL), updated_at DESC").all(scope) as AbilityRow[]).map((row)=>this.toAbility(row,concepts.get(row.id)??[]));}
 
-  abilityStates():LearnerAbilityState[]{const rows=this.db.prepare("SELECT s.*,a.title FROM learner_ability_state s JOIN ability_documents a ON a.id=s.ability_id ORDER BY CASE s.training_status WHEN 'training' THEN 0 WHEN 'diagnosing' THEN 1 WHEN 'monitoring' THEN 2 ELSE 3 END,s.updated_at DESC").all() as Array<Record<string,unknown>>;return rows.map((row)=>({abilityId:String(row.ability_id),title:String(row.title),proficiency:Number(row.proficiency),confidence:Number(row.confidence),evidenceCount:Number(row.evidence_count),lastEvidenceAt:row.last_evidence_at?String(row.last_evidence_at):null,trainingStatus:String(row.training_status) as LearnerAbilityState["trainingStatus"],trend:String(row.trend) as LearnerAbilityState["trend"],currentBelief:String(row.current_belief),nextVerification:String(row.next_verification),updatedAt:String(row.updated_at)}));}
+  /** Every ability state the learner has, in every Track. Only the rating reads
+   *  this — everything else in the app is about one line of practice at a time. */
+  allAbilityStates():LearnerAbilityState[]{const rows=this.db.prepare("SELECT s.*,a.title FROM learner_ability_state s JOIN ability_documents a ON a.id=s.ability_id ORDER BY s.updated_at DESC").all() as Array<Record<string,unknown>>;return rows.map((row)=>this.toAbilityState(row));}
+  abilityStates(trackId?:string|null):LearnerAbilityState[]{const scope=this.learningTrackId(trackId);if(!scope)return[];const rows=this.db.prepare("SELECT s.*,a.title FROM learner_ability_state s JOIN ability_documents a ON a.id=s.ability_id WHERE a.track_id=? ORDER BY CASE s.training_status WHEN 'training' THEN 0 WHEN 'diagnosing' THEN 1 WHEN 'monitoring' THEN 2 ELSE 3 END,s.updated_at DESC").all(scope) as Array<Record<string,unknown>>;return rows.map((row)=>this.toAbilityState(row));}
+  private toAbilityState(row:Record<string,unknown>):LearnerAbilityState{return{abilityId:String(row.ability_id),title:String(row.title),proficiency:Number(row.proficiency),confidence:Number(row.confidence),evidenceCount:Number(row.evidence_count),lastEvidenceAt:row.last_evidence_at?String(row.last_evidence_at):null,trainingStatus:String(row.training_status) as LearnerAbilityState["trainingStatus"],trend:String(row.trend) as LearnerAbilityState["trend"],currentBelief:String(row.current_belief),nextVerification:String(row.next_verification),updatedAt:String(row.updated_at)};}
   evidenceForAbility(abilityId:string):LearnerEvidence[]{return (this.db.prepare("SELECT * FROM learner_evidence WHERE ability_id=? ORDER BY occurred_at DESC").all(abilityId) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),abilityId:String(row.ability_id),attemptId:row.attempt_id?String(row.attempt_id):null,eventId:row.event_id?String(row.event_id):null,statement:String(row.statement),polarity:String(row.polarity) as LearnerEvidence["polarity"],independence:String(row.independence) as LearnerEvidence["independence"],strength:Number(row.strength),occurredAt:String(row.occurred_at)}));}
-  listPatterns():LearnerPattern[]{return (this.db.prepare("SELECT p.*,COUNT(pe.evidence_id) evidence_count FROM learner_patterns p LEFT JOIN pattern_evidence pe ON pe.pattern_id=p.id GROUP BY p.id ORDER BY CASE p.status WHEN 'pattern' THEN 0 WHEN 'hypothesis' THEN 1 WHEN 'monitoring' THEN 2 WHEN 'observation' THEN 3 ELSE 4 END,p.updated_at DESC").all() as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),title:String(row.title),description:String(row.description),abilityId:row.ability_id?String(row.ability_id):null,status:String(row.status) as LearnerPattern["status"],evidenceCount:Number(row.evidence_count),lastObservedAt:row.last_observed_at?String(row.last_observed_at):null,updatedAt:String(row.updated_at)}));}
-  listNotices(limit=6):SparNotice[]{return (this.db.prepare("SELECT id,title,body,created_at FROM learner_notices WHERE dismissed_at IS NULL ORDER BY created_at DESC LIMIT ?").all(limit) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),title:String(row.title),body:String(row.body),createdAt:String(row.created_at)}));}
+  listPatterns(trackId?:string|null):LearnerPattern[]{const scope=this.learningTrackId(trackId);if(!scope)return[];return (this.db.prepare("SELECT p.*,COUNT(pe.evidence_id) evidence_count FROM learner_patterns p JOIN ability_documents a ON a.id=p.ability_id LEFT JOIN pattern_evidence pe ON pe.pattern_id=p.id WHERE a.track_id=? GROUP BY p.id ORDER BY CASE p.status WHEN 'pattern' THEN 0 WHEN 'hypothesis' THEN 1 WHEN 'monitoring' THEN 2 WHEN 'observation' THEN 3 ELSE 4 END,p.updated_at DESC").all(scope) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),title:String(row.title),description:String(row.description),abilityId:row.ability_id?String(row.ability_id):null,status:String(row.status) as LearnerPattern["status"],evidenceCount:Number(row.evidence_count),lastObservedAt:row.last_observed_at?String(row.last_observed_at):null,updatedAt:String(row.updated_at)}));}
+  listNotices(limit=6,trackId?:string|null):SparNotice[]{const scope=this.learningTrackId(trackId);if(!scope)return[];return (this.db.prepare("SELECT id,title,body,created_at FROM learner_notices WHERE dismissed_at IS NULL AND track_id=? ORDER BY created_at DESC LIMIT ?").all(scope,limit) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),title:String(row.title),body:String(row.body),createdAt:String(row.created_at)}));}
+  /**
+   * The learner's rating, across everything they have done.
+   *
+   * Not scoped to a Track, unlike the abilities and patterns beside it. Those
+   * are statements about one line of practice and only mean anything inside it;
+   * a rating is a statement about the person. Per Track it read as a different
+   * number for the same learner depending on which Track was open, and starting
+   * a new Track reset them to 1200 — so the one figure in the app that is
+   * supposed to accumulate was the one that kept starting over.
+   *
+   * `track_id` is still written on the rows and still carried by sync, because
+   * it says which line of practice produced the point; it just no longer divides
+   * the series.
+   */
   ratingHistory():RatingPoint[]{return (this.db.prepare("SELECT * FROM rating_points ORDER BY occurred_at").all() as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),rating:Number(row.rating),provisional:Boolean(row.provisional),reason:String(row.reason),occurredAt:String(row.occurred_at)}));}
-  learnerProgress():LearnerProgress{const history=this.ratingHistory();return{rating:history.at(-1)??this.ensureRating(),ratingHistory:history.length?history:[this.ensureRating()],abilities:this.abilityStates(),patterns:this.listPatterns(),notices:this.listNotices()};}
+  /**
+   * A picture the agent made, kept for as long as the message that shows it.
+   *
+   * Stored as opaque JSON. The store has no opinion about what a visualisation
+   * is — the shape belongs to `@spar/visualizer`, and putting a second copy of
+   * it in the schema would mean a migration every time the canvas learns to draw
+   * something new. What the store owns is that the row is scoped to a session
+   * and outlives the turn that wrote it.
+   */
+  saveVisualization(input: { id: string; sessionId: string; title: string; payload: unknown }): void {
+    this.db.prepare("INSERT OR REPLACE INTO agent_visualizations (id, session_id, title, payload, created_at) VALUES (?,?,?,?,?)")
+      .run(input.id, input.sessionId, input.title, JSON.stringify(input.payload), new Date().toISOString());
+  }
+
+  readVisualization(id: string): { id: string; sessionId: string; title: string; payload: unknown } | null {
+    const row = this.db.prepare("SELECT * FROM agent_visualizations WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    try {
+      return { id: String(row.id), sessionId: String(row.session_id), title: String(row.title), payload: JSON.parse(String(row.payload)) };
+    } catch {
+      // A row that will not parse is a row written by a version that is gone.
+      // The card renders its own "this picture could not be read" rather than
+      // the whole transcript failing to draw.
+      return null;
+    }
+  }
+
+  learnerProgress(trackId?:string|null):LearnerProgress{const scope=this.learningTrackId(trackId);const history=this.ratingHistory();const rating=history.at(-1)??this.ensureRating();return{rating,ratingHistory:history.length?history:[rating],abilities:this.abilityStates(scope),patterns:this.listPatterns(scope),notices:this.listNotices(6,scope)};}
+  progressByTrack(){return Object.fromEntries(this.listTracks().map((track)=>[track.id,this.learnerProgress(track.id)]));}
 
   getBaseline():BaselineState{return baselineStateSchema.catch({status:"not-started",confidence:0,directEvidenceCount:0,importedEvidenceCount:0,completedAt:null,sessionId:null}).parse(this.getSetting("baseline-state",{status:"not-started",confidence:0,directEvidenceCount:0,importedEvidenceCount:0,completedAt:null,sessionId:null}));}
   setBaseline(input:Partial<BaselineState>){const previous=this.getBaseline();const next=baselineStateSchema.parse({...previous,...input});this.setSetting("baseline-state",next);this.queueLearningState();return next;}
@@ -346,7 +442,7 @@ export class LocalStore {
     const challengeTitle=question?.title??`Continue ${track.title}`;
     const reason=question
       ? `${intentCopy(intent)} ${target?.specificGap??question.specificGap}`
-      : "Spar is reviewing your global evidence before it chooses a narrowly matched challenge.";
+      : "Spar is reviewing this Track's evidence before it chooses a narrowly matched challenge.";
     const recommendation={id:question?.id??track.id,trackId:track.id,trackTitle:track.title,sessionId:session?.id??null,questionId:question?.id??null,challengeTitle,abilityId:target?.abilityId??null,abilityTitle:target?.abilityTitle??track.priorities[0]??"Initial direction",intent,source,reason,reasoning:[`Training intent: ${intentCopy(intent)}`,ability?`Confidence is ${Math.round(ability.confidence*100)}% from ${ability.evidenceCount} linked evidence item${ability.evidenceCount===1?"":"s"}.`:"This ability is still unknown, so Spar is seeking clean diagnostic evidence.",question?.source?`${question.source.source==="leetcode"?"LeetCode":"Codeforces"} provides the best current fit and its own judge.`:"A Spar challenge keeps unrelated difficulty from obscuring the target."],mode,createdAt:new Date().toISOString()} satisfies TodayRecommendation;
     const existing=this.db.prepare("SELECT id FROM training_decisions WHERE id=?").get(recommendation.id);
     if(!existing){this.db.prepare("INSERT INTO training_decisions (id,track_id,session_id,ability_id,intent,reason,mode,candidate_snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?)").run(recommendation.id,track.id,session?.id??null,target?.abilityId??null,intent,reason,JSON.stringify(mode),JSON.stringify([{title:challengeTitle,source,selected:true}]),recommendation.createdAt);this.queueLearningState();}
@@ -364,11 +460,11 @@ export class LocalStore {
       evidence:evidence.map((item)=>({challengeId:item.challenge_id,sessionId:item.session_id,sessionTitle:item.session_title,title:item.title,language:item.language as Language,difficulty:item.difficulty as AbilityDetail["evidence"][number]["difficulty"],outcome:item.outcome as AbilityDetail["evidence"][number]["outcome"],occurredAt:item.occurred_at})),
       machine:this.abilityStates().find((item)=>item.abilityId===id),
       learnerEvidence:this.evidenceForAbility(id),
-      patterns:this.listPatterns().filter((item)=>item.abilityId===id),
+      patterns:this.listPatterns(row.track_id).filter((item)=>item.abilityId===id),
     };
   }
-  queueAbilitySync(id:string){const row=this.abilityRow(id);if(row)this.enqueue("ability-upsert",{id:row.id,title:row.title,markdown:row.markdown,version:row.version,status:row.status,summary:row.summary,earnedAt:row.earned_at,updatedAt:row.updated_at,concepts:this.abilityConcepts(id).map((tag)=>tag.slug),evidenceEventIds:JSON.parse(row.evidence_ids)});}
-  private abilityRow(id:string){return this.db.prepare("SELECT id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at FROM ability_documents WHERE id=?").get(id) as AbilityRow|undefined;}
+  queueAbilitySync(id:string){const row=this.abilityRow(id);if(row)this.enqueue("ability-upsert",{id:row.id,trackId:row.track_id,title:row.title,markdown:row.markdown,version:row.version,status:row.status,summary:row.summary,earnedAt:row.earned_at,updatedAt:row.updated_at,concepts:this.abilityConcepts(id).map((tag)=>tag.slug),evidenceEventIds:JSON.parse(row.evidence_ids)});}
+  private abilityRow(id:string){return this.db.prepare("SELECT id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at,track_id FROM ability_documents WHERE id=?").get(id) as AbilityRow|undefined;}
   private abilityConcepts(id:string):ConceptTag[]{return this.abilityConceptRows(id).get(id)??[];}
   private abilityConceptRows(id?:string){
     const rows=this.db.prepare(`SELECT ac.ability_id key,c.slug,c.title,c.kind,c.parent_slug,p.title parent_title FROM ability_concepts ac JOIN concepts c ON c.id=ac.concept_id LEFT JOIN concepts p ON p.slug=c.parent_slug${id?" WHERE ac.ability_id=?":""} ORDER BY c.title`).all(...(id?[id]:[]) as []) as Array<{key:string;slug:string;title:string;kind:string;parent_slug:string|null;parent_title:string|null}>;
@@ -381,7 +477,7 @@ export class LocalStore {
   /** Concepts are part of what a challenge *is*, so they are searchable text: the
    *  agent looking for "sliding window" evidence has to find the challenges that
    *  were tagged with it even when the title never says the words. */
-  searchChallenges(query:string,limit:number){const terms=searchTerms(query);const rows=this.listChallenges();if(!terms.length)return rows.slice(0,limit);return rows.map((row)=>({row,score:relevance(`${row.title}\n${row.sessionTitle}\n${row.difficulty}\n${row.lastOutcome??""}\n${row.concepts.map((tag)=>`${tag.slug.replace(/-/g," ")} ${tag.title} ${tag.parentTitle??""}`).join("\n")}`,terms)})).filter((item)=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updatedAt.localeCompare(a.row.updatedAt)).slice(0,limit).map((item)=>item.row);}
+  searchChallenges(query:string,limit:number,trackId?:string|null){const terms=searchTerms(query);const scope=this.learningTrackId(trackId);const sessionIds=new Set(this.listSessions().filter((session)=>session.trackId===scope).map((session)=>session.id));const rows=this.listChallenges().filter((row)=>sessionIds.has(row.sessionId));if(!terms.length)return rows.slice(0,limit);return rows.map((row)=>({row,score:relevance(`${row.title}\n${row.sessionTitle}\n${row.difficulty}\n${row.lastOutcome??""}\n${row.concepts.map((tag)=>`${tag.slug.replace(/-/g," ")} ${tag.title} ${tag.parentTitle??""}`).join("\n")}`,terms)})).filter((item)=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updatedAt.localeCompare(a.row.updatedAt)).slice(0,limit).map((item)=>item.row);}
   /** What the learner has actually been asked lately, across every session,
    *  flattened to the fields a targeting decision needs.
    *
@@ -390,11 +486,11 @@ export class LocalStore {
    *  never thinks to ask. Carried on every planning turn's context so the same
    *  primary concept coming back for the thirteenth time is visible before the
    *  target is set rather than after the challenge is published. */
-  recentChallengeCoverage(limit=12){return this.listChallenges().slice(0,limit).map((row)=>({title:row.title,goal:row.sessionTitle,primaryConcept:row.concepts[0]?.slug??null,difficulty:row.difficulty,outcome:row.lastOutcome,askedAt:row.createdAt}));}
+  recentChallengeCoverage(limit=12,trackId?:string|null){return this.searchChallenges("",limit,trackId).map((row)=>({title:row.title,goal:row.sessionTitle,primaryConcept:row.concepts[0]?.slug??null,difficulty:row.difficulty,outcome:row.lastOutcome,askedAt:row.createdAt}));}
   /** Whether this exact title has been asked before anywhere. The session-scoped
    *  check let the same challenge come back under a new session, which is what
    *  the learner sees as repetition — the library is one library to them. */
-  challengeTitleUsed(title:string){const normalized=title.trim().toLocaleLowerCase();if(!normalized)return false;const rows=this.db.prepare("SELECT title FROM questions").all() as Array<{title:string}>;return rows.some((row)=>row.title.trim().toLocaleLowerCase()===normalized);}
+  challengeTitleUsed(title:string,trackId?:string|null){const normalized=title.trim().toLocaleLowerCase();const scope=this.learningTrackId(trackId);if(!normalized||!scope)return false;const rows=this.db.prepare("SELECT q.title FROM questions q JOIN sessions s ON s.id=q.session_id WHERE s.track_id=?").all(scope) as Array<{title:string}>;return rows.some((row)=>row.title.trim().toLocaleLowerCase()===normalized);}
   readChallenge(id:string){const row=this.db.prepare("SELECT q.*,s.title session_title FROM questions q JOIN sessions s ON s.id=q.session_id WHERE q.id=?").get(id) as (QuestionRow&{session_title:string;validation_report:string})|undefined;if(!row)return null;const attempts=this.db.prepare("SELECT id,status,started_at,completed_at FROM attempts WHERE question_id=? ORDER BY started_at").all(id) as Array<Record<string,unknown>>;return{...row,sessionTitle:row.session_title,concepts:this.questionConcepts(id),design:JSON.parse(row.design),validationReport:JSON.parse(row.validation_report),attempts:attempts.map((attempt)=>({...attempt,events:this.readAttempt(String(attempt.id))}))};}
   /** One challenge with everything it needs to stand on its own away from its
    *  session: the design it was compiled from, the goal and target it answers,
@@ -464,8 +560,9 @@ export class LocalStore {
   /** Every sourced challenge the learner has been set, newest first. Read before
    *  assigning one so the same problem is not set twice — and so a problem they
    *  gave up on can be recognised when it comes round again. */
-  assignedPracticeProblems(limit=40){
-    return (this.db.prepare(`SELECT q.source_ref,q.title,q.status,ch.outcome,ch.updated_at FROM questions q JOIN (${CHALLENGE_OUTCOME_SQL}) ch ON ch.id=q.id WHERE q.source_ref IS NOT NULL ORDER BY ch.updated_at DESC LIMIT ?`).all(limit) as Array<{source_ref:string;title:string;status:string;outcome:string;updated_at:string}>)
+  assignedPracticeProblems(limit=40,trackId?:string|null){
+    const scope=this.learningTrackId(trackId);if(!scope)return[];
+    return (this.db.prepare(`SELECT q.source_ref,q.title,q.status,ch.outcome,ch.updated_at FROM questions q JOIN (${CHALLENGE_OUTCOME_SQL}) ch ON ch.id=q.id JOIN sessions s ON s.id=q.session_id WHERE q.source_ref IS NOT NULL AND s.track_id=? ORDER BY ch.updated_at DESC LIMIT ?`).all(scope,limit) as Array<{source_ref:string;title:string;status:string;outcome:string;updated_at:string}>)
       .flatMap((row)=>{const source=parseSourceRef(row.source_ref);return source?[{slug:source.slug,source:source.source,region:source.region,title:row.title,outcome:row.outcome,assignedAt:row.updated_at}]:[];});
   }
 
@@ -530,16 +627,16 @@ export class LocalStore {
   /** Every concept the learner has actually met, richest first. Counts roll a
    *  sub-concept's evidence up into its area, so "Sliding window" reads as the
    *  whole shelf while "Restoring the invariant" stays the finding. */
-  listConcepts():ConceptSummary[]{
-    const index=this.conceptIndex();
+  listConcepts(trackId?:string|null):ConceptSummary[]{
+    const index=this.conceptIndex(trackId);
     return index.rows
       .map((row)=>index.summarize(row))
       .filter((summary)=>summary.challengeCount>0||summary.abilityCount>0)
       .sort((left,right)=>right.challengeCount-left.challengeCount||(right.lastSeenAt??"").localeCompare(left.lastSeenAt??"")||left.title.localeCompare(right.title));
   }
 
-  conceptDetail(slug:string):ConceptDetail|null{
-    const index=this.conceptIndex();
+  conceptDetail(slug:string,trackId?:string|null):ConceptDetail|null{
+    const index=this.conceptIndex(trackId);
     const row=index.bySlug.get(conceptSlug(slug));
     if(!row)return null;
     const parent=row.parent_slug?index.bySlug.get(row.parent_slug):undefined;
@@ -561,8 +658,8 @@ export class LocalStore {
    * empty graph, which read as "this learner has no concepts" and left the tool
    * useless.
    */
-  conceptGraph(query:string,limit=14):Array<ConceptSummary&{standing:string}>{
-    const index=this.conceptIndex();
+  conceptGraph(query:string,limit=14,trackId?:string|null):Array<ConceptSummary&{standing:string}>{
+    const index=this.conceptIndex(trackId);
     const terms=searchTerms(query);
     const scored=index.rows.map((row)=>{
       const summary=index.summarize(row);
@@ -582,11 +679,11 @@ export class LocalStore {
    * is what lets the agent say "arrays are fine, the in-place pass is not"
    * instead of averaging the two into a number that hides both.
    */
-  conceptEvidenceReport(query:string,limit=4){
-    const index=this.conceptIndex();
+  conceptEvidenceReport(query:string,limit=4,trackId?:string|null){
+    const index=this.conceptIndex(trackId);
     const slug=conceptSlug(query);
     const direct=index.bySlug.get(slug);
-    const targets=direct?[direct]:this.conceptGraph(query,limit).flatMap((summary)=>{const row=index.bySlug.get(summary.slug);return row?[row]:[];});
+    const targets=direct?[direct]:this.conceptGraph(query,limit,trackId).flatMap((summary)=>{const row=index.bySlug.get(summary.slug);return row?[row]:[];});
     return targets.slice(0,limit).map((row)=>{
       const summary=index.summarize(row);
       return {
@@ -603,8 +700,8 @@ export class LocalStore {
   }
 
   /** Every challenge tagged with a concept or one of its sub-concepts. */
-  conceptChallenges(slug:string,limit=40):ConceptEvidence[]{
-    const index=this.conceptIndex();
+  conceptChallenges(slug:string,limit=40,trackId?:string|null):ConceptEvidence[]{
+    const index=this.conceptIndex(trackId);
     const row=index.bySlug.get(conceptSlug(slug));
     return row?index.evidence(row).slice(0,limit):[];
   }
@@ -615,15 +712,16 @@ export class LocalStore {
    * for its area *without* being double-counted when a challenge is tagged with
    * both — which is a de-duplication, not an aggregate.
    */
-  private conceptIndex(){
+  private conceptIndex(trackId?:string|null){
+    const scope=this.learningTrackId(trackId);
     const rows=this.db.prepare("SELECT id,slug,title,kind,parent_slug,description FROM concepts ORDER BY title").all() as ConceptRow[];
     const bySlug=new Map(rows.map((row)=>[row.slug,row]));
     const children=new Map<string,ConceptRow[]>();
     for(const row of rows)if(row.parent_slug)children.set(row.parent_slug,[...(children.get(row.parent_slug)??[]),row]);
-    const tagged=this.db.prepare(`SELECT qc.concept_id,qc.role,ch.id question_id,ch.session_id,s.title session_title,ch.title,ch.language,ch.difficulty,ch.outcome,ch.attempt_count,ch.test_run_count,ch.created_at,ch.updated_at occurred_at,(SELECT COUNT(*) FROM questions child WHERE child.replaces_question_id=ch.id) replaced FROM question_concepts qc JOIN (${CHALLENGE_OUTCOME_SQL}) ch ON ch.id=qc.question_id JOIN sessions s ON s.id=ch.session_id`).all() as TaggedChallengeRow[];
+    const tagged=this.db.prepare(`SELECT qc.concept_id,qc.role,ch.id question_id,ch.session_id,s.title session_title,ch.title,ch.language,ch.difficulty,ch.outcome,ch.attempt_count,ch.test_run_count,ch.created_at,ch.updated_at occurred_at,(SELECT COUNT(*) FROM questions child WHERE child.replaces_question_id=ch.id) replaced FROM question_concepts qc JOIN (${CHALLENGE_OUTCOME_SQL}) ch ON ch.id=qc.question_id JOIN sessions s ON s.id=ch.session_id WHERE s.track_id IS ?`).all(scope) as TaggedChallengeRow[];
     const byConcept=new Map<string,TaggedChallengeRow[]>();
     for(const row of tagged)byConcept.set(row.concept_id,[...(byConcept.get(row.concept_id)??[]),row]);
-    const abilityRows=this.db.prepare("SELECT ac.concept_id,a.id,a.title,a.status FROM ability_concepts ac JOIN ability_documents a ON a.id=ac.ability_id").all() as Array<{concept_id:string;id:string;title:string;status:string}>;
+    const abilityRows=this.db.prepare("SELECT ac.concept_id,a.id,a.title,a.status FROM ability_concepts ac JOIN ability_documents a ON a.id=ac.ability_id WHERE a.track_id IS ?").all(scope) as Array<{concept_id:string;id:string;title:string;status:string}>;
     const abilitiesByConcept=new Map<string,typeof abilityRows>();
     for(const row of abilityRows)abilitiesByConcept.set(row.concept_id,[...(abilitiesByConcept.get(row.concept_id)??[]),row]);
     const childrenOf=(slug:string)=>children.get(slug)??[];
@@ -784,25 +882,29 @@ export class LocalStore {
   /** Account-scoped learner state must not survive a permanent account deletion. Preferences stay device-scoped. */
   /* The cached problems go too. Their statements are public, but the copy Spar
      holds records whether *this* learner has solved each one, which is theirs. */
-  learningEngineSnapshot(){return{baseline:this.getBaseline(),trainingMode:this.getTrainingMode(),activeTrack:this.activeTrack(),abilityState:this.abilityStates(),evidence:(this.db.prepare("SELECT * FROM learner_evidence ORDER BY occurred_at DESC LIMIT 100").all()),patterns:this.listPatterns(),decisions:this.db.prepare("SELECT * FROM training_decisions ORDER BY created_at DESC LIMIT 50").all(),notices:this.listNotices(20),rating:this.ratingHistory(),model:{schemaVersion:4,policyVersion:"adaptive-policy-v1",abilityRegistry:"concept-taxonomy-v1"}};}
-  cloudLearningState(){return{version:1,updatedAt:new Date().toISOString(),tracks:this.listTracks(),activeTrackId:this.activeTrack()?.id??null,sessionTracks:this.db.prepare("SELECT id sessionId,track_id trackId FROM sessions WHERE track_id IS NOT NULL").all(),baseline:this.getBaseline(),trainingMode:this.getTrainingMode(),abilityState:this.abilityStates(),evidence:this.db.prepare("SELECT * FROM learner_evidence").all(),patterns:this.db.prepare("SELECT * FROM learner_patterns").all(),patternEvidence:this.db.prepare("SELECT * FROM pattern_evidence").all(),notices:this.db.prepare("SELECT * FROM learner_notices").all(),rating:this.db.prepare("SELECT * FROM rating_points").all(),decisions:this.db.prepare("SELECT * FROM training_decisions").all()};}
+  learningEngineSnapshot(){const trackId=this.activeTrack()?.id??null;return{baseline:this.getBaseline(),trainingMode:this.getTrainingMode(),activeTrack:this.activeTrack(),abilityState:this.abilityStates(trackId),evidence:this.db.prepare("SELECT e.* FROM learner_evidence e JOIN ability_documents a ON a.id=e.ability_id WHERE a.track_id IS ? ORDER BY e.occurred_at DESC LIMIT 100").all(trackId),patterns:this.listPatterns(trackId),decisions:this.db.prepare("SELECT * FROM training_decisions WHERE track_id IS ? ORDER BY created_at DESC LIMIT 50").all(trackId),notices:this.listNotices(20,trackId),rating:this.ratingHistory(),model:{schemaVersion:4,policyVersion:"adaptive-policy-v1",abilityRegistry:"concept-taxonomy-v1"}};}
+  cloudLearningState(){const tracks=this.listTracks();return{version:2,updatedAt:new Date().toISOString(),tracks,activeTrackId:this.activeTrack()?.id??null,sessionTracks:this.db.prepare("SELECT id sessionId,track_id trackId FROM sessions WHERE track_id IS NOT NULL").all(),abilityTracks:this.db.prepare("SELECT id abilityId,track_id trackId FROM ability_documents WHERE track_id IS NOT NULL").all(),baseline:this.getBaseline(),trainingMode:this.getTrainingMode(),abilityState:tracks.flatMap((track)=>this.abilityStates(track.id)),evidence:this.db.prepare("SELECT * FROM learner_evidence").all(),patterns:this.db.prepare("SELECT * FROM learner_patterns").all(),patternEvidence:this.db.prepare("SELECT * FROM pattern_evidence").all(),notices:this.db.prepare("SELECT * FROM learner_notices").all(),rating:this.db.prepare("SELECT * FROM rating_points").all(),decisions:this.db.prepare("SELECT * FROM training_decisions").all()};}
   queueLearningState(){if(this.restoring)return;this.db.prepare("DELETE FROM sync_outbox WHERE kind='learning-state'").run();this.enqueue("learning-state",this.cloudLearningState());}
   restoreLearningState(value:unknown){if(!value||typeof value!=="object")return;const state=value as Record<string,unknown>;const tracks=Array.isArray(state.tracks)?state.tracks:[];
     /* A restore runs before the outbox flush. If this device has a pending
        snapshot, it is the only copy that can contain its offline work; replacing
        it with the cloud document would silently move the learner model backward. */
     if(this.db.prepare("SELECT 1 FROM sync_outbox WHERE kind='learning-state' LIMIT 1").get())return;
-    this.inRestore(()=>{this.db.prepare("UPDATE sessions SET track_id=NULL").run();for(const table of ["pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","learner_ability_state","tracks"])this.db.prepare(`DELETE FROM ${table}`).run();const insertTrack=this.db.prepare("INSERT INTO tracks VALUES (?,?,?,?,?,?,?,?,?,?)");for(const item of tracks){const row=item as Track;try{insertTrack.run(row.id,row.title,row.goal,row.status,JSON.stringify(row.emphasis??[]),JSON.stringify(row.priorities??[]),JSON.stringify(row.investigating??[]),JSON.stringify(row.monitoring??[]),row.createdAt,row.updatedAt);}catch{/* Ignore a future track shape. */}}
+    this.inRestore(()=>{this.db.prepare("UPDATE sessions SET track_id=NULL").run();for(const table of ["pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","learner_ability_state","tracks"])this.db.prepare(`DELETE FROM ${table}`).run();/* Columns named rather than positional: this insert silently became wrong the
+         moment the table grew a language, and a restore that writes a Track's goal
+         into its status column is not a failure anyone would diagnose from here. */
+      const insertTrack=this.db.prepare("INSERT INTO tracks (id,title,goal,status,language,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)");for(const item of tracks){const row=item as Track;try{insertTrack.run(row.id,row.title,row.goal,row.status,row.language??null,JSON.stringify(row.emphasis??[]),JSON.stringify(row.priorities??[]),JSON.stringify(row.investigating??[]),JSON.stringify(row.monitoring??[]),row.createdAt,row.updatedAt);}catch{/* Ignore a future track shape. */}}
       const attach=this.db.prepare("UPDATE sessions SET track_id=? WHERE id=?");for(const item of Array.isArray(state.sessionTracks)?state.sessionTracks:[]){const row=item as {sessionId?:unknown;trackId?:unknown};if(typeof row.sessionId==="string"&&typeof row.trackId==="string")attach.run(row.trackId,row.sessionId);}
+      const attachAbility=this.db.prepare("UPDATE ability_documents SET track_id=? WHERE id=?");for(const item of Array.isArray(state.abilityTracks)?state.abilityTracks:[]){const row=item as {abilityId?:unknown;trackId?:unknown};if(typeof row.abilityId==="string"&&typeof row.trackId==="string")attachAbility.run(row.trackId,row.abilityId);}
       const ability=this.db.prepare("INSERT OR IGNORE INTO learner_ability_state VALUES (?,?,?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.abilityState)?state.abilityState:[]){const row=item as LearnerAbilityState;ability.run(row.abilityId,row.proficiency,row.confidence,row.evidenceCount,row.lastEvidenceAt,row.trainingStatus,row.trend,row.currentBelief,row.nextVerification,row.updatedAt);}
       const evidence=this.db.prepare("INSERT OR IGNORE INTO learner_evidence VALUES (?,?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.evidence)?state.evidence:[]){const row=item as Record<string,unknown>;try{evidence.run(row.id,row.ability_id,row.attempt_id,row.event_id,row.statement,row.polarity,row.independence,row.strength,row.occurred_at);}catch{/* Missing attempts from a partial restore are skipped. */}}
       const pattern=this.db.prepare("INSERT OR IGNORE INTO learner_patterns VALUES (?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.patterns)?state.patterns:[]){const row=item as Record<string,unknown>;try{pattern.run(row.id,row.title,row.description,row.ability_id,row.status,row.created_at,row.updated_at,row.last_observed_at);}catch{/* Defensive restore. */}}
       const patternLink=this.db.prepare("INSERT OR IGNORE INTO pattern_evidence VALUES (?,?)");for(const item of Array.isArray(state.patternEvidence)?state.patternEvidence:[]){const row=item as Record<string,unknown>;try{patternLink.run(row.pattern_id,row.evidence_id);}catch{/* Defensive restore. */}}
-      const notice=this.db.prepare("INSERT OR IGNORE INTO learner_notices VALUES (?,?,?,?,?)");for(const item of Array.isArray(state.notices)?state.notices:[]){const row=item as Record<string,unknown>;notice.run(row.id,row.title,row.body,row.created_at,row.dismissed_at);}
-      const rating=this.db.prepare("INSERT OR IGNORE INTO rating_points VALUES (?,?,?,?,?)");for(const item of Array.isArray(state.rating)?state.rating:[]){const row=item as Record<string,unknown>;rating.run(row.id,row.rating,row.provisional,row.reason,row.occurred_at);}
+      const notice=this.db.prepare("INSERT OR IGNORE INTO learner_notices (id,title,body,created_at,dismissed_at,track_id) VALUES (?,?,?,?,?,?)");for(const item of Array.isArray(state.notices)?state.notices:[]){const row=item as Record<string,unknown>;notice.run(row.id,row.title,row.body,row.created_at,row.dismissed_at,row.track_id??null);}
+      const rating=this.db.prepare("INSERT OR IGNORE INTO rating_points (id,rating,provisional,reason,occurred_at,track_id) VALUES (?,?,?,?,?,?)");for(const item of Array.isArray(state.rating)?state.rating:[]){const row=item as Record<string,unknown>;rating.run(row.id,row.rating,row.provisional,row.reason,row.occurred_at,row.track_id??null);}
       const decision=this.db.prepare("INSERT OR IGNORE INTO training_decisions VALUES (?,?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.decisions)?state.decisions:[]){const row=item as Record<string,unknown>;try{decision.run(row.id,row.track_id,row.session_id,row.ability_id,row.intent,row.reason,row.mode,row.candidate_snapshot,row.created_at);}catch{/* Defensive restore. */}}
       if(state.baseline){const baseline=baselineStateSchema.safeParse(state.baseline);if(baseline.success){this.setSetting("baseline-state",baseline.data);if(baseline.data.sessionId)this.db.prepare("UPDATE sessions SET context='baseline',track_id=NULL WHERE id=?").run(baseline.data.sessionId);}}if(state.trainingMode)this.setSetting("training-mode",state.trainingMode);if(typeof state.activeTrackId==="string")this.setSetting("active-track-id",state.activeTrackId);
-    });this.backfillTracks();this.ensureRating();}
+    });this.backfillTracks();this.backfillLearningTracks();this.ensureRating();}
 
   clearAccountData(){this.db.transaction(()=>{for(const table of ["sync_outbox","pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","learner_ability_state","tracks","ability_documents","learner_profile","practice_problems","practice_problem_links"])this.db.prepare(`DELETE FROM ${table}`).run();
     /* Seeded concepts are shipped vocabulary and stay. A concept the agent
@@ -811,8 +913,8 @@ export class LocalStore {
     this.db.prepare("DELETE FROM concepts WHERE seeded=0").run();})();}
   close(){this.db.close();}
 
-  private createTrackRecord(goal:string,title?:string){const cleanGoal=goal.trim();if(cleanGoal.length<3)throw new Error("A Track goal is required");const id=randomUUID();const now=new Date().toISOString();const cleanTitle=(title?.trim()||trackTitle(cleanGoal)).slice(0,80);this.db.prepare("INSERT INTO tracks (id,title,goal,status,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,?,?,'active','[]','[]','[]','[]',?,?)").run(id,cleanTitle,cleanGoal,now,now);this.setActiveTrack(id);return this.toTrack(this.db.prepare("SELECT * FROM tracks WHERE id=?").get(id) as TrackRow);}
-  private toTrack(row:TrackRow):Track{return{id:row.id,title:row.title,goal:row.goal,status:row.status,emphasis:JSON.parse(row.emphasis) as string[],priorities:JSON.parse(row.priorities) as string[],investigating:JSON.parse(row.investigating) as string[],monitoring:JSON.parse(row.monitoring) as string[],createdAt:row.created_at,updatedAt:row.updated_at};}
+  private createTrackRecord(goal:string,title?:string,language?:Language|null){const cleanGoal=goal.trim();if(cleanGoal.length<3)throw new Error("A Track goal is required");const id=randomUUID();const now=new Date().toISOString();const cleanTitle=(title?.trim()||trackTitle(cleanGoal)).slice(0,80);this.db.prepare("INSERT INTO tracks (id,title,goal,status,language,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,?,?,'active',?,'[]','[]','[]','[]',?,?)").run(id,cleanTitle,cleanGoal,language??null,now,now);this.setActiveTrack(id);return this.toTrack(this.db.prepare("SELECT * FROM tracks WHERE id=?").get(id) as TrackRow);}
+  private toTrack(row:TrackRow):Track{return{id:row.id,title:row.title,goal:row.goal,status:row.status,language:languageSchema.nullable().catch(null).parse(row.language),emphasis:JSON.parse(row.emphasis) as string[],priorities:JSON.parse(row.priorities) as string[],investigating:JSON.parse(row.investigating) as string[],monitoring:JSON.parse(row.monitoring) as string[],createdAt:row.created_at,updatedAt:row.updated_at};}
   private backfillTracks(){const sessions=this.db.prepare("SELECT id,title,original_goal,created_at,updated_at FROM sessions WHERE track_id IS NULL AND context<>'baseline' ORDER BY updated_at DESC").all() as Array<{id:string;title:string;original_goal:string;created_at:string;updated_at:string}>;if(!sessions.length)return;
     /* Sessions predate Tracks. Treating every old session as a Track would turn
        this new product object into a renamed history list, so one migration
@@ -820,13 +922,35 @@ export class LocalStore {
        specific goal; a real history gets the intentionally broad migration goal. */
     const existing=this.activeTrack();const trackId=existing?.id??randomUUID();if(!existing){const newest=sessions[0]!;const oldest=sessions.at(-1)!;const title=sessions.length===1?newest.title.slice(0,80):"General practice";const goal=sessions.length===1?newest.original_goal:"Continue adaptive practice across my existing Spar history.";this.db.prepare("INSERT INTO tracks (id,title,goal,status,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,?,?,'active','[]','[]','[]','[]',?,?)").run(trackId,title,goal,oldest.created_at,newest.updated_at);}
     const attach=this.db.prepare("UPDATE sessions SET track_id=? WHERE id=?");this.db.transaction(()=>{for(const session of sessions)attach.run(trackId,session.id);})();if(!this.getSetting<string>("active-track-id",""))this.setSetting("active-track-id",trackId);}
+  private normalizeLegacyBaseline(){this.db.prepare("UPDATE sessions SET context='baseline',track_id=NULL WHERE context='training' AND title='Baseline calibration' AND original_goal LIKE 'Build a representative programming baseline with adaptive direct calibration%'").run();this.db.prepare("DELETE FROM tracks WHERE title='Baseline calibration' AND NOT EXISTS (SELECT 1 FROM sessions WHERE sessions.track_id=tracks.id)").run();}
+  /** The first Tracks prototype wrapped every historical session in its own
+   * Track. That is a renamed history list, not a workspace. Collapse that exact
+   * migration shape once; deliberate Tracks have independently-created Track
+   * timestamps and are left alone. */
+  private migrateLegacyTrackWorkspaces(){if(this.getSetting<boolean>("track-workspace-migration-v2",false))return;const rows=this.db.prepare(`SELECT t.id,s.id session_id,s.created_at,s.updated_at FROM tracks t JOIN sessions s ON s.track_id=t.id WHERE t.goal=s.original_goal AND t.title=substr(s.title,1,80) AND t.created_at=s.created_at AND t.updated_at=s.updated_at AND (SELECT COUNT(*) FROM sessions owned WHERE owned.track_id=t.id)=1`).all() as Array<{id:string;session_id:string;created_at:string;updated_at:string}>;if(rows.length>1){const trackId=randomUUID();const oldest=rows.map((row)=>row.created_at).sort()[0]!;const newest=rows.map((row)=>row.updated_at).sort().at(-1)!;this.db.transaction(()=>{this.db.prepare("INSERT INTO tracks (id,title,goal,status,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,? ,?,'active','[]','[]','[]','[]',?,?)").run(trackId,"General practice","Continue adaptive practice across my existing Spar history.",oldest,newest);const attach=this.db.prepare("UPDATE sessions SET track_id=? WHERE id=?");const moveAbilities=this.db.prepare("UPDATE ability_documents SET track_id=? WHERE track_id=?");const moveNotices=this.db.prepare("UPDATE learner_notices SET track_id=? WHERE track_id=?");const moveRatings=this.db.prepare("UPDATE rating_points SET track_id=? WHERE track_id=?");const moveDecisions=this.db.prepare("UPDATE training_decisions SET track_id=? WHERE track_id=?");for(const row of rows){attach.run(trackId,row.session_id);moveAbilities.run(trackId,row.id);moveNotices.run(trackId,row.id);moveRatings.run(trackId,row.id);moveDecisions.run(trackId,row.id);}const remove=this.db.prepare("DELETE FROM tracks WHERE id=?");for(const row of rows)remove.run(row.id);this.setSetting("active-track-id",trackId);})();}this.setSetting("track-workspace-migration-v2",true);}
+  private backfillLearningTracks(){const fallback=this.activeTrack()?.id??null;if(!fallback)return;this.db.prepare(`UPDATE ability_documents SET track_id=COALESCE((SELECT s.track_id FROM training_targets t JOIN sessions s ON s.id=t.session_id WHERE t.ability_id=ability_documents.id AND s.track_id IS NOT NULL ORDER BY t.created_at DESC LIMIT 1),?) WHERE track_id IS NULL AND NOT EXISTS (SELECT 1 FROM training_targets t JOIN sessions s ON s.id=t.session_id WHERE t.ability_id=ability_documents.id AND s.context='baseline')`).run(fallback);this.db.prepare("UPDATE learner_notices SET track_id=? WHERE track_id IS NULL").run(fallback);
+    /* Ratings are deliberately not backfilled onto a Track. The column only
+       records which line of practice produced a point, and the account's opening
+       point was produced by none — see `ratingHistory`. */
+  }
+  private learningTrackId(trackId?:string|null){return trackId===undefined?this.activeTrack()?.id??null:trackId;}
+  private trackIdForAbilityTarget(abilityId:string){const row=this.db.prepare("SELECT s.track_id FROM training_targets t JOIN sessions s ON s.id=t.session_id WHERE t.ability_id=? AND s.track_id IS NOT NULL ORDER BY t.created_at DESC LIMIT 1").get(abilityId) as {track_id:string}|undefined;return row?.track_id??null;}
   private recordAbilityEvidence(abilityId:string,eventIds:string[],summary:string,status:AbilityStatus){const insert=this.db.prepare("INSERT OR IGNORE INTO learner_evidence (id,ability_id,attempt_id,event_id,statement,polarity,independence,strength,occurred_at) VALUES (?,?,?,?,?,?,?,?,?)");for(const eventId of eventIds){const row=this.db.prepare("SELECT e.id,e.attempt_id,e.occurred_at,e.type,e.payload FROM attempt_events e WHERE e.id=?").get(eventId) as {id:string;attempt_id:string;occurred_at:string;type:string;payload:string}|undefined;const payload=row?JSON.parse(row.payload) as Record<string,unknown>:{};const outcome=String(payload.outcome??"");const polarity=outcome==="failed"||status==="uncertain"?"contradictory":outcome==="passed"||status==="independent"?"supporting":"neutral";const independence=payload.assisted===true?"assisted":"unknown";insert.run(randomUUID(),abilityId,row?.attempt_id??null,eventId,summary||`Evidence from ${row?.type??"an attempt"}.`,polarity,independence,polarity==="neutral"?0.45:0.7,row?.occurred_at??new Date().toISOString());}}
   private recordInterpretedEvidence(abilityId:string,items:EvidenceInterpretation[]){const upsert=this.db.prepare("INSERT INTO learner_evidence (id,ability_id,attempt_id,event_id,statement,polarity,independence,strength,occurred_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(ability_id,event_id) DO UPDATE SET statement=excluded.statement,polarity=excluded.polarity,independence=excluded.independence,strength=excluded.strength");for(const item of items){const event=this.db.prepare("SELECT attempt_id,occurred_at FROM attempt_events WHERE id=?").get(item.eventId) as {attempt_id:string;occurred_at:string}|undefined;if(!event)continue;upsert.run(randomUUID(),abilityId,event.attempt_id,item.eventId,item.statement,item.polarity,item.independence,Math.max(0,Math.min(1,item.strength)),event.occurred_at);}}
-  private upsertPattern(abilityId:string,input:PatternInterpretation){const eventIds=[...new Set(input.evidenceEventIds)];const evidence=this.db.prepare(`SELECT le.id,le.attempt_id FROM learner_evidence le WHERE le.ability_id=? AND le.event_id IN (${eventIds.map(()=>"?").join(",")||"NULL"})`).all(abilityId,...eventIds) as Array<{id:string;attempt_id:string|null}>;const independentAttempts=new Set(evidence.map((item)=>item.attempt_id).filter(Boolean)).size;let status=input.status;if((status==="pattern"||status==="monitoring"||status==="resolved")&&independentAttempts<2)status=independentAttempts?"hypothesis":"observation";const existing=this.db.prepare("SELECT id,status FROM learner_patterns WHERE lower(title)=lower(?) AND ability_id=?").get(input.title,abilityId) as {id:string;status:string}|undefined;const id=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO learner_patterns (id,title,description,ability_id,status,created_at,updated_at,last_observed_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET description=excluded.description,status=excluded.status,updated_at=excluded.updated_at,last_observed_at=excluded.last_observed_at").run(id,input.title,input.description,abilityId,status,now,now,evidence.length?now:null);const link=this.db.prepare("INSERT OR IGNORE INTO pattern_evidence (pattern_id,evidence_id) VALUES (?,?)");for(const item of evidence)link.run(id,item.id);if(existing&&existing.status!==status)this.addNotice(`${input.title} is now ${status}`,input.description);}
-  private reconcileAbilityState(abilityId:string){const ability=this.abilityRow(abilityId);if(!ability)return;const evidence=this.evidenceForAbility(abilityId);const linkedCount=(JSON.parse(ability.evidence_ids) as string[]).length;const count=Math.max(linkedCount,evidence.length);const confidence=Math.min(0.96,1-Math.exp(-count/3));const base:Record<AbilityStatus,number>={uncertain:0.35,developing:0.55,independent:0.82,stale:0.72};const proficiency=base[ability.status];const previous=this.db.prepare("SELECT proficiency,training_status FROM learner_ability_state WHERE ability_id=?").get(abilityId) as {proficiency:number;training_status:string}|undefined;const trainingStatus=ability.status==="independent"?"monitoring":ability.status==="uncertain"?count?"diagnosing":"unknown":"training";const trend=!previous?"unknown":proficiency>previous.proficiency+0.04?"improving":proficiency<previous.proficiency-0.04?"declining":"stable";const now=new Date().toISOString();const practice=JSON.parse(ability.practice) as string[];this.db.prepare("INSERT INTO learner_ability_state (ability_id,proficiency,confidence,evidence_count,last_evidence_at,training_status,trend,current_belief,next_verification,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ability_id) DO UPDATE SET proficiency=excluded.proficiency,confidence=excluded.confidence,evidence_count=excluded.evidence_count,last_evidence_at=excluded.last_evidence_at,training_status=excluded.training_status,trend=excluded.trend,current_belief=excluded.current_belief,next_verification=excluded.next_verification,updated_at=excluded.updated_at").run(abilityId,proficiency,confidence,count,evidence[0]?.occurredAt??(count?ability.updated_at:null),trainingStatus,trend,ability.summary||firstNarrativeLine(ability.markdown),practice[0]??"Spar wants independent evidence in a different problem structure.",now);if(previous&&previous.training_status!==trainingStatus)this.addNotice(trainingStatus==="monitoring"?`Monitoring ${ability.title}`:`Training focus changed`,trainingStatus==="monitoring"?`Spar is moving ${ability.title} out of deliberate practice. Newer evidence is strong enough to monitor it instead.`:`${ability.title} is now ${trainingStatus}. The change is backed by linked attempt evidence.`);this.recalculateRating(`${ability.title} moved to ${trainingStatus}.`);}
-  private addNotice(title:string,body:string){this.db.prepare("INSERT INTO learner_notices (id,title,body,created_at,dismissed_at) VALUES (?,?,?,?,NULL)").run(randomUUID(),title,body,new Date().toISOString());}
-  private ensureRating():RatingPoint{const current=this.ratingHistory().at(-1);if(current)return current;const point={id:randomUUID(),rating:1200,provisional:true,reason:"Initial provisional rating",occurredAt:new Date().toISOString()} satisfies RatingPoint;this.db.prepare("INSERT INTO rating_points VALUES (?,?,?,?,?)").run(point.id,point.rating,1,point.reason,point.occurredAt);return point;}
-  private recalculateRating(reason:string){const states=this.abilityStates();const prior=this.ratingHistory().at(-1)??this.ensureRating();if(!states.length)return prior;const weight=states.reduce((sum,item)=>sum+Math.max(0.15,item.confidence),0);const performance=states.reduce((sum,item)=>sum+item.proficiency*Math.max(0.15,item.confidence),0)/weight;const rating=Math.round(700+performance*1100);const evidence=states.reduce((sum,item)=>sum+item.evidenceCount,0);if(Math.abs(rating-prior.rating)<10&&prior.provisional===(evidence<8))return prior;const point={id:randomUUID(),rating,provisional:evidence<8,reason,occurredAt:new Date().toISOString()} satisfies RatingPoint;this.db.prepare("INSERT INTO rating_points VALUES (?,?,?,?,?)").run(point.id,point.rating,point.provisional?1:0,point.reason,point.occurredAt);return point;}
+  private upsertPattern(abilityId:string,input:PatternInterpretation){const eventIds=[...new Set(input.evidenceEventIds)];const evidence=this.db.prepare(`SELECT le.id,le.attempt_id FROM learner_evidence le WHERE le.ability_id=? AND le.event_id IN (${eventIds.map(()=>"?").join(",")||"NULL"})`).all(abilityId,...eventIds) as Array<{id:string;attempt_id:string|null}>;const independentAttempts=new Set(evidence.map((item)=>item.attempt_id).filter(Boolean)).size;let status=input.status;if((status==="pattern"||status==="monitoring"||status==="resolved")&&independentAttempts<2)status=independentAttempts?"hypothesis":"observation";const existing=this.db.prepare("SELECT id,status FROM learner_patterns WHERE lower(title)=lower(?) AND ability_id=?").get(input.title,abilityId) as {id:string;status:string}|undefined;const id=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO learner_patterns (id,title,description,ability_id,status,created_at,updated_at,last_observed_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET description=excluded.description,status=excluded.status,updated_at=excluded.updated_at,last_observed_at=excluded.last_observed_at").run(id,input.title,input.description,abilityId,status,now,now,evidence.length?now:null);const link=this.db.prepare("INSERT OR IGNORE INTO pattern_evidence (pattern_id,evidence_id) VALUES (?,?)");for(const item of evidence)link.run(id,item.id);if(existing&&existing.status!==status)this.addNotice(`${input.title} is now ${status}`,input.description,this.trackIdForAbilityTarget(abilityId)??this.abilityRow(abilityId)?.track_id);}
+  private reconcileAbilityState(abilityId:string){const ability=this.abilityRow(abilityId);if(!ability)return;const evidence=this.evidenceForAbility(abilityId);const linkedCount=(JSON.parse(ability.evidence_ids) as string[]).length;const count=Math.max(linkedCount,evidence.length);const confidence=Math.min(0.96,1-Math.exp(-count/3));const base:Record<AbilityStatus,number>={uncertain:0.35,developing:0.55,independent:0.82,stale:0.72};const proficiency=base[ability.status];const previous=this.db.prepare("SELECT proficiency,training_status FROM learner_ability_state WHERE ability_id=?").get(abilityId) as {proficiency:number;training_status:string}|undefined;const trainingStatus=ability.status==="independent"?"monitoring":ability.status==="uncertain"?count?"diagnosing":"unknown":"training";const trend=!previous?"unknown":proficiency>previous.proficiency+0.04?"improving":proficiency<previous.proficiency-0.04?"declining":"stable";const now=new Date().toISOString();const practice=JSON.parse(ability.practice) as string[];this.db.prepare("INSERT INTO learner_ability_state (ability_id,proficiency,confidence,evidence_count,last_evidence_at,training_status,trend,current_belief,next_verification,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ability_id) DO UPDATE SET proficiency=excluded.proficiency,confidence=excluded.confidence,evidence_count=excluded.evidence_count,last_evidence_at=excluded.last_evidence_at,training_status=excluded.training_status,trend=excluded.trend,current_belief=excluded.current_belief,next_verification=excluded.next_verification,updated_at=excluded.updated_at").run(abilityId,proficiency,confidence,count,evidence[0]?.occurredAt??(count?ability.updated_at:null),trainingStatus,trend,ability.summary||firstNarrativeLine(ability.markdown),practice[0]??"Spar wants independent evidence in a different problem structure.",now);if(previous&&previous.training_status!==trainingStatus)this.addNotice(trainingStatus==="monitoring"?`Monitoring ${ability.title}`:`Training focus changed`,trainingStatus==="monitoring"?`Spar is moving ${ability.title} out of deliberate practice. Newer evidence is strong enough to monitor it instead.`:`${ability.title} is now ${trainingStatus}. The change is backed by linked attempt evidence.`,ability.track_id);this.recalculateRating(`${ability.title} moved to ${trainingStatus}.`,ability.track_id);}
+  private addNotice(title:string,body:string,trackId?:string|null){const scope=this.learningTrackId(trackId);if(!scope)return;this.db.prepare("INSERT INTO learner_notices (id,title,body,created_at,dismissed_at,track_id) VALUES (?,?,?,?,NULL,?)").run(randomUUID(),title,body,new Date().toISOString(),scope);}
+  /* Written once for the account, with no Track on it: the opening rating is the
+     learner's, and a Track that happens to be open when the app first starts is
+     not what it is about. */
+  private ensureRating():RatingPoint{const current=this.ratingHistory().at(-1);if(current)return current;const point={id:randomUUID(),rating:1200,provisional:true,reason:"Initial provisional rating",occurredAt:new Date().toISOString()} satisfies RatingPoint;this.db.prepare("INSERT INTO rating_points (id,rating,provisional,reason,occurred_at,track_id) VALUES (?,?,?,?,?,?)").run(point.id,point.rating,1,point.reason,point.occurredAt,null);return point;}
+  /* Recomputed from every ability the learner has, in every Track. Weighting one
+     Track's abilities alone is what made the number local: finishing a hard
+     Track and starting an easy one read as getting worse, because the evidence
+     behind the old number had been dropped rather than added to. The point still
+     records the Track whose change triggered it, so the history can say where a
+     move came from. */
+  private recalculateRating(reason:string,trackId?:string|null){const states=this.allAbilityStates();const prior=this.ratingHistory().at(-1)??this.ensureRating();if(!states.length)return prior;const weight=states.reduce((sum,item)=>sum+Math.max(0.15,item.confidence),0);const performance=states.reduce((sum,item)=>sum+item.proficiency*Math.max(0.15,item.confidence),0)/weight;const rating=Math.round(700+performance*1100);const evidence=states.reduce((sum,item)=>sum+item.evidenceCount,0);if(Math.abs(rating-prior.rating)<10&&prior.provisional===(evidence<8))return prior;const point={id:randomUUID(),rating,provisional:evidence<8,reason,occurredAt:new Date().toISOString()} satisfies RatingPoint;this.db.prepare("INSERT INTO rating_points (id,rating,provisional,reason,occurred_at,track_id) VALUES (?,?,?,?,?,?)").run(point.id,point.rating,point.provisional?1:0,point.reason,point.occurredAt,this.learningTrackId(trackId));return point;}
   private insertEvent(event:AttemptEvent){this.db.prepare("INSERT INTO attempt_events VALUES (?,?,?,?,?,?,?,?)").run(event.id,event.attemptId,event.sequence,event.type,event.occurredAt,JSON.stringify(event.payload),event.source,event.schemaVersion);}
   private ensureColumn(table:string,column:string,declaration:string){const columns=this.db.pragma(`table_info(${table})`) as Array<{name:string}>;if(!columns.some((item)=>item.name===column))this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);}
   /* Writes made while restoring are not news. Every insert path in this class
@@ -851,7 +975,7 @@ function abilityStatusFor(evidenceCount:number):AbilityStatus{return evidenceCou
 function trackTitle(goal:string){const clean=goal.replace(/^(i want to|i'd like to|help me)\s+/i,"").trim();return clean.length>52?`${clean.slice(0,49).trimEnd()}…`:clean.replace(/^./,(letter)=>letter.toUpperCase());}
 function firstNarrativeLine(markdown:string){return markdown.split("\n").map((line)=>line.replace(/^#+\s*/,"").trim()).find((line)=>line.length>8)??"Spar is still forming a reliable belief.";}
 function intentCopy(intent:TrainingTarget["action"]){return({diagnose:"Spar needs cleaner evidence before treating this as a weakness.",teach:"A prerequisite needs a short, explicit intervention.",practise:"Repeated evidence makes deliberate practice worthwhile.",transfer:"Direct execution looks reliable; the next question tests transfer.",advance:"The current level is supported strongly enough to raise the constraint.",retain:"This was previously reliable but has not been observed recently."} as const)[intent];}
-type AbilityRow={id:string;title:string;markdown:string;version:number;status:AbilityStatus;updated_at:string;evidence_ids:string;summary:string;practice:string;earned_at:string|null};
+type AbilityRow={id:string;track_id:string|null;title:string;markdown:string;version:number;status:AbilityStatus;updated_at:string;evidence_ids:string;summary:string;practice:string;earned_at:string|null};
 
 const SEARCH_STOP_WORDS=new Set(["a","an","and","day","days","for","from","have","i","in","interview","learn","me","my","of","on","prepare","the","to","want","with"]);
 const EVIDENCE_STOP_WORDS=new Set([
@@ -890,4 +1014,12 @@ function iso(value:string|Date|null|undefined):string{
 
 /** Stored activity, read back defensively: a message written before this column
  *  existed has none, and a malformed row must not take the transcript with it. */
+/** How many messages keep their full step-by-step account in memory. Enough that
+ *  the part of the conversation anyone is actually looking at is complete. */
+const TRANSCRIPT_ACTIVITY_WINDOW=12;
+
+/** The step count without building the steps: a length is all an unloaded row
+ *  needs to offer, and parsing the array is the cost being avoided. */
+function countActivity(value:string|null):number{if(!value)return 0;try{const parsed=JSON.parse(value) as unknown;return Array.isArray(parsed)?parsed.length:0;}catch{return 0;}}
+
 function parseActivity(value:string|null):AgentActivityStep[]{if(!value)return[];try{const parsed=JSON.parse(value) as unknown;if(!Array.isArray(parsed))return[];return parsed.flatMap((entry)=>{const step=agentActivityStepSchema.safeParse(entry);return step.success?[step.data]:[];});}catch{return[];}}

@@ -5,6 +5,8 @@ import { AuthService } from "./auth.js";
 import { apiOrigin } from "./apiOrigin.js";
 import { installDockIcon } from "./dockIcon.js";
 import { installIpc } from "./ipc.js";
+import { VisualizerService } from "./visualizer.js";
+import { VisualizerToolbox } from "./visualizerTools.js";
 import { installMenu } from "./menu.js";
 import { LocalStore } from "./store.js";
 import { CloudSyncService } from "./sync.js";
@@ -45,7 +47,17 @@ else {
        keychain access, and a key that crossed into it would also cross into every
        payload the worker serialises. */
     const web = new WebSearchService(() => auth.readSecret("exa"));
-    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice));
+    /* The visualiser owns its own execution process. A trace is issued on every
+       run of code that does not work yet, so the likeliest outcome of any one of
+       them is a program that never returns — and that should cost the learner
+       one killed process, not the runner everything else shares. */
+    const visualizer = new VisualizerService();
+    /* The visualiser, as the agent reaches it. Constructed beside the service
+       rather than inside it: the service runs one trace and forgets it, which is
+       right for a page the learner is driving. The toolbox is what holds a run
+       still between tool calls so a turn can ask several questions about it. */
+    const visualizerTools = new VisualizerToolbox(visualizer, store, workspaces);
+    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice, visualizerTools));
     const sync=new CloudSyncService(store,auth,origin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
     /* Writes the checkpoints that make a session resumable on another machine.
        Nothing wrote them before, so `checkpoints` was empty on every install and
@@ -66,6 +78,7 @@ else {
       checkpoints.stop();
       sync.stop();
       runner.stop();
+      visualizer.stop();
       agent.stop();
       updates?.stop();
       store.close();
@@ -80,7 +93,7 @@ else {
     const signedIn = Boolean(await auth.account());
     const needsRestore = signedIn && !store.getProfile();
     const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : "app" as const;
-    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, checkpoints, restore, web, window: () => mainWindow });
+    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, checkpoints, restore, web, visualizer, window: () => mainWindow });
     updates = new UpdateService(store, () => mainWindow, prepareToExit);
     updates.installIpc();
     installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); updates.start();

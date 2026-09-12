@@ -1,0 +1,38 @@
+{
+  "name": "@spar/visualizer",
+  "version": "0.4.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./host": {
+      "types": "./src/host.ts",
+      "development": "./src/host.ts",
+      "default": "./dist/host.js"
+    },
+    "./python": {
+      "types": "./src/languages/python/index.ts",
+      "development": "./src/languages/python/index.ts",
+      "default": "./dist/languages/python/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "node scripts/copy-assets.mjs && tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-assets.mjs"
+  },
+  "dependencies": {
+    "@spar/domain": "workspace:*",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

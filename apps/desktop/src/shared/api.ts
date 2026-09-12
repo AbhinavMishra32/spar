@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { canonicalWorkspacePath } from "./workspacePath.js";
+import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spar/visualizer";
+import type { AgentActivityStep } from "@spar/domain";
+export type { VisualizerSpec, VisualizerTrace };
 import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
 
 export const ipc = {
@@ -9,7 +12,7 @@ export const ipc = {
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
   workspaceStateSave: "workspace:state-save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
-  workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", attemptSubmit: "attempt:submit",
+  workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentStop: "agent:stop", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
@@ -31,6 +34,7 @@ export const ipc = {
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
+  visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity",
   restoreRetry: "restore:retry",
   updateState: "update:state", updateCheck: "update:check", updateDownload: "update:download",
   updateDismissChangelog: "update:dismiss-changelog",
@@ -71,8 +75,8 @@ export type AuthRequest = z.infer<typeof authRequestInput>;
  *  confirmation code. */
 export type AuthResult = { status: "signed-in" } | { status: "code-sent"; purpose: AuthCodePurpose };
 
-export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000) });
-export const createTrackInput = z.object({ goal: z.string().trim().min(3).max(1000), title: z.string().trim().min(1).max(80).optional() });
+export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000), trackId: z.string().uuid().optional() });
+export const createTrackInput = z.object({ goal: z.string().trim().min(3).max(1000), title: z.string().trim().min(1).max(80).optional(), language: languageSchema.optional() });
 /* Sidebar housekeeping. Titles are capped where the generated one is capped, so a
    renamed session cannot outgrow the row it has to fit in. */
 export const sessionRenameInput = z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(80) });
@@ -284,7 +288,67 @@ export type SourceRunReport = {
 /** Emitted whenever a source's connection changes under the app's feet. */
 export type PracticeSourceEvent = { source: z.infer<typeof sourceIdSchema>; state: PracticeSourceState; message: string };
 
-export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+/* ---- Code visualiser ------------------------------------------------------
+   The renderer composes the setup itself — the input form and the composer both
+   live in `@spar/visualizer`, which is bundled into the window — so what crosses
+   this boundary is two strings and a language. The main process still bounds
+   both, because a size that is comfortable in a React state is not the same as
+   a size worth handing to a subprocess. */
+export const visualizerLanguageSchema = languageSchema;
+export const visualizerAnalyzeInput = z.object({
+  language: visualizerLanguageSchema,
+  code: z.string().max(200_000),
+  /** The signature a source problem declared, when the learner opened one. The
+   *  renderer passes it through rather than the main process re-fetching the
+   *  problem: it already has it, and a second fetch could disagree with the
+   *  statement on screen. */
+  signature: z.object({
+    name: z.string().min(1).max(200),
+    params: z.array(z.object({ name: z.string().max(100), type: z.string().max(400) })).max(20),
+    returnType: z.string().max(400),
+    classBased: z.boolean(),
+  }).nullable().default(null),
+});
+export const visualizerTraceInput = z.object({
+  language: visualizerLanguageSchema,
+  code: z.string().max(200_000),
+  setup: z.string().max(50_000),
+  /** How much of the run to keep. Bounded here as well as in the service so a
+   *  window cannot ask for a trace large enough to stall the main process
+   *  parsing it. */
+  maxSteps: z.number().int().min(1).max(6_000).optional(),
+});
+
+/**
+ * One source problem, as the visualiser needs it.
+ *
+ * Narrower than the practice layer's own problem on purpose. The visualiser
+ * wants four things from LeetCode and nothing else: the statement to read
+ * beside the canvas, the declared signature to build the form from, the worked
+ * examples to prefill it with, and the starter code to open the editor on. The
+ * rest of a practice problem — the judge ids, the reference graph, the tag
+ * vocabulary — belongs to the challenge workspace, and carrying it here would
+ * invite the visualiser to grow a second, worse version of that page.
+ */
+export type VisualizerProblem = {
+  source: z.infer<typeof sourceIdSchema>;
+  slug: string;
+  displayId: string;
+  title: string;
+  url: string;
+  difficulty: "easy" | "medium" | "hard";
+  statement: string;
+  /** Starter code in the requested language, empty when the source has none. */
+  starter: string;
+  signature: { name: string; params: Array<{ name: string; type: string }>; returnType: string; classBased: boolean } | null;
+  /** Arguments per example, in signature order, exactly as the statement wrote
+   *  them. Parsed in the renderer, where a malformed one can degrade to an
+   *  empty control instead of failing a request. */
+  examples: Array<{ input: string[]; output: string; explanation: string }>;
+  paidOnly: boolean;
+};
+
+export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** How far the pull half of sync has got. The shell gates on this before it
    *  gates on `profile`: a signed-in device with no local profile has either not
    *  finished restoring or could not reach the server, and treating either as "no
@@ -297,6 +361,11 @@ export type BootstrapData ={ account: { id: string; displayName: string; email: 
 export type RestoreState = "idle" | "pending" | "done" | "failed";
 /** One file a tool wrote, with the line counts the activity row reports. */
 export type AgentActivityFile = { path: string; added: number; removed: number };
+/** A saved explanation: the steps the agent chose, each with its caption and the
+ *  two snapshots the canvas needs to draw what moved. The payload is produced by
+ *  `sliceView` in `@spar/visualizer` and is passed through the store opaquely. */
+export type AgentVisualization = { id: string; sessionId: string; title: string; payload: VisualizerView };
+export type VisualizerView = import("@spar/visualizer").TraceView & { setup: string; takeaway: string };
 export type AgentStreamEvent = {
   runId: string;
   /** Which session this turn is working on. Stamped in the main process, because
@@ -367,6 +436,14 @@ export interface SparApi {
       submission as test cases instead of only reporting the verdict. */
   submitAttempt(input:{sessionId:string;attemptId:string}):Promise<{outcome:"passed"|"failed";exitCode:number;durationMs:number;output:string;summary:string}>;
   sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
+  /** Stops the turn running for this session, if there is one.
+   *
+   *  Real cancellation, not a hidden one: the worker aborts its own loop, which
+   *  stops it between phases as well as mid-stream. That distinction is the
+   *  whole point — a turn nobody is watching still calls tools, and a tool call
+   *  writes to the learner's record. What the agent had already said is kept, so
+   *  stopping ends the turn rather than erasing it. */
+  stopAgentTurn(input: { sessionId: string }): Promise<void>;
   /** Give up on the active challenge; the session returns to general chat. */
   abandonAttempt(input: { sessionId: string; attemptId: string; reason: string }): Promise<void>;
   /** Start a clean evidence segment without throwing away the learner's files. */
@@ -477,6 +554,28 @@ export interface SparApi {
   onNativeSurface(listener: (surface: NativeSurface) => void): () => void;
   onSyncState(listener: (state: SyncState) => void): () => void;
   onRestoreState(listener: (state: RestoreState) => void): () => void;
+  /* ---- Code visualiser ---------------------------------------------------
+     `visualize` runs the learner's code under a tracer and returns every step
+     of it. `analyzeForVisualizer` asks how that code can be called, so the
+     input form can be generated instead of typed. Both are host-owned because
+     both mean starting a process. */
+  analyzeForVisualizer(input: z.infer<typeof visualizerAnalyzeInput>): Promise<VisualizerSpec>;
+  /** A trace that ends in an exception is a successful call: the frames up to
+   *  the throw are the point. This rejects only when no trace could be produced
+   *  at all — no interpreter, a timeout, output past the ceiling. */
+  visualize(input: z.infer<typeof visualizerTraceInput>): Promise<VisualizerTrace>;
+  /** One problem, in full, for the visualiser to inherit its inputs from.
+   *  Distinct from the search hit a list holds: this is the statement, the
+   *  declared signature, the worked examples and the starter code. */
+  visualizerProblem(input: z.infer<typeof sourceSlugInput>): Promise<VisualizerProblem | null>;
+  /** A diagram the agent built into a reply, by the id its tool call returned.
+   *  Fetched rather than carried in the message: the frames behind a picture are
+   *  far larger than the sentence that introduces it, and a transcript that
+   *  inlined them would grow by a trace per explanation. */
+  visualizerView(input: { id: string }): Promise<AgentVisualization | null>;
+  /** The steps behind an older transcript row, which the session load leaves on
+   *  disk. See `TRANSCRIPT_ACTIVITY_WINDOW`. */
+  messageActivity(input: { messageId: string }): Promise<AgentActivityStep[]>;
   /** Try the pull again after it failed — the button on the screen that failure
    *  puts up. Resolves with wherever the retry landed. */
   retryRestore(): Promise<RestoreState>;

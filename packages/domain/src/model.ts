@@ -7,6 +7,24 @@ export const LANGUAGES = ["javascript", "typescript", "python", "java", "c", "cp
 export const languageSchema = z.enum(LANGUAGES);
 export type Language = z.infer<typeof languageSchema>;
 
+const EXTENSION_LANGUAGE: Record<string, Language> = {
+  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
+  py: "python", pyi: "python",
+  java: "java",
+  c: "c", h: "c",
+  cc: "cpp", cpp: "cpp", cxx: "cpp", hpp: "cpp",
+  go: "go", rs: "rust", swift: "swift", rb: "ruby",
+};
+
+/** The language of a path, or null when Spar has no name for it. Null is a real
+ *  answer here — a README or a lockfile is not a language failure. */
+export function languageForPath(filePath: string): Language | null {
+  const extension = filePath.split(".").pop()?.toLowerCase();
+  if (!extension) return null;
+  return EXTENSION_LANGUAGE[extension] ?? null;
+}
+
 /** What the learner told Spar about themselves at onboarding.
  *  `language` is the default every new session starts in — a default, not a
  *  constraint: naming another language in a goal still wins. */
@@ -343,6 +361,13 @@ export const trackSchema = z.object({
   title: z.string().min(1).max(80),
   goal: z.string().min(3).max(1000),
   status: trackStatusSchema,
+  /* The language every challenge in this Track is written in. Null means "follow
+     the profile", which is what a Track created before Tracks had a language of
+     their own means — and what a learner who never chose one means. A Track that
+     names a language owns it: the goal "practice python hashmaps" produced
+     TypeScript for as long as the global profile was the only language in the
+     context. */
+  language: languageSchema.nullable().default(null),
   emphasis: z.array(z.string()).default([]),
   priorities: z.array(z.string()).default([]),
   investigating: z.array(id).default([]),
@@ -515,7 +540,11 @@ export const sessionDetailSchema = z.object({
   question: activeQuestionSchema.nullable(),
   checkpoint: z.unknown().nullable(),
   pendingLearnerQuestion: askUserQuestionRequestSchema.nullable(),
-  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate, activity: z.array(agentActivityStepSchema).default([]) })),
+  /* `activity` is loaded only for the recent tail of the transcript — see
+     `TRANSCRIPT_ACTIVITY_WINDOW` in the store. `activityCount` is how many steps
+     an older message has on disk but not in memory, which is what lets the
+     transcript offer them rather than pretend the turn did nothing. */
+  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate, activity: z.array(agentActivityStepSchema).default([]), activityCount: z.number().int().min(0).default(0) })),
   events: z.array(z.object({ id, sequence: z.number().int(), type: z.string(), occurredAt: isoDate, payload: z.record(z.unknown()), source: z.string() }))
 });
 export type SessionDetail = z.infer<typeof sessionDetailSchema>;

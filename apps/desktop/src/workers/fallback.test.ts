@@ -46,7 +46,9 @@ describe("guaranteed fallback challenge", () => {
   for (const language of ["javascript","typescript","python","java","c","cpp","go","rust","swift","ruby"] as const) {
     it(`compiles and validates the ${language} fallback`, async () => {
       const design = fallbackDesign(language);
-      const compiled = await compileQuestion(design, (files) => execute(files, language));
+      /* Compiled exactly as the host compiles it: the fallback is Spar's own
+         design, and the case-volume bar is aimed at what the model writes. */
+      const compiled = await compileQuestion(design, (files) => execute(files, language), "host");
       const failures = compiled.report.checks.filter((check) => !check.passed);
       expect(failures.map((check) => `${check.name}: ${check.detail}`)).toEqual([]);
       expect(compiled.report.valid).toBe(true);

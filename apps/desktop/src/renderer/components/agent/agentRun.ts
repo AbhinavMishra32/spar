@@ -41,6 +41,43 @@ export type AgentRun = {
  * one growing message rather than a wall of fragments, and a tool's start/end
  * pair updates one row in place via its callId.
  */
+/**
+ * How much of one block of thinking, or one answer, is kept in memory.
+ *
+ * A turn arrives one token at a time and each token used to rewrite the block it
+ * belongs to: `body + text`, a new parts array, a new run object, a React
+ * update. For a turn that thinks for ninety seconds that is hundreds of
+ * thousands of intermediate strings, each one a copy of everything said so far,
+ * and the heap it churns through is quadratic in the length of the thought. That
+ * is where the gigabytes came from — the app was not holding them so much as
+ * generating them faster than they could be collected, and V8 does not hand that
+ * back to the operating system once it has grown for it.
+ *
+ * Two things fix it and both are here: the flush in `App` applies a frame's
+ * worth of deltas in one pass, and this caps what any single part can grow to.
+ * The cap keeps the head — the beginning of a thought is the part worth reading,
+ * and nobody is scrolling a hundred thousand characters of it.
+ */
+const MAX_BODY = 20_000;
+
+/** Appends, and stops growing at the cap rather than copying forever. */
+function extend(body: string, text: string): string {
+  if (body.length >= MAX_BODY) return body;
+  const next = body + text;
+  return next.length <= MAX_BODY ? next : `${next.slice(0, MAX_BODY)}…`;
+}
+
+/**
+ * A whole frame's events, applied in one pass.
+ *
+ * The reducer below copies the parts array per event, which is right for one
+ * event and ruinous for a thousand. Folding the buffered batch through it and
+ * setting state once is what turns a per-token rewrite into a per-frame one.
+ */
+export function reduceRunBatch(current: AgentRun | null, events: readonly AgentStreamEvent[]): AgentRun | null {
+  return events.reduce<AgentRun | null>((run, event) => reduceRun(run, event) ?? run, current);
+}
+
 export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): AgentRun | null {
   const run: AgentRun = current && current.runId === event.runId
     ? current
@@ -56,7 +93,7 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       // A word of the answer closes the thinking that produced it.
       const settled = closeReasoning(parts);
       const tail = settled[settled.length - 1];
-      if (tail?.kind === "text") settled[settled.length - 1] = { ...tail, body: tail.body + text };
+      if (tail?.kind === "text") settled[settled.length - 1] = { ...tail, body: extend(tail.body, text) };
       else settled.push({ kind: "text", id: `${event.runId}-t${settled.length}`, body: text });
       return { ...run, parts: settled, status: "streaming" };
     }
@@ -80,7 +117,7 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
          row per call and read as a stack of stubs rather than as one thought. */
       if (last?.kind === "reasoning") {
         const { endedAt: _reopened, ...held } = last;
-        parts[parts.length - 1] = { ...held, body: last.body + text, open: true };
+        parts[parts.length - 1] = { ...held, body: extend(last.body, text), open: true };
       } else {
         parts.push({ kind: "reasoning", id: `${event.runId}-r${parts.length}`, body: text, open: true, startedAt: Date.now() });
       }
@@ -172,7 +209,11 @@ export type GroupedPart =
   | Exclude<RunPart, { kind: "tool" }>
   | { kind: "tool-row"; id: string; part: ToolPart }
   | { kind: "challenge"; id: string; part: ToolPart }
-  | { kind: "solve-read"; id: string; part: ToolPart };
+  | { kind: "solve-read"; id: string; part: ToolPart }
+  /** A diagram the agent built into its reply. Lifted out of the step rows for
+   *  the same reason a published challenge is: it is something the learner is
+   *  meant to look at, not a record of the agent having looked at something. */
+  | { kind: "explained-trace"; id: string; part: ToolPart };
 
 /**
  * Rows, in the order everything happened.
@@ -190,6 +231,9 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
     // Reading the solve is set apart for the same reason: it is what the rest of
     // the turn is a response to.
     else if (part.kind === "tool" && part.tool === "replay_attempt" && part.phase !== "error") grouped.push({ kind: "solve-read", id: `solve-${part.id}`, part });
+    // A successful visualisation is the picture; a failed one is an ordinary
+    // failed step, because there is nothing to draw.
+    else if (part.kind === "tool" && part.tool === "visualize_explain" && part.phase === "done") grouped.push({ kind: "explained-trace", id: `trace-${part.id}`, part });
     /* Every other call is its own row.
        Consecutive calls used to be folded into one collapsed group under a
        synthesized summary — "Reviewed past attempts, checked concept evidence, and
@@ -199,9 +243,34 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
        replaces four specific sentences with one generic one is throwing away the
        only part worth reading. */
     else if (part.kind === "tool") grouped.push({ kind: "tool-row", id: `tool-${part.id}`, part });
+    /* Thinking that was interrupted only by more thinking is one thought.
+
+       The stream opens a fresh reasoning block per provider call, and a stored
+       turn records one step per block, so a turn that made six calls came back as
+       six settled blocks in a row — a dozen grey headings stacked down the
+       transcript with the actual work pushed off the screen. Nothing happened
+       between them: there is no tool call, no reply, nothing to divide them but
+       the provider's own accounting. Joined here rather than in the reducer so
+       the live transcript and the stored one fold identically, and so the parts
+       themselves stay a faithful record of what arrived. */
+    else if (part.kind === "reasoning" && !part.open && last(grouped)?.kind === "reasoning") {
+      const open = grouped[grouped.length - 1] as Extract<RunPart, { kind: "reasoning" }>;
+      if (open.open) grouped.push(part);
+      else grouped[grouped.length - 1] = {
+        ...open,
+        // Blank line between them: a heading is only a heading at the start of a
+        // line, so joining two blocks with a space would bury the second's.
+        body: `${open.body}\n\n${part.body}`.trim(),
+        endedAt: Math.max(open.endedAt ?? 0, part.endedAt ?? 0),
+      };
+    }
     else grouped.push(part);
   }
   return grouped;
+}
+
+function last(grouped: GroupedPart[]): GroupedPart | undefined {
+  return grouped[grouped.length - 1];
 }
 
 function isProtocolNoise(body: string): boolean {
@@ -229,6 +298,11 @@ const TOOL_VERBS: Record<string, string> = {
   evaluate_attempt: "Evaluated your attempt",
   propose_ability_update: "Updated ability document",
   commit_session_decision: "Committed next action",
+  open_visualizer: "Opened the visualiser",
+  visualize_run: "Traced the code",
+  visualize_find: "Looked for the moment it changed",
+  visualize_read_step: "Read the state at that step",
+  visualize_explain: "Drew what happens",
   web_search: "Searched the web",
   web_fetch: "Read a web page",
 };
@@ -276,7 +350,10 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   create_question: ["Build challenge", "Built challenge"],
   replace_current_question: ["Build replacement challenge", "Built replacement challenge"],
   create_fallback_question: ["Set a standard challenge", "Set a standard challenge"],
-  ask_user_question: ["Prepare a question", "Prepared a question"],
+  /* Named for the thing the learner watched happen. "Prepared a question" is
+     the tool's own view of itself — the question had already been asked, and
+     answered, by the time that row settled. */
+  ask_user_question: ["Asking you something", "Asked a question"],
   /* The two that leave the learner's own record. Named for the fact of going out
      to the web, because that is the part worth noticing in a transcript that is
      otherwise entirely about them. */

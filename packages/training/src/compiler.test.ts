@@ -7,8 +7,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 const design={title:"Repair the queue",language:"typescript",kind:"repair",statement:"Repair the event queue so work enqueued while draining is never lost.",starterFiles:{"queue.ts":"broken"},referenceFiles:{"queue.ts":"correct"},visibleTests:{"visible.test.ts":"visible"},hiddenTests:{"hidden.test.ts":"hidden"},knownIncorrectFiles:[{"queue.ts":"incorrect"}],runCommand:"test",accidentalDifficulty:["basic TypeScript"],expectedFailureSignatures:["stops after current batch"]};
 const actual={title:"Normalize event batches",language:"javascript" as const,kind:"function" as const,statement:"Return the first stable batch whose accumulated weight reaches the requested threshold.",starterFiles:{"src/batch.js":"export function firstStableBatch(events, threshold) { throw new Error(\"implement\") }"},referenceFiles:{"src/batch.js":"export function firstStableBatch(events, threshold) { let total=0; for(let i=0;i<events.length;i++){ total+=events[i]; if(total>=threshold)return events.slice(0,i+1) } return [] }"},visibleTests:{"tests/visible.test.js":"import test from \"node:test\";import assert from \"node:assert/strict\";import {firstStableBatch} from \"../src/batch.js\";test(\"direct threshold\",()=>assert.deepEqual(firstStableBatch([2,3],5),[2,3]));"},hiddenTests:{"tests/hidden.test.js":"import test from \"node:test\";import assert from \"node:assert/strict\";import {firstStableBatch} from \"../src/batch.js\";test(\"must stop at first valid invariant\",()=>assert.deepEqual(firstStableBatch([3,3,9],5),[3,3]));"},knownIncorrectFiles:[{"src/batch.js":"export function firstStableBatch(events, threshold) { let total=0; for(const event of events) total+=event; return total>=threshold?events:[] }"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["accumulates the complete input after the invariant is already satisfied"]};
-const run=async(files:Record<string,string>)=>{const root=await mkdtemp(path.join(tmpdir(),"spar-compiler-"));const started=Date.now();try{for(const[file,content]of Object.entries(files)){const target=path.join(root,file);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,content);}try{const result=await promisify(execFile)(process.execPath,["--test",...Object.keys(files).filter(file=>file.endsWith(".test.js"))],{cwd:root,timeout:5000});return{exitCode:0,stdout:result.stdout,stderr:result.stderr,durationMs:Date.now()-started};}catch(error){const value=error as {stdout?:string;stderr?:string;code?:number};return{exitCode:Number(value.code??1),stdout:value.stdout??"",stderr:value.stderr??"",durationMs:Date.now()-started};}}finally{await rm(root,{recursive:true,force:true});}};
-describe("question compiler",()=>{it("releases only when plausible incorrect code passes visible and fails hidden",async()=>{const {report}=await compileQuestion(design,async(files)=>{const failed=files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files;return{exitCode:failed?1:0,stdout:failed?"not ok - preserves work queued while draining\n    expected: retained\n    actual: lost\n":"ok - preserves queued work\n",stderr:"",durationMs:5}});expect(report.valid).toBe(true);});it("rejects weak hidden tests",async()=>{const {report}=await compileQuestion({...design,expectedFailureSignatures:[]},async()=>({exitCode:0,stdout:"ok - visible case\n",stderr:"",durationMs:1}));expect(report.valid).toBe(false);});});
+const run=async(files:Record<string,string>)=>{const root=await mkdtemp(path.join(tmpdir(),"spar-compiler-"));const started=Date.now();try{for(const[file,content]of Object.entries(files)){const target=path.join(root,file);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,content);}try{const result=await promisify(execFile)(process.execPath,["--test","--test-reporter=tap",...Object.keys(files).filter(file=>file.endsWith(".test.js"))],{cwd:root,timeout:5000});return{exitCode:0,stdout:result.stdout,stderr:result.stderr,durationMs:Date.now()-started};}catch(error){const value=error as {stdout?:string;stderr?:string;code?:number};return{exitCode:Number(value.code??1),stdout:value.stdout??"",stderr:value.stderr??"",durationMs:Date.now()-started};}}finally{await rm(root,{recursive:true,force:true});}};
+describe("question compiler",()=>{it("releases only when plausible incorrect code passes visible and fails hidden",async()=>{const {report}=await compileQuestion(design,async(files)=>{const failed=files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files;return{exitCode:failed?1:0,stdout:failed?"not ok - preserves work queued while draining\n    expected: retained\n    actual: lost\n":"ok - preserves queued work\n",stderr:"",durationMs:5}},"host");expect(report.valid).toBe(true);});it("rejects weak hidden tests",async()=>{const {report}=await compileQuestion({...design,expectedFailureSignatures:[]},async()=>({exitCode:0,stdout:"ok - visible case\n",stderr:"",durationMs:1}));expect(report.valid).toBe(false);});});
 
 it("rejects a silent assert-only suite even when every exit code is correct",async()=>{
   const {report}=await compileQuestion(design,async(files)=>({
@@ -32,21 +32,21 @@ it("rejects misconception files that do not replace the reference implementation
 
 it("materializes JavaScript assertion oracles from the isolated reference solution",async()=>{
   const wrongExpected={...actual,hiddenTests:{"tests/hidden.test.js":"import test from \"node:test\";import assert from \"node:assert/strict\";import {firstStableBatch} from \"../src/batch.js\";test(\"must stop at first valid invariant\",()=>assert.deepEqual(firstStableBatch([3,3,9],5),[3,3,9]));"}};
-  const compiled=await compileQuestion(wrongExpected,run);
+  const compiled=await compileQuestion(wrongExpected,run,"host");
   expect(compiled.report.valid, JSON.stringify(compiled.report.checks.filter((check)=>!check.passed))).toBe(true);
   expect(compiled.design.hiddenTests["tests/hidden.test.js"]).toContain("[3,3]");
 });
 
 it("materializes a bounded differential hidden counterexample",async()=>{
   const weakHidden={...actual,hiddenTests:{"tests/hidden.test.js":actual.visibleTests["tests/visible.test.js"]}};
-  const compiled=await compileQuestion(weakHidden,run);
+  const compiled=await compileQuestion(weakHidden,run,"host");
   expect(compiled.report.valid).toBe(true);
   expect(Object.keys(compiled.design.hiddenTests)).toContain("src/.spar-generated-1.hidden.test.js");
 });
 
 it("synthesizes a visible-safe targeted mutant when the model gives an equivalent implementation",async()=>{
   const equivalent={...actual,knownIncorrectFiles:[actual.referenceFiles]};
-  const compiled=await compileQuestion(equivalent,run);
+  const compiled=await compileQuestion(equivalent,run,"host");
   expect(compiled.report.valid).toBe(true);
   expect(compiled.design.knownIncorrectFiles[0]?.["src/batch.js"]).not.toBe(actual.referenceFiles["src/batch.js"]);
 });
@@ -62,7 +62,7 @@ it("repairs a visible-failing branch misconception with a deterministic assignme
     knownIncorrectFiles:[{"src/branches.js":"export function branchValues() { return { a: 1, b: 2 }; }"}],
     runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["does not update b in the primary branch"],
   };
-  const compiled=await compileQuestion(branchDesign,run);
+  const compiled=await compileQuestion(branchDesign,run,"host");
   expect(compiled.report.valid,JSON.stringify(compiled.report.checks.filter((check)=>!check.passed))).toBe(true);
   expect(compiled.design.knownIncorrectFiles[0]?.["src/branches.js"]).toContain("b = b");
 });
@@ -77,11 +77,44 @@ it("keeps validation failures concise and strips runner paths and stacks",async(
 
 it("reports a CommonJS target whose return contract hides the misconception",async()=>{
   const commonjs={title:"Longest typed stream",language:"javascript" as const,kind:"function" as const,statement:"Return the longest contiguous event stream containing at most k distinct event types.",starterFiles:{"src/window.js":"function solve(){throw new Error('implement')} module.exports={solve};"},referenceFiles:{"src/window.js":"function solve(events,k){const counts=new Map();let left=0,best=0;for(let right=0;right<events.length;right++){counts.set(events[right],(counts.get(events[right])||0)+1);while(counts.size>k){const value=events[left++];counts.set(value,counts.get(value)-1);if(counts.get(value)===0)counts.delete(value)}best=Math.max(best,right-left+1)}return best} module.exports={solve};"},visibleTests:{"test/visible.test.js":"const test=require('node:test');const assert=require('node:assert/strict');const {solve}=require('../src/window.js');test('simple',()=>assert.equal(solve('ab',1),1));"},hiddenTests:{"test/hidden.test.js":"const test=require('node:test');const assert=require('node:assert/strict');const {solve}=require('../src/window.js');test('repeat',()=>assert.equal(solve('abc',1),1));"},knownIncorrectFiles:[{"path":"src/window.js","content":"function solve(events,k){const counts=new Map();let left=0,best=0;for(let right=0;right<events.length;right++){counts.set(events[right],(counts.get(events[right])||0)+1);if(counts.size>k){const value=events[left++];counts.set(value,counts.get(value)-1);if(counts.get(value)===0)counts.delete(value)}best=Math.max(best,right-left+1)}return best} module.exports={solve};"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["shrinks only once"]};
-  const compiled=await compileQuestion(commonjs,run);
+  const compiled=await compileQuestion(commonjs,run,"host");
   expect(compiled.report.valid).toBe(false);
   expect(compiled.report.checks.find((check)=>check.name==="known incorrect 1 fails hidden")?.detail).toContain("return contract may hide");
 },10_000);
 
 it("executes real visible and hidden tests against reference and plausible wrong code",async()=>{
-  const compiled=await compileQuestion(actual,run);expect(compiled.report.valid).toBe(true);expect(compiled.report.checks.find(check=>check.name==="known incorrect 1 passes visible")?.passed).toBe(true);expect(compiled.report.checks.find(check=>check.name==="known incorrect 1 fails hidden")?.passed).toBe(true);expect(compiled.report.checks.find(check=>check.name==="reference solution")?.passed).toBe(true);
+  const compiled=await compileQuestion(actual,run,"host");expect(compiled.report.valid).toBe(true);expect(compiled.report.checks.find(check=>check.name==="known incorrect 1 passes visible")?.passed).toBe(true);expect(compiled.report.checks.find(check=>check.name==="known incorrect 1 fails hidden")?.passed).toBe(true);expect(compiled.report.checks.find(check=>check.name==="reference solution")?.passed).toBe(true);
+});
+
+/**
+ * The case-volume bar, which is about the model's habits and not about shape.
+ *
+ * Measured from verdicts the reference run actually printed, so a suite cannot
+ * satisfy it by declaring cases it does not run. The fixtures above are marked
+ * `host` precisely because they are three-case designs testing something else;
+ * these two are the ones that hold an authored candidate to the bar.
+ */
+it("rejects an authored challenge that grades with a handful of cases",async()=>{
+  const {report}=await compileQuestion(design,async(files)=>{
+    const failed=files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files;
+    return{exitCode:failed?1:0,stdout:failed?"not ok - drains\n    expected: retained\n    actual: lost\n":"ok - one case\n",stderr:"",durationMs:5};
+  });
+  expect(report.valid).toBe(false);
+  expect(report.checks.find(check=>check.name==="case volume")?.passed).toBe(false);
+  expect(report.checks.find(check=>check.name==="case volume")?.detail).toContain("brute-force oracle");
+});
+
+it("accepts an authored challenge whose hidden suite actually sweeps",async()=>{
+  const sweep=Array.from({length:30},(_,index)=>`ok - generated ${index}: prefixLength([${index}], 1)`).join("\n");
+  const visible=Array.from({length:5},(_,index)=>`ok - stated case ${index}`).join("\n");
+  const {report}=await compileQuestion(design,async(files)=>{
+    const failed=files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files;
+    if(failed)return{exitCode:1,stdout:"not ok - drains\n    input: [3,3,9], 5\n    expected: retained\n    actual: lost\n",stderr:"",durationMs:5};
+    /* The visible-only run prints just the curated cases; every other run has
+       the hidden sweep in it too, which is what the volume check measures. */
+    return{exitCode:0,stdout:"hidden.test.ts" in files?`${visible}\n${sweep}\n`:`${visible}\n`,stderr:"",durationMs:5};
+  });
+  expect(report.checks.find(check=>check.name==="case volume")?.passed).toBe(true);
+  expect(report.checks.find(check=>check.name==="curated visible cases")?.passed).toBe(true);
+  expect(report.valid).toBe(true);
 });

@@ -40,6 +40,7 @@ export const PALETTE_PLACES: PalettePlace[] = [
   { page: "progress", label: "Progress", keywords: "abilities rating patterns evidence" },
   { page: "history", label: "History", keywords: "attempts challenges completed incomplete" },
   { page: "problems", label: "Problems", keywords: "practice browse library leetcode codeforces solve pick" },
+  { page: "visualizer", label: "Visualize", keywords: "visualizer debugger trace step through animation memory linked list tree pointers watch run python" },
   { page: "sessions", label: "Sessions", keywords: "all list" },
   { page: "ability", label: "Abilities", keywords: "map skills evidence what i can do" },
   { page: "challenges", label: "Challenges", keywords: "history problems attempts tests" },

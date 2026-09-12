@@ -54,6 +54,24 @@ describe("CodeforcesClient", () => {
     expect(verdict).toMatchObject({ outcome: "passed", status: "Accepted", submitted: true, submissionId: "99" });
   });
 
+  it("submits Python on CPython rather than PyPy", async () => {
+    /* PyPy is the faster judge, but Spar runs the local samples on python3. A
+       program that passes locally and fails on a dialect difference at submit
+       time is the one failure the learner cannot reproduce. */
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href.endsWith("/problemset/submit") && !init?.method) return html(`<meta content="fresh" name="X-Csrf-Token"><input name="ftaa" value="f"><input name="bfaa" value="b"><select name="programTypeId"><option value="70">PyPy 3.10 (7.3.15, 64bit)</option><option value="31">Python 3.8.10</option></select>`);
+      if (href.endsWith("/problemset/submit") && init?.method === "POST") {
+        expect(String(init.body)).toContain("programTypeId=31");
+        return html("submitted");
+      }
+      if (href.includes("user.status")) return json({ status: "OK", result: [{ id: 7, contestId: 4, creationTimeSeconds: Math.floor(Date.now() / 1000), programmingLanguage: "Python 3", verdict: "OK", passedTestCount: 3, problem: PROBLEM }] });
+      throw new Error(`unexpected ${href}`);
+    }) as typeof fetch;
+    const verdict = await new CodeforcesClient(async () => SESSION, fetcher).submit({ problem: { slug: "4/A", externalId: "4/A" }, language: "python", code: "print(1)", timeoutMs: 5_000 });
+    expect(verdict).toMatchObject({ outcome: "passed", submitted: true });
+  });
+
   it("reports a rejected session instead of pretending the compiler is missing", async () => {
     const expired = vi.fn();
     const fetcher = vi.fn(async () => new Response(`<form><input name="handleOrEmail"><input name="password"></form>`, {

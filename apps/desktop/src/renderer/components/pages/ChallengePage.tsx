@@ -179,7 +179,7 @@ function Brief({
         )}
 
         <Section title="THE PROBLEM">
-          <ProblemStatement source={detail.statement} />
+          <ProblemStatement language={summary.language} source={detail.statement} />
         </Section>
 
         {(summary.replacesQuestionTitle || summary.replacedByQuestionTitle) && (
@@ -314,13 +314,29 @@ export function ChallengePage({
     };
   }, [api, challengeId, adopt, onError]);
 
+  const terminalFlush = useRef(0);
+  const scheduleTerminalFlush = useCallback(() => {
+    if (terminalFlush.current) return;
+    terminalFlush.current = requestAnimationFrame(() => {
+      terminalFlush.current = 0;
+      setTerminal(terminalRef.current);
+    });
+  }, []);
+  useEffect(() => () => { if (terminalFlush.current) cancelAnimationFrame(terminalFlush.current); }, []);
+
   useEffect(() => {
     if (!api) return;
     return api.onRunnerEvent((event) => {
       if (event.id !== visibleRunId.current) return;
-      terminalRef.current += event.data;
-      setTerminal(terminalRef.current);
+      /* Bounded, and flushed a frame at a time. A generated sweep prints a line
+         per case and a runaway loop prints without stopping; appending each
+         chunk to an ever-growing string and setting state on every one of them
+         is how a test run turned into gigabytes of churn. The tail is what is
+         kept — the end of a log is the part that says what happened. */
+      terminalRef.current = clampTail(terminalRef.current + event.data);
+      scheduleTerminalFlush();
       if (event.stream === "exit") {
+        setTerminal(terminalRef.current);
         setRunning(false);
         visibleRunId.current = null;
         setOutcome({
@@ -329,7 +345,7 @@ export function ChallengePage({
         });
       }
     });
-  }, [api]);
+  }, [api, scheduleTerminalFlush]);
 
   // One rim sweep when a run lands, matching the workspace's own settle.
   const wasBusy = useRef(false);
@@ -427,7 +443,33 @@ export function ChallengePage({
     return () => removeEventListener("keydown", listener);
   });
 
-  const mount: OnMount = (editor) => editor.updateOptions({ fontLigatures: true });
+  const mount: OnMount = (editor, monaco) => {
+    editor.updateOptions({ fontLigatures: true });
+    editors.current = monaco;
+  };
+  const editors = useRef<Parameters<OnMount>[1] | null>(null);
+
+  /**
+   * Models belonging to challenges that are no longer open, disposed.
+   *
+   * Monaco keeps a model per file path for as long as the page lives, and the
+   * editor component deliberately does not throw them away when `path` changes —
+   * that is what preserves scroll position and undo history when you switch
+   * files. It also means every challenge ever opened in this session is still
+   * held in full, and for JavaScript and TypeScript the language worker holds
+   * its own analysed copy of each one, which is the expensive half.
+   *
+   * Nothing outside this challenge's files needs to survive, so nothing does.
+   */
+  useEffect(() => {
+    const monaco = editors.current;
+    if (!monaco) return;
+    const live = new Set((detail?.files ?? []).map((file) => file.path.replace(/^\/+/, "")));
+    for (const model of monaco.editor.getModels()) {
+      const path = model.uri.path.replace(/^\/+/, "");
+      if (!live.has(path)) model.dispose();
+    }
+  }, [challengeId, detail?.files]);
   const activeFile = detail?.files.find((file) => file.path === activePath);
   const scaffold = useMemo(
     () => detail?.source?.source === "leetcode" ? splitSolutionScaffold(drafts[activePath] ?? "") : null,
@@ -634,4 +676,13 @@ export function ChallengePage({
       </PanelGroup>
     </div>
   );
+}
+
+/** How much of a run's output is worth keeping in memory. Past this the head is
+ *  dropped: a log's tail is the part that says what happened, and no one reads
+ *  the first megabyte of a runaway loop. */
+const MAX_TERMINAL = 200_000;
+
+function clampTail(text: string): string {
+  return text.length <= MAX_TERMINAL ? text : `…earlier output dropped.\n${text.slice(-MAX_TERMINAL)}`;
 }

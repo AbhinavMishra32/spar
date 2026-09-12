@@ -188,7 +188,11 @@
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: oklch(14.5% 0 0 / 6%);
-  --sidebar-accent-active: oklch(14.5% 0 0 / 11%);
+  /* Barely a step over hover, on purpose. Selection in a source list is the
+     answer to "which one am I looking at", and the pane beside it already
+     answers that at full size — so the row only has to be findable at a glance,
+     not shouted. The old value read as a filled bar. */
+  --sidebar-accent-active: oklch(14.5% 0 0 / 8%);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: oklch(14.5% 0 0 / 8%);
   --sidebar-ring: var(--ring);
@@ -256,6 +260,43 @@
   --concept-engineering: oklch(52% 0.09 203);
   --concept-craft: oklch(55% 0.11 42);
 
+  /* Trace identity. The visualiser needs to tell one variable from another at a
+     glance while a dozen of them move, and it needs to do it in an app that is
+     otherwise monochrome — so these are held to exactly the brief the concept
+     hues are: a dot, a hairline, a label, a faint wash. Never a filled shape,
+     never coloured body text.
+
+     Six because that is how many pointers a linked-list or two-pointer problem
+     puts on screen at once before it stops being a problem anyone is learning
+     from; past that the canvas cycles rather than inventing hues nobody can
+     name. One lightness and one chroma across all six, rotated far enough apart
+     to survive the common colour confusions, so no variable looks more
+     important than another — which would be a lie about the algorithm.
+
+     `--trace-change` is the exception and is deliberately the only warm accent
+     in the set: "this changed on this step" is the single most important thing
+     the canvas says, and it has to win against six identity colours at once. */
+  --trace-1: oklch(54% 0.13 274);
+  --trace-2: oklch(54% 0.12 168);
+  --trace-3: oklch(56% 0.12 52);
+  --trace-4: oklch(54% 0.12 232);
+  --trace-5: oklch(55% 0.13 348);
+  --trace-6: oklch(56% 0.12 128);
+  --trace-change: oklch(56% 0.16 32);
+  /* The graph's own furniture: an edge is structure, not content, so it sits at
+     the weight of a border rather than of text. */
+  --trace-edge: color-mix(in oklab, var(--foreground) 30%, transparent);
+  --trace-node: color-mix(in oklab, var(--foreground) 4%, var(--background));
+
+  /* The transcript's own greys. A step in the agent thread is secondary to the
+     prose around it and the mark in its gutter is secondary again, so all three
+     are tints of the foreground rather than separate hues — they stay correct
+     when the foreground moves. */
+  --transcript-step: oklch(14.5% 0 0 / 60%);
+  --transcript-step-strong: oklch(14.5% 0 0 / 80%);
+  --transcript-step-mark: oklch(14.5% 0 0 / 50%);
+  --border-surface-strong: oklch(14.5% 0 0 / 15%);
+  --brand: oklch(14.5% 0 0);
   --code-foreground: #33363b;
   --code-comment: #727780;
   --code-keyword: #ce2734;
@@ -298,7 +339,7 @@
 
   --sidebar: transparent;
   --sidebar-accent: oklch(98.5% 0 0 / 7%);
-  --sidebar-accent-active: oklch(98.5% 0 0 / 13%);
+  --sidebar-accent-active: oklch(98.5% 0 0 / 10%);
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: oklch(98.5% 0 0 / 9%);
 
@@ -307,6 +348,19 @@
   --color-background-elevated-primary: var(--surface-primary);
   --color-background-elevated-secondary: var(--surface-secondary);
   --color-background-editor: color-mix(in oklab, black 14%, var(--background));
+
+  /* Lifted and slightly desaturated for the dark ground: the same hues at the
+     light lightness turn to mud on a 23% background, and the same chroma reads
+     as neon once the surface stops competing with it. */
+  --trace-1: oklch(76% 0.11 274);
+  --trace-2: oklch(78% 0.11 168);
+  --trace-3: oklch(80% 0.10 52);
+  --trace-4: oklch(77% 0.10 232);
+  --trace-5: oklch(77% 0.11 348);
+  --trace-6: oklch(79% 0.11 128);
+  --trace-change: oklch(78% 0.13 32);
+  --trace-edge: color-mix(in oklab, var(--foreground) 34%, transparent);
+  --trace-node: color-mix(in oklab, var(--foreground) 8%, var(--background));
 
   --app-window-fill: oklch(23.5% 0 0);
   /* Lighter than the pane, not darker: the sidebar is the surface the content
@@ -355,6 +409,11 @@
   --concept-engineering: oklch(74% 0.09 203);
   --concept-craft: oklch(76% 0.10 45);
 
+  --transcript-step: oklch(98.5% 0 0 / 50%);
+  --transcript-step-strong: oklch(98.5% 0 0 / 78%);
+  --transcript-step-mark: oklch(98.5% 0 0 / 40%);
+  --border-surface-strong: oklch(98.5% 0 0 / 20%);
+  --brand: oklch(98.5% 0 0);
   --code-foreground: #c9d1d9;
   --code-comment: #8b949e;
   --code-keyword: #ff8177;
@@ -670,6 +729,107 @@
 
   .agent-transcript {
     --transcript-width: 46rem;
+
+    /* ---- The reference thread, matched rather than approximated ------------
+       The transcript is the one surface in this window that is not chrome, and
+       the reference it is measured against — Aside's session view — builds it
+       from a different system than the rest of this app uses: Geist rather than
+       the platform face, a superellipse at every radius rather than only at the
+       sheet scale, and a two-size type scale (14px for the work, 16px for the
+       prose) rather than the 12/13px the chrome runs at.
+
+       Those are deliberate divergences from the app's own rules, so they are
+       scoped here and nowhere else. Nothing outside `.agent-transcript` sees
+       any of it: the sidebar, the toolbars and the settings pages keep the
+       system face and the arcs they were designed with. */
+
+    /* Geist, and only here. The rest of the window uses the platform's own UI
+       face because it is hinted for chrome sizes against a glass backdrop —
+       see `--font-sans`. The transcript is a reading surface at 14–16px, which
+       is where Geist was drawn to sit, and it is the single largest reason the
+       reference reads the way it does. */
+    --thread-font: "Geist Variable", "Geist", var(--font-sans);
+    font-family: var(--thread-font);
+
+    /* The reference's own superellipse exponent, which is flatter than the
+       app's 1.65 because it is applied at every radius rather than only at the
+       big ones — the same curve that reads as material on a 20px sheet reads as
+       a blob on a 6px chip. */
+    --squircle-factor: 1.4;
+
+    /* Tailwind's radius scale × that factor, which is exactly how the reference
+       derives its own. Rescoped rather than redefined globally, so `rounded-lg`
+       inside the transcript is 11.2px and `rounded-lg` in a toolbar is still
+       10px. */
+    --radius-md: calc(0.375rem * var(--squircle-factor));
+    --radius-lg: calc(0.5rem * var(--squircle-factor));
+    --radius-xl: calc(0.75rem * var(--squircle-factor));
+    --radius-2xl: calc(1rem * var(--squircle-factor));
+
+    /* Surface strokes. The reference never pairs a 1px border with a shadow —
+       it draws a half-pixel ring in one of these two greys and lets the shadow
+       start outside it, which is the same rule `smooth-shadow-ring` encodes for
+       the rest of this app. */
+    --border-surface: oklch(14.5% 0 0 / 10%);
+    --border-surface-strong: oklch(14.5% 0 0 / 15%);
+  }
+
+  .dark .agent-transcript {
+    --border-surface: oklch(98.5% 0 0 / 15%);
+    --border-surface-strong: oklch(98.5% 0 0 / 20%);
+  }
+
+  /* The superellipse, back on for the whole thread.
+     
+     The app opts every radius under the sheet scale back out to a circular arc
+     (see the `corner-shape` block in @layer base) because at 6–10px the curve
+     is invisible and only lends the corner weight. Inside the transcript that
+     trade goes the other way: the panels a tool row opens are 11–17px, they sit
+     one inside another, and the continuous corner is what keeps a stack of them
+     from reading as a stack of boxes. */
+  @supports (corner-shape: superellipse(2)) {
+    .agent-transcript :is(
+      [class~="rounded-md"],
+      [class~="rounded-lg"],
+      [class~="rounded-xl"],
+      [class~="rounded-2xl"]
+    ) {
+      corner-shape: superellipse(var(--squircle-factor));
+    }
+
+    /* Circles stay circles, as everywhere else. */
+    .agent-transcript [class*="rounded-full"] {
+      corner-shape: round;
+    }
+  }
+
+  /* The thread's prose face. Sizing is left exactly where the app sets it —
+     `--md-*` still derives the whole markdown scale from `.md-prose` above. */
+  .agent-transcript .md-prose {
+    font-family: var(--thread-font);
+  }
+
+  /* A panel that opens does not appear — it grows, at the reference's own
+     duration and curve. Radix publishes the measured height as a custom
+     property; without these two rules the content pops to full height in one
+     frame and the thread jumps under the pointer. */
+  .agent-transcript [data-slot="collapsible-content"] {
+    overflow: hidden;
+  }
+  .agent-transcript [data-slot="collapsible-content"][data-state="open"] {
+    animation: thread-panel-down 200ms cubic-bezier(0, 0, 0.2, 1);
+  }
+  .agent-transcript [data-slot="collapsible-content"][data-state="closed"] {
+    animation: thread-panel-up 200ms cubic-bezier(0, 0, 0.2, 1);
+  }
+
+  @keyframes thread-panel-down {
+    from { height: 0; }
+    to { height: var(--radix-collapsible-content-height); }
+  }
+  @keyframes thread-panel-up {
+    from { height: var(--radix-collapsible-content-height); }
+    to { height: 0; }
   }
 
   /* The fallback matters: composers and banners sit outside .agent-transcript,
@@ -1025,10 +1185,219 @@
 
   /* ---- Code -------------------------------------------------------------- */
 
+  /* ---- Agent prose ---------------------------------------------------------
+     ChatGPT's markdown scale, taken from its own stylesheet rather than
+     approximated. Everything derives from one unit — `--md-space`, which is the
+     body size over four — so the whole system moves together if the body size
+     changes, and no margin is a number somebody picked.
+
+     Resolved at the 15px body Spar uses: space 3.75px, line-height 24.4px
+     (1.625), small text 13.1px. The parts worth knowing, because they are the
+     ones that make it read like ChatGPT rather than like a generic prose sheet:
+
+       - Paragraphs are tight by default and only open up between siblings.
+         `p + p` gets four units; a paragraph after a heading gets none. That is
+         what stops the transcript looking double-spaced.
+       - List markers are semibold and in the text colour, not muted. They read
+         as structure rather than as punctuation, and it is the single most
+         recognisable thing about ChatGPT's lists.
+       - A blockquote's rule is an inset rounded bar drawn as a pseudo-element,
+         not a border — it stops short of the text's top and bottom.
+       - Inline code has `box-decoration-break: clone`, so a fragment that wraps
+         gets its corners on both lines instead of one long torn box.
+
+     Named `md-` rather than pasted onto the component so the transcript, concept
+     entries and anything else that renders agent prose can share one scale. */
+  .md-prose {
+    /* 13.5px: prose, not a headline.
+       
+       Chrome and prose are different jobs and want different sizes — the agent's
+       text was set at 13px, the size of a toolbar label, which is why a
+       paragraph of teaching had the density of a settings row. But ChatGPT's own
+       16px assumes a column about twice this panel's width, and at 380px that
+       reads as oversized.
+       
+       Half a step above the app's UI size is enough to change how it reads.
+       Every margin, heading, pill and list indent below is a multiple of this,
+       so moving this one line rescales the whole system together. */
+    --md-font-size: 0.84375rem;
+    /* The system face, and the system's own optical sizing.
+       
+       `--font-display` is named for the job rather than for a file: on macOS it
+       resolves through `-apple-system` exactly as `--font-sans` does, and the
+       platform picks the Text or Display cut from the size. Naming it here is
+       still worth it, because on Windows the two stacks genuinely differ. */
+    font-family: var(--font-display);
+    /* Slightly off the full foreground. Pure white text at this size on a dark
+       ground buzzes; ChatGPT's body sits just under its own maximum too. */
+    color: color-mix(in oklab, var(--foreground) 92%, transparent);
+    --md-line-height: calc(var(--md-font-size) * 1.625);
+    --md-small-font-size: max(0.8125rem, calc(var(--md-font-size) * 0.875));
+    --md-space: calc(var(--md-font-size) / 4);
+    font-size: var(--md-font-size);
+    line-height: var(--md-line-height);
+    /* A bare UUID or a long path must wrap rather than widen the column. */
+    overflow-wrap: anywhere;
+  }
+
+  .md-prose > :first-child { margin-top: 0; }
+  .md-prose > :last-child { margin-bottom: 0; }
+
+  .md-prose p {
+    margin: 0 0 var(--md-space);
+    white-space: pre-wrap;
+  }
+  .md-prose > p:not(:first-child) { margin-top: calc(var(--md-space) * 3.5); }
+  .md-prose > p + p { margin-block: calc(var(--md-space) * 4); }
+
+  /* 700, not 600. At prose sizes a semibold heading beside a semibold bold run
+     is not distinguishable from it, and the transcript loses its outline. */
+  .md-prose :is(h1, h2, h3, h4, h5, h6) {
+    font-weight: 700;
+    letter-spacing: -0.011em;
+    color: var(--foreground);
+  }
+  .md-prose h1 {
+    margin: 0 0 calc(var(--md-space) * 2);
+    font-size: calc(var(--md-font-size) * 1.5);
+    line-height: calc(var(--md-space) * 8);
+  }
+  .md-prose h2 {
+    margin: calc(var(--md-space) * 5) 0 calc(var(--md-space) * 2);
+    font-size: calc(var(--md-font-size) * 1.25);
+    line-height: calc(var(--md-space) * 7);
+  }
+  .md-prose h3 {
+    margin: calc(var(--md-space) * 5) 0 calc(var(--md-space) * 2);
+    font-size: calc(var(--md-font-size) * 1.125);
+    line-height: calc(var(--md-space) * 7);
+  }
+  .md-prose h4 {
+    margin: calc(var(--md-space) * 4) 0 0;
+    font-size: var(--md-font-size);
+    line-height: calc(var(--md-space) * 6);
+  }
+  .md-prose :is(h5, h6) {
+    margin: 0;
+    font-size: var(--md-font-size);
+    line-height: var(--md-line-height);
+  }
+  .md-prose h4 + p { margin-top: 0; }
+  .md-prose > ul + :is(h1, h2, h3, h4),
+  .md-prose > ol + :is(h1, h2, h3, h4) { margin-top: calc(var(--md-space) * 4); }
+
+  .md-prose :is(ul, ol) {
+    margin: 0;
+    /* Indented by the line height, so the text column lines up with the leading
+       rather than with an arbitrary padding. */
+    padding-inline-start: var(--md-line-height);
+    list-style-position: outside;
+  }
+  .md-prose ul { list-style-type: disc; }
+  .md-prose ul ul { list-style-type: circle; }
+  .md-prose ul ul ul { list-style-type: square; }
+  .md-prose ol { list-style-type: decimal; }
+  .md-prose > :is(ul, ol):not(:first-child) { margin-top: calc(var(--md-space) * 3); }
+  .md-prose > p + :is(ul, ol) { margin-top: 0; }
+
+  .md-prose li {
+    padding-inline-start: calc(var(--md-space) * 1.5);
+    display: list-item;
+  }
+  .md-prose li + li { margin-top: calc(var(--md-space) * 1.5); }
+  .md-prose li > :first-child { margin-top: 0; margin-bottom: 0; }
+  .md-prose li > :last-child { margin-bottom: 0; }
+  .md-prose li > p { margin: 0; }
+  .md-prose li > p + p { margin-top: calc(var(--md-space) * 4); }
+  .md-prose li > :is(ul, ol) { margin-top: 0; margin-bottom: 0; }
+  /* The tell. Muted markers make a list read as a run of dashes; these are the
+     same weight as a heading and the same colour as the text. */
+  .md-prose :is(ul, ol) > li::marker {
+    color: var(--foreground);
+    font-weight: 700;
+  }
+
+  /* Bold carries weight here rather than colour, so it has to be heavy enough to
+     read as emphasis in a paragraph rather than as a slightly darker word. */
+  .md-prose :is(strong, b) {
+    font-weight: 700;
+    color: var(--foreground);
+  }
+
+  .md-prose blockquote {
+    position: relative;
+    margin: 0 0 calc(var(--md-space) * 2);
+    border: 0;
+    padding-block: calc(var(--md-space) * 2);
+    padding-inline-start: calc(var(--md-space) * 6);
+    color: inherit;
+    font-style: normal;
+    line-height: calc(var(--md-space) * 6);
+  }
+  .md-prose blockquote::after {
+    content: "";
+    position: absolute;
+    inset-inline-start: 0;
+    top: calc(var(--md-space) * 2);
+    bottom: calc(var(--md-space) * 2);
+    width: var(--md-space);
+    border-radius: calc(var(--md-space) / 2);
+    background-color: var(--border-strong);
+  }
+  .md-prose blockquote > :first-child { margin-top: 0; }
+  .md-prose blockquote > :last-child { margin-bottom: 0; }
+
+  .md-prose hr {
+    clear: both;
+    height: 0;
+    margin: calc(var(--md-space) * 7) 0;
+    border: 0;
+    border-top: 1px solid var(--border-strong);
+  }
+  .md-prose hr + * { margin-top: 0; }
+
+  /* A pill, not a tint. ChatGPT's inline code is a clearly drawn object with
+     real horizontal padding — paths and identifiers are the thing a learner
+     copies out of a sentence, and they have to be findable at a glance. */
+  /* Inline code is code, so it takes the code palette. It used to be drawn from
+     `--muted` and the body colour, which meant an identifier in a sentence and
+     the same identifier in the editor two inches away were different colours —
+     the one comparison a learner makes constantly. */
+  .md-prose :not(pre) > code {
+    display: inline;
+    border-radius: calc(var(--radius-sm) + 1px);
+    background: color-mix(in oklab, var(--code-foreground) 10%, transparent);
+    color: var(--code-foreground);
+    padding: calc(var(--md-space) * 0.5) calc(var(--md-space) * 1.5);
+    font-family: var(--font-mono);
+    font-size: var(--md-small-font-size);
+    font-weight: 500;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    /* So a wrapped fragment keeps its corners on both lines. */
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
+  }
+
+  .md-prose :is(table) { font-size: var(--md-small-font-size); }
+
+  /* The problem pane runs at the app's content size, not the transcript's.
+     
+     `.md-prose` is scaled for the thread, which is a reading surface. A problem
+     statement sits beside the editor in a column the learner is scanning against
+     code, and it was 13px there before the two surfaces started sharing one
+     renderer. Rescoped rather than reverted: every margin, heading and list
+     indent still derives from this one line, so the pane keeps the same system
+     at its own size. */
+  .md-prose-content {
+    --md-font-size: var(--text-content);
+  }
+
   .code-inline {
     border-radius: 0.35rem;
-    border: 1px solid color-mix(in srgb, var(--border) 82%, var(--foreground) 8%);
-    background: color-mix(in srgb, var(--muted) 70%, transparent);
+    border: 1px solid color-mix(in srgb, var(--code-border) 82%, var(--code-foreground) 8%);
+    background: color-mix(in srgb, var(--code-background) 70%, transparent);
+    color: var(--code-foreground);
     padding: 0.05em 0.32em;
     font-family: var(--font-mono);
     font-size: 0.92em;
@@ -1044,8 +1413,8 @@
 
   .code-block {
     border-radius: var(--radius-lg);
-    border: 1px solid var(--border);
-    background: color-mix(in srgb, var(--muted) 45%, transparent);
+    border: 1px solid var(--code-border);
+    background: var(--code-background);
     font-family: var(--font-mono);
   }
 }
@@ -1341,4 +1710,52 @@
     opacity: 1;
     color: var(--foreground);
   }
+}
+
+
+/* ---------------------------------------------------------------------------
+   The visualiser's current line.
+
+   Marked three ways for one reason each. The whole line's background says where
+   execution is; the bar in the gutter survives a horizontal scroll, when the
+   background has been scrolled out from under the code; and the line number is
+   lit because that is where somebody looks when the narration under the canvas
+   says "line 12".
+
+   Deliberately not `--trace-change`. Warm accent means "this value changed on
+   this step" everywhere else in the visualiser, and spending it on "you are
+   here" — which is true on every single step — would leave the thing that
+   actually changed with nothing to say it apart. So the current line is drawn
+   in the app's own foreground at low weight, and the accent stays rare.
+--------------------------------------------------------------------------- */
+.viz-line {
+  background: color-mix(in oklab, var(--foreground) 7%, transparent);
+}
+
+.viz-line-gutter {
+  width: 2px !important;
+  margin-left: 3px;
+  background: var(--foreground);
+  opacity: 0.55;
+}
+
+.viz-line-number {
+  color: var(--foreground) !important;
+  font-weight: 600;
+}
+
+/* Edited since the trace was taken. The line the trace named may not be the
+   line that is there now, so the mark stays — losing it would read as "no
+   line" rather than "not any more" — and stops being confident about it. */
+.viz-line.viz-line-stale {
+  background: color-mix(in oklab, var(--foreground) 3%, transparent);
+}
+
+.viz-line-gutter.viz-line-gutter-stale {
+  opacity: 0.25;
+}
+
+.viz-line-number.viz-line-number-stale {
+  color: var(--muted-foreground) !important;
+  font-weight: 500;
 }

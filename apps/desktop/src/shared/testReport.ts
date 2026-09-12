@@ -17,6 +17,14 @@ export type CaseStatus = "passed" | "failed" | "skipped" | "todo";
 
 export type TestFailure = {
   message?: string;
+  /** The arguments the case was called with.
+   *
+   *  A hidden case that fails and will not say what it ran is the single most
+   *  frustrating thing a grader can do: the learner is told `expected 2, got 3`
+   *  about an input they cannot see, and the only move left is guessing. Every
+   *  harness prints this on failure, and generated cases carry it in their name
+   *  as well, so a failure always says which input broke it. */
+  input?: string;
   expected?: string;
   actual?: string;
   operator?: string;
@@ -91,6 +99,8 @@ export function parseTestOutput(output: string): TestReport {
     if (expected) failure.expected = expected;
     const actual = block.fields.actual;
     if (actual) failure.actual = actual;
+    const inputs = block.fields.input;
+    if (inputs) failure.input = inputs;
     const operator = block.fields.operator;
     if (operator) failure.operator = operator;
     const location = block.fields.location;
@@ -133,7 +143,7 @@ export function parseTestOutput(output: string): TestReport {
  * prose that merely mentions them is not mistaken for a verdict.
  */
 const CHECK = /^(not ok|ok)\s*(?:\d+\s*)?[-–]\s*(.+)$/;
-const CHECK_FIELD = /^\s+(expected|actual|error|message)\s*:\s*(.*)$/i;
+const CHECK_FIELD = /^\s+(input|expected|actual|error|message)\s*:\s*(.*)$/i;
 
 function parseCheckLines(output: string): TestReport {
   const lines = output.replace(/\r\n/g, "\n").split("\n");
@@ -157,7 +167,8 @@ function parseCheckLines(output: string): TestReport {
     const failure = current.failure ?? {};
     const key = (field[1] ?? "").toLowerCase();
     const value = (field[2] ?? "").trim();
-    if (key === "expected") failure.expected = value;
+    if (key === "input") failure.input = value;
+    else if (key === "expected") failure.expected = value;
     else if (key === "actual") failure.actual = value;
     else failure.message = value;
     current.failure = failure;
@@ -182,6 +193,7 @@ export type TestCaseRecord = {
   name: string;
   status: CaseStatus;
   durationMs?: number;
+  input?: string;
   expected?: string;
   actual?: string;
   message?: string;
@@ -199,6 +211,7 @@ export function caseRecords(report: TestReport): TestCaseRecord[] {
     name: item.name,
     status: item.status,
     ...(item.durationMs === undefined ? {} : { durationMs: Math.round(item.durationMs * 100) / 100 }),
+    ...(item.failure?.input === undefined ? {} : { input: clip(item.failure.input) }),
     ...(item.failure?.expected === undefined ? {} : { expected: clip(item.failure.expected) }),
     ...(item.failure?.actual === undefined ? {} : { actual: clip(item.failure.actual) }),
     ...(headline(item.failure?.message) ? { message: clip(headline(item.failure?.message)!) } : {}),

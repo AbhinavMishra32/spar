@@ -33,6 +33,21 @@ describe("transcript rows", () => {
     expect(rows.map((row) => row.kind)).toEqual(["tool-row", "tool-row", "tool-row"]);
   });
 
+  /* A turn that makes six provider calls settles six reasoning blocks with
+     nothing between them, and each one drew its own grey heading. */
+  it("joins thinking that was interrupted by nothing into one thought", () => {
+    const think = (id: string, body: string): RunPart => ({ kind: "reasoning", id, body, open: false, startedAt: 0, endedAt: 1 });
+    const rows = groupParts([think("a", "**Planning**"), think("b", "**Refining**"), tool("read_ability"), think("c", "**Deciding**")]);
+    expect(rows.map((row) => row.kind)).toEqual(["reasoning", "tool-row", "reasoning"]);
+    expect((rows[0] as Extract<RunPart, { kind: "reasoning" }>).body).toBe("**Planning**\n\n**Refining**");
+  });
+
+  it("leaves the thought still being written alone", () => {
+    const settled: RunPart = { kind: "reasoning", id: "a", body: "done", open: false, startedAt: 0, endedAt: 1 };
+    const live: RunPart = { kind: "reasoning", id: "b", body: "writing", open: true, startedAt: 0 };
+    expect(groupParts([settled, live]).map((row) => row.id)).toEqual(["a", "b"]);
+  });
+
   it("still lifts the two outcomes out of the run of steps", () => {
     const published = { ...tool("create_question"), phase: "done" as const };
     const rows = groupParts([tool("search_learner_model"), tool("replay_attempt"), published]);

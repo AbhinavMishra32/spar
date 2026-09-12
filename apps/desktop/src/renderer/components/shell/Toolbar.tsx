@@ -1,5 +1,7 @@
-import { ChevronLeft, PanelLeftOpen } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ExpandSidebar } from "./ExpandSidebar";
+import { SIDEBAR_SLIDE_CSS } from "./sidebarMotion";
 
 /** Inset macOS toolbar: one title-bar row tall, hairline base, draggable but for the controls. */
 export function Toolbar({
@@ -26,20 +28,20 @@ export function Toolbar({
         // always on the trailing edge, and on macOS they land here only once the
         // sidebar (which normally hosts them) is hidden.
         "pr-[max(0.625rem,var(--window-controls-trailing))]",
+        /* Eased rather than switched, on the sidebar's own curve: the inset
+           appears as the column vacates the space it needs. Switched, the title
+           stepped sideways by the width of the traffic lights on the first frame
+           of a collapse that had not started moving yet. */
+        "transition-[padding-left]",
+        SIDEBAR_SLIDE_CSS,
         onExpandSidebar && "pl-[max(0.625rem,var(--window-controls-leading))]",
         className,
       )}
     >
-      {onExpandSidebar && (
-        <button
-          className="app-no-drag grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onExpandSidebar}
-          title="Show sidebar  ⌘B"
-          type="button"
-        >
-          <PanelLeftOpen className="size-3.5" />
-        </button>
-      )}
+      {/* Revealed, not mounted — the button is the only part of this row that
+          exists *because* the sidebar left, so it opens on the same curve the
+          column closes on. */}
+      <ExpandSidebar gap={8} onExpand={onExpandSidebar} />
       {onBack && (
         <button
           className="app-no-drag grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

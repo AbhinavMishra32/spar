@@ -111,7 +111,9 @@ export function buildHarness(input: { problem: PracticeProblem; language: Langua
     [paths.entry]: solutionFile(language, starter, signature),
     ...(language === "cpp"
       ? { [paths.test]: cppTest(signature, runnable), [paths.support as string]: CPP_SUPPORT }
-      : { [paths.test]: scriptTest(language, signature, runnable) }),
+      : language === "python"
+        ? { [paths.test]: pythonTest(signature, runnable) }
+        : { [paths.test]: scriptTest(language, signature, runnable) }),
   };
   return { supported: true, files, entryPath: paths.entry, testPaths: [paths.test], cases: runnable };
 }
@@ -129,7 +131,7 @@ export function buildProgramHarness(input: { problem: PracticeProblem; language:
   const starter = problem.languages.find((candidate) => candidate.language === language)?.starter ?? programStarter(language);
   if(!LOCAL_PROGRAM_HARNESS.has(language))return{supported:false,reason:`${LANGUAGE_NAME[language]} uses the source's own sample runner or judge; Spar does not wrap its stdin/stdout locally yet.`,files:{[entryPath]:starter},entryPath,testPaths:[],cases:[]};
   const cases = input.cases.filter((entry) => entry.input.length === 1 && entry.expected.trim());
-  const comment = language === "cpp" ? "//" : "//";
+  const comment = language === "python" ? "#" : "//";
   const solution = [
     `${comment} Everything between the markers is submitted to ${problem.source === "codeforces" ? "Codeforces" : "the source"}.`,
     `${comment} ${SOLUTION_START}`,
@@ -139,14 +141,18 @@ export function buildProgramHarness(input: { problem: PracticeProblem; language:
   ].join("\n");
   if (!cases.length) return { supported: false, reason: "This problem publishes no complete input/output example Spar can run locally.", files: { [entryPath]: solution }, entryPath, testPaths: [], cases: [] };
 
-  const testPath = language === "cpp" ? "tests/examples.test.cpp" : `tests/examples.test.${language === "typescript" ? "ts" : "js"}`;
-  const test = language === "cpp" ? cppProgramTest(cases) : scriptProgramTest(entryPath, cases);
+  /* The name is the runner's selector, not a label: Spar runs Python tests by
+     globbing `test_*.py`, so a file called `examples.test.py` would be written
+     and then never run. */
+  const testPath = language === "cpp" ? "tests/examples.test.cpp" : language === "python" ? "tests/test_examples.py" : `tests/examples.test.${language === "typescript" ? "ts" : "js"}`;
+  const test = language === "cpp" ? cppProgramTest(cases) : language === "python" ? pythonProgramTest(entryPath, cases) : scriptProgramTest(entryPath, cases);
   const support = language === "cpp" ? { "include/bits/stdc++.h": `#pragma once\n${CPP_INCLUDES}\n` } : {};
   return { supported: true, files: { [entryPath]: solution, [testPath]: test, ...support }, entryPath, testPaths: [testPath, ...Object.keys(support)], cases };
 }
 
 function programStarter(language: Language): string {
   if (language === "cpp") return "#include <bits/stdc++.h>\nusing namespace std;\n\nint main() {\n  ios::sync_with_stdio(false);\n  cin.tie(nullptr);\n\n  // Read input, solve the problem, and print the answer.\n  return 0;\n}";
+  if (language === "python") return "import sys\n\ndata = sys.stdin.read().split()\n# Parse input, solve the problem, and print the answer.\n";
   if (language === "typescript") return "import * as fs from \"fs\";\n\nconst input: string = fs.readFileSync(0, \"utf8\").trim();\n// Parse input, solve the problem, and print the answer.\nvoid input;";
   return "const fs = require(\"fs\");\n\nconst input = fs.readFileSync(0, \"utf8\").trim();\n// Parse input, solve the problem, and print the answer.\nvoid input;";
 }
@@ -196,8 +202,8 @@ function cppSamples(rows: Array<{ name: string; input: string; expected: string 
 }
 
 const LANGUAGE_NAME: Record<Language, string> = {javascript:"JavaScript",typescript:"TypeScript",python:"Python",java:"Java",c:"C",cpp:"C++",go:"Go",rust:"Rust",swift:"Swift",ruby:"Ruby"};
-const LOCAL_FUNCTION_HARNESS=new Set<Language>(["javascript","typescript","cpp"]);
-const LOCAL_PROGRAM_HARNESS=new Set<Language>(["javascript","typescript","cpp"]);
+const LOCAL_FUNCTION_HARNESS=new Set<Language>(["javascript","typescript","python","cpp"]);
+const LOCAL_PROGRAM_HARNESS=new Set<Language>(["javascript","typescript","python","cpp"]);
 
 const LAYOUT: Record<Language, { entry: string; test: string; support?: string }> = {
   javascript: { entry: "src/solution.js", test: "tests/examples.test.js" },
@@ -219,6 +225,13 @@ const LAYOUT: Record<Language, { entry: string; test: string; support?: string }
 function solutionFile(language: Language, starter: string, signature: PracticeSignature | null): string {
   const body = starter.replace(/\s+$/, "");
   const entry = signature && !signature.classBased ? signature.name : "";
+  if (language === "python") {
+    /* The preamble is outside the markers for the same reason C++'s includes are:
+       LeetCode's own environment has `List`, `Optional`, `ListNode` and `TreeNode`
+       already in scope, and its starter refers to them without importing them.
+       Reproducing that here is what makes the published starter run unmodified. */
+    return [PYTHON_PREAMBLE, "", "", `# ${SOLUTION_START}`, body, `# ${SOLUTION_END}`, ""].join("\n");
+  }
   if (language === "cpp") {
     return [
       "#pragma once",
@@ -289,6 +302,332 @@ function scriptTest(language: Language, signature: PracticeSignature, cases: Pra
     "    assert.strictEqual(String(JSON.stringify(actual)), String(item.expected), `${item.name}: expected ${item.expected}, got ${JSON.stringify(actual)}.`);",
     "  });",
     "}",
+    "",
+  ].join("\n");
+}
+
+/**
+ * What LeetCode's Python environment already has in scope.
+ *
+ * Its starter writes `List[int]` and `Optional[ListNode]` in the signature and
+ * imports nothing, because the judge's own module has `typing` star-imported and
+ * the node classes defined. A file that reproduces that is a file where the
+ * published starter runs unmodified; a file that does not fails on line one with
+ * a `NameError`, which is the least informative way a correct solution can lose.
+ * It sits outside the markers so the submitted region stays byte-for-byte the
+ * learner's own code.
+ */
+const PYTHON_PREAMBLE = [
+  "from typing import *",
+  "from collections import Counter, OrderedDict, defaultdict, deque",
+  "import bisect",
+  "import functools",
+  "import heapq",
+  "import itertools",
+  "import math",
+  "",
+  "",
+  "class ListNode:",
+  "    def __init__(self, val=0, next=None):",
+  "        self.val, self.next = val, next",
+  "",
+  "",
+  "class TreeNode:",
+  "    def __init__(self, val=0, left=None, right=None):",
+  "        self.val, self.left, self.right = val, left, right",
+].join("\n");
+
+/**
+ * The generated test for Python.
+ *
+ * A plain script rather than a pytest module, because Spar runs Python tests by
+ * invoking `python3` on each `test_*.py` it finds and pytest may not be
+ * installed. It prints TAP 13 for the same reason the C++ harness does: TAP is
+ * what the result panel reads per case, and a run that only sets an exit code
+ * arrives as a wall of text with no cases in it.
+ *
+ * Two conversions do the real work. Arguments declared `ListNode` or `TreeNode`
+ * arrive from the statement as arrays and are built into real nodes, and a
+ * result that *is* a node is rendered back into the statement's array notation —
+ * without which every linked-list problem would compare `[5,4,3,2,1]` against
+ * `<solution.ListNode object at 0x...>`.
+ */
+function pythonTest(signature: PracticeSignature, cases: PracticeCase[]): string {
+  const rows = cases.map((entry) => ({
+    name: `${entry.name} (${entry.origin})`,
+    args: entry.input.map((value) => value.trim()),
+    expected: entry.expected.trim(),
+  }));
+  return [
+    '"""Generated by Spar from this problem\'s own published examples.',
+    "",
+    "Read-only: these are the cases the source states, so editing them would be",
+    "editing the problem. Some problems accept any of several correct answers and",
+    "the statement shows one of them, so a failure here is a difference from the",
+    "published example — the source's judge is the authority.",
+    '"""',
+    "",
+    "import ast",
+    "import json",
+    "import os",
+    "import sys",
+    "from collections import deque",
+    "",
+    'sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src"))',
+    "",
+    "import solution as _module",
+    "",
+    'ListNode = getattr(_module, "ListNode", None)',
+    'TreeNode = getattr(_module, "TreeNode", None)',
+    "",
+    `NAME = ${JSON.stringify(signature.name)}`,
+    `PARAM_TYPES = ${pythonList(signature.params.map((param) => param.type))}`,
+    `CASES = ${pythonValue(rows, 0)}`,
+    PYTHON_SUPPORT,
+  ].join("\n");
+}
+
+/** A JSON-ish value as a Python literal. Python reads JSON's own syntax for
+ *  everything used here, so this is `JSON.stringify` with Python's indentation. */
+function pythonValue(value: unknown, depth: number): string {
+  const pad = "    ".repeat(depth + 1);
+  const close = "    ".repeat(depth);
+  if (Array.isArray(value)) {
+    if (!value.length) return "[]";
+    return `[\n${value.map((item) => `${pad}${pythonValue(item, depth + 1)}`).join(",\n")},\n${close}]`;
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (!entries.length) return "{}";
+    return `{\n${entries.map(([key, item]) => `${pad}${JSON.stringify(key)}: ${pythonValue(item, depth + 1)}`).join(",\n")},\n${close}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function pythonList(values: readonly string[]): string {
+  return `[${values.map((value) => JSON.stringify(value)).join(", ")}]`;
+}
+
+/** The half of the Python test that does not depend on the problem. */
+const PYTHON_SUPPORT = `
+
+def parse(text):
+    """The statement's notation, as a value.
+
+    JSON covers almost all of it; the literal reader covers the rest — tuples,
+    'None', and the statements that quote with single quotes. Text that is
+    neither stays text, which is what keeps the loosely written answers testable.
+    """
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+    try:
+        return ast.literal_eval(text)
+    except Exception:
+        return text
+
+
+def linked_list(values):
+    head = None
+    for value in reversed(values):
+        head = ListNode(value, head)
+    return head
+
+
+def tree(values):
+    if not values or values[0] is None:
+        return None
+    root = TreeNode(values[0])
+    queue = deque([root])
+    items = iter(values[1:])
+    while queue:
+        parent = queue.popleft()
+        for field in ("left", "right"):
+            value = next(items, None)
+            if value is not None:
+                node = TreeNode(value)
+                setattr(parent, field, node)
+                queue.append(node)
+    return root
+
+
+def build(value, declared):
+    if declared == "ListNode" and ListNode is not None:
+        return linked_list(value if isinstance(value, list) else [])
+    if declared == "TreeNode" and TreeNode is not None:
+        return tree(value if isinstance(value, list) else [])
+    return value
+
+
+def render(value, seen=None):
+    """A result in the notation the statement uses.
+
+    Cycles are tracked because a half-finished reversal is very often a loop, and
+    reporting the answer should not be the thing that hangs.
+    """
+    seen = seen or set()
+    if value is None:
+        return None
+    if id(value) in seen:
+        return "<cycle>"
+    if TreeNode is not None and isinstance(value, TreeNode):
+        seen = seen | {id(value)}
+        levels, queue = [], deque([value])
+        while queue and len(levels) < 4096:
+            node = queue.popleft()
+            if node is None or id(node) in seen and node is not value:
+                levels.append(None)
+                continue
+            seen = seen | {id(node)}
+            levels.append(node.val)
+            queue.append(node.left)
+            queue.append(node.right)
+        while levels and levels[-1] is None:
+            levels.pop()
+        return levels
+    if ListNode is not None and isinstance(value, ListNode):
+        items, node = [], value
+        while node is not None and len(items) < 4096:
+            if id(node) in seen:
+                items.append("<cycle>")
+                break
+            seen = seen | {id(node)}
+            items.append(node.val)
+            node = node.next
+        return items
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [render(item, seen) for item in value]
+    return value
+
+
+def text(value):
+    try:
+        return json.dumps(value, separators=(",", ":"))
+    except TypeError:
+        return str(value)
+
+
+def flat(value):
+    return "".join(str(value).split())
+
+
+def matches(actual, expected_text):
+    """Structurally first, then on the flattened text.
+
+    The text pass is what lets [0, 1] and [0,1] agree, and what compares an
+    expected answer the statement wrote in a form no parser accepts.
+    """
+    if actual == parse(expected_text):
+        return True
+    return flat(text(actual)) == flat(expected_text)
+
+
+def quote(value):
+    return "'" + str(value).replace("\\\\", "\\\\\\\\").replace("'", "''").replace("\\n", " ") + "'"
+
+
+def main():
+    entry = _module.Solution() if hasattr(_module, "Solution") else _module
+    call = getattr(entry, NAME, None)
+    if call is None:
+        print("TAP version 13")
+        print("not ok 1 - " + NAME + " is defined")
+        print("  ---")
+        print("  error: " + quote("solution.py defines no " + NAME + " to call"))
+        print("  ...")
+        return 1
+    failures = 0
+    print("TAP version 13")
+    for ordinal, case in enumerate(CASES, 1):
+        name = case["name"]
+        try:
+            args = [build(parse(raw), declared) for raw, declared in zip(case["args"], PARAM_TYPES)]
+            actual = render(call(*args))
+        except Exception as error:
+            failures += 1
+            print("not ok " + str(ordinal) + " - " + name)
+            print("  ---")
+            print("  error: " + quote(type(error).__name__ + ": " + str(error)))
+            print("  ...")
+            continue
+        if matches(actual, case["expected"]):
+            print("ok " + str(ordinal) + " - " + name)
+            continue
+        failures += 1
+        print("not ok " + str(ordinal) + " - " + name)
+        print("  ---")
+        print("  error: " + quote("expected " + case["expected"] + ", got " + text(actual)))
+        print("  expected: " + quote(case["expected"]))
+        print("  actual: " + quote(text(actual)))
+        print("  ...")
+    print("1.." + str(len(CASES)))
+    print("# tests " + str(len(CASES)))
+    print("# pass " + str(len(CASES) - failures))
+    print("# fail " + str(failures))
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+`;
+
+/** The stdin/stdout runner for Python contest problems: the same program the
+ *  judge receives, launched once per published sample. */
+function pythonProgramTest(entryPath: string, cases: PracticeCase[]): string {
+  const rows = cases.map((entry) => ({ name: entry.name, input: entry.input[0] ?? "", expected: entry.expected }));
+  return [
+    '"""Generated by Spar from this problem\'s own published samples. Read-only."""',
+    "",
+    "import os",
+    "import subprocess",
+    "import sys",
+    "",
+    `SOLUTION = os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, *${pythonList(entryPath.split("/"))})`,
+    `CASES = ${pythonValue(rows, 0)}`,
+    "",
+    "",
+    "def clean(value):",
+    '    return "\\n".join(line.rstrip() for line in value.replace("\\r\\n", "\\n").rstrip().split("\\n"))',
+    "",
+    "",
+    "def quote(value):",
+    "    return \"'\" + str(value).replace(\"\\\\\", \"\\\\\\\\\").replace(\"'\", \"''\").replace(\"\\n\", \" \") + \"'\"",
+    "",
+    "",
+    "def main():",
+    "    failures = 0",
+    '    print("TAP version 13")',
+    "    for ordinal, case in enumerate(CASES, 1):",
+    "        try:",
+    '            run = subprocess.run([sys.executable, SOLUTION], input=case["input"], capture_output=True, text=True, timeout=10)',
+    "        except subprocess.TimeoutExpired:",
+    "            failures += 1",
+    '            print("not ok " + str(ordinal) + " - " + case["name"])',
+    '            print("  ---")',
+    '            print("  error: " + quote("the program did not finish within 10 seconds"))',
+    '            print("  ...")',
+    "            continue",
+    '        actual = clean(run.stdout)',
+    '        if run.returncode == 0 and actual == clean(case["expected"]):',
+    '            print("ok " + str(ordinal) + " - " + case["name"])',
+    "            continue",
+    "        failures += 1",
+    '        print("not ok " + str(ordinal) + " - " + case["name"])',
+    '        print("  ---")',
+    '        print("  error: " + quote(run.stderr.strip() or ("expected " + clean(case["expected"]) + ", got " + actual)))',
+    '        print("  expected: " + quote(clean(case["expected"])))',
+    '        print("  actual: " + quote(actual))',
+    '        print("  ...")',
+    '    print("1.." + str(len(CASES)))',
+    '    print("# tests " + str(len(CASES)))',
+    '    print("# pass " + str(len(CASES) - failures))',
+    '    print("# fail " + str(failures))',
+    "    return 1 if failures else 0",
+    "",
+    "",
+    'if __name__ == "__main__":',
+    "    raise SystemExit(main())",
     "",
   ].join("\n");
 }

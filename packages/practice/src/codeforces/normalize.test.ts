@@ -41,6 +41,6 @@ describe("Codeforces normalization", () => {
     expect(problem?.statement).not.toContain("time limit per test");
     expect(problem?.examples).toEqual([{ input: ["3\n5\n1 2"], output: "YES", explanation: "" }]);
     expect(casesForCodeforcesProblem(problem!)).toEqual([{ name: "Example 1", input: ["3\n5\n1 2"], expected: "YES", origin: "source" }]);
-    expect(problem?.languages.map((entry) => entry.language)).toEqual(["javascript", "typescript", "cpp"]);
+    expect(problem?.languages.map((entry) => entry.language)).toEqual(["javascript", "typescript", "python", "cpp"]);
   });
 });

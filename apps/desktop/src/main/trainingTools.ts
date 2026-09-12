@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { compileQuestion, fallbackDesign } from "@spar/training";
+import { compileQuestion, fallbackDesign, type DesignOrigin } from "@spar/training";
 import { abilityStatusSchema, languageSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
@@ -9,7 +9,29 @@ import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
 import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 import { practiceSourceName } from "./practiceChoice.js";
-import { SOURCE_READ_TOOLS } from "../workers/agentPolicy.js";
+import { SOURCE_READ_TOOLS, VISUALIZER_TOOLS } from "../workers/agentPolicy.js";
+import type { VisualizerToolbox } from "./visualizerTools.js";
+
+/**
+ * A published challenge's language becomes the Track's.
+ *
+ * The learner who says "in python man!" is not asking about this one challenge;
+ * they are telling Spar what this Track is for. Without this the correction
+ * lasts exactly one turn, because `preferredLanguage` is rebuilt from the Track
+ * on the next one and the next question comes back in the old language again.
+ *
+ * Derived from a tool result rather than from the learner's words: the agent has
+ * already resolved "in python man!" into `language: "python"` on a candidate the
+ * host compiled and ran. Nothing here reads natural language.
+ */
+function rememberTrackLanguage(local: LocalStore, trackId: string | null | undefined, value: Record<string, unknown>) {
+  if (!trackId) return;
+  const language = languageSchema.safeParse(value.language);
+  if (!language.success) return;
+  const track = local.listTracks().find((entry) => entry.id === trackId);
+  if (!track || track.language === language.data) return;
+  local.updateTrack(trackId, { language: language.data });
+}
 
 export async function executeTrainingTool(
   name: string,
@@ -20,9 +42,14 @@ export async function executeTrainingTool(
   runner: UtilityClient,
   web?: WebSearchService,
   practice?: PracticeService,
+  /* Optional for the same reason `web` and `practice` are: the tool tests call
+     this directly, and standing up a tracer to assert that `read_ability` reads
+     an ability would be a fixture with no bearing on the thing under test. */
+  visualizer?: VisualizerToolbox,
 ) {
   if (!sessionId) throw new Error("Training tool call is missing its session context");
   const value = input as Record<string, unknown>;
+  const trackId = local.trackIdForSession(sessionId);
   /* Reads of the practice source go straight through to its MCP server, which
      owns their schemas and their failure wording. Nothing is unwrapped here: the
      agent gets exactly what the server said, including its "carry on without me"
@@ -47,10 +74,16 @@ export async function executeTrainingTool(
     const urls = Array.isArray(value.urls) ? value.urls.map((entry) => String(entry)) : [String(value.url ?? "")];
     return web.fetch(urls);
   }
+  /* The visualiser's own toolkit, routed as a unit. It keeps state the rest of
+     these calls do not — a trace, held between calls so the agent can ask about
+     one run rather than re-running it per question — so it is an object with a
+     lifetime rather than another branch here. */
+  if (visualizer?.handles(name)) return visualizer.execute(name, value, sessionId);
+  if (VISUALIZER_TOOLS.includes(name)) return { error: "unavailable", note: "The execution visualiser is not available in this context." };
   if (name === "read_session") return local.readSession(String(value.sessionId));
-  if (name === "search_learner_model") return { passages: local.searchLearner(String(value.query ?? ""), Number(value.limit ?? 4)) };
-  if (name === "search_attempt_history") return { attempts: local.searchAttempts(String(value.query ?? ""), Number(value.limit ?? 5)) };
-  if (name === "search_challenge_history") return { challenges: local.searchChallenges(String(value.query ?? ""), Number(value.limit ?? 6)) };
+  if (name === "search_learner_model") return { passages: local.searchLearner(String(value.query ?? ""), Number(value.limit ?? 4), trackId) };
+  if (name === "search_attempt_history") return { attempts: local.searchAttempts(String(value.query ?? ""), Number(value.limit ?? 5), trackId) };
+  if (name === "search_challenge_history") return { challenges: local.searchChallenges(String(value.query ?? ""), Number(value.limit ?? 6), trackId) };
   if (name === "read_challenge") return { challenge: local.readChallenge(String(value.questionId ?? "")) };
   /* Both concept reads answer the same question at different resolutions.
      `read_concept_graph` is the shelf — what vocabulary exists near this topic
@@ -59,15 +92,15 @@ export async function executeTrainingTool(
      which is the difference between "arrays are shaky" and "the in-place pass is
      the problem and two-pointers is fine". */
   if (name === "read_concept_graph") {
-    const concepts = local.conceptGraph(String(value.query ?? value.conceptId ?? ""), Number(value.limit ?? 14));
+    const concepts = local.conceptGraph(String(value.query ?? value.conceptId ?? ""), Number(value.limit ?? 14), trackId);
     return { concepts, bounded: true, note: concepts.length ? "Counts roll each sub-concept's evidence into its area. `standing` is derived from graded outcomes; an untested concept is not a weak one." : "No concept in the vocabulary matches this query and the learner has no tagged evidence yet." };
   }
   if (name === "search_concept_evidence") {
-    const report = local.conceptEvidenceReport(String(value.concept ?? value.query ?? ""), Number(value.limit ?? 3));
+    const report = local.conceptEvidenceReport(String(value.concept ?? value.query ?? ""), Number(value.limit ?? 3), trackId);
     return { concepts: report, note: report.length ? "Read subConcepts before the top-level counts: an area's average hides the specific one that is failing." : "This concept has no tagged challenges yet, so there is nothing to read behaviour from." };
   }
   if (name === "set_session_objective") return { committed: true, ...local.setObjective(sessionId, String(value.objective)) };
-  if (name === "set_training_target") { const target=local.setTrainingTarget(sessionId, value as { ability: string; specificGap: string; desiredEvidence: string; avoidTesting: string[] });local.ensureAbility(target.abilityId,target.abilityTitle);local.queueAbilitySync(target.abilityId);return { committed: true, ...target }; }
+  if (name === "set_training_target") { const target=local.setTrainingTarget(sessionId, value as { ability: string; specificGap: string; desiredEvidence: string; avoidTesting: string[] });local.ensureAbility(target.abilityId,target.abilityTitle,trackId);local.queueAbilitySync(target.abilityId);return { committed: true, ...target }; }
   if (name === "commit_session_decision") return { committed: true, ...local.commitDecision(sessionId, value as { action: string; reason: string }) };
   if (name === "ask_user_question") {
     return { pending: true, ...local.setPendingIntake(sessionId, value as AskUserQuestionInput) };
@@ -81,7 +114,7 @@ export async function executeTrainingTool(
     /* Checked against the whole library, not this session. A session boundary is
        an implementation detail to the learner: the same challenge arriving under
        a new goal is the same challenge. */
-    if (local.challengeTitleUsed(proposedTitle)) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `The learner has already been asked a challenge titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
+    if (local.challengeTitleUsed(proposedTitle,trackId)) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `This Track has already used a challenge titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
     const saturation = saturatedConcept(local, sessionId, value.concepts);
     if (saturation) return { status: "invalid", report: { valid: false, checks: [{ name: "goal coverage", passed: false, detail: saturation }] } };
     const compiled = await compileCandidate(input, sessionId, workspaces, runner);
@@ -92,6 +125,7 @@ export async function executeTrainingTool(
     }
     await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: conceptTags(value.concepts) });
+    rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, report: compiled.report };
   }
   /* Not in the agent's tool list. The controller reaches for this only after
@@ -104,7 +138,7 @@ export async function executeTrainingTool(
     if (openChallenge(local, sessionId)) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "A challenge is already active for this session." }] } };
     const language = languageSchema.catch("javascript").parse(value.language);
     const design = fallbackDesign(language);
-    const compiled = await compileCandidate(design, sessionId, workspaces, runner);
+    const compiled = await compileCandidate(design, sessionId, workspaces, runner, "host");
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
     await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     /* Tagged like any other challenge, and tagged for what it actually is rather
@@ -123,14 +157,27 @@ export async function executeTrainingTool(
     if (!stillActive || stillActive.id !== activeQuestion.id) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "The active challenge changed while this replacement compiled. The candidate was discarded." }] } };
     await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."), conceptTags(value.concepts));
+    rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report };
   }
   if (name === "inspect_current_attempt" || name === "read_attempt") return { events: local.readAttempt(String(value.attemptId)) };
   if (name === "evaluate_attempt") return { events: local.readAttempt(String(value.attemptId)) };
+  if (name === "review_solution") {
+    const attemptId = String(value.attemptId);
+    const verdict = value.verdict === "rework" ? "rework" : "accepted";
+    const reasons = Array.isArray(value.reasons) ? value.reasons.map((entry) => String(entry)).slice(0, 4) : [];
+    local.appendNextEvent({ id: randomUUID(), attemptId, type: "submission_evaluated", occurredAt: new Date().toISOString(), payload: { review: verdict, reasons, approach: String(value.approach ?? ""), observedComplexity: String(value.observedComplexity ?? "") }, source: "system", schemaVersion: 1 });
+    if (verdict === "accepted") return { review: "accepted", note: "Recorded. The attempt stays complete." };
+    /* Reopening is the point of the tool, so it is the host that does it — an
+       agent that says "that does not meet the requirement" and leaves the
+       challenge closed has only complained. */
+    const reopened = local.reopenAttempt(attemptId, reasons.join(" ") || "The solution did not meet the challenge's stated requirements.");
+    return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
+  }
   if (name === "replay_attempt") return replayForAgent(local, value);
   if (name === "read_ability") return { ability: local.readAbility(String(value.abilityId)) };
   if (name === "propose_ability_update") {const updated=local.updateAbility({abilityId:String(value.abilityId),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
-  if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
+  if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)},trackId);local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   throw new Error(`Unsupported Spar tool: ${name}`);
 }
 
@@ -191,7 +238,7 @@ async function assignPracticeProblem(
   if (activeQuestion && design.title === activeQuestion.title) {
     return refuse("adaptive progression", `"${design.title}" is the challenge they are already on, so there is nothing to swap. Choose a different problem.`);
   }
-  if (local.challengeTitleUsed(design.title)) {
+  if (local.challengeTitleUsed(design.title,local.trackIdForSession(sessionId))) {
     return refuse("adaptive progression", `The learner has already been set "${design.title}". Choose a different problem, or write a challenge that approaches the same gap from another direction.`);
   }
   /* Nothing can grade it: no judge at the source, and no case Spar could recover
@@ -343,7 +390,7 @@ function saturatedConcept(local: LocalStore, sessionId: string, concepts: unknow
   if (!primary) return null;
   const summary = local.readSession(sessionId)?.summary;
   if (!summary || summary.questionTitles.length > 0) return null;
-  const recent = local.recentChallengeCoverage(3);
+  const recent = local.recentChallengeCoverage(3,local.trackIdForSession(sessionId));
   if (recent.length < 3 || !recent.every((row) => row.primaryConcept === primary)) return null;
   if (goalNames(summary.originalGoal, primary)) return null;
   return `The learner's last ${recent.length} challenges were all aimed at "${primary}" (${recent.map((row) => `"${row.title}"`).join(", ")}), and this session's goal — "${summary.originalGoal}" — does not name it. Retrieved history calibrates difficulty; it does not choose the topic. Set a target inside the surface this goal actually describes and aim this first challenge at a concept the learner has no recent evidence under.`;
@@ -405,12 +452,30 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0) : [];
 }
 
-async function compileCandidate(input:unknown,sessionId:string,workspaces:WorkspaceService,runner:UtilityClient){
-  const value=input as Record<string,unknown>;
-  return compileQuestion(input,async(files,_command,limits)=>{
+/**
+ * The stated requirements, written into the problem page.
+ *
+ * A constraint the learner is judged against has to be on the page they read,
+ * not only in the field the agent filled in — otherwise the first they hear of
+ * "this had to be one pass" is the review that sends it back, which is a trick
+ * rather than a challenge. Done here, in the host, so it is true of every
+ * challenge rather than of the ones where the agent remembered to repeat itself
+ * in the statement.
+ */
+function withRequirements(value: Record<string, unknown>): Record<string, unknown> {
+  const requirements = Array.isArray(value.solutionRequirements) ? value.solutionRequirements.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 4) : [];
+  if (!requirements.length || typeof value.statement !== "string") return value;
+  if (/^##\s*How this must be solved/m.test(value.statement)) return value;
+  const section = ["", "## How this must be solved", "", ...requirements.map((entry) => `- ${entry}`), "", "Passing the tests is not enough on its own: a solution that ignores these is handed back with an explanation."].join("\n");
+  return { ...value, solutionRequirements: requirements, statement: `${value.statement.trimEnd()}\n${section}\n` };
+}
+
+async function compileCandidate(input:unknown,sessionId:string,workspaces:WorkspaceService,runner:UtilityClient,origin:DesignOrigin="authored"){
+  const value=withRequirements(input as Record<string,unknown>);
+  return compileQuestion(value,async(files,_command,limits)=>{
     const validationId=randomUUID();
     const root=await workspaces.writeValidation(sessionId,validationId,files);
     try{return await runner.request("run",{root,language:String(value.language),command:"test",timeoutMs:limits.timeoutMs}).promise as {exitCode:number;stdout:string;stderr:string;durationMs:number};}
     finally{await workspaces.removeValidation(sessionId,validationId);}
-  });
+  },origin);
 }

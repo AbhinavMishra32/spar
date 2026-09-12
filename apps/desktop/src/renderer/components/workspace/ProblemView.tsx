@@ -76,7 +76,7 @@ export function ProblemView({
           </div>
         )}
 
-        <ProblemStatement source={presented.statement} />
+        <ProblemStatement language={question.language} source={presented.statement} />
 
         {question.source?.localRunNote && (
           <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-lg)] border border-[color-mix(in_oklab,var(--warning)_30%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_6%,transparent)] px-3 py-2 text-ui leading-[1.55] text-muted-foreground">
@@ -103,7 +103,7 @@ export function ProblemView({
                   </button>
                   {open && (
                     <div className="border-t border-border/70 px-3 py-2">
-                      <ProblemStatement source={hint} />
+                      <ProblemStatement language={question.language} source={hint} />
                     </div>
                   )}
                 </div>

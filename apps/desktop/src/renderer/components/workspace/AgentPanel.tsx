@@ -7,6 +7,7 @@ import { AgentThread } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
+import { useStopTurn } from "@/hooks/use-stop-turn";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { DifficultyPill } from "./Difficulty";
 import { ProblemView } from "./ProblemView";
@@ -44,6 +45,7 @@ export function AgentPanel({
 }) {
   const [view, setView] = useState<View>("problem");
   const busy = run?.status === "streaming";
+  const stop = useStopTurn(detail.summary.id);
 
   // The incoming view enters from the side it sits on in the switch, so the
   // motion agrees with the thumb instead of fighting it.
@@ -145,6 +147,7 @@ export function AgentPanel({
             onChange={onDraft}
             {...(onOpenSettings ? { onOpenSettings } : {})}
             // Answering lands in the transcript, so go where the answer will be.
+            onStop={stop}
             onSubmit={() => {
               setView("chat");
               onSend();

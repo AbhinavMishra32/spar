@@ -221,6 +221,11 @@ function languageId(html: string, language: Language) {
      keeps Run and Submit semantically aligned. */
   const preferences = language === "cpp"
     ? [/GNU (?:G\+\+|C\+\+)20\b/i, /GNU (?:G\+\+|C\+\+)23\b/i, /GNU (?:G\+\+|C\+\+)17\b/i, /GNU (?:G\+\+|C\+\+)14\b/i]
+    /* CPython before PyPy, even though PyPy is the faster judge: Spar runs the
+       local samples on `python3`, and a program that passes locally and then
+       fails on a dialect difference at submit time is the one failure the
+       learner cannot reproduce. */
+    : language === "python" ? [/^\s*Python 3/i, /\bPython 3/i, /PyPy 3/i]
     : language === "typescript" ? [/TypeScript/i] : [/JavaScript/i, /Node\.js/i];
   for (const pattern of preferences) {
     const option = options.find((candidate) => pattern.test(candidate.name));

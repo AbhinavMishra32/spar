@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { SessionDetail, SessionSummary } from "@spar/domain";
-import type { BootstrapData, SparApi, ThemePreference } from "../shared/api";
+import type { Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
+import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
 import { Sidebar, type Page, type SessionActions } from "./components/shell/Sidebar";
@@ -11,8 +11,11 @@ import { Toolbar } from "./components/shell/Toolbar";
 import { SearchPalette } from "./components/common/SearchPalette";
 import { TodayPage } from "./components/pages/TodayPage";
 import { BaselinePage } from "./components/pages/BaselinePage";
+import { SIDEBAR_SLIDE, SIDEBAR_SLIDE_CSS } from "./components/shell/sidebarMotion";
 import { TracksPage } from "./components/pages/TracksPage";
+import { TrackPage } from "./components/pages/TrackPage";
 import { ProblemsPage } from "./components/pages/ProblemsPage";
+import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { AbilityPage } from "./components/pages/AbilityPage";
@@ -24,7 +27,7 @@ import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { Workspace } from "./components/workspace/Workspace";
 import { PlanningView } from "./components/workspace/PlanningView";
 import { ChatView } from "./components/workspace/ChatView";
-import { reduceRun, type AgentRun } from "./components/agent/agentRun";
+import { reduceRunBatch, type AgentRun } from "./components/agent/agentRun";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
 import { SparDots } from "@/components/common/SparDots";
 import { Button } from "@/components/ui/button";
@@ -36,9 +39,11 @@ const api: SparApi | undefined = window.spar;
 const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge" | "baseline">, string> = {
   today: "Today",
   tracks: "Tracks",
+  track: "Track",
   progress: "Progress",
   history: "History",
   problems: "Problems",
+  visualizer: "Visualize",
   sessions: "Sessions",
   ability: "Abilities",
   challenges: "Challenges",
@@ -120,6 +125,9 @@ export function App() {
       const next = await api.openSession(id);
       if (!next) throw new Error("That session no longer exists.");
       setDetail(next);
+      // Opening a session crosses into its Track workspace. Re-read the shell so
+      // Today, Progress, and the sidebar all reflect that Track when Back is used.
+      setData(await api.bootstrap());
       /* A failed turn is reported on the card until someone goes and looks. Once
          they have, the durable transcript is the record of it and the held run
          would only keep the failure on the card behind them. */
@@ -148,11 +156,11 @@ export function App() {
   /* Starting a session is reachable before the shell exists: the last step of
      onboarding opens the sparring session the learner picked, so this has to be
      declared above the early returns rather than beside the other page actions. */
-  const start = useCallback(async (goal: string) => {
+  const start = useCallback(async (goal: string, trackId?: string) => {
     if (!api) return;
     setError(null);
     try {
-      const result = await api.createSession({ goal });
+      const result = await api.createSession({ goal, trackId });
       await refresh();
       await openSession(result.sessionId);
     } catch (cause) {
@@ -200,8 +208,28 @@ export function App() {
     return () => query.removeEventListener("change", sync);
   }, [data?.theme]);
 
+  /* Deltas arrive far faster than anything needs to be drawn — a fast provider
+     sends thousands a second — and each one used to be its own React update over
+     a growing transcript. They are buffered here and applied a frame at a time
+     instead; see `MAX_BODY` in agentRun for the whole story. */
+  const pending = useRef(new Map<string, AgentStreamEvent[]>());
+  const flushing = useRef(0);
   useEffect(() => {
     if (!api) return;
+    const flush = () => {
+      flushing.current = 0;
+      const batch = pending.current;
+      if (!batch.size) return;
+      pending.current = new Map();
+      setRuns((current) => {
+        let next = current;
+        for (const [sessionId, events] of batch) {
+          const run = reduceRunBatch(next[sessionId] ?? null, events);
+          if (run) next = next === current ? { ...current, [sessionId]: run } : Object.assign(next, { [sessionId]: run });
+        }
+        return next;
+      });
+    };
     const offAgent = api.onAgentEvent((event) => {
       /* The main process stamps the session on every event. The fallback is for
          a turn that somehow arrives unattributed: routing it to the open session
@@ -211,6 +239,10 @@ export function App() {
       if (!sessionId) return;
 
       if (event.type === "done") {
+        /* The turn's own buffered deltas are dropped: the reply it produced is
+           about to be re-read from storage, and replaying a partial stream over
+           the top of it would duplicate the transcript. */
+        pending.current.delete(sessionId);
         // The summaries every card is drawn from are re-read whichever session
         // finished; only the open one needs its detail re-opened.
         if (detailRef.current?.summary.id === sessionId) {
@@ -220,14 +252,15 @@ export function App() {
         return;
       }
 
-      setRuns((current) => {
-        const next = reduceRun(current[sessionId] ?? null, event);
-        return next ? { ...current, [sessionId]: next } : current;
-      });
+      pending.current.set(sessionId, [...(pending.current.get(sessionId) ?? []), event]);
+      if (!flushing.current) flushing.current = requestAnimationFrame(flush);
     });
 
     return () => {
       offAgent();
+      if (flushing.current) cancelAnimationFrame(flushing.current);
+      flushing.current = 0;
+      pending.current = new Map();
     };
   }, [clearRun, openSession, refresh]);
 
@@ -337,6 +370,16 @@ export function App() {
   const conceptSummaries = new Map(data.concepts.map((entry) => [entry.slug, entry]));
 
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
+  const openTrack = async (track: Track) => {
+    if (!api) return;
+    setOpening(true); setError(null);
+    try {
+      await api.setActiveTrack(track.id);
+      await refresh();
+      navigate("track");
+    } catch (cause) { setError(message(cause)); }
+    finally { setOpening(false); }
+  };
   const openChallenge = (id: string, from: Extract<Page, "problems" | "history"> = "history") => {
     setChallengeId(id);
     setChallengeFrom(from);
@@ -432,7 +475,7 @@ export function App() {
     await refresh();
   };
 
-  const createTrack = async (input: { goal: string; title?: string }) => {
+  const createTrack = async (input: { goal: string; title?: string; language?: Language }) => {
     if (!api) return;
     setOpening(true); setError(null);
     try {
@@ -451,27 +494,69 @@ export function App() {
 
   return (
     <div className="app-vibrant relative flex h-full">
-      {/* Width, not display, so the vibrant layer never repaints while animating.
-          The transition is dropped mid-drag, or the edge lags the cursor. */}
-      <div
-        className={cn("shrink-0 overflow-hidden", !dragging && "transition-[width] duration-200 ease-out")}
-        style={{ width: sidebar ? sidebarWidth : 0 }}
+      {/* The column, which is only ever a window onto the sidebar.
+
+             It used to be the sidebar: one element whose width animated from
+             zero, with `<Sidebar/>` filling whatever it was that frame. So every
+             frame of the collapse re-laid-out the entire source list at a new
+             width — labels rewrapping, titles re-truncating, the Track groups
+             reflowing — which is the churn that made this read as a browser
+             panel rather than a native one, and it was the most expensive
+             animation in the window besides.
+
+             Now nothing inside it changes size at all. The sidebar below is
+             pinned to its full width and slides; this clips. The two run on the
+             same curve, so the sidebar's right edge sits exactly on the clip
+             edge for the whole travel: a pure slide, no stretch, no reflow, and
+           the icons never move relative to the words beside them.
+
+          Animated rather than mounted and unmounted, unlike the version this
+          came from: the sidebar owns state the learner set — which Tracks they
+          opened, whether the archive is showing — and unmounting it on collapse
+          throws that away every time the column is hidden. */}
+      <motion.div
+        animate={{ width: sidebar ? sidebarWidth : 0 }}
+        className="relative shrink-0 overflow-hidden"
+        initial={false}
+        /* No transition while the divider is being dragged: the width is
+           animated so collapsing eases, and the same easing applied to a drag
+           leaves the edge lagging a frame behind the cursor. */
+        transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
       >
-        <Sidebar
-          // The name the learner gave onboarding, not the one derived from their email.
-          account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
-          activeSessionId={detail?.summary.id}
-          onCollapse={toggleSidebar}
-          onCommandPalette={() => setPalette(true)}
-          onNewSession={() => navigate("tracks")}
-          onOpenSession={open}
-          onPage={navigate}
-          page={page}
-          sessionActions={sessionActions}
-          sessions={data.sessions.filter((session) => session.context !== "baseline")}
-          syncState={data.syncState}
-        />
-      </div>
+        <motion.div
+          /* Laid out once, at the width it will still be when the animation
+             ends. `will-change` because this is the one element in the window
+             that is worth a compositor layer of its own — a whole source list
+             being moved, sixty times a second. */
+          animate={{ x: sidebar ? 0 : -sidebarWidth }}
+          className="h-full will-change-transform"
+          initial={false}
+          style={{ width: sidebarWidth }}
+          transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
+        >
+          <Sidebar
+            // The name the learner gave onboarding, not the one derived from their email.
+            account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
+            activeSessionId={detail?.summary.id}
+            onCollapse={toggleSidebar}
+            onCommandPalette={() => setPalette(true)}
+            onNewSession={() => navigate("tracks")}
+            onNewTrack={() => navigate("tracks")}
+            onOpenSession={open}
+            onOpenTrack={(track) => void openTrack(track)}
+            onPage={navigate}
+            page={page}
+            sessionActions={sessionActions}
+            /* Every Track's sessions, not just the open one's: the sidebar groups
+               them under their Tracks now, and a list that can only show you the
+               Track you are already in is not one. */
+            sessions={data.sessions.filter((session) => session.context !== "baseline")}
+            syncState={data.syncState}
+            tracks={data.tracks}
+            {...(data.activeTrack ? { activeTrackId: data.activeTrack.id } : {})}
+          />
+        </motion.div>
+      </motion.div>
 
       {/* The pane's leading corners round away from the sidebar so the translucent
           material wraps around it and the two read as one continuous surface —
@@ -504,6 +589,10 @@ export function App() {
       <main
         className={cn(
           "app-pane relative flex min-w-0 flex-1 flex-col",
+          /* The content pane's rounded leading corners and inset ring arrive
+             with the sidebar rather than the instant it is asked for. */
+          "transition-[border-radius,box-shadow]",
+          SIDEBAR_SLIDE_CSS,
           sidebar && "app-content-pane",
           (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
         )}
@@ -525,7 +614,8 @@ export function App() {
         <div className="min-h-0 flex-1">
           {page === "today" && <TodayPage busy={opening} data={data} onBaseline={beginBaseline} onCreateTrack={() => navigate("tracks")} onMode={setTrainingMode} onOpen={open} />}
           {page === "baseline" && <BaselinePage api={api} busy={opening} dark={dark} data={data} detail={detail} onAbandon={abandon} onBack={() => navigate("today")} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
-          {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={open} onSelect={async (trackId) => { if (!api) return; await api.setActiveTrack(trackId); await refresh(); }} />}
+          {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
+          {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
           {page === "problems" && (
             <ProblemsPage
               api={api}
@@ -534,6 +624,10 @@ export function App() {
               onStartProblem={startProblem}
             />
           )}
+          {/* Mounted only while it is the page. The visualiser holds a trace,
+              an editor and a running animation, and none of that is worth
+              keeping warm behind four other surfaces. */}
+          {page === "visualizer" && <VisualizerPage api={api} dark={dark} onError={setError} />}
           {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
           {(page === "progress" || page === "ability") && (
             <AbilityPage
@@ -599,7 +693,7 @@ export function App() {
                       dark={dark}
                       detail={detail}
                       onAbandon={abandon}
-                      onBack={() => navigate("today")}
+                      onBack={() => navigate("track")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
@@ -611,7 +705,7 @@ export function App() {
                     <ChatView
                       api={api}
                       detail={detail}
-                      onBack={() => navigate("today")}
+                      onBack={() => navigate("track")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
@@ -622,7 +716,7 @@ export function App() {
                     <PlanningView
                       api={api}
                       detail={detail}
-                      onBack={() => navigate("today")}
+                      onBack={() => navigate("track")}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}

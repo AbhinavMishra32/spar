@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ArrowRight } from "lucide-react";
 import { Markdown } from "../agent/Markdown";
+import { MarkdownLinkProvider } from "../agent/MarkdownLinks";
 import { parseStatement } from "@/lib/statement";
 
 /**
@@ -8,21 +9,27 @@ import { parseStatement } from "@/lib/statement";
  * the rules it must satisfy, and worked examples you can scan. When the agent's
  * text already has its own structure this steps aside and renders the markdown.
  */
-export function ProblemStatement({ source }: { source: string }) {
+export function ProblemStatement({ source, language }: { source: string; language?: string | undefined }) {
   const parsed = useMemo(() => parseStatement(source), [source]);
+  /* The challenge's language, so `nums[i]` in a statement is coloured the way
+     the same text is in the editor beside it. A fenced block names its own
+     language; an inline span cannot, and the statement's language is the only
+     honest guess. Without it every span falls back to a plain chip. */
+  const links = useMemo(() => (language ? { language } : {}), [language]);
 
-  if (!parsed.structured) return <Markdown source={source} />;
+  if (!parsed.structured) return <MarkdownLinkProvider value={links}><Markdown className="md-prose-content" source={source} /></MarkdownLinkProvider>;
 
   return (
+    <MarkdownLinkProvider value={links}>
     <div className="min-w-0">
-      <Markdown className="text-[0.875rem] leading-[1.6]" source={parsed.lead} />
+      <Markdown className="md-prose-content" source={parsed.lead} />
 
       {parsed.requirements.length > 0 && (
         <ul className="mt-3 space-y-1.5">
           {parsed.requirements.map((requirement, index) => (
             <li key={index} className="flex min-w-0 gap-2">
               <span className="mt-[0.62em] size-1 shrink-0 rounded-full bg-muted-foreground/50" />
-              <Markdown className="min-w-0 flex-1" source={requirement} />
+              <Markdown className="md-prose-content min-w-0 flex-1" source={requirement} />
             </li>
           ))}
         </ul>
@@ -50,9 +57,10 @@ export function ProblemStatement({ source }: { source: string }) {
 
       {parsed.note && (
         <div className="mt-3">
-          <Markdown className="text-ui text-muted-foreground" source={parsed.note} />
+          <Markdown className="md-prose-content text-muted-foreground" source={parsed.note} />
         </div>
       )}
     </div>
+    </MarkdownLinkProvider>
   );
 }

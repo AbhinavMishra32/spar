@@ -8,6 +8,7 @@ import { AgentThread } from "../agent/AgentThread";
 import { Composer } from "../agent/Composer";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
 import type { AgentRun } from "../agent/agentRun";
+import { useStopTurn } from "@/hooks/use-stop-turn";
 
 const STAGES = ["History retrieval", "Target selection", "Challenge compilation", "Deterministic validation"];
 
@@ -95,6 +96,7 @@ export function PlanningView({
   };
 
   const streaming = run?.status === "streaming";
+  const stop = useStopTurn(detail.summary.id, onError);
   const transcriptMessages = pending
     ? detail.messages.filter((item) => item.role !== "agent" || !pending.questions.some((question) => question.question === item.body))
     : detail.messages;
@@ -151,6 +153,7 @@ export function PlanningView({
                     busy={busy || streaming}
                     onChange={setDraft}
                     {...(onOpenSettings ? { onOpenSettings } : {})}
+                    onStop={stop}
                     onSubmit={() => void send()}
                     placeholder="Send the agent a note…"
                     value={draft}

@@ -7,6 +7,22 @@ export const questionDesignSchema = z.object({
   kind: z.enum(["function", "module", "repair", "extension", "repository"]),
   difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]).optional(),
   statement: z.string().min(30),
+  /**
+   * How the solution has to be written, when the agent has a reason to insist.
+   *
+   * Passing the tests is evidence that the output is right and nothing more. A
+   * learner practising sliding windows who passes with a nested loop, or
+   * practising recursion who passes with a stdlib call, has produced a correct
+   * answer to a question nobody asked — and the ability document written from
+   * that attempt records a skill they did not use. So the agent may state the
+   * terms up front: linear time, one pass, no sort, recursive, no library for
+   * the part being taught. They are shown to the learner with the problem,
+   * because a constraint discovered at review time is a trick, and they are
+   * checked after the tests pass rather than by the tests, because "wrote it
+   * the intended way" is a judgement about code and not something an assertion
+   * can decide.
+   */
+  solutionRequirements: z.array(z.string().min(4).max(160)).max(4).optional(),
   starterFiles: z.record(z.string()),
   referenceFiles: z.record(z.string()),
   visibleTests: z.record(z.string()),

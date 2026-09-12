@@ -486,10 +486,15 @@ export type CaseValue = { input: string; output?: string; expected: string };
 export function caseValues(result: TestCaseResult, declared?: DeclaredCase): CaseValue[] {
   const assertions = declared?.assertions ?? [];
   if (!assertions.length && (result.failure?.expected !== undefined || result.failure?.actual !== undefined)) {
-    return [{ input: "—", expected: result.failure.expected ?? "—", ...(result.failure.actual === undefined ? {} : { output: result.failure.actual }) }];
+    /* A hidden case has no declared source to read its call out of — the file is
+       not on the learner's disk — so the input it reports is the only thing that
+       can fill this column. Without it the panel says a hidden case failed and
+       refuses to say on what, which is the one piece of information that makes
+       the failure actionable. */
+    return [{ input: result.failure.input ?? "—", expected: result.failure.expected ?? "—", ...(result.failure.actual === undefined ? {} : { output: result.failure.actual }) }];
   }
   return assertions.map((assertion, index) => ({
-    input: assertion.call || "—",
+    input: (index === 0 ? result.failure?.input : undefined) || assertion.call || "—",
     expected: index === 0 ? (result.failure?.expected ?? assertion.expected) || "—" : assertion.expected || "—",
     ...(index === 0 && result.failure?.actual !== undefined
       ? { output: result.failure.actual }

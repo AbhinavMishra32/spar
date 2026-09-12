@@ -13,6 +13,8 @@ it("persists the device theme across store reloads",()=>{const directory=mkdtemp
 
 it("migrates legacy sessions into one living Track instead of one Track each",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-track-migration-"));const database=path.join(directory,"state.sqlite3");try{const before=new LocalStore(database);before.createSession("Practise arrays");before.createSession("Trace the JavaScript runtime");before.close();const legacy=new Database(database);legacy.prepare("UPDATE sessions SET track_id=NULL").run();legacy.prepare("DELETE FROM tracks").run();legacy.prepare("DELETE FROM settings WHERE key='active-track-id'").run();legacy.close();const migrated=new LocalStore(database);try{expect(migrated.listTracks()).toEqual([expect.objectContaining({title:"General practice"})]);const trackIds=new Set(migrated.listSessions().map((session)=>session.trackId));expect(trackIds.size).toBe(1);expect(trackIds.has(migrated.activeTrack()?.id??"")).toBe(true);}finally{migrated.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
 
+it("collapses the one-Track-per-session prototype into a workspace",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-track-v2-migration-"));const database=path.join(directory,"state.sqlite3");try{const before=new LocalStore(database);const first=before.createSession("Practise arrays");const second=before.createSession("Trace the JavaScript runtime");before.close();const legacy=new Database(database);const sessions=legacy.prepare("SELECT id,title,original_goal,created_at,updated_at FROM sessions ORDER BY created_at").all() as Array<{id:string;title:string;original_goal:string;created_at:string;updated_at:string}>;legacy.prepare("DELETE FROM settings WHERE key='track-workspace-migration-v2'").run();legacy.prepare("DELETE FROM tracks").run();const insert=legacy.prepare("INSERT INTO tracks (id,title,goal,status,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)");const attach=legacy.prepare("UPDATE sessions SET track_id=? WHERE id=?");for(const session of sessions){const id=randomUUID();insert.run(id,session.title.slice(0,80),session.original_goal,"active","[]","[]","[]","[]",session.created_at,session.updated_at);attach.run(id,session.id);}legacy.close();const migrated=new LocalStore(database);try{expect(migrated.listTracks()).toEqual([expect.objectContaining({title:"General practice"})]);expect(new Set(migrated.listSessions().map((session)=>session.trackId)).size).toBe(1);expect(migrated.listSessions().map((session)=>session.id)).toEqual(expect.arrayContaining([first.sessionId,second.sessionId]));}finally{migrated.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
+
 it("clears learner data without erasing device preferences",()=>{const store=new LocalStore(":memory:");try{store.setSetting("theme","dark");const {sessionId}=store.createSession("Practise JavaScript arrays");store.setTrainingTarget(sessionId,{ability:"Arrays",specificGap:"Filter values",desiredEvidence:"Uses filter",avoidTesting:[]});store.createQuestion(sessionId,design("Filter values"),{valid:true});store.clearAccountData();expect(store.listSessions()).toEqual([]);expect(store.listAbilities()).toEqual([]);expect(store.getSetting("theme","system")).toBe("dark");}finally{store.close();}});
 
 it("keeps the onboarding profile out of the next account",()=>{const store=new LocalStore(":memory:");try{const profile={name:"Abhinav",experience:"working" as const,focus:["Async and concurrency"],weakness:"I never know what needs awaiting.",language:"typescript" as const,completedAt:new Date().toISOString()};store.saveProfile(profile);expect(store.getProfile()).toEqual(profile);store.setPreferredLanguage("cpp");expect(store.getProfile()?.language).toBe("cpp");
@@ -255,6 +257,28 @@ it("pushes the onboarding profile so another machine can skip intake",()=>{const
 }finally{store.close();}});
 
 describe("adaptive product state",()=>{
+  it("gives a Track its own language, so a Python goal is not written in the profile's language",()=>{const store=new LocalStore(":memory:");try{
+    /* The failure this replaces: a Track whose goal said "practice python
+       hashmap" produced a TypeScript challenge, because the only language in the
+       agent's context was the global profile's. */
+    const python=store.createTrack("practice python hashmap","Python Hashmaps","python");
+    expect(store.listTracks().find((track)=>track.id===python.track.id)?.language).toBe("python");
+
+    // A Track that names none follows the profile, which is what null means.
+    const unset=store.createTrack("Get better at algorithms generally","General");
+    expect(store.listTracks().find((track)=>track.id===unset.track.id)?.language).toBeNull();
+
+    /* "in python man!" has to outlive the turn it was said in. The agent resolves
+       it into a language on a compiled challenge and the host writes it here, so
+       the next turn's context already carries it. */
+    store.updateTrack(unset.track.id,{language:"python"});
+    expect(store.listTracks().find((track)=>track.id===unset.track.id)?.language).toBe("python");
+
+    // Updating anything else leaves it alone.
+    store.updateTrack(unset.track.id,{title:"Renamed"});
+    expect(store.listTracks().find((track)=>track.id===unset.track.id)?.language).toBe("python");
+  }finally{store.close();}});
+
   it("keeps baseline calibration out of Tracks and ordinary session navigation",()=>{const store=new LocalStore(":memory:");try{
     const training=store.createTrack("Become reliable at backend problem solving","Backend Problem Solving");
     const baseline=store.createBaselineSession();
@@ -265,16 +289,26 @@ describe("adaptive product state",()=>{
     expect(store.createBaselineSession()).toEqual(baseline);
   }finally{store.close();}});
 
-  it("keeps Tracks separate from the one global learner model",()=>{const store=new LocalStore(":memory:");try{
+  it("keeps baseline evidence outside every Track learner model across restarts",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-baseline-model-"));const database=path.join(directory,"state.sqlite3");try{
+    const first=new LocalStore(database);const track=first.createTrack("Prepare for algorithmic interviews");const baseline=first.createBaselineSession();const target=first.setTrainingTarget(baseline.sessionId,{ability:"Problem decomposition",specificGap:"Split an unfamiliar task into testable steps",desiredEvidence:"Defines the state before coding",avoidTesting:[]});first.ensureAbility(target.abilityId,target.abilityTitle,null);expect(first.listAbilities(track.track.id)).toEqual([]);first.close();
+    const reopened=new LocalStore(database);try{expect(reopened.activeTrack()?.id).toBe(track.track.id);expect(reopened.listAbilities(track.track.id)).toEqual([]);expect(reopened.readAbility(target.abilityId)).toMatchObject({id:target.abilityId,title:"Problem decomposition"});}finally{reopened.close();}
+  }finally{rmSync(directory,{recursive:true,force:true});}});
+
+  it("keeps sessions and learner models isolated by Track workspace",()=>{const store=new LocalStore(":memory:");try{
     const typescript=store.createTrack("Become extremely strong at TypeScript and understand the language deeply");
     const interviews=store.createTrack("Prepare seriously for algorithmic interviews");
     const target=store.setTrainingTarget(typescript.sessionId,{ability:"Invariant restoration",specificGap:"Restore validity after every mutation",desiredEvidence:"Uses a loop until valid",avoidTesting:[]});
     store.ensureAbility(target.abilityId,target.abilityTitle);
     expect(store.listTracks()).toHaveLength(2);
     expect(store.activeTrack()?.id).toBe(interviews.track.id);
-    expect(store.abilityStates()).toEqual([expect.objectContaining({abilityId:target.abilityId,trainingStatus:"unknown"})]);
+    expect(store.abilityStates()).toEqual([]);
     store.setActiveTrack(typescript.track.id);
     expect(store.abilityStates()[0]?.abilityId).toBe(target.abilityId);
+    const interviewTarget=store.setTrainingTarget(interviews.sessionId,{ability:"Invariant restoration",specificGap:"Restore a different invariant",desiredEvidence:"Restores independently",avoidTesting:[]});
+    store.ensureAbility(interviewTarget.abilityId,interviewTarget.abilityTitle);
+    expect(interviewTarget.abilityId).not.toBe(target.abilityId);
+    expect(store.listAbilities(typescript.track.id).map((ability)=>ability.id)).toEqual([target.abilityId]);
+    expect(store.listAbilities(interviews.track.id).map((ability)=>ability.id)).toEqual([interviewTarget.abilityId]);
   }finally{store.close();}});
 
   it("turns linked attempts into confidence without treating one event as mastery",()=>{const store=new LocalStore(":memory:");try{
@@ -318,7 +352,7 @@ describe("adaptive product state",()=>{
     expect(store.listPatterns()[0]).toMatchObject({status:"pattern",evidenceCount:2});
   }finally{store.close();}});
 
-  it("compacts and restores the account-wide adaptive projection",()=>{const source=new LocalStore(":memory:");const restored=new LocalStore(":memory:");try{
+  it("compacts and restores Track-owned adaptive projections",()=>{const source=new LocalStore(":memory:");const restored=new LocalStore(":memory:");try{
     const created=source.createTrack("Become deeply fluent in the TypeScript type system","TypeScript Depth");
     const target=source.setTrainingTarget(created.sessionId,{ability:"Generic constraint design",specificGap:"Constrain inference without widening",desiredEvidence:"Preserves the caller's narrow type",avoidTesting:[]});
     source.ensureAbility(target.abilityId,target.abilityTitle);

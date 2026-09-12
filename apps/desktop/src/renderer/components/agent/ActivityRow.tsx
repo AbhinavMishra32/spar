@@ -1,41 +1,115 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { BookOpen, Check, ChevronDown, CircleAlert, FilePenLine, Globe, History, Link2, Search } from "lucide-react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { IconAlert, IconBook, IconCheck, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconList, IconQuestion, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
+import { ToolDetail } from "./ToolDetail";
+import { toolSubject } from "./toolSubject";
+import { thoughts } from "./thoughts";
+import { useMarkdownLinks } from "./MarkdownLinks";
+import { FadedScroll, RawPayload } from "./ToolPayload";
 import { SourceGlyph } from "../common/SourceGlyph";
 import { diffTotals, isSourceTool, toolRowTitle, type RunPart } from "./agentRun";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
+/**
+ * Which orb a running step spins.
+ *
+ * Nine states ship, and a transcript that used three of them was throwing away
+ * the only thing the orb is for: telling the reader, before any text is read,
+ * what kind of work is under way. Going out to the network does not look like
+ * reading a file, and recording what someone understands does not look like
+ * either. Names are matched both hyphenated and underscored because the
+ * transcript carries tools from v0.7 as well as Construct's own.
+ */
 function orbFor(tool: string): OrbState {
-  if (tool.startsWith("search_") || tool.startsWith("read_") || tool.startsWith("inspect_") || tool === "replay_attempt" || tool.startsWith("web_")) return "searching";
-  if (tool === "create_question" || tool === "replace_current_question") return "shaping";
-  if (tool === "evaluate_attempt") return "solving";
-  if (tool === "ask_user_question") return "listening";
-  if (tool.startsWith("set_") || tool.startsWith("propose_") || tool.startsWith("commit_") || tool === "upsert_ability") return "composing";
+  const name = tool.replace(/-/g, "_");
+  /* Out to the internet: the wires, not the globe. */
+  if (name.startsWith("web_") || name.startsWith("fetch_") || name.startsWith("sync_")) return "connecting";
+  if (name.startsWith("search_") || name.startsWith("read_") || name.startsWith("inspect_") || name.startsWith("list_") || name.startsWith("grep") || name === "replay_attempt") return "searching";
+  if (name.startsWith("write_") || name.startsWith("edit_") || name.startsWith("apply_") || name.startsWith("create_file")) return "shaping";
+  if (name === "create_question" || name === "replace_current_question" || name.startsWith("plan_") || name.startsWith("path")) return "weaving";
+  if (name === "evaluate_attempt" || name.startsWith("run_") || name.startsWith("terminal") || name.startsWith("shell")) return "solving";
+  if (name === "ask_user_question") return "listening";
+  if (name.startsWith("record_") || name.startsWith("upsert_") || name.startsWith("flow_memory") || name.startsWith("remember")) return "breathing";
+  if (name.startsWith("set_") || name.startsWith("propose_") || name.startsWith("commit_") || name.startsWith("update_")) return "composing";
   return "working";
 }
 
+/**
+ * What a step did, as a mark.
+ *
+ * Every row used to end here with a tick, and the reason is worth recording:
+ * the cases below tested v0.7's underscored tool names — `read_`, `search_` —
+ * and Construct's tools are hyphenated, so not one of them ever matched. A
+ * transcript of identical green ticks says only "something happened", which is
+ * the one thing the reader already knows.
+ *
+ * Solid, not stroked. See `threadIcons` for why: at 16px a stroked glyph beside
+ * 14px text is a smudge, and no stroke weight fixes it — filled shapes are what
+ * hold a silhouette this small, and what make the marks read as one column
+ * rather than as noise beside the words.
+ */
+const MARK = "size-4";
+
 function ToolIcon({ part }: { part: ToolPart }) {
   if (part.phase === "running") return <ThinkingOrb aria-label="Working" size={20} state={orbFor(part.tool)} style={{ width: 15, height: 15 }} />;
-  if (part.phase === "error") return <CircleAlert className="size-3.5 text-[var(--warning)]" />;
+  if (part.phase === "error") return <IconAlert className={cn(MARK, "text-[var(--warning)]")} />;
   /* Anything that reached the practice source is marked with the source's own logo.
      A magnifying glass over "Searching LeetCode for a problem" says the agent
-     searched something; the mark says what. Unconditional today because a
-     ChallengeSource can only be LeetCode — a second source means carrying which one
-     on the row rather than guessing from the tool name. */
-  if (isSourceTool(part.tool)) return <SourceGlyph className="size-3.5" source={sourceFor(part)} />;
-  /* Going out to the web gets its own mark. Every other row in the transcript is
-     the agent reading the learner's own record, and a globe is the one-glance
-     difference between "it looked at your attempts" and "it looked outside". */
-  if (part.tool === "web_search") return <Globe className="size-3.5" />;
-  if (part.tool === "web_fetch") return <Link2 className="size-3.5" />;
-  if (part.tool.startsWith("search_")) return <Search className="size-3.5" />;
-  if (part.tool.startsWith("read_") || part.tool.startsWith("inspect_")) return <BookOpen className="size-3.5" />;
-  if (part.tool === "create_question" || part.tool === "replace_current_question" || part.tool.startsWith("set_") || part.tool.startsWith("propose_") || part.tool.startsWith("commit_") || part.tool === "upsert_ability") return <FilePenLine className="size-3.5" />;
-  return <Check className="size-3.5" />;
+     searched something; the mark says what. */
+  if (isSourceTool(part.tool)) return <SourceGlyph className="size-4" source={sourceFor(part)} />;
+
+  switch (part.tool) {
+    /* Going out to the web gets its own mark. Every other row in the transcript
+       is the agent reading the learner's own project, and a globe is the
+       one-glance difference between "it read your files" and "it read the internet". */
+    case "web-search":
+    case "web_search":
+      return <IconSearch className={MARK} />;
+    case "web-fetch":
+    case "web_fetch":
+      return <IconGlobe className={MARK} />;
+    case "read-file":
+      return <IconFile className={MARK} />;
+    case "write-file":
+      return <IconEdit className={MARK} />;
+    /* Memory is marked as notes, not as files. A page-and-pen next to "Updated
+       memory" reads as another write into the learner's source tree; what
+       actually changed is Construct's own notebook about them. */
+    case "flow-memory-fetch":
+      return <IconChip className={MARK} />;
+    case "flow-memory-patch":
+      return <IconDossier className={MARK} />;
+    case "list-files":
+      return <IconFolder className={MARK} />;
+    case "run-terminal-command":
+      return <IconTerminal className={MARK} />;
+    case "record-concept":
+      return <IconBook className={MARK} />;
+    case "plan-learning-path":
+      return <IconSparkle className={MARK} />;
+    case "set-practice-task":
+      return <IconList className={MARK} />;
+    case "judge-practice-task":
+      return <IconCheck className={MARK} />;
+    /* A wrench over "Asked a question" said a tool ran. This row is a turn of
+       conversation, and it is marked as one. */
+    case "ask_user_question":
+    case "ask-user-question":
+      return <IconQuestion className={MARK} />;
+    default:
+      break;
+  }
+
+  if (part.tool.startsWith("search_") || part.tool.startsWith("search-")) return <IconSearch className={MARK} />;
+  if (part.tool.startsWith("read_") || part.tool.startsWith("inspect_")) return <IconFile className={MARK} />;
+  if (part.tool.startsWith("set_") || part.tool.startsWith("propose_") || part.tool.startsWith("commit_")) return <IconEdit className={MARK} />;
+  /* Neutral, and deliberately not a tick: a tool that ran is not a tool that
+     succeeded at anything the reader cares about. */
+  return <IconDot />;
 }
 
 /** What the call did, as one word, in the corner of its panel. */
@@ -54,133 +128,84 @@ function StatusPill({ part }: { part: ToolPart }) {
 }
 
 /**
- * A fixed-height scroll box whose ends fade toward whatever is out of view.
+ * What the call was, and what it was about.
  *
- * One primitive for the two kinds of unbounded content in a transcript row — the
- * model's thinking and a tool's payload — so both live in the same amount of
- * space, and a thought that streamed inside 1.5in does not suddenly become a
- * screenful the instant it settles.
+ * `Read main.py` rather than `Read a file`. A column of bare verbs says the
+ * agent did five things and nothing about which, so the only way to find the
+ * one that matters was to open all five.
  *
- * `follow` keeps the newest line in view while content is still arriving. It sets
- * `scrollTop` rather than calling `scrollIntoView`, which looks like the same
- * thing and is not: `scrollIntoView` scrolls every ancestor that can scroll, so
- * each delta also aimed the thread's viewport at this box, the thread's own
- * auto-follow undid it, and the transcript juddered for as long as the model was
- * thinking. A layout effect, so the tail is never painted at the old offset.
+ * A path is underlined and opens the file: the row names something real, and
+ * the thing you do after seeing it is look at it. The short name is shown and
+ * the full path is the title, because two `index.ts` in one project are only
+ * told apart by the directories a row has no width for.
  */
-function FadedScroll({
-  children,
-  className,
-  follow = false,
-  watch,
-  uncapped = false,
-}: {
-  children: React.ReactNode;
-  className?: string;
-  follow?: boolean;
-  /** Changes that mean the content grew, so the fades are re-measured. */
-  watch?: unknown;
-  /** Released once the reader has asked for the whole thing. */
-  uncapped?: boolean;
-}) {
-  const box = useRef<HTMLDivElement>(null);
-  const [fade, setFade] = useState<"none" | "top" | "bottom" | "both">("none");
-
-  const measure = useCallback(() => {
-    const node = box.current;
-    if (!node) return;
-    // A rounding slack: a box scrolled to the end is routinely a fraction of a
-    // pixel short of it, and a fade that never quite clears reads as a bug.
-    const above = node.scrollTop > 1;
-    const below = node.scrollTop + node.clientHeight < node.scrollHeight - 1;
-    setFade(above && below ? "both" : above ? "top" : below ? "bottom" : "none");
-  }, []);
-
-  useLayoutEffect(() => {
-    const node = box.current;
-    if (!node) return;
-    if (follow) node.scrollTop = node.scrollHeight;
-    measure();
-  }, [follow, measure, watch, uncapped]);
+function ToolTitle({ part }: { part: ToolPart }) {
+  const { onOpenFile } = useMarkdownLinks();
+  const running = part.phase === "running";
+  const subject = toolSubject(part.tool, part.input, running);
+  if (!subject) return <>{toolRowTitle(part)}</>;
 
   return (
-    <div
-      className={cn("agent-scroll app-scroll min-w-0", className)}
-      data-fade={fade}
-      onScroll={measure}
-      ref={box}
-      {...(uncapped ? { style: { maxHeight: "none" } } : {})}
-    >
-      {children}
-    </div>
-  );
-}
-
-/**
- * One labelled block of JSON — what went in, or what came back.
- *
- * Capped like everything else in a row, with the way out being explicit: a
- * payload longer than the box says so and offers the whole thing, rather than
- * leaving the reader to guess from a scrollbar whether there are three more lines
- * or three hundred.
- */
-function Payload({ title, body }: { title: string; body: string }) {
-  const [full, setFull] = useState(false);
-  const trimmed = body.trim();
-  if (!trimmed) return null;
-  const lines = trimmed.split("\n").length;
-  return (
-    <div className="min-w-0">
-      <p className="px-2.5 pt-2 pb-1 text-ui-sm font-medium tracking-wide text-muted-foreground/70 uppercase">{title}</p>
-      <FadedScroll uncapped={full} watch={body}>
-        <pre className="px-2.5 pb-2 font-mono text-ui-sm leading-[1.5] whitespace-pre text-muted-foreground/90">{trimmed}</pre>
-      </FadedScroll>
-      {lines > 8 && (
-        <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 font-mono text-ui-sm text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => setFull((value) => !value)}
-          type="button"
+    <>
+      {subject.verb}{" "}
+      {subject.path ? (
+        <span
+          className={cn(
+            "cursor-default underline decoration-dotted underline-offset-2",
+            /* Darker only under the pointer that is about to open it, and never
+               while the row is shimmering: the sweep is a background clipped to
+               the text, and a child that sets `color` renders opaque and sits
+               dead in the middle of it. */
+            !running && "hover:text-foreground",
+          )}
+          onClick={(event) => {
+            /* The row itself is a disclosure; opening the file must not also
+               toggle the panel under it. */
+            event.stopPropagation();
+            onOpenFile?.(subject.path!);
+          }}
+          title={subject.path}
         >
-          {full ? "Collapse output" : `Show full output · ${lines} lines`}
-        </button>
+          {subject.subject}
+        </span>
+      ) : (
+        /* No colour of its own. The subject used to be printed darker than the
+           verb in front of it, which made every settled row a two-tone line and
+           a column of them a stripe of dark words with grey ones between. The
+           whole row is grey, and the whole row goes dark together on hover. */
+        <span>{subject.subject}</span>
       )}
-    </div>
+    </>
   );
 }
 
 /**
- * The call, opened up: its arguments and its result.
+ * One step of a turn: its mark, what it did, and what it did it to.
  *
- * The transcript used to name each call and stop there — deliberately, on the
- * grounds that arguments are raw internals. But a tutor that says "searched your
- * history" and will not say what for is asking to be taken on faith, and the
- * learner is the one whose record it searched. Everything is shown except the
- * parts of a challenge design that are its answer, which the worker has already
- * replaced with a note saying so before this ever sees them.
+ * The mark sits in a column of its own rather than inside the label, and that
+ * column is the thread. The line under a mark is a flex child that fills
+ * whatever height is left in the row's block, so a row that opens does not
+ * *add* a line beside its panel: the line it already had grows, because the
+ * block it is measured against got taller. Two rows in the same run of work
+ * meet with no seam because the space between them is padding inside the upper
+ * block, which the line runs through, and the lower block opens with the short
+ * lead-in above its own mark.
+ *
+ * This replaced three absolutely positioned segments that were each nudged into
+ * place separately. Every one of those joins was arithmetic that had to be kept
+ * true by hand, and none of them survived a change to the row's padding.
  */
-export function ToolRow({ part, linked = false }: { part: ToolPart; linked?: boolean }) {
+export function ToolRow({ part, continues = false }: { part: ToolPart; continues?: boolean }) {
   const [open, setOpen] = useState(false);
   const hasPayload = Boolean(part.input.trim() || part.output.trim());
   const totals = diffTotals(part.files);
   const running = part.phase === "running";
 
-  const row = (
+  const label = (
     <>
-      {/* Joins this step to the one above it, up the middle of the icon column.
-          Without it a tight cluster is just rows that happen to be near each
-          other; with it, it reads as one sequence of work. Sized to exactly the
-          margin above the row, so it can never reach over the text either side. */}
-      {linked && (
-        <span
-          aria-hidden
-          className="absolute w-px bg-border/60"
-          style={{ left: ICON_CENTER, top: `-${LINKED_GAP}`, height: LINKED_GAP }}
-        />
-      )}
-      <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/70"><ToolIcon part={part} /></span>
-      <span className={cn("min-w-0 truncate", running && "thinking-shimmer text-foreground")}>
-        {toolRowTitle(part)}
-        {took(part) && <span className="ml-1.5 tabular-nums text-muted-foreground/50">{took(part)}</span>}
+      <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
+        <ToolTitle part={part} />
+        {took(part) && <span className="ml-1.5 tabular-nums text-[var(--transcript-step-mark)]">{took(part)}</span>}
       </span>
       <DiffStat added={totals.added} removed={totals.removed} />
       {/* Only when it did not simply work. A row of green "Success" badges down a
@@ -190,24 +215,60 @@ export function ToolRow({ part, linked = false }: { part: ToolPart; linked?: boo
     </>
   );
 
-  if (!hasPayload) return <div className={cn(ROW, "text-muted-foreground")}>{row}</div>;
-
   return (
-    <Collapsible onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className={cn(ROW, TRIGGER)}>{row}</CollapsibleTrigger>
-      <CollapsibleContent>
-        {/* A rule from the row down past the panel, and the panel indented off it.
-            The line is what ties an opened call to the row that opened it once the
-            card is tall enough that they are no longer adjacent on screen. */}
-        <div className="flex min-w-0 gap-2.5 pb-1" style={{ paddingLeft: ROW_INSET }}>
-          <span aria-hidden className="w-px shrink-0 bg-border/70" />
-          <div className="min-w-0 flex-1 overflow-hidden rounded-[var(--radius-lg)] border border-border bg-[var(--color-background-elevated-secondary,var(--card))]">
-            <Payload body={part.input} title="Input" />
-            {part.input.trim() && part.output.trim() && <div className="mx-2.5 border-t border-border/60" />}
-            <Payload body={part.output} title="Result" />
-          </div>
+    <Collapsible className="group/step" onOpenChange={setOpen} open={open}>
+      {/* The block, at the reference's geometry: a 24px gutter, a 6px gap, and
+          the gap to the next step held inside the block as padding rather than
+          outside it as a margin — a margin is space the thread's line cannot
+          cross. The whole row is pulled 4px left of the prose column so the
+          16px mark centres where the reference centres it. */}
+      <div className="relative -mx-1 flex min-w-0 items-start gap-1.5 pb-2">
+        <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
+          {/* One element, not three. The line starts below this row's mark and
+              runs to the foot of its block — which grows when the panel opens,
+              so opening a row stretches the thread rather than adding a second
+              piece of it. Consecutive rows join with no seam because each one's
+              own bottom padding is inside the box the line is measured against. */}
+          <span aria-hidden className={cn(RAIL, !continues && RAIL_LAST)} data-line />
+          <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}><ToolIcon part={part} /></span>
         </div>
-      </CollapsibleContent>
+
+        <div className="min-w-0 flex-1">
+          {hasPayload ? (
+            <CollapsibleTrigger className={cn(LABEL_ROW, TRIGGER)}>{label}</CollapsibleTrigger>
+          ) : (
+            /* Same hover as a row that opens. Whether a step happens to have a
+               payload is not a reason for it to read as a different kind of
+               line. */
+            <div className={cn(LABEL_ROW, "text-[var(--transcript-step)] transition-colors hover:text-[var(--transcript-step-strong)]")}>{label}</div>
+          )}
+          {hasPayload && (
+            <CollapsibleContent>
+              {/* A ring, not a border. A 1px border and a shadow on the same box
+                  draw a hard line and then a soft edge just outside it; the
+                  reference draws one half-pixel ring and lets the shadow start
+                  from there, which is the same rule `smooth-shadow-ring` states
+                  for the rest of this app. */}
+              <div className="mt-1.5 min-w-0 overflow-hidden rounded-xl bg-[var(--surface-primary)] shadow-sm ring-[0.5px] ring-[var(--border-surface-strong)]">
+                {/* Built for the tool when there is a view for it, raw when there is
+                    not — `ToolDetail` decides, and falls back itself.
+
+                    It cannot be decided here. `<ToolDetail/>` is an element, never
+                    null, so testing it for nullishness always took the drawn branch
+                    and a tool with no view of its own rendered an empty panel.
+
+                    A failed call keeps the raw payload: the error text is the whole
+                    point, and a drawn view of arguments that did not work hides it. */}
+                {part.phase === "error" ? (
+                  <RawPayload input={part.input} output={part.output} />
+                ) : (
+                  <ToolDetail input={part.input} output={part.output} tool={part.tool} />
+                )}
+              </div>
+            </CollapsibleContent>
+          )}
+        </div>
+      </div>
     </Collapsible>
   );
 }
@@ -228,28 +289,56 @@ export function ToolRow({ part, linked = false }: { part: ToolPart; linked?: boo
    is small on purpose — the space between steps is what separates them, and paying
    for it twice is what spread a run of five calls over half a screen. */
 const ROW = "relative inline-flex w-fit min-w-0 max-w-full items-center gap-2.5 px-1.5 py-[3px] text-left text-ui";
+/** The icon column every row of a turn hangs its mark in.
+ *
+ *  Named, and reserved even when there is no mark to put in it. A settled
+ *  thought used to draw no slot at all, so "Thought for 43s" started where the
+ *  tool rows' *icons* start and the two lines under it started 26px further in
+ *  — and the same row jumped left by that much the moment the turn finished,
+ *  because the live version does draw one. A transcript with four left edges is
+ *  what "the padding feels off" turns out to be. */
+export const ROW_GLYPH = "relative z-10 flex size-6 shrink-0 items-center justify-center [&>svg]:size-4";
 /* `cursor-default` for the same reason the sidebar sets it: AppKit shows the arrow
    over a list of rows, never the hand, and the pointer cursor is the clearest tell
    that a desktop app was built in a browser. These rows are a list, not controls. */
-const TRIGGER = "group/row cursor-default rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:text-foreground";
-/** The row's own horizontal inset, which anything hanging beneath a row aligns to. */
-const ROW_INSET = "0.375rem";
-/** Down the middle of the icon column: the row's inset plus half an icon. Where the
- *  rule joining one step to the next is drawn. */
-export const ICON_CENTER = "0.875rem";
+const TRIGGER = "group/row cursor-default border-0 p-0 text-[var(--transcript-step)] transition-colors outline-none hover:text-[var(--transcript-step-strong)]";
+/** The row's own horizontal inset, which anything hanging beneath a row aligns to.
+ *  This is also the transcript's prose edge: a paragraph starts where a row's
+ *  mark starts, not where its label does. */
+export const ROW_INSET = "0rem";
 /** The gap between two steps of the same run of work, and therefore exactly the
  *  height of the rule that joins them. Exported so the row that sets the margin
- *  and the rule that fills it cannot drift apart. */
-export const LINKED_GAP = "0.375rem";
+ *  and the rule that fills it cannot drift apart.
+ *
+ *  Tight, and tighter than it reads: a step also carries the clearance its mark
+ *  keeps off the line above and below it, so the space between two rows is this
+ *  plus that. Widening it to give the line more room was the wrong knob — it
+ *  pushed the steps apart and cost the cluster the tightness that makes a run of
+ *  work read as one thing. */
+export const LINKED_GAP = "0rem";
 /** A step that opens a new run of work, and a paragraph of prose. Prose gets the
  *  most room of anything in a turn: the contrast between a tight cluster of steps
  *  and a sentence with air around it is what makes a long turn scannable. */
-export const STEP_GAP = "0.5rem";
-export const PROSE_GAP = "0.875rem";
+export const STEP_GAP = "0.25rem";
+export const PROSE_GAP = "0.25rem";
 /** Exactly where a row's label starts: the inset, plus the icon, plus the gap
  *  after it. A note under a row uses this so it lines up with the words it belongs
  *  to rather than nearly lining up with them. */
-const UNDER_LABEL = "1.9375rem";
+export const UNDER_LABEL = "1.625rem";
+
+/** The thread, as one absolutely positioned line per row: it hangs from the
+ *  bottom of this row's mark (`top-6`) to 16px short of the block's foot, and
+ *  the block's foot moves when the panel opens. */
+const RAIL = "bg-border absolute top-6 left-1/2 h-[calc(100%-16px)] min-h-2 w-px -translate-x-1/2";
+/** The last step of a run draws no line — there is nothing under it to reach.
+ *  Except when its own panel is open, where the line is what ties the panel to
+ *  the row that opened it. */
+const RAIL_LAST = "hidden h-[calc(100%-32px)] group-data-[state=open]/step:block";
+
+/** A row's words: everything except the mark, which is now a column of its own.
+ *  Keeps the row's height at exactly the mark's, so the two line up without
+ *  either of them being nudged. */
+const LABEL_ROW = "flex min-h-6 w-full min-w-0 items-center justify-start gap-1 overflow-hidden text-left text-ui";
 
 /**
  * The mark that opens a row, kept out of the way until it is wanted.
@@ -267,14 +356,18 @@ const UNDER_LABEL = "1.9375rem";
  * the distance between an icon and a sentence, which is far too much between a
  * sentence and the small mark that belongs to it.
  */
-function Caret({ open }: { open: boolean }) {
+function Caret({ open, standing = false }: { open: boolean; standing?: boolean }) {
   return (
-    <ChevronDown
+    <IconChevronRight
       className={cn(
-        "-ml-1.5 size-3.5 shrink-0 text-muted-foreground/50 opacity-0 transition-[transform,opacity] duration-200",
-        "group-hover/row:opacity-100 group-focus-visible/row:opacity-100",
-        open && "opacity-100",
-        !open && "-rotate-90",
+        "size-4 shrink-0 text-[var(--transcript-step-mark)] transition-all duration-200",
+        /* Hidden until hover on a row that already shows its own heading: the
+           caret is an offer to see the working behind a line you have read.
+           `standing` is for a row that is standing in for rows you cannot see —
+           there, nothing else on screen says the rest of the thinking is in
+           there, so the affordance cannot be something you have to find. */
+        standing ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
+        open && "rotate-90 opacity-100",
       )}
     />
   );
@@ -283,6 +376,10 @@ function Caret({ open }: { open: boolean }) {
 /** How long a settled call took. Absent for a stored row, which does not keep
  *  timings, and for anything under a second, where the number is noise. */
 function took(part: ToolPart): string {
+  /* A question is not work the agent did — it is a wait on the learner. "Asked a
+     question in 25s" times how long somebody took to read and think, which is a
+     stopwatch held on them and tells them nothing about their project. */
+  if (part.tool === "ask_user_question" || part.tool === "ask-user-question") return "";
   if (part.phase === "running" || !part.startedAt || !part.endedAt) return "";
   const seconds = (part.endedAt - part.startedAt) / 1_000;
   return seconds < 1 ? "" : `in ${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
@@ -309,7 +406,7 @@ function StepDetail({ detail }: { detail: string }) {
   const trimmed = detail.replace(/^status invalid · /, "").trim();
   if (!trimmed) return null;
   return (
-    <p className="min-w-0 break-words text-ui-sm leading-[1.55] text-muted-foreground/65" style={{ paddingLeft: UNDER_LABEL }}>
+    <p className="min-w-0 break-words text-ui-sm leading-[1.55] text-[var(--transcript-step)]" style={{ paddingLeft: UNDER_LABEL }}>
       {trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed}
     </p>
   );
@@ -332,43 +429,179 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
   const sections = thoughts(part.body);
   const seconds = Math.max(1, Math.round(((part.endedAt ?? Date.now()) - part.startedAt) / 1_000));
 
-  /* Live: the heading the model is under right now, with its prose following it.
-     Only the tail is shown, because the point while it runs is watching where the
-     thinking has got to rather than reading all of it — and it is shown inside the
-     same box the settled thought will use, so nothing reflows when it closes. */
+  /* Live, and folded like everything else.
+     
+     This used to print the whole stream inline while the model wrote it: a
+     paragraph of half-finished reasoning that pushed the conversation off the
+     screen and then vanished when the turn settled. Thinking is the agent's
+     working, not its answer — the row says it is thinking and what about, and
+     the stream is there for anybody who wants it.
+     
+     Open state survives the deltas because the part keeps its identity for the
+     length of the run, so a thought opened mid-stream stays open and keeps
+     following the tail. */
   if (part.open) {
     const current = sections.at(-1);
     return (
-      <div className="min-w-0 px-1.5">
-        <div className="flex items-center gap-2 py-0.5">
-          <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
-          <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">{current?.title ?? "Thinking"}</span>
-        </div>
-        {current?.body && (
-          <FadedScroll follow watch={part.body}>
-            <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/70">
-              {current.body}
-            </p>
-          </FadedScroll>
-        )}
-      </div>
+      <LiveThought
+        body={part.body}
+        id={part.id}
+        sections={sections}
+        title={current?.title ?? "Thinking"}
+      />
     );
   }
 
   if (!sections.length) return null;
   /* Settled: one row per heading the model gave its own thinking, which is what
      makes a long turn readable — "Resolving the language conflict" says something,
-     and seven rows of "Thought for 9s" say nothing. */
+     and seven rows of "Thought for 9s" say nothing.
+
+     Up to a point. Reasoning summaries are not all written the same way: some
+     models narrate a turn in two or three headings, and some head every
+     paragraph, which turned a single block of thinking into a column of ten grey
+     lines that pushed the actual work off the screen. Past that point the block
+     folds back into one row — the first heading still says what it was about, and
+     the rest is one click away. */
+  if (sections.length > THOUGHT_ROWS) {
+    return <ThoughtCluster sections={sections} settling={part.startedAt > 0} />;
+  }
   return (
     <div className="min-w-0">
       {sections.map((section, index) => (
         <div key={`${part.id}-${index}`} className="min-w-0" {...(index > 0 ? { style: { marginTop: LINKED_GAP } } : {})}>
           {/* Several headings from one block of thinking are one cluster, spaced
               like consecutive steps rather than like separate paragraphs. */}
-          <Thought body={section.body} title={section.title ?? `Thought for ${seconds}s`} />
+          <Thought
+            body={section.body}
+            /* A stored step has no clock on it — see `storedPart`. Reading a
+               transcript back is not watching one settle, and every thought in
+               it sliding into place on mount would be motion for nothing. */
+            settling={part.startedAt > 0}
+            title={section.title ?? `Thought for ${seconds}s`}
+          />
         </div>
       ))}
     </div>
+  );
+}
+
+/** How many headings one settled block of thinking may spend on its own rows
+ *  before it folds into a single one. Three is the most a reader takes in as a
+ *  list of steps rather than as a wall. */
+const THOUGHT_ROWS = 3;
+
+/**
+ * A long block of thinking, folded.
+ *
+ * The first heading is the title, because it is the one the model wrote before
+ * it knew where the thinking would end up and is the closest thing to a subject.
+ * Opening it shows every section with its own heading, so nothing is lost — the
+ * rows are just not all on screen at once.
+ */
+function ThoughtCluster({ sections, settling }: { sections: Array<{ title?: string; body: string }>; settling: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [home, setHome] = useState(!settling);
+  useEffect(() => {
+    if (home) return;
+    const frame = requestAnimationFrame(() => setHome(true));
+    return () => cancelAnimationFrame(frame);
+  }, [home]);
+
+  const travel = {
+    paddingLeft: home ? ROW_INSET : UNDER_LABEL,
+    transition: "padding-left 260ms cubic-bezier(0.32, 0.72, 0, 1)",
+  };
+  const lead = sections.find((section) => section.title)?.title ?? sections[0]?.body ?? "Thinking";
+
+  return (
+    <Collapsible onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className={cn(ROW, TRIGGER, "motion-reduce:transition-none")} style={travel}>
+        <span className="min-w-0 truncate">{lead}</span>
+        {/* What is behind the row, counted. "+11" beside a heading is the only
+            thing telling the learner that eleven more thoughts exist, so it is
+            drawn as a standing chip rather than as dimmed trailing text. */}
+        <span className="shrink-0 rounded-full bg-[var(--transcript-step-mark)]/12 px-1.5 py-px text-ui-sm tabular-nums text-[var(--transcript-step)]">
+          +{sections.length - 1}
+        </span>
+        <Caret open={open} standing />
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <FadedScroll className="mx-1.5 mb-1">
+          <div className="border-l border-border/70 pl-2.5">
+            {sections.map((section, index) => (
+              <div key={index} className={index > 0 ? "mt-2" : undefined}>
+                {section.title ? (
+                  <p className="text-ui-sm leading-[1.6] font-medium text-[var(--transcript-step-strong)]">{section.title}</p>
+                ) : null}
+                {section.body ? (
+                  <p className="text-ui-sm leading-[1.6] text-[var(--transcript-step)]">{section.body}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </FadedScroll>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/**
+ * Thinking as it arrives, behind a disclosure.
+ *
+ * The trigger is the same row every other step uses, so a turn in flight reads
+ * as one column of steps rather than as a wall with rows either side of it. The
+ * orb and the shimmer are what say this one is still happening.
+ *
+ * The stream inside follows its own tail and is capped, so opening it during a
+ * long thought shows the end — where the model is now — rather than the
+ * beginning, and never grows past a screenful.
+ */
+function LiveThought({
+  body,
+  id,
+  sections,
+  title,
+}: {
+  body: string;
+  id: string;
+  sections: Array<{ title?: string; body: string }>;
+  title: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const trigger = (
+    <>
+      <span className={ROW_GLYPH}>
+        <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
+      </span>
+      <span className="thinking-shimmer min-w-0 truncate">{title}</span>
+      {sections.length > 0 && <Caret open={open} />}
+    </>
+  );
+
+  if (sections.length === 0) return <div className={cn(ROW, "text-[var(--transcript-step)]")}>{trigger}</div>;
+
+  return (
+    <Collapsible onOpenChange={setOpen} open={open}>
+      <CollapsibleTrigger className={cn(ROW, TRIGGER)}>{trigger}</CollapsibleTrigger>
+      <CollapsibleContent>
+        <FadedScroll className="mx-1.5 mb-1" follow watch={body}>
+          <div className="space-y-2 border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-[var(--transcript-step)]">
+            {sections.map((section, index) => (
+              <div key={`${id}-live-${index}`}>
+                {/* The heading of a section that has finished. The one still
+                    being written is already the row's own title. */}
+                {section.title && index < sections.length - 1 && (
+                  <p className="font-medium text-[var(--transcript-step-strong)]">{section.title}</p>
+                )}
+                {section.body && <p>{section.body}</p>}
+              </div>
+            ))}
+          </div>
+        </FadedScroll>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -380,13 +613,42 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
  * and keeping its gutter was worse than either: the text sat indented under a
  * blank column, which reads as a nested child of the row above rather than as a
  * step beside it. The thought starts at the margin.
+ *
+ * `settling` is how it gets there. While the model is thinking the row carries
+ * an orb in the gutter, so its words sit a label's width in; the moment the orb
+ * goes the words have to travel that width to the margin, and doing it in one
+ * frame is a jump in the middle of a paragraph the reader is already looking at.
+ * It is only ever true for a thought that has just finished in front of them —
+ * a transcript read back from storage was never indented and has nothing to
+ * travel.
  */
-function Thought({ title, body }: { title: string; body: string }) {
+function Thought({ title, body, settling }: { title: string; body: string; settling: boolean }) {
   const [open, setOpen] = useState(false);
-  if (!body) return <div className={cn(ROW, "text-muted-foreground")}><span className="min-w-0 truncate">{title}</span></div>;
+  /* Starts where the live row left it, then moves on the next frame. Setting
+     both the start and the end in one commit would give the browser a single
+     computed value and nothing to interpolate between. */
+  const [home, setHome] = useState(!settling);
+  useEffect(() => {
+    if (home) return;
+    const frame = requestAnimationFrame(() => setHome(true));
+    return () => cancelAnimationFrame(frame);
+  }, [home]);
+
+  const travel = {
+    paddingLeft: home ? ROW_INSET : UNDER_LABEL,
+    transition: "padding-left 260ms cubic-bezier(0.32, 0.72, 0, 1)",
+  };
+
+  if (!body) {
+    return (
+      <div className={cn(ROW, "motion-reduce:transition-none text-[var(--transcript-step)]")} style={travel}>
+        <span className="min-w-0 truncate">{title}</span>
+      </div>
+    );
+  }
   return (
     <Collapsible onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className={cn(ROW, TRIGGER)}>
+      <CollapsibleTrigger className={cn(ROW, TRIGGER, "motion-reduce:transition-none")} style={travel}>
         <span className="min-w-0 truncate">{title}</span>
         <Caret open={open} />
       </CollapsibleTrigger>
@@ -395,7 +657,7 @@ function Thought({ title, body }: { title: string; body: string }) {
             then expanded to a screenful on settling would reflow the thread under
             the reader at the exact moment they started reading it. */}
         <FadedScroll className="mx-1.5 mb-1">
-          <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-muted-foreground/75">{body}</p>
+          <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-[var(--transcript-step)]">{body}</p>
         </FadedScroll>
       </CollapsibleContent>
     </Collapsible>
@@ -403,42 +665,7 @@ function Thought({ title, body }: { title: string; body: string }) {
 }
 
 /**
- * Reasoning summaries arrive as `**A heading**` followed by prose, several to a
- * block. Those headings are the model's own account of what it is doing, so they
- * become the rows — and the markup is removed rather than shown, which is what
- * put literal asterisks in the transcript.
- */
-function thoughts(body: string): Array<{ title?: string; body: string }> {
-  const sections: Array<{ title?: string; body: string }> = [];
-  const pattern = /\*\*(.+?)\*\*/g;
-  let cursor = 0;
-  for (let match = pattern.exec(body); match; match = pattern.exec(body)) {
-    const before = clean(body.slice(cursor, match.index));
-    if (before) {
-      const open = sections.at(-1);
-      if (open) open.body = clean(`${open.body} ${before}`);
-      else sections.push({ body: before });
-    }
-    sections.push({ title: clean(match[1] ?? ""), body: "" });
-    cursor = match.index + match[0].length;
-  }
-  const rest = clean(body.slice(cursor));
-  if (rest) {
-    const open = sections.at(-1);
-    if (open) open.body = clean(`${open.body} ${rest}`);
-    else sections.push({ body: rest });
-  }
-  return sections.filter((section) => section.title || section.body);
-}
-
-/** Reasoning is emitted with hard wraps and blank runs that read as gaps in the
- *  transcript. The words are what matter here, so the whitespace is normalised. */
-function clean(value: string): string {
-  return value.replace(/\*\*/g, "").replace(/\s*\n\s*/g, " ").replace(/\s{2,}/g, " ").trim();
-}
-
-/**
- * Spar reading how the challenge was actually solved.
+ * Construct reading how the challenge was actually solved.
  *
  * This is the step the rest of the turn is built on, and the learner should be
  * able to see it happen: what it looked at, and what it found in their own
@@ -449,20 +676,20 @@ function clean(value: string): string {
 export function SolveRead({ part }: { part: ToolPart }) {
   const running = part.phase === "running";
   return (
-    <div className={cn(ROW, "text-muted-foreground")}>
-      <span className="grid size-4 shrink-0 place-items-center text-muted-foreground/70">
+    <div className={cn(ROW, "text-[var(--transcript-step)]")}>
+      <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}>
         {running
           ? <ThinkingOrb aria-label="Reading your solve" size={20} state="searching" style={{ width: 15, height: 15 }} />
-          : <History className="size-3.5" />}
+          : <IconHistory className="size-4" />}
       </span>
-      <span className={cn("min-w-0 truncate", running && "thinking-shimmer text-foreground")}>
+      <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
         {running ? "Reading your solve" : "Read your solve"}
       </span>
       {/* What the replay found, on the same line. It used to be a stack of chips
           built by splitting the label on an em dash — a shape that broke the day
           that field started carrying the agent's own title for the step. */}
       {!running && part.detail && (
-        <span className="min-w-0 truncate text-muted-foreground/60">{part.detail}</span>
+        <span className="min-w-0 truncate text-[var(--transcript-step-mark)]">{part.detail}</span>
       )}
     </div>
   );
@@ -495,11 +722,11 @@ export function ChallengePublished({ part }: { part: ToolPart }) {
       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
     >
       <span className={cn("grid size-4 shrink-0 place-items-center", sourced ? "text-foreground/80" : "text-[var(--success)]")}>
-        {sourced ? <SourceGlyph className="size-3.5" source={source} /> : <Check className="size-3.5" />}
+        {sourced ? <SourceGlyph className="size-3.5" source={source} /> : <IconCheck className="size-4" />}
       </span>
       <span className="min-w-0 truncate">
-        <span className="font-medium text-foreground">{part.label || (sourced ? "Problem set" : replaced ? "Challenge replaced" : "Challenge ready")}</span>
-        <span className="ml-1.5 text-muted-foreground/60">
+        <span className="text-ui font-medium text-foreground">{part.label || (sourced ? "Problem set" : replaced ? "Challenge replaced" : "Challenge ready")}</span>
+        <span className="ml-1.5 text-muted-foreground">
           {sourced ? `· from ${sourceName} · judged there` : replaced ? "· replaced · validated" : "· validated"}
         </span>
       </span>
@@ -529,20 +756,20 @@ export function RunFailure({ body }: { body: string }) {
       transition={{ duration: 0.24 }}
     >
       <div className="flex min-w-0 items-start gap-2.5">
-        <CircleAlert className="mt-px size-4 shrink-0 text-destructive/80" />
+        <IconAlert className="mt-px size-4 shrink-0 text-destructive/80" />
         <div className="min-w-0 flex-1">
           <p className="text-ui font-medium text-foreground">That turn did not finish</p>
           <p className="mt-0.5 min-w-0 break-words text-ui leading-[1.55] text-muted-foreground">
-            {headline?.trim().replace(/\.$/, "") ?? "Spar could not complete that turn"}.
+            {headline?.trim().replace(/\.$/, "") ?? "Construct could not complete that turn"}.
           </p>
           {detail && (
             <>
               <button
-                className="mt-1.5 inline-flex items-center gap-1 text-ui-sm text-muted-foreground/70 transition-colors hover:text-foreground"
+                className="mt-1.5 inline-flex items-center gap-1 text-ui-sm text-muted-foreground/85 transition-colors hover:text-foreground"
                 onClick={() => setOpen((value) => !value)}
                 type="button"
               >
-                <ChevronDown className={cn("size-3 transition-transform duration-200", !open && "-rotate-90")} />
+                <IconChevronRight className={cn("size-3.5 transition-transform duration-200", open && "rotate-90")} />
                 {open ? "Hide details" : "Show details"}
               </button>
               <AnimatePresence initial={false}>

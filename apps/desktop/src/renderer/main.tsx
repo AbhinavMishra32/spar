@@ -8,13 +8,16 @@ import "monaco-editor/esm/vs/language/typescript/monaco.contribution";
 import "monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution";
 import "monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution";
 import "monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution";
+import "monaco-editor/esm/vs/basic-languages/python/python.contribution";
 import "monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import TypeScriptWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import { MotionConfig } from "motion/react";
 import { App } from "./App";
 import { UpdateExperience } from "./components/updates/UpdateExperience";
+import { CrashBoundary } from "./components/common/CrashScreen";
 import { defineEditorThemes } from "./lib/monaco-theme";
+import { CodeThemeProvider } from "./hooks/use-code-theme";
 import "./theme.css";
 
 window.MonacoEnvironment = {
@@ -42,9 +45,16 @@ loader.config({ monaco });
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <MotionConfig reducedMotion="user">
-      <App />
-      {window.spar && <UpdateExperience api={window.spar} />}
-    </MotionConfig>
+    {/* Outermost, so a throw in a provider is caught too — those are exactly the
+        crashes that would otherwise take the window down before anything is
+        drawn, with nothing on screen to say why. */}
+    <CrashBoundary>
+      <MotionConfig reducedMotion="user">
+        <CodeThemeProvider>
+          <App />
+          {window.spar && <UpdateExperience api={window.spar} />}
+        </CodeThemeProvider>
+      </MotionConfig>
+    </CrashBoundary>
   </React.StrictMode>,
 );

@@ -1,21 +1,23 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, History, Library, Map, PanelLeftClose, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
-import type { SessionSummary } from "@spar/domain";
+import { Archive, ArchiveRestore, ArrowRight, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Map, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
+import type { SessionSummary, Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { formatDuration, initials, relativeTime } from "@/lib/format";
 import { challengeBands } from "@/lib/progress";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Meter } from "@/components/ui/meter";
 import { SparWordmark } from "../common/SparWordmark";
+import { SidebarGlyph } from "./NavIcons";
 
 /* "challenge" is one challenge opened from History or Problems. Like
    "workspace" it draws its own toolbar and is not a destination in the nav; the
    parent destination is kept by App so Back returns to the surface it came from. */
-export type Page = "today" | "baseline" | "tracks" | "progress" | "history" | "problems" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
+export type Page = "today" | "baseline" | "tracks" | "track" | "progress" | "history" | "problems" | "visualizer" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
 
 /** What the sidebar can do to a session. Every one of these is a write the main
  *  process owns, so the row reports intent and never edits its own copy. */
@@ -27,10 +29,19 @@ export type SessionActions = {
   remove(session: SessionSummary): void;
 };
 
+/* Tracks are not in here. A Track is a container for sessions, not a
+   destination beside them — so it heads its own group in the list below, over
+   the sessions it holds, and the page that shows one is reached by opening
+   it. A nav row for "Tracks" and a list of tracks underneath said the same thing
+   twice, and only one of them could tell you what was in them. */
 const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: "today", label: "Today", icon: Waypoints },
-  { id: "tracks", label: "Tracks", icon: Target },
   { id: "problems", label: "Problems", icon: Library },
+  /* Below Problems and above Progress, which is the order of the work: you pick
+     something to solve, you go and look at how it runs, and only then is there
+     progress to read. Putting it under the two surfaces it is opened from also
+     keeps it out of the first three rows, where the daily loop lives. */
+  { id: "visualizer", label: "Visualize", icon: Eye },
   { id: "progress", label: "Progress", icon: Map },
   { id: "history", label: "History", icon: History },
 ];
@@ -103,23 +114,33 @@ export function Sidebar({
   page,
   account,
   sessions,
+  tracks,
+  activeTrackId,
   activeSessionId,
   syncState,
   sessionActions,
   onPage,
   onOpenSession,
+  onOpenTrack,
+  onNewTrack,
   onNewSession,
   onCommandPalette,
   onCollapse,
 }: {
   page: Page;
   account: NonNullable<BootstrapData["account"]>;
+  /** Every session the learner has, across every Track. The sidebar does the
+   *  grouping now — it is the thing drawing the groups. */
   sessions: SessionSummary[];
+  tracks: Track[];
+  activeTrackId?: string | undefined;
   activeSessionId?: string | undefined;
   syncState: BootstrapData["syncState"];
   sessionActions: SessionActions;
   onPage(page: Page): void;
   onOpenSession(session: SessionSummary): void;
+  onOpenTrack(track: Track): void;
+  onNewTrack(): void;
   onNewSession(): void;
   onCommandPalette(): void;
   onCollapse(): void;
@@ -127,18 +148,30 @@ export function Sidebar({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  /* Which Tracks the learner has opened in the list. Only their explicit choices live here;
+     the Track being worked in is open because it is the Track being worked in,
+     which is why that is read off `activeTrackId` rather than seeded into state
+     — seeding it would mean a Track you deliberately closed springs back open
+     the next time the shell re-reads. */
+  const [opened, setOpened] = useState<Record<string, boolean>>({});
 
   // The store already sorts pinned first, then by last touched; the sidebar only
   // has to say where one group stops and the next starts.
   const shelved = sessions.filter((session) => session.archivedAt);
   const live = sessions.filter((session) => !session.archivedAt);
-  const pinned = live.filter((session) => session.pinnedAt);
-  const recent = live.filter((session) => !session.pinnedAt).slice(0, RECENT_LIMIT);
+  /* A session belongs to its Track's group, and only what is left over reaches
+     the flat lists underneath — otherwise every title would be in the sidebar
+     twice, once under its Track and once under Recent. A `trackId` naming a Track
+     that is not in the list counts as loose rather than disappearing. */
+  const known = new Set(tracks.map((track) => track.id));
+  const loose = live.filter((session) => !session.trackId || !known.has(session.trackId));
+  const pinned = loose.filter((session) => session.pinnedAt);
+  const recent = loose.filter((session) => !session.pinnedAt).slice(0, RECENT_LIMIT);
   /* The open session keeps its row whatever else is true of it. Archiving or
      finishing the session you are working in is the ordinary way to file it away,
      and the row disappearing from under the cursor while its workspace is still
      on screen reads as having lost the thing rather than having tidied it. */
-  const shown = new Set([...pinned, ...recent, ...(showArchived ? shelved : [])].map((session) => session.id));
+  const shown = new Set([...live.filter((session) => session.trackId && known.has(session.trackId)), ...pinned, ...recent, ...(showArchived ? shelved : [])].map((session) => session.id));
   const stranded = activeSessionId && !shown.has(activeSessionId) ? sessions.find((session) => session.id === activeSessionId) : undefined;
 
   const row = (session: SessionSummary) => (
@@ -163,12 +196,15 @@ export function Sidebar({
       <div className="flex h-[var(--titlebar-height)] shrink-0 items-center pl-[max(0.625rem,var(--window-controls-leading))] pr-2">
         <SparWordmark className="text-[1.1rem] text-foreground" />
         <button
-          className="app-no-drag ml-auto grid size-7 place-items-center rounded-lg text-muted-foreground hover:bg-[var(--sidebar-accent)] hover:text-foreground"
+          /* `rounded-md` rather than `rounded-lg`: the one control on the
+             trailing edge of the title row was shaped unlike every other 28px
+             control in the window. */
+          className="app-no-drag ml-auto grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-[var(--sidebar-accent)] hover:text-foreground"
           onClick={onCollapse}
           title="Hide sidebar  ⌘B"
           type="button"
         >
-          <PanelLeftClose className={ROW_ICON} />
+          <SidebarGlyph />
         </button>
       </div>
 
@@ -223,6 +259,45 @@ export function Sidebar({
       </nav>
 
       <div className="app-no-drag app-scroll mt-4 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+        {tracks.length > 0 && (
+          <>
+            <SectionLabel
+              action={
+                <button
+                  aria-label="Start a Track"
+                  className="grid size-5 place-items-center rounded text-muted-foreground hover:bg-[var(--sidebar-accent)] hover:text-foreground"
+                  onClick={onNewTrack}
+                  title="Start a Track"
+                  type="button"
+                >
+                  <Plus className="size-3.5" />
+                </button>
+              }
+            >
+              Tracks
+            </SectionLabel>
+            <div className="space-y-0.5">
+              {tracks.map((track) => (
+                <TrackGroup
+                  key={track.id}
+                  onOpen={() => onOpenTrack(track)}
+                  onToggle={() => setOpened((value) => ({ ...value, [track.id]: !(value[track.id] ?? activeTrackId === track.id) }))}
+                  open={opened[track.id] ?? activeTrackId === track.id}
+                  track={track}
+                >
+                  {(() => {
+                    const inside = live.filter((session) => session.trackId === track.id);
+                    /* An empty Track says so rather than opening onto nothing —
+                       a Track with no sessions yet is the ordinary state of one
+                       just started, and a blank gap reads as a bug. */
+                    return inside.length ? inside.map(row) : <p className="px-2.5 py-1 text-source-sm text-muted-foreground">No sessions yet</p>;
+                  })()}
+                </TrackGroup>
+              ))}
+            </div>
+          </>
+        )}
+
         {pinned.length > 0 && (
           <>
             <SectionLabel>Pinned</SectionLabel>
@@ -312,6 +387,73 @@ const ICON_BUTTON =
  * and the title fades under them rather than being cut. What the fade hides,
  * hovering walks past — see {@link RowTitle}.
  */
+/**
+ * A Track in the source list, with its sessions under it.
+ *
+ * The whole header toggles, and toggling is all it does. Opening a Track to see
+ * what is in it is not the same act as going to it — the first is looking, the
+ * second is moving, and a row that did both meant you could not glance inside a
+ * Track without leaving the one you were in. Going to a Track is what clicking a
+ * session in it does, and the arrow on the right is there for the Track's own
+ * page.
+ *
+ * Radix rather than a bare conditional, for the height it measures: an accordion
+ * that pops open has no relationship between the row you clicked and the rows
+ * that appeared, and on a list where several can be open at once that is the
+ * difference between the list re-laying-out and the list answering you.
+ */
+function TrackGroup({
+  track,
+  open,
+  onToggle,
+  onOpen,
+  children,
+}: {
+  track: Track;
+  open: boolean;
+  onToggle(): void;
+  onOpen(): void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Collapsible onOpenChange={onToggle} open={open}>
+      {/* No selection fill on the Track itself. The session inside it is the thing
+          that is open, and lighting both made two rows look chosen when only one
+          was — the Track row is a heading, and a heading does not get selected
+          along with its contents. */}
+      <div className={cn(ROW, "group/track gap-1 pl-1 pr-1 hover:bg-[var(--sidebar-accent)]")}>
+        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 text-left outline-none" type="button">
+          {/* No glyph beyond the disclosure. Every mark tried beside it — a
+              folder, the Track target — claimed the Track was a kind of thing it
+              is not. A source list names its groups and leaves icons to items. */}
+          <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
+            <ChevronRight className={cn("size-3.5 transition-transform duration-200 ease-out", open && "rotate-90")} />
+          </span>
+          <span className="min-w-0 flex-1 truncate">{track.title}</span>
+        </CollapsibleTrigger>
+        {/* The Track's own page, which is a different place from its sessions.
+            Hidden until the row is under the pointer, like the controls on a
+            session row: it is the rarer of the two things you want from a Track,
+            and a permanent chevron on every row is a second column of chrome. */}
+        <button
+          aria-label={`Open ${track.title}`}
+          className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/track:opacity-100 focus-visible:opacity-100 hover:text-foreground"
+          onClick={onOpen}
+          title={`Open ${track.title}`}
+          type="button"
+        >
+          <ArrowRight className="size-3.5" />
+        </button>
+      </div>
+      {/* Indented to the Track's own text column, so the titles inside line up
+          under the name of the thing holding them. */}
+      <CollapsibleContent>
+        <div className="mt-0.5 space-y-0.5 pl-[0.875rem]">{children}</div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function SessionRow({
   session,
   active,
