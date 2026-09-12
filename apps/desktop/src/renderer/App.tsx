@@ -468,6 +468,11 @@ export function App() {
      opens instantly wherever it was clicked. */
   const conceptSummaries = new Map(data.concepts.map((entry) => [entry.slug, entry]));
 
+  /* One bundle rather than three props repeated at every surface that shows a
+     concept chip. Every chip in the app previews the same history and opens the
+     same sheet, so they all read from this. */
+  const conceptContext = { challenges: data.challenges, summaries: conceptSummaries, onOpen: setConcept };
+
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
   const openTrack = async (track: Track, record = true) => {
     if (!api) return;
@@ -731,7 +736,7 @@ export function App() {
 
         <div className="min-h-0 flex-1">
           {page === "today" && <TodayPage busy={opening} data={data} onBaseline={beginBaseline} onCreateTrack={() => navigate("tracks")} onMode={setTrainingMode} onOpen={open} onProgress={() => navigate("progress")} />}
-          {page === "baseline" && <BaselinePage api={api} busy={opening} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
+          {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
           {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
           {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
           {page === "problems" && (
@@ -810,6 +815,7 @@ export function App() {
                   {detail.question ? (
                     <Workspace
                       api={api}
+                      concepts={conceptContext}
                       dark={dark}
                       detail={detail}
                       onAbandon={abandon}

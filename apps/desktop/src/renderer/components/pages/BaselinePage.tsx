@@ -9,11 +9,12 @@ import { AskUserQuestion } from "../agent/AskUserQuestion";
 import type { AgentRun } from "../agent/agentRun";
 import { Toolbar } from "../shell/Toolbar";
 import { Workspace } from "../workspace/Workspace";
+import type { ConceptContext } from "../concepts/ConceptChip";
 
 /** Baseline is a product flow, not a session transcript. The agent still makes
  *  the adaptive decisions underneath it, but the learner sees only the context
  *  question that is genuinely needed and the coding probe it selected. */
-export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRefresh, nav, onProgress, onError, onAbandon, onExpandSidebar, onOpenSettings }: {
+export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRefresh, concepts, nav, onProgress, onError, onAbandon, onExpandSidebar, onOpenSettings }: {
   api: SparApi | undefined;
   data: BootstrapData;
   detail: SessionDetail | null;
@@ -23,6 +24,7 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
   onStart(): Promise<void>;
   onRefresh(): Promise<void>;
   /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
+  concepts?: ConceptContext | undefined;
   nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
   onProgress(): void;
   onError(value: string): void;
@@ -51,7 +53,7 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
     </div>
   );
 
-  if (detail?.question) return <Workspace api={api} context="baseline" dark={dark} detail={detail} onAbandon={onAbandon} nav={nav} onError={onError} onExpandSidebar={onExpandSidebar} onOpenSettings={onOpenSettings} onRefresh={onRefresh} question={detail.question} run={run} />;
+  if (detail?.question) return <Workspace api={api} concepts={concepts} context="baseline" dark={dark} detail={detail} onAbandon={onAbandon} nav={nav} onError={onError} onExpandSidebar={onExpandSidebar} onOpenSettings={onOpenSettings} onRefresh={onRefresh} question={detail.question} run={run} />;
 
   const pending = detail?.pendingLearnerQuestion;
   const send = async (answer: string) => {

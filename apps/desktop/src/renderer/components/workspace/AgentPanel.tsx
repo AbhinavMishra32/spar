@@ -11,6 +11,7 @@ import { useStopTurn } from "@/hooks/use-stop-turn";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { DifficultyPill } from "./Difficulty";
 import { ProblemView } from "./ProblemView";
+import type { ConceptContext } from "../concepts/ConceptChip";
 
 type View = "problem" | "chat";
 const ORDER: View[] = ["problem", "chat"];
@@ -22,6 +23,7 @@ const ORDER: View[] = ["problem", "chat"];
  * question is always one click away from the statement.
  */
 export function AgentPanel({
+  concepts,
   detail,
   question,
   run,
@@ -32,6 +34,7 @@ export function AgentPanel({
   onOpenExternal,
   testFiles,
 }: {
+  concepts?: ConceptContext | undefined;
   detail: SessionDetail;
   question: ActiveQuestion;
   run: AgentRun | null;
@@ -127,7 +130,7 @@ export function AgentPanel({
             }}
           >
             {view === "problem" ? (
-              <ProblemView onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
+              <ProblemView concepts={concepts} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
             ) : (
               <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} run={run} />
             )}

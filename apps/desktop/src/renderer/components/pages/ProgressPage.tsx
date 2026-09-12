@@ -58,6 +58,7 @@ export function ProgressPage({
       <AbilityDetail
         abilityId={ability}
         api={api}
+        challenges={challenges}
         fallback={abilities.find((entry) => entry.id === ability)}
         onBack={() => onOpenAbility(null)}
         onOpenConcept={onOpenConcept}

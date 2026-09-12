@@ -32,6 +32,28 @@ export function OutcomeMark({ className, outcome }: { className?: string; outcom
  * rather than a button that does nothing: a cursor that changes over something
  * inert is a promise the row does not keep.
  */
+/**
+ * Everything a chip needs to be more than a label: the history the preview is
+ * drawn from, the learner's standing on each concept, and the way to open one.
+ *
+ * Bundled because it travels as a set — a chip with history but no opener is a
+ * preview you cannot act on, and an opener with no history is a button that
+ * tells you nothing before you press it — and because the surfaces that carry
+ * it are three components deep from the page that has it.
+ */
+export type ConceptContext = {
+  challenges: ChallengeHistorySummary[];
+  summaries: Map<string, ConceptSummary>;
+  onOpen(slug: string): void;
+};
+
+/** Spreads a context onto one chip, dropping the parts it has nothing for. */
+export function conceptChipProps(context: ConceptContext | undefined, slug: string) {
+  if (!context) return {};
+  const summary = context.summaries.get(slug);
+  return { challenges: context.challenges, onOpen: context.onOpen, ...(summary ? { summary } : {}) };
+}
+
 export function ConceptChip({
   challenges,
   className,

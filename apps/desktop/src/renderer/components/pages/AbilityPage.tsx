@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
-import type { AbilityDetail as AbilityDetailData, AbilityHistorySummary, ConceptSummary } from "@spar/domain";
+import type { AbilityDetail as AbilityDetailData, AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { relativeTime, shortTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { LanguageMark } from "../common/LanguageGlyph";
 import { Markdown } from "../agent/Markdown";
-import { ConceptChip, OutcomeMark } from "../concepts/ConceptChip";
+import { ConceptChip, conceptChipProps, OutcomeMark } from "../concepts/ConceptChip";
 import { SparDots } from "@/components/common/SparDots";
 import { Band, Page, Panel } from "../common/Page";
 import { STATUS, StatusRing } from "../progress/status";
@@ -45,6 +45,7 @@ import { STATUS, StatusRing } from "../progress/status";
 export function AbilityDetail({
   abilityId,
   api,
+  challenges,
   fallback,
   onBack,
   onOpenConcept,
@@ -54,6 +55,8 @@ export function AbilityDetail({
 }: {
   abilityId: string;
   api: SparApi | undefined;
+  /** History, so a chip here previews the same evidence it does everywhere else. */
+  challenges: ChallengeHistorySummary[];
   fallback: AbilityHistorySummary | undefined;
   onBack(): void;
   onOpenConcept(slug: string): void;
@@ -266,12 +269,7 @@ export function AbilityDetail({
         <div className="mt-7 flex flex-wrap items-center gap-2">
           <span className="text-ui text-muted-foreground/70">Filed under</span>
           {ability.concepts.map((tag) => (
-            <ConceptChip
-              key={tag.slug}
-              onOpen={onOpenConcept}
-              tag={tag}
-              {...(summaries.get(tag.slug) ? { summary: summaries.get(tag.slug)! } : {})}
-            />
+            <ConceptChip key={tag.slug} tag={tag} {...conceptChipProps({ challenges, summaries, onOpen: onOpenConcept }, tag.slug)} />
           ))}
         </div>
       )}

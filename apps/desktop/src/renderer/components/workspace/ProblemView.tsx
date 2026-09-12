@@ -6,7 +6,7 @@ import { declaredCases, sourcedCases } from "@/lib/testCases";
 import { presentSourcedStatement } from "@/lib/sourcedStatement";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { ProblemStatement } from "./ProblemStatement";
-import { ConceptChip } from "../concepts/ConceptChip";
+import { ConceptChip, conceptChipProps, type ConceptContext } from "../concepts/ConceptChip";
 import { SourceBadge } from "../common/SourceBadge";
 import { SourceGlyph } from "../common/SourceGlyph";
 
@@ -16,10 +16,13 @@ import { SourceGlyph } from "../common/SourceGlyph";
  * push the problem out of reach when you need to re-read it mid-attempt.
  */
 export function ProblemView({
+  concepts,
   onOpenExternal,
   question,
   testFiles,
 }: {
+  /** What the concept chips need to preview and open. */
+  concepts?: ConceptContext | undefined;
   /** Opens the problem at its source in the real browser. */
   onOpenExternal?: ((url: string) => void) | undefined;
   question: ActiveQuestion;
@@ -57,7 +60,13 @@ export function ProblemView({
             <p className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">
               {question.source ? "CHOSEN FOR YOU" : "CHALLENGE SET FOR YOU"}
             </p>
-            <p className="truncate text-content font-medium">{question.abilityTitle}</p>
+            {/* The problem's own name, which is what the learner calls it and
+                what they will search for later. The ability under it is what it
+                is training — related, and not the same thing: the header used to
+                lead with the ability, so the biggest words on the page were a
+                topic while the problem itself was a line of toolbar chrome. */}
+            <p className="truncate text-[1.0625rem] font-semibold leading-[1.25] tracking-[-0.015em]">{question.title}</p>
+            {question.abilityTitle && <p className="truncate text-ui text-muted-foreground">{question.abilityTitle}</p>}
           </div>
           {question.source && (
             <SourceBadge
@@ -67,12 +76,16 @@ export function ProblemView({
           )}
         </div>
 
-        {/* What it is training, while it is still being worked on. No hover card
-            and no link: mid-challenge is the wrong moment to send someone off to
-            read their own history, and naming the concept is the whole value. */}
+        {/* What it is training. These carry the same preview and the same opener
+            as every other chip in the app: a chip that behaves one way in
+            history and another way here is two controls wearing one face, and
+            the moment you most want to know what you have already done under a
+            concept is while you are stuck on a problem about it. */}
         {question.concepts.length > 0 && (
           <div className="mb-4 -mt-1.5 flex flex-wrap gap-1">
-            {question.concepts.map((concept) => <ConceptChip key={concept.slug} showArea tag={concept} />)}
+            {question.concepts.map((concept) => (
+              <ConceptChip key={concept.slug} showArea tag={concept} {...conceptChipProps(concepts, concept.slug)} />
+            ))}
           </div>
         )}
 
