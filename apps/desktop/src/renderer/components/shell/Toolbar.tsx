@@ -1,20 +1,22 @@
-import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ExpandSidebar } from "./ExpandSidebar";
+import { NavButtons } from "./NavButtons";
 import { SIDEBAR_SLIDE_CSS } from "./sidebarMotion";
 
 /** Inset macOS toolbar: one title-bar row tall, hairline base, draggable but for the controls. */
 export function Toolbar({
   title,
   subtitle,
-  onBack,
+  nav,
   onExpandSidebar,
   actions,
   className,
 }: {
   title: string;
   subtitle?: string;
-  onBack?(): void;
+  /** The window's back and forward. Drawn here only while the sidebar — which
+   *  normally carries them — is hidden, so the window never shows two pairs. */
+  nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
   /** Present only while the sidebar is hidden, so the traffic lights get their inset. */
   onExpandSidebar?: (() => void) | undefined;
   actions?: React.ReactNode;
@@ -42,15 +44,8 @@ export function Toolbar({
           exists *because* the sidebar left, so it opens on the same curve the
           column closes on. */}
       <ExpandSidebar gap={8} onExpand={onExpandSidebar} />
-      {onBack && (
-        <button
-          className="app-no-drag grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          onClick={onBack}
-          title="Back"
-          type="button"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
+      {onExpandSidebar && nav && (
+        <NavButtons canBack={nav.canBack} canForward={nav.canForward} onBack={nav.onBack} onForward={nav.onForward} />
       )}
       <div className="flex min-w-0 items-baseline gap-2">
         {/* Set with the sidebar, not with the toolbar's controls: this is the name

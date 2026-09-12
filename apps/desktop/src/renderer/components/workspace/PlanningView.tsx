@@ -63,7 +63,7 @@ export function PlanningView({
   run,
   onRefresh,
   onError,
-  onBack,
+  nav,
   onExpandSidebar,
   onOpenSettings,
 }: {
@@ -72,7 +72,8 @@ export function PlanningView({
   run: AgentRun | null;
   onRefresh(): Promise<void>;
   onError(value: string): void;
-  onBack(): void;
+  /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
+  nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
   onExpandSidebar?: (() => void) | undefined;
   onOpenSettings?: (() => void) | undefined;
 }) {
@@ -104,7 +105,7 @@ export function PlanningView({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Toolbar
-        onBack={onBack}
+        nav={nav}
         onExpandSidebar={onExpandSidebar}
         subtitle={detail.summary.status}
         title={detail.summary.title}

@@ -28,6 +28,7 @@ import { Workspace } from "./components/workspace/Workspace";
 import { PlanningView } from "./components/workspace/PlanningView";
 import { ChatView } from "./components/workspace/ChatView";
 import { reduceRunBatch, type AgentRun } from "./components/agent/agentRun";
+import { canGoBack, canGoForward, forget, step, visit, type History, type View } from "./hooks/navigation";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
 import { SparDots } from "@/components/common/SparDots";
 import { Button } from "@/components/ui/button";
@@ -54,16 +55,19 @@ export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page>("today");
+  /* Where the window has been. A browser's model, not a stack's — see
+     `hooks/navigation`. Every place-changing call below records into it exactly
+     once, and `applyView` is the only thing that moves without recording. */
+  const [history, setHistory] = useState<History>({ entries: [{ page: "today" }], index: 0 });
+  /* Which ability the Progress surface is showing. It used to live inside
+     ProgressPage, which put one of the app's real places out of reach of the
+     history — back from an ability could only land on the Progress index. */
+  const [ability, setAbility] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   /* Which challenge the standalone page is showing. Held here rather than inside
      the challenges list so navigating away and back does not silently keep a
      challenge mounted behind the list. */
   const [challengeId, setChallengeId] = useState<string | null>(null);
-  /* Where Back goes from a challenge. A challenge is opened from two places now —
-     the history list and the problem library — and a Back button that always lands
-     on Challenges would take a learner who started on Problems somewhere they have
-     never been, then leave them to find their way back. */
-  const [challengeFrom, setChallengeFrom] = useState<Extract<Page, "problems" | "history">>("history");
   const [opening, setOpening] = useState(false);
   /* Every agent turn in flight, by the session it belongs to — not just the one
      the workspace is showing. A turn is started from a session and then survives
@@ -81,6 +85,13 @@ export function App() {
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
   const { width: sidebarWidth, dragging, handleProps: sidebarHandle } = useSidebarWidth();
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
+  /* The back/forward mover, reachable from the window listener. `go` is defined
+     below the loading guard — it needs the bootstrap to reopen a session — and a
+     hook cannot be. The shortcut is bound on the window rather than in the menu
+     because it has to work wherever focus is, including inside the editor: an
+     editor that swallowed ⌘[ would make the buttons the only way back, which is
+     the thing a shortcut exists to avoid. */
+  const goRef = useRef<(direction: -1 | 1) => void>(() => {});
   const detailRef = useRef<SessionDetail | null>(null);
   detailRef.current = detail;
 
@@ -117,9 +128,11 @@ export function App() {
     });
   }, []);
 
-  const openSession = useCallback(async (id: string, destination: "workspace" | "baseline" = "workspace") => {
+  const openSession = useCallback(async (id: string, destination: "workspace" | "baseline" = "workspace", record = true) => {
     if (!api) return;
     setPage(destination);
+    setAbility(null);
+    if (record) setHistory((current) => visit(current, { page: destination, sessionId: id }));
     setOpening(true);
     try {
       const next = await api.openSession(id);
@@ -175,6 +188,10 @@ export function App() {
   const signedIn = useCallback(async () => {
     setError(null);
     setPage("today");
+    /* A different account is a different window. Keeping the old history would
+       let Back reopen the last person's session. */
+    setHistory({ entries: [{ page: "today" }], index: 0 });
+
     await refresh();
   }, [refresh]);
 
@@ -275,11 +292,18 @@ export function App() {
     const listener = (event: KeyboardEvent) => {
       const meta = event.metaKey || event.ctrlKey;
       if (!meta) return;
+      if (event.altKey) return;
+      if (event.key === "[" || event.key === "]") {
+        event.preventDefault();
+        goRef.current(event.key === "[" ? -1 : 1);
+        return;
+      }
       const key = event.key.toLowerCase();
       if (key === "n") {
         event.preventDefault();
         setPage("today");
         setDetail(null);
+        setHistory((current) => visit(current, { page: "today" }));
       }
       if (key === "k") {
         event.preventDefault();
@@ -302,13 +326,17 @@ export function App() {
     if (!api) return;
     return api.onMenuCommand((command) => {
       if (command === "command-palette") setPalette(true);
+      /* The menu is another way to the same places, so it records the same
+         entries. A move the history never saw is one Back steps straight past. */
       if (command === "settings") {
         setPage("settings");
         setDetail(null);
+        setHistory((current) => visit(current, { page: "settings" }));
       }
       if (command === "new-session") {
         setPage("today");
         setDetail(null);
+        setHistory((current) => visit(current, { page: "today" }));
       }
     });
   }, []);
@@ -359,10 +387,81 @@ export function App() {
     );
   }
 
-  const navigate = (next: Page) => {
+  /* Landing on a page, without deciding whether the move is worth recording —
+     that is `navigate`'s job, and `applyView`'s job is to do this and nothing
+     else. Split so a back press cannot append the entry it is standing on. */
+  const show = (next: Page) => {
     setPage(next);
     if (next !== "workspace") setDetail(null);
     if (next !== "challenge") setChallengeId(null);
+    if (next !== "ability") setAbility(null);
+  };
+
+  /* A page is a place. Recorded here rather than at each call site so a page
+     reached from the sidebar and the same page reached from the palette are one
+     entry with one meaning. */
+  const navigate = (next: Page) => {
+    show(next);
+    /* The pages that are a place only together with an id record themselves,
+       from the call that knows the id. */
+    if (next !== "workspace" && next !== "baseline" && next !== "challenge" && next !== "ability" && next !== "track") {
+      setHistory((current) => visit(current, { page: next }));
+    }
+  };
+
+  /**
+   * Puts the window where the history says, without recording the move.
+   *
+   * Re-entering a session goes through `openSession` so the main process
+   * reopens it — the transcript, workspace and attempts are read on open, and
+   * restoring the page alone would show a workspace the rest of the app does
+   * not believe is open. The same is true of a Track, which is active state the
+   * main process owns. Anything deleted since is skipped rather than reopened.
+   */
+  const applyView = (view: View) => {
+    if (view.page === "workspace" || view.page === "baseline") {
+      if (!data.sessions.some((session) => session.id === view.sessionId)) return;
+      void openSession(view.sessionId, view.page, false).catch((cause) => setError(message(cause)));
+      return;
+    }
+    if (view.page === "challenge") {
+      setChallengeId(view.challengeId);
+      show("challenge");
+      return;
+    }
+    if (view.page === "ability") {
+      show("ability");
+      setAbility(view.abilityId);
+      return;
+    }
+    if (view.page === "track") {
+      const track = data.tracks.find((entry) => entry.id === view.trackId);
+      if (!track) return;
+      if (data.activeTrack?.id === track.id) { show("track"); return; }
+      void openTrack(track, false);
+      return;
+    }
+    show(view.page);
+  };
+
+  /* Read outside the updater on purpose. Applying the view from inside one
+     would put a side effect in a function React is free to call twice — which
+     it does in development — and reopening a session twice per click is not
+     something the second call makes harmless. */
+  const go = (direction: -1 | 1) => {
+    const moved = step(history, direction);
+    if (!moved) return;
+    setHistory(moved.history);
+    applyView(moved.view);
+  };
+
+  goRef.current = go;
+
+  const nav = {
+    canBack: canGoBack(history),
+    canForward: canGoForward(history),
+    onBack: () => go(-1),
+    onForward: () => go(1),
   };
 
   /* The sheet's header renders from this before its own read lands, so a chip
@@ -370,21 +469,31 @@ export function App() {
   const conceptSummaries = new Map(data.concepts.map((entry) => [entry.slug, entry]));
 
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
-  const openTrack = async (track: Track) => {
+  const openTrack = async (track: Track, record = true) => {
     if (!api) return;
     setOpening(true); setError(null);
     try {
       await api.setActiveTrack(track.id);
       await refresh();
-      navigate("track");
+      show("track");
+      if (record) setHistory((current) => visit(current, { page: "track", trackId: track.id }));
     } catch (cause) { setError(message(cause)); }
     finally { setOpening(false); }
   };
-  const openChallenge = (id: string, from: Extract<Page, "problems" | "history"> = "history") => {
+  /* `from` is gone: a challenge is opened from two libraries, and where Back
+     lands is now the history's business rather than a guess recorded at the
+     door. */
+  const openChallenge = (id: string) => {
     setChallengeId(id);
-    setChallengeFrom(from);
-    setPage("challenge");
+    show("challenge");
     setDetail(null);
+    setHistory((current) => visit(current, { page: "challenge", challengeId: id }));
+  };
+
+  const openAbility = (id: string) => {
+    show("ability");
+    setAbility(id);
+    setHistory((current) => visit(current, { page: "ability", abilityId: id }));
   };
 
   /* Practice is a real session, so it lands where a new session lands: the sheet
@@ -434,9 +543,12 @@ export function App() {
        agent's own refresh both re-open the session by id, and either one would
        come back to a row that is no longer there. */
     remove: (session) => void mutateSession(async (sdk) => {
+      /* Back must not point at a session that no longer exists: the entry would
+         reopen something deleted, and the reopen fails rather than no-ops. */
+      setHistory((current) => forget(current, session.id));
       if (detailRef.current?.summary.id === session.id) {
         setDetail(null);
-        setPage("today");
+        show("today");
       }
       clearRun(session.id);
       await sdk.deleteSession(session.id);
@@ -471,6 +583,10 @@ export function App() {
     setRuns({});
     setDetail(null);
     setPage("today");
+    /* A different account is a different window. Keeping the old history would
+       let Back reopen the last person's session. */
+    setHistory({ entries: [{ page: "today" }], index: 0 });
+
     setError(null);
     await refresh();
   };
@@ -545,6 +661,7 @@ export function App() {
             onNewTrack={() => navigate("tracks")}
             onOpenSession={open}
             onOpenTrack={(track) => void openTrack(track)}
+            nav={nav}
             onPage={navigate}
             page={page}
             sessionActions={sessionActions}
@@ -599,7 +716,7 @@ export function App() {
         )}
       >
         {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
-          <Toolbar onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge" | "baseline">]} />
+          <Toolbar nav={nav} onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge" | "baseline">]} />
         )}
 
         {error && (
@@ -614,14 +731,14 @@ export function App() {
 
         <div className="min-h-0 flex-1">
           {page === "today" && <TodayPage busy={opening} data={data} onBaseline={beginBaseline} onCreateTrack={() => navigate("tracks")} onMode={setTrainingMode} onOpen={open} onProgress={() => navigate("progress")} />}
-          {page === "baseline" && <BaselinePage api={api} busy={opening} dark={dark} data={data} detail={detail} onAbandon={abandon} onBack={() => navigate("today")} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
+          {page === "baseline" && <BaselinePage api={api} busy={opening} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
           {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
           {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
           {page === "problems" && (
             <ProblemsPage
               api={api}
               challenges={data.challenges}
-              onOpenChallenge={(id) => openChallenge(id, "problems")}
+              onOpenChallenge={openChallenge}
               onStartProblem={startProblem}
             />
           )}
@@ -633,9 +750,11 @@ export function App() {
           {(page === "progress" || page === "ability") && (
             <ProgressPage
               abilities={data.abilities}
+              ability={ability}
               api={api}
               challenges={data.challenges}
               concepts={data.concepts}
+              onOpenAbility={(next) => (next ? openAbility(next) : navigate("progress"))}
               onOpenConcept={setConcept}
               onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
               onPractise={practise}
@@ -656,7 +775,7 @@ export function App() {
               api={api}
               challengeId={challengeId}
               dark={dark}
-              onBack={() => navigate(challengeFrom)}
+              nav={nav}
               onError={setError}
               onExpandSidebar={expandSidebar}
               onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
@@ -694,7 +813,7 @@ export function App() {
                       dark={dark}
                       detail={detail}
                       onAbandon={abandon}
-                      onBack={() => navigate("track")}
+                      nav={nav}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
@@ -706,7 +825,7 @@ export function App() {
                     <ChatView
                       api={api}
                       detail={detail}
-                      onBack={() => navigate("track")}
+                      nav={nav}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}
@@ -717,7 +836,7 @@ export function App() {
                     <PlanningView
                       api={api}
                       detail={detail}
-                      onBack={() => navigate("track")}
+                      nav={nav}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSettings={() => navigate("settings")}

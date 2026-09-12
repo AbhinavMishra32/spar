@@ -13,7 +13,7 @@ import { Workspace } from "../workspace/Workspace";
 /** Baseline is a product flow, not a session transcript. The agent still makes
  *  the adaptive decisions underneath it, but the learner sees only the context
  *  question that is genuinely needed and the coding probe it selected. */
-export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRefresh, onBack, onProgress, onError, onAbandon, onExpandSidebar, onOpenSettings }: {
+export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRefresh, nav, onProgress, onError, onAbandon, onExpandSidebar, onOpenSettings }: {
   api: SparApi | undefined;
   data: BootstrapData;
   detail: SessionDetail | null;
@@ -22,7 +22,8 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
   busy: boolean;
   onStart(): Promise<void>;
   onRefresh(): Promise<void>;
-  onBack(): void;
+  /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
+  nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
   onProgress(): void;
   onError(value: string): void;
   onAbandon(reason: string): Promise<void>;
@@ -34,7 +35,7 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
 
   if (baseline.status === "complete") return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar onBack={onBack} onExpandSidebar={onExpandSidebar} subtitle="Calibration complete" title="Build your baseline" />
+      <Toolbar nav={nav} onExpandSidebar={onExpandSidebar} subtitle="Calibration complete" title="Build your baseline" />
       <div className="app-scroll grid min-h-0 flex-1 place-items-center overflow-y-auto px-8 py-12">
         <div className="w-full max-w-[32rem] text-center">
           <span className="mx-auto grid size-12 place-items-center rounded-full border border-border bg-card"><CheckCircle2 className="size-5 text-[var(--success)]" /></span>
@@ -50,7 +51,7 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
     </div>
   );
 
-  if (detail?.question) return <Workspace api={api} context="baseline" dark={dark} detail={detail} onAbandon={onAbandon} onBack={onBack} onError={onError} onExpandSidebar={onExpandSidebar} onOpenSettings={onOpenSettings} onRefresh={onRefresh} question={detail.question} run={run} />;
+  if (detail?.question) return <Workspace api={api} context="baseline" dark={dark} detail={detail} onAbandon={onAbandon} nav={nav} onError={onError} onExpandSidebar={onExpandSidebar} onOpenSettings={onOpenSettings} onRefresh={onRefresh} question={detail.question} run={run} />;
 
   const pending = detail?.pendingLearnerQuestion;
   const send = async (answer: string) => {
@@ -63,7 +64,7 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Toolbar onBack={onBack} onExpandSidebar={onExpandSidebar} subtitle={detail ? "Choosing the next probe" : "Adaptive calibration"} title="Build your baseline" />
+      <Toolbar nav={nav} onExpandSidebar={onExpandSidebar} subtitle={detail ? "Choosing the next probe" : "Adaptive calibration"} title="Build your baseline" />
       <div className="app-scroll grid min-h-0 flex-1 place-items-center overflow-y-auto px-8 py-12">
         <div className="w-full max-w-[34rem]">
           {pending ? (

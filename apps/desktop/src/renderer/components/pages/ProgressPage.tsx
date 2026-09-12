@@ -29,6 +29,8 @@ export function ProgressPage({
   api,
   challenges,
   concepts,
+  ability,
+  onOpenAbility,
   onOpenConcept,
   onOpenSession,
   onPractise,
@@ -38,22 +40,26 @@ export function ProgressPage({
   api: SparApi | undefined;
   challenges: ChallengeHistorySummary[];
   concepts: ConceptSummary[];
+  /** Which ability is open, or null for the index. Owned by App rather than by
+   *  this page: an ability is one of the window's places, and a place the
+   *  history cannot name is a place Back cannot return to. */
+  ability: string | null;
+  onOpenAbility(abilityId: string | null): void;
   onOpenConcept(slug: string): void;
   onOpenSession(sessionId: string): void;
   onPractise(input: { abilityId?: string; conceptSlug?: string; drill?: string }): void;
   progress: LearnerProgress;
 }) {
   const [view, setView] = useState<View>("abilities");
-  const [openAbility, setOpenAbility] = useState<string | null>(null);
   const summaries = useMemo(() => new Map(concepts.map((concept) => [concept.slug, concept])), [concepts]);
 
-  if (openAbility) {
+  if (ability) {
     return (
       <AbilityDetail
-        abilityId={openAbility}
+        abilityId={ability}
         api={api}
-        fallback={abilities.find((ability) => ability.id === openAbility)}
-        onBack={() => setOpenAbility(null)}
+        fallback={abilities.find((entry) => entry.id === ability)}
+        onBack={() => onOpenAbility(null)}
         onOpenConcept={onOpenConcept}
         onOpenSession={onOpenSession}
         onPractise={onPractise}
@@ -73,7 +79,7 @@ export function ProgressPage({
         <RatingBand progress={progress} />
       </Band>
 
-      <StandingBand onOpenAbility={setOpenAbility} progress={progress} />
+      <StandingBand onOpenAbility={onOpenAbility} progress={progress} />
 
       <PatternsBand patterns={progress.patterns} />
 
@@ -98,7 +104,7 @@ export function ProgressPage({
             challenges={challenges}
             earned={earned}
             forming={forming}
-            onOpen={setOpenAbility}
+            onOpen={onOpenAbility}
             onOpenConcept={onOpenConcept}
             summaries={summaries}
           />

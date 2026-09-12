@@ -47,3 +47,21 @@ export const SidebarGlyph = ({ className }: { className?: string | undefined }) 
     <path d="M9.4 4.75v14.5" />
   </Glyph>
 );
+
+/* Sized against the sidebar glyph beside them rather than to their own box.
+
+   A chevron drawn to the same inset as a full glyph is optically much smaller —
+   it has no width to speak of, so the eye reads its height alone and the pair
+   looked shrunken next to the pane. These run 12 of the 24 units tall against
+   the pane's 14.5, which is what makes the three read as one set. */
+export const ChevronLeftGlyph = ({ className }: { className?: string | undefined }) => (
+  <Glyph className={className}>
+    <path d="M14.5 6 9 12l5.5 6" />
+  </Glyph>
+);
+
+export const ChevronRightGlyph = ({ className }: { className?: string | undefined }) => (
+  <Glyph className={className}>
+    <path d="M9.5 6 15 12l-5.5 6" />
+  </Glyph>
+);

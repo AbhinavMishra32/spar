@@ -239,7 +239,7 @@ export function ChallengePage({
   api,
   challengeId,
   dark,
-  onBack,
+  nav,
   onError,
   onExpandSidebar,
   onOpenSession,
@@ -247,7 +247,8 @@ export function ChallengePage({
   api: SparApi | undefined;
   challengeId: string;
   dark: boolean;
-  onBack(): void;
+  /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
+  nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
   onError(value: string): void;
   onExpandSidebar?: (() => void) | undefined;
   onOpenSession(sessionId: string): void;
@@ -480,7 +481,7 @@ export function ChallengePage({
   if (missing) {
     return (
       <div className="flex h-full flex-col">
-        <Toolbar onBack={onBack} onExpandSidebar={onExpandSidebar} title="Challenge" />
+        <Toolbar nav={nav} onExpandSidebar={onExpandSidebar} title="Challenge" />
         <div className="grid flex-1 place-items-center px-8 text-center">
           <div>
             <p className="text-content font-medium">That challenge is gone</p>
@@ -496,7 +497,7 @@ export function ChallengePage({
   if (!detail) {
     return (
       <div className="flex h-full flex-col">
-        <Toolbar onBack={onBack} onExpandSidebar={onExpandSidebar} title="Challenge" />
+        <Toolbar nav={nav} onExpandSidebar={onExpandSidebar} title="Challenge" />
         <div className="grid flex-1 place-items-center">
           <div className="flex items-center gap-2 text-ui text-muted-foreground">
             <SparDots pattern="sweep" size={18} label="Opening challenge" />
@@ -549,7 +550,7 @@ export function ChallengePage({
             </button>
           </>
         }
-        onBack={onBack}
+        nav={nav}
         onExpandSidebar={onExpandSidebar}
         subtitle={detail.summary.sessionTitle}
         title={`Challenge ${detail.summary.ordinal}`}

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Meter } from "@/components/ui/meter";
+import { NavButtons } from "./NavButtons";
 import { SparWordmark } from "../common/SparWordmark";
 import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { SidebarGlyph } from "./NavIcons";
@@ -128,9 +129,13 @@ export function Sidebar({
   onNewSession,
   onCommandPalette,
   onCollapse,
+  nav,
 }: {
   page: Page;
   account: NonNullable<BootstrapData["account"]>;
+  /** Where the window has been. The arrows live up here with the window
+   *  controls, which is where the platform puts them. */
+  nav: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void };
   /** Challenge history, read only for what each live challenge is about, so the
    *  mark on a session row is the same mark that challenge wears in Problems
    *  rather than a second, private drawing of the same problem. */
@@ -207,11 +212,12 @@ export function Sidebar({
           wordmark keeps its clearance if the button metrics ever move. */}
       <div className="flex h-[var(--titlebar-height)] shrink-0 items-center pl-[max(0.625rem,var(--window-controls-leading))] pr-2">
         <SparWordmark className="text-[1.1rem] text-foreground" />
+        <NavButtons canBack={nav.canBack} canForward={nav.canForward} className="ml-auto" onBack={nav.onBack} onForward={nav.onForward} />
         <button
           /* `rounded-md` rather than `rounded-lg`: the one control on the
              trailing edge of the title row was shaped unlike every other 28px
              control in the window. */
-          className="app-no-drag ml-auto grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-[var(--sidebar-accent)] hover:text-foreground"
+          className="app-no-drag grid size-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-[var(--sidebar-accent)] hover:text-foreground"
           onClick={onCollapse}
           title="Hide sidebar  ⌘B"
           type="button"

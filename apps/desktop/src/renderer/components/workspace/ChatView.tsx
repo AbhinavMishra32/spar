@@ -21,7 +21,7 @@ export function ChatView({
   run,
   onRefresh,
   onError,
-  onBack,
+  nav,
   onExpandSidebar,
   onOpenSettings,
 }: {
@@ -30,7 +30,8 @@ export function ChatView({
   run: AgentRun | null;
   onRefresh(): Promise<void>;
   onError(value: string): void;
-  onBack(): void;
+  /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
+  nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
   onExpandSidebar?: (() => void) | undefined;
   onOpenSettings?: (() => void) | undefined;
 }) {
@@ -81,7 +82,7 @@ export function ChatView({
             New challenge
           </button>
         }
-        onBack={onBack}
+        nav={nav}
         onExpandSidebar={onExpandSidebar}
         subtitle="no active challenge"
         title={detail.summary.title}

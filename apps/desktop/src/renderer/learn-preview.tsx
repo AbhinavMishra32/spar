@@ -130,6 +130,7 @@ const api = {
 function Harness() {
   const [page, setPage] = useState<"today" | "progress" | "settings">("today");
   const [dark, setDark] = useState(true);
+  const [ability, setAbility] = useState<string | null>(null);
   return (
     <div className={dark ? "dark" : ""}>
       <div className="flex h-screen flex-col bg-[var(--app-window-fill)] text-foreground">
@@ -141,7 +142,7 @@ function Harness() {
         </div>
         <div className="min-h-0 flex-1 bg-background">
           {page === "today" && <TodayPage busy={false} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onOpen={() => {}} onProgress={() => setPage("progress")} />}
-          {page === "progress" && <ProgressPage abilities={abilityLedger} api={api} challenges={[]} concepts={[]} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} progress={progress} />}
+          {page === "progress" && <ProgressPage abilities={abilityLedger} ability={ability} api={api} challenges={[]} concepts={[]} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} progress={progress} />}
           {page === "settings" && <SettingsPage api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
         </div>
       </div>
