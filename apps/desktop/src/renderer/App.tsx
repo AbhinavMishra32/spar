@@ -538,6 +538,7 @@ export function App() {
             // The name the learner gave onboarding, not the one derived from their email.
             account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
             activeSessionId={detail?.summary.id}
+            challenges={data.challenges}
             onCollapse={toggleSidebar}
             onCommandPalette={() => setPalette(true)}
             onNewSession={() => navigate("tracks")}

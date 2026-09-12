@@ -47,6 +47,21 @@ const progress: any = {
   ],
 };
 
+const abilityLedger: any[] = [
+  { id: "a1", title: "Two-pointer invariants", status: "independent", version: 3, evidenceCount: 4,
+    summary: "You can hold two indices under a stated rule and move them without rescanning — and you can say what the rule is while you do it.",
+    markdown: "## Notes", concepts: [{ slug: "two-pointers", title: "Two pointers", kind: "dsa" }], practice: [], earnedAt: ago(40), updatedAt: ago(20) },
+  { id: "a2", title: "Hash-map counting", status: "independent", version: 2, evidenceCount: 5,
+    summary: "You reach for a frequency map before a nested loop, and you know when the map is cheaper than sorting.",
+    markdown: "", concepts: [{ slug: "hash-maps", title: "Hash maps", kind: "dsa" }], practice: [], earnedAt: ago(120), updatedAt: ago(60) },
+  { id: "a3", title: "Graph traversal with visited sets", status: "developing", version: 1, evidenceCount: 2,
+    summary: "You can write BFS from memory; the visited set is still going in after the first wrong answer rather than before.",
+    markdown: "", concepts: [{ slug: "graphs", title: "Graphs", kind: "dsa" }], practice: [], earnedAt: null, updatedAt: ago(6) },
+  { id: "a4", title: "Recurrence to bottom-up DP", status: "uncertain", version: 1, evidenceCount: 0,
+    summary: "Spar set this as a target after the memoisation attempt stalled.",
+    markdown: "", concepts: [{ slug: "dp", title: "Dynamic programming", kind: "dsa" }], practice: [], earnedAt: null, updatedAt: ago(70) },
+];
+
 const data: BootstrapData = {
   account: { id: "u1", displayName: "A", email: "a@example.com" },
   profile: { language: "python" } as any,
@@ -126,7 +141,7 @@ function Harness() {
         </div>
         <div className="min-h-0 flex-1 bg-background">
           {page === "today" && <TodayPage busy={false} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onOpen={() => {}} onProgress={() => setPage("progress")} />}
-          {page === "progress" && <ProgressPage abilities={[]} api={api} challenges={[]} concepts={[]} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} progress={progress} />}
+          {page === "progress" && <ProgressPage abilities={abilityLedger} api={api} challenges={[]} concepts={[]} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} progress={progress} />}
           {page === "settings" && <SettingsPage api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
         </div>
       </div>

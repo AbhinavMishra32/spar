@@ -100,9 +100,13 @@ export type ProblemEmblemProps = {
   className?: string;
   /** Off below about 28px, where the facets close up into a smudge. */
   detail?: boolean;
+  /** Lifts the ink for the small sizes. The chip is tuned to sit quietly at 40px
+   *  on a card; at 16px in a list of full-strength titles the same alphas read as
+   *  an empty bubble rather than a mark, so a row asks for the heavier pair. */
+  strong?: boolean;
 };
 
-export function ProblemEmblem({ className, detail = true, seed, size = 40, subject }: ProblemEmblemProps) {
+export function ProblemEmblem({ className, detail = true, seed, size = 40, strong = false, subject }: ProblemEmblemProps) {
   const art = useMemo(() => {
     const key = normalize(subject);
     // Index 0 — the circle — is reserved for a problem with nothing to say about
@@ -143,8 +147,8 @@ export function ProblemEmblem({ className, detail = true, seed, size = 40, subje
             ink, which is all the relief a 40px chip can hold without turning into
             a button. */}
         <linearGradient id={`face-${uid}`} x1="0.25" x2="0.7" y1="0" y2="1">
-          <stop offset="0%" stopColor={ink(26)} />
-          <stop offset="100%" stopColor={ink(15)} />
+          <stop offset="0%" stopColor={ink(strong ? 52 : 26)} />
+          <stop offset="100%" stopColor={ink(strong ? 34 : 15)} />
         </linearGradient>
         <clipPath id={`clip-${uid}`}>
           <polygon points={art.shape} stroke="#000" strokeLinejoin="round" strokeWidth={JOIN} />

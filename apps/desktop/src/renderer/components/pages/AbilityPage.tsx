@@ -9,7 +9,7 @@ import { LanguageMark } from "../common/LanguageGlyph";
 import { Markdown } from "../agent/Markdown";
 import { ConceptChip, OutcomeMark } from "../concepts/ConceptChip";
 import { SparDots } from "@/components/common/SparDots";
-import { Band, Meter, Page } from "../common/Page";
+import { Band, Meter, Page, Panel } from "../common/Page";
 import { STATUS, StatusRing } from "../progress/status";
 
 /**
@@ -81,92 +81,93 @@ export function AbilityDetail({
         Progress
       </button>
 
+      {/* Identity: what this is called, how it stands, and what it is about.
+          The concepts belong here rather than in a section of their own — they
+          are what the ability is filed under, not something it contains. */}
       <header className="flex items-start gap-3">
         <StatusRing size={34} status={ability.status} />
         <div className="min-w-0 flex-1">
           <h1 className="text-[1.5rem] font-semibold leading-[1.15] tracking-[-0.035em]">{ability.title}</h1>
-          <p className="mt-0.5 text-ui">
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-ui">
             <span className={status.text}>{status.label}</span>
-            <span className="text-muted-foreground"> · {status.blurb.toLowerCase()}</span>
-          </p>
+            <span className="text-muted-foreground" aria-hidden>·</span>
+            <span className="text-muted-foreground">
+              {ability.earnedAt ? "earned" : "introduced"} {relativeTime(ability.earnedAt ?? ability.updatedAt)}
+            </span>
+            {ability.concepts.map((tag) => (
+              <ConceptChip
+                key={tag.slug}
+                onOpen={onOpenConcept}
+                tag={tag}
+                {...(summaries.get(tag.slug) ? { summary: summaries.get(tag.slug)! } : {})}
+              />
+            ))}
+          </div>
         </div>
       </header>
 
-      {ability.summary && <p className="mt-4 line-clamp-3 text-content leading-[1.7] text-foreground/85">{ability.summary}</p>}
+      {/* The claim itself. */}
+      {ability.summary && <p className="mt-5 text-content leading-[1.7] text-foreground/85">{ability.summary}</p>}
 
-      {/* The measurements, inline. Proficiency and confidence are the two halves
-          of the model and are drawn identically on purpose — the whole point is
-          that they can disagree. */}
+      {/* The measurement, as one aligned block rather than two figures floating
+          in the margin. Proficiency and confidence are drawn identically on
+          purpose — the whole point is that they can disagree — and each carries
+          the fact that qualifies it: which way it is moving, and how much Spar
+          has actually seen. */}
       {detail?.machine && (
-        <div className="mt-5 flex flex-wrap items-center gap-x-7 gap-y-3">
-          <Gauge label="Proficiency" value={detail.machine.proficiency} />
-          <Gauge label="Confidence" value={detail.machine.confidence} />
-        </div>
+        <Panel className="mt-5 grid grid-cols-[auto_9rem_auto_1fr] items-center gap-x-3 gap-y-2.5 px-4 py-3">
+          <Reading
+            label="Proficiency"
+            note={TREND[detail.machine.trend] ?? detail.machine.trend}
+            value={detail.machine.proficiency}
+          />
+          <Reading
+            label="Confidence"
+            note={`${detail.evidence.length} attempt${detail.evidence.length === 1 ? "" : "s"}, ${passed} passed`}
+            value={detail.machine.confidence}
+          />
+        </Panel>
       )}
 
-      <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-ui text-muted-foreground">
-        <span>{detail ? `${passed} of ${detail.evidence.length} passed` : "…"}</span>
-        <span aria-hidden>·</span>
-        <span>{ability.evidenceCount} evidence</span>
-        {detail?.machine && <><span aria-hidden>·</span><span>{TREND[detail.machine.trend] ?? detail.machine.trend}</span></>}
-        <span aria-hidden>·</span>
-        <span>{ability.earnedAt ? "earned" : "introduced"} {relativeTime(ability.earnedAt ?? ability.updatedAt)}</span>
-        <span aria-hidden>·</span>
-        <span>v{ability.version}</span>
-      </p>
-
-      {ability.concepts.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {ability.concepts.map((tag) => (
-            <ConceptChip
-              key={tag.slug}
-              onOpen={onOpenConcept}
-              showArea
-              tag={tag}
-              {...(summaries.get(tag.slug) ? { summary: summaries.get(tag.slug)! } : {})}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* One actionable line, not a belief paragraph. What Spar currently
-          thinks is already the summary above; what it has not checked yet is
-          the only thing on this page the learner could not have guessed. */}
-      {detail?.machine?.nextVerification && (
-        <p className="mt-4 text-ui leading-[1.65] text-muted-foreground">
-          <span className="text-foreground/70">Checking next: </span>
-          {detail.machine.nextVerification}
-        </p>
-      )}
-
-      <Band title="Practice">
-        {ability.practice.length ? (
-          <div className="flex flex-col">
-            {ability.practice.map((drill, index) => (
-              <button
-                className="group -mx-2 flex items-start gap-2.5 rounded-[var(--radius-md)] px-2 py-2 text-left transition-colors hover:bg-accent/35"
-                key={index}
-                onClick={() => onPractise({ abilityId: ability.id, drill })}
-                type="button"
-              >
-                <Dumbbell className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
-                <span className="min-w-0 flex-1 text-ui leading-[1.6] text-foreground/85">{drill}</span>
-                <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70" />
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="flex items-center gap-3">
-            <p className="min-w-0 flex-1 text-ui text-muted-foreground/70">No drills written yet.</p>
+      {/* One section, because these are one thing: what to do about this next.
+          The verification line was orphaned between a row of chips and a
+          heading, which is why it read as stray text — it is the reason the
+          drills exist, so it introduces them. */}
+      {(detail?.machine?.nextVerification || ability.practice.length || detail) && (
+        <Band title="Next">
+          {detail?.machine?.nextVerification && (
+            <p className="mb-2 text-ui leading-[1.65] text-foreground/85">
+              Spar wants to see {lowerFirst(detail.machine.nextVerification)}
+            </p>
+          )}
+          {ability.practice.length ? (
+            <div className="flex flex-col">
+              {ability.practice.map((drill, index) => (
+                <button
+                  className="group -mx-2 flex items-start gap-2.5 rounded-[var(--radius-md)] px-2 py-2 text-left transition-colors hover:bg-accent/35"
+                  key={index}
+                  onClick={() => onPractise({ abilityId: ability.id, drill })}
+                  type="button"
+                >
+                  <Dumbbell className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+                  <span className="min-w-0 flex-1 text-ui leading-[1.6] text-foreground/85">{drill}</span>
+                  <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70" />
+                </button>
+              ))}
+            </div>
+          ) : (
             <Button onClick={() => onPractise({ abilityId: ability.id })} size="sm" variant="secondary">
               <Dumbbell />
-              Practise
+              Practise this
             </Button>
-          </div>
-        )}
-      </Band>
+          )}
+        </Band>
+      )}
 
-      <Band title="Attempts">
+      <Band
+        action={detail?.evidence.length ? <span className="text-ui-sm text-muted-foreground/70">{passed} of {detail.evidence.length} passed</span> : undefined}
+        title="Attempts"
+      >
         {detail ? (
           detail.evidence.length ? (
             <div className="flex flex-col">
@@ -271,16 +272,31 @@ export function AbilityDetail({
   );
 }
 
-/** A proportion with its number said out loud, sized so the bar is obviously a
- *  gauge and never an underline of the label above it. */
-function Gauge({ label, value }: { label: string; value: number }) {
+/**
+ * One reading in the measurement block: label, bar, figure, qualifier.
+ *
+ * A fragment rather than a row, so every reading's four parts land on the same
+ * four columns of the parent grid. Two independently laid out rows is how the
+ * old version ended up with a percentage sitting under a word it did not
+ * belong to.
+ */
+function Reading({ label, note, value }: { label: string; note: string; value: number }) {
   return (
-    <div className="flex items-center gap-2.5">
+    <>
       <span className="text-ui text-muted-foreground">{label}</span>
-      <Meter className="w-20" value={value} />
-      <span className="tabular-nums text-ui">{Math.round(value * 100)}%</span>
-    </div>
+      <Meter value={value} />
+      <span className="w-9 text-right tabular-nums text-ui">{Math.round(value * 100)}%</span>
+      <span className="text-right text-ui-sm text-muted-foreground/70">{note}</span>
+    </>
   );
+}
+
+/** The verification note is written as a sentence and is being spliced into one
+ *  here, so its first letter has to give way — unless it opens on something that
+ *  is capitalised in its own right. */
+function lowerFirst(value: string) {
+  const rest = value.slice(1);
+  return rest === rest.toLowerCase() ? value.charAt(0).toLowerCase() + rest : value;
 }
 
 const TREND: Record<string, string> = { improving: "Improving", stable: "Stable", declining: "Declining", unknown: "Trend unknown" };

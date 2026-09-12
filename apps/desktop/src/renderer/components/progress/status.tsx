@@ -1,4 +1,3 @@
-import { Sparkles } from "lucide-react";
 import type { AbilityHistorySummary } from "@spar/domain";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +40,6 @@ export function StatusRing({ size = 32, status }: { size?: number; status: Abili
           strokeWidth="2"
         />
       </svg>
-      <Sparkles style={{ width: size * 0.44, height: size * 0.44 }} />
     </span>
   );
 }

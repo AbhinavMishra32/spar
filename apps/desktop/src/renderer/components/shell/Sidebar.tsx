@@ -1,6 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Archive, ArchiveRestore, ArrowRight, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Map, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
-import type { SessionSummary, Track } from "@spar/domain";
+import type { ChallengeHistorySummary, SessionSummary, Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { formatDuration, initials, relativeTime } from "@/lib/format";
@@ -12,6 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Meter } from "@/components/ui/meter";
 import { SparWordmark } from "../common/SparWordmark";
+import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { SidebarGlyph } from "./NavIcons";
 
 /* "challenge" is one challenge opened from History or Problems. Like
@@ -113,6 +114,7 @@ function SectionLabel({ children, action }: { children: React.ReactNode; action?
 export function Sidebar({
   page,
   account,
+  challenges,
   sessions,
   tracks,
   activeTrackId,
@@ -129,6 +131,10 @@ export function Sidebar({
 }: {
   page: Page;
   account: NonNullable<BootstrapData["account"]>;
+  /** Challenge history, read only for what each live challenge is about, so the
+   *  mark on a session row is the same mark that challenge wears in Problems
+   *  rather than a second, private drawing of the same problem. */
+  challenges: ChallengeHistorySummary[];
   /** Every session the learner has, across every Track. The sidebar does the
    *  grouping now — it is the thing drawing the groups. */
   sessions: SessionSummary[];
@@ -174,6 +180,11 @@ export function Sidebar({
   const shown = new Set([...live.filter((session) => session.trackId && known.has(session.trackId)), ...pinned, ...recent, ...(showArchived ? shelved : [])].map((session) => session.id));
   const stranded = activeSessionId && !shown.has(activeSessionId) ? sessions.find((session) => session.id === activeSessionId) : undefined;
 
+  /* What each live challenge is about, keyed by the question it is. One pass over
+     history rather than a lookup per row, and the first concept is the one the
+     challenge was aimed at. */
+  const subjects: Record<string, string> = Object.fromEntries(challenges.map((challenge) => [challenge.id, challenge.concepts[0]?.title ?? ""]));
+
   const row = (session: SessionSummary) => (
     <SessionRow
       key={session.id}
@@ -185,6 +196,7 @@ export function Sidebar({
       onRequestDelete={() => setPendingDelete(session)}
       renaming={renaming === session.id}
       session={session}
+      subject={(session.activeQuestion ? subjects[session.activeQuestion.id] : "") || session.currentFocus[0] || ""}
     />
   );
 
@@ -456,6 +468,7 @@ function TrackGroup({
 
 function SessionRow({
   session,
+  subject,
   active,
   renaming,
   actions,
@@ -465,6 +478,7 @@ function SessionRow({
   onRequestDelete,
 }: {
   session: SessionSummary;
+  subject: string;
   active: boolean;
   renaming: boolean;
   actions: SessionActions;
@@ -476,6 +490,12 @@ function SessionRow({
   const [open, setOpen] = useState(false);
   const [peeking, setPeeking] = useState(false);
   const archived = !!session.archivedAt;
+  /* The row says what you are working on, not what the folder holding it is
+     called. A session's title is written once, when it is created, and stops
+     being true the moment Spar sets the next challenge — whereas the challenge
+     is the thing you left the app in the middle of and came back for. The
+     session's own title is still one hover away, in the peek. */
+  const label = session.activeQuestion?.title ?? session.title;
   const finished = session.status === "completed";
   // A live challenge is what the session is, so its status is not the learner's
   // to relabel while one is open.
@@ -536,9 +556,22 @@ function SessionRow({
               archived && !active && "text-foreground/60",
             )}
             onClick={onOpen}
+            title={session.activeQuestion ? `${session.activeQuestion.title} — ${session.title}` : session.title}
             type="button"
           >
-            <RowTitle>{session.title}</RowTitle>
+            {/* The same mark the challenge wears everywhere else, seeded the same
+                way, so the row you click in the sidebar and the tile you find in
+                Problems are recognisably one problem. A session between
+                challenges falls back to its own id, which keeps the text column
+                aligned rather than leaving one row starting further left. */}
+            <ProblemEmblem
+              detail={false}
+              seed={`spar:${session.activeQuestion?.id ?? session.id}`}
+              size={17}
+              strong
+              subject={subject}
+            />
+            <RowTitle>{label}</RowTitle>
           </button>
 
           {/* No `flex` utility here: display is CSS's to own, because it is the
