@@ -199,7 +199,7 @@ export function ProofRun() {
         <div className="shell grid w-full items-center gap-12 lg:grid-cols-[minmax(0,25rem)_minmax(0,1fr)] lg:gap-16">
           <div>
             <p className="eyebrow">
-              <span data-index>[07]</span>
+              <span data-index>[08]</span>
               The model is not the judge
             </p>
             {/* Stacked, so the block never resizes as one line replaces another. */}

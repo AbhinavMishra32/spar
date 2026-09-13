@@ -22,17 +22,23 @@ import { useEffect, useRef } from "react";
 const ACTS = [
   {
     label: "The same sheet, for everyone",
-    line: "A roadmap, a 150-problem sheet, a course in a fixed order. Handed to you and to everybody else, in the same order, forever.",
+    line: "The same problems, in the same order, for everybody.",
+    /* Uniform on purpose: a fixed curriculum, drawn as seven identical marks. */
+    glyphs: ["▪", "▪", "▪", "▪", "▪", "▪", "▪"],
     at: 0,
   },
   {
     label: "How you actually solved it",
-    line: "Spar keeps what a checklist throws away — where you stalled, what you tried first, which case broke you.",
+    line: "Spar keeps what a checkmark throws away.",
+    /* The same seven marks, no longer the same: that is what an attempt adds. */
+    glyphs: ["▫", "▪", "·", "▪", "▫", "▪", "·"],
     at: 0.4,
   },
   {
     label: "Where you're actually weak",
-    line: "Losing an invariant and never spotting that a problem is a graph are completely different weaknesses. Spar remembers the difference.",
+    line: "A lost invariant and a missed graph are not the same gap.",
+    /* One of the seven, named. */
+    glyphs: ["·", "·", "▫", "◆", "▫", "·", "·"],
     at: 0.75,
   },
 ];
@@ -167,6 +173,7 @@ export function LadderField() {
 
       // The captions are driven from the same progress, so what you read and
       // what the dots are doing can never disagree.
+      const now = performance.now() / 1000;
       for (const [index, act] of ACTS.entries()) {
         const node = wrap.querySelector<HTMLElement>(`[data-act="${index}"]`);
         if (!node) continue;
@@ -177,6 +184,26 @@ export function LadderField() {
         const shown = rising * (1 - smoothstep(next - 0.14, next - 0.02, p));
         node.style.opacity = String(calm.matches ? (index === 0 ? 1 : 0) : shown);
         node.style.transform = `translateY(${(1 - shown) * 14}px)`;
+
+        /* The glyph row says the same thing the dots do, in seven characters.
+           Act one does not move — a fixed curriculum has nothing to report. Act
+           two flickers unevenly, because that is what evidence looks like before
+           anything has been made of it. Act three settles, and one mark holds. */
+        const glyphs = node.querySelectorAll<HTMLElement>("[data-glyph]");
+        for (const [slot, glyph] of glyphs.entries()) {
+          const seed = evidence(index * 11 + slot, slot);
+          let alpha = 0.4;
+          let scale = 1;
+          if (index === 1 && !calm.matches) {
+            alpha = 0.14 + 0.66 * (0.5 + 0.5 * Math.sin(now * 1.5 + seed * 11));
+          } else if (index === 2) {
+            const held = slot === 3;
+            alpha = held ? (calm.matches ? 1 : 0.62 + 0.38 * (0.5 + 0.5 * Math.sin(now * 2.1))) : 0.3;
+            scale = held ? 1.15 : 1;
+          }
+          glyph.style.opacity = String(alpha);
+          glyph.style.transform = `scale(${scale})`;
+        }
       }
     }
 
@@ -213,6 +240,18 @@ export function LadderField() {
                 </p>
                 <p className="mt-5 font-display text-[clamp(1.5rem,3.1vw,2.4rem)] leading-[1.12]">
                   {act.line}
+                </p>
+                <p aria-hidden className="mt-7 flex justify-center gap-3 font-mono text-[1.05rem] text-paper">
+                  {act.glyphs.map((glyph, slot) => (
+                    <span
+                      key={slot}
+                      data-glyph
+                      className="inline-block transition-none"
+                      style={{ opacity: 0.4 }}
+                    >
+                      {glyph}
+                    </span>
+                  ))}
                 </p>
               </div>
             ))}

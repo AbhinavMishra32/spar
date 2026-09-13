@@ -59,8 +59,8 @@ export function Hero({ release }: { release: Release }) {
         </h1>
 
         <p className="lede mt-7 max-w-[52ch] sm:mt-8">
-          Spar learns how you solve — where you stall, what you reach for first, which case breaks your
-          approach — and picks or writes the one problem worth your next hour.
+          Spar watches how the attempt actually goes — where you stall, what you reach for first, which
+          case breaks you — and sets the one problem worth your next hour.
         </p>
 
         <div className="mt-9 flex w-full flex-col items-center gap-3 sm:mt-10 sm:w-auto sm:flex-row">
@@ -71,7 +71,7 @@ export function Hero({ release }: { release: Release }) {
         </div>
 
         <p className="mt-8 font-mono text-[10.5px] tracking-[0.2em] text-faint uppercase sm:text-[11px]">
-          LeetCode. Codeforces. Spar-generated challenges. One training system.
+          LeetCode. Codeforces. Problems written for you. One rating, one history.
         </p>
       </div>
 

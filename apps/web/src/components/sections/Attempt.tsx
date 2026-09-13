@@ -29,7 +29,7 @@ export function Attempt() {
   return (
     <Section bloom="bl">
       <SectionHead
-        index="02"
+        index="03"
         label="What an attempt leaves behind"
         title="Accepted and Wrong Answer describe everybody. They can&rsquo;t describe you."
         lede="A final verdict is the smallest possible summary of half an hour's work. While you solve, Spar has the attempt itself."

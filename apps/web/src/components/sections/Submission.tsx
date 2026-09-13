@@ -44,7 +44,7 @@ export function Submission() {
     <Section bloom="br">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:gap-16">
         <SectionHead
-          index="08"
+          index="09"
           label="Submitting"
           title="What that looks like from your side."
           lede={

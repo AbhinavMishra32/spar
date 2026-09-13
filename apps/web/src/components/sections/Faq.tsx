@@ -44,7 +44,7 @@ export function Faq() {
   return (
     <Section id="faq" bloom="bl">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] lg:gap-20">
-        <SectionHead index="12" label="Questions" title="The ones worth asking." />
+        <SectionHead index="13" label="Questions" title="The ones worth asking." />
 
         <div className="border-t border-line">
           {QUESTIONS.map((item, index) => (

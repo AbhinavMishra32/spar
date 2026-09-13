@@ -15,24 +15,26 @@ export const site = {
 
 export const nav = [
   { label: "Ability map", href: "#abilities" },
+  { label: "Rating", href: "#rating" },
   { label: "How it works", href: "#how" },
   { label: "Problems", href: "#sources" },
   { label: "The app", href: "#app" },
   { label: "FAQ", href: "#faq" },
 ] as const;
 
-/** The languages a challenge can be set in. Order is the app's own. */
+/** The languages a challenge can be set in, by the id their mark is drawn from.
+ *  Order is the app's own. */
 export const languages = [
-  "TypeScript",
-  "JavaScript",
-  "Python",
-  "Java",
-  "C++",
-  "C",
-  "Go",
-  "Rust",
-  "Swift",
-  "Ruby",
+  "typescript",
+  "javascript",
+  "python",
+  "java",
+  "cpp",
+  "c",
+  "go",
+  "rust",
+  "swift",
+  "ruby",
 ] as const;
 
 /** How you can drive the agent. Three routes, and the site says so plainly. */
@@ -55,7 +57,9 @@ export const modelRoutes = [
       "Z.ai",
       "MiniMax",
       "OpenRouter",
+      "Cline",
       "Vercel AI Gateway",
+      "Cloudflare AI Gateway",
     ],
   },
   {

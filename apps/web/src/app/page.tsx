@@ -14,6 +14,7 @@ import { Languages } from "@/components/sections/Languages";
 import { Models } from "@/components/sections/Models";
 import { NoCourse } from "@/components/sections/NoCourse";
 import { ProofRun } from "@/components/sections/Proof";
+import { Rating } from "@/components/sections/Rating";
 import { Sources } from "@/components/sections/Sources";
 import { Submission } from "@/components/sections/Submission";
 import { TheAgent } from "@/components/sections/TheAgent";
@@ -40,6 +41,7 @@ export default async function Home() {
         <Languages />
         <LadderField />
         <AbilityMap />
+        <Rating />
         <Attempt />
         <HowItWorks />
         <NoCourse />

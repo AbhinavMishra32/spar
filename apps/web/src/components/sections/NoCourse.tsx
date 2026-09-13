@@ -29,7 +29,7 @@ export function NoCourse() {
       <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:gap-20">
         <Reveal>
           <p className="eyebrow">
-            <span data-index>[04]</span>
+            <span data-index>[05]</span>
             No roadmap, no sheet, no course
           </p>
           <h2 className="mt-5 max-w-[20ch] text-[length:var(--text-title)]">

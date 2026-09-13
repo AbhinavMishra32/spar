@@ -17,6 +17,7 @@ const SOURCES: readonly Source[] = [
   { id: "leetcode", name: "LeetCode", note: "Submit and run, both on their judge", live: true },
   { id: "codeforces", name: "Codeforces", note: "Submit to their judge; examples run here", live: true },
   { id: "hackerrank", name: "HackerRank", note: "Shown in the app as planned", live: false },
+  { id: "codechef", name: "CodeChef", note: "Shown in the app as planned", live: false },
 ];
 
 const PRODUCED = [
@@ -36,7 +37,7 @@ const PRODUCED = [
 /* The geometry, in one place, because the wires have to land on the tiles
    exactly. Every path below is derived from these — there are no typed-in
    coordinates left to drift out of step with a tile that moved. */
-const IN = { x: 24, w: 214, h: 74, ys: [100, 198, 296] } as const;
+const IN = { x: 24, w: 214, h: 74, ys: [66, 154, 242, 330] } as const;
 const CORE = { x: 424, y: 122, w: 158, h: 150 } as const;
 const OUT = { x: 764, w: 212, h: 74, ys: [140, 268] } as const;
 /** The centre line every wire meets the agent on. */
@@ -91,7 +92,7 @@ export function Sources() {
   return (
     <Section id="sources" bloom="bl">
       <SectionHead
-        index="05"
+        index="06"
         label="Where problems come from"
         title="The right problem might already exist."
         lede="Connect LeetCode and Codeforces and Spar can set you real problems from them — chosen against your ability map instead of browsed by you, and opened in the Spar workspace so the attempt lands in the same history as everything else."
@@ -150,7 +151,7 @@ export function Sources() {
             viewBox="0 0 1000 430"
             className="h-auto w-full"
             role="img"
-            aria-label="LeetCode and Codeforces feed problems to Spar, which searches them before writing its own. What it sets becomes your attempt, graded by the tests, and lands in one attempt history — which sets the next target. HackerRank is planned."
+            aria-label="LeetCode and Codeforces feed problems to Spar, which searches them before writing its own. What it sets becomes your attempt, graded by the tests, and lands in one attempt history — which sets the next target. HackerRank and CodeChef are planned."
           >
             <defs>
               {/* The head is bright and the tail falls away, so the dash reads as

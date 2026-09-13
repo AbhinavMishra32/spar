@@ -22,7 +22,7 @@ export function Workspace() {
     <Section id="app" bloom="bl">
       <div className="grid gap-14 lg:grid-cols-[minmax(0,30rem)_minmax(0,1fr)] lg:gap-20">
         <SectionHead
-          index="10"
+          index="11"
           label="The workspace"
           title="Built around solving, not around chatting."
           lede={

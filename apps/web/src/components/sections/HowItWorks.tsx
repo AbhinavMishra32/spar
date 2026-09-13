@@ -30,7 +30,7 @@ export function HowItWorks() {
   return (
     <Section id="how" bloom="br">
       <SectionHead
-        index="03"
+        index="04"
         label="What happens next"
         title="Your next challenge is a decision, not a category."
         lede="After an attempt, Spar doesn't ask a model for another medium sliding-window problem. It reads the ability map, the history behind it and the failure that just happened, and picks a move."

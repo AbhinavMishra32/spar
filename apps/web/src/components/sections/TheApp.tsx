@@ -52,7 +52,7 @@ export function TheApp() {
   return (
     <Section bloom="tr">
       <SectionHead
-        index="06"
+        index="07"
         label="Generated challenges"
         title="And when the right problem doesn&rsquo;t exist, Spar writes it."
         lede="Sometimes a general question isn't precise enough. A challenge can be built around the exact ability Spar wants to test — and nobody else is getting your exercise, so there is nothing to look up."

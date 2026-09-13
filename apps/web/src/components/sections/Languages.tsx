@@ -1,5 +1,5 @@
 import { Dots } from "@/components/Dots";
-import { Mark } from "@/components/Mark";
+import { LANGUAGE_LABEL, LanguageGlyph } from "@/components/LanguageGlyph";
 import { languages } from "@/lib/site";
 
 /**
@@ -28,12 +28,12 @@ export function Languages() {
             {run.map((language, index) => (
               <span
                 key={`${language}-${index}`}
-                className="flex shrink-0 items-center gap-2.5 font-display text-[1.05rem] whitespace-nowrap text-faint"
+                className="flex shrink-0 items-center gap-2.5 font-display text-[1.05rem] whitespace-nowrap text-muted"
                 // The second run is the first one again, for the seam.
                 aria-hidden={index >= languages.length}
               >
-                <Mark size={11} className="opacity-45" />
-                {language}
+                <LanguageGlyph className="size-[1.1rem] shrink-0" language={language} />
+                {LANGUAGE_LABEL[language]}
               </span>
             ))}
           </div>
