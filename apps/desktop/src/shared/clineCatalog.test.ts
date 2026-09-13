@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { getModels } from "@earendil-works/pi-ai/compat";
-import { createPiMastraModel } from "../workers/piMastraModel.js";
+import { createTrainingAgent, phaseToolChoice, piAgentTools } from "../workers/piAgent.js";
 import { clineBaseUrl, clineModelFor, clineModels, clineSeedTiers, clineTiersFrom, clineTiersUrl, fetchClineTiers } from "./clineCatalog.js";
 
 describe("Cline catalog", () => {
@@ -97,24 +97,22 @@ describe("a Cline turn on the wire", () => {
   it("posts to Cline's chat-completions route and reads a tool call back", async () => {
     const { seen, baseUrl } = await cline([
       completion({ role: "assistant", content: "Reading the evidence." }),
-      completion({ tool_calls: [{ index: 0, id: "call-1", type: "function", function: { name: "read_ability", arguments: "{\"abilityId\":\"a1\"}" } }] }),
+      completion({ tool_calls: [{ index: 0, id: "call-1", type: "function", function: { name: "read_ability", arguments: "{\"abilityId\":\"6f1c9d34-0e1a-4a5b-9c3d-2f8e7a6b5c40\",\"actionTitle\":\"Reading the ability\"}" } }] }),
       finish,
     ]);
-    const model = createPiMastraModel({ provider: "cline", model: "deepseek/deepseek-v4-flash", api: "openai-completions", baseUrl, apiKey: "cline-key" });
-    const result = await model.doGenerate({
-      prompt: [{ role: "system", content: "Use evidence." }, { role: "user", content: [{ type: "text", text: "Choose a target." }] }],
-      tools: [{ type: "function", name: "read_ability", description: "Read evidence", inputSchema: { type: "object", properties: { abilityId: { type: "string" } }, required: ["abilityId"] } }],
-      toolChoice: { type: "required" },
-    });
+    const agent = createTrainingAgent({ provider: "cline", model: "deepseek/deepseek-v4-flash", api: "openai-completions", baseUrl, apiKey: "cline-key" }, "Use evidence.", { current: phaseToolChoice("openai-completions", "required") });
+    const called: unknown[] = [];
+    agent.state.tools = piAgentTools((name) => name === "read_ability", async (_name, input) => { called.push(input); return { ok: true }; });
+    await agent.prompt("Choose a target.");
 
     expect(seen).toHaveLength(1);
     expect(seen[0]!.url).toBe("/api/v1/chat/completions");
     expect(seen[0]!.authorization).toBe("Bearer cline-key");
     expect(seen[0]!.body).toMatchObject({ model: "deepseek/deepseek-v4-flash", stream: true });
     expect((seen[0]!.body.tools as Array<{ function: { name: string } }>)[0]!.function.name).toBe("read_ability");
-    expect(result.finishReason).toBe("tool-calls");
-    expect(result.content).toContainEqual({ type: "tool-call", toolCallId: "call-1", toolName: "read_ability", input: JSON.stringify({ abilityId: "a1" }) });
-    expect(result.usage.totalTokens).toBe(16);
+    // The phase's demand, on the wire. It never used to get this far.
+    expect(seen[0]!.body.tool_choice).toBe("required");
+    expect(called).toEqual([{ abilityId: "6f1c9d34-0e1a-4a5b-9c3d-2f8e7a6b5c40", actionTitle: "Reading the ability" }]);
   });
 
   /* Cline normalizes reasoning through OpenRouter's nested object. Nothing in
@@ -123,8 +121,8 @@ describe("a Cline turn on the wire", () => {
      it — the picker would move and the model would not think. */
   it("asks Cline for reasoning the way Cline reads it", async () => {
     const { seen, baseUrl } = await cline([completion({ role: "assistant", content: "Thought about it." }), finish]);
-    const model = createPiMastraModel({ provider: "cline", model: "deepseek/deepseek-v4-flash", api: "openai-completions", baseUrl, apiKey: "cline-key", reasoningEffort: "high" });
-    await model.doGenerate({ prompt: [{ role: "user", content: [{ type: "text", text: "Think." }] }] });
+    const agent = createTrainingAgent({ provider: "cline", model: "deepseek/deepseek-v4-flash", api: "openai-completions", baseUrl, apiKey: "cline-key", reasoningEffort: "high" }, "Use evidence.", { current: undefined });
+    await agent.prompt("Think.");
 
     expect(seen[0]!.body.reasoning).toEqual({ effort: "high" });
     expect(seen[0]!.body).not.toHaveProperty("reasoning_effort");

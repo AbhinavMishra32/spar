@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toolChoiceFor } from "./piMastraModel.js";
+import { toolChoiceFor } from "./piProvider.js";
 
 /* Spar's phase controller is twenty-one forced calls in a row, so what this
    translation produces is the difference between a deterministic sequence and a
