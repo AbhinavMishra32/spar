@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, ArrowRight, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Map, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowRight, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Loader2, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
 import type { ChallengeHistorySummary, SessionSummary, Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -15,11 +15,12 @@ import { NavButtons } from "./NavButtons";
 import { SparWordmark } from "../common/SparWordmark";
 import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { SidebarGlyph } from "./NavIcons";
+import type { AgentRun } from "../agent/agentRun";
 
 /* "challenge" is one challenge opened from History or Problems. Like
    "workspace" it draws its own toolbar and is not a destination in the nav; the
    parent destination is kept by App so Back returns to the surface it came from. */
-export type Page = "today" | "baseline" | "tracks" | "track" | "progress" | "history" | "problems" | "visualizer" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
+export type Page = "home" | "baseline" | "tracks" | "track" | "history" | "problems" | "visualizer" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
 
 /** What the sidebar can do to a session. Every one of these is a write the main
  *  process owns, so the row reports intent and never edits its own copy. */
@@ -37,14 +38,15 @@ export type SessionActions = {
    it. A nav row for "Tracks" and a list of tracks underneath said the same thing
    twice, and only one of them could tell you what was in them. */
 const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "today", label: "Today", icon: Waypoints },
+  /* One row, because there is one page. What to do next and how the record
+     stands were two destinations that each needed the other to make sense — see
+     `HomePage`. */
+  { id: "home", label: "Home", icon: Waypoints },
   { id: "problems", label: "Problems", icon: Library },
-  /* Below Problems and above Progress, which is the order of the work: you pick
-     something to solve, you go and look at how it runs, and only then is there
-     progress to read. Putting it under the two surfaces it is opened from also
-     keeps it out of the first three rows, where the daily loop lives. */
+  /* Below Problems, which is the order of the work: you pick something to solve,
+     then you go and look at how it runs. Putting it under the surface it is
+     opened from also keeps it out of the first rows, where the daily loop lives. */
   { id: "visualizer", label: "Visualize", icon: Eye },
-  { id: "progress", label: "Progress", icon: Map },
   { id: "history", label: "History", icon: History },
 ];
 
@@ -117,6 +119,7 @@ export function Sidebar({
   account,
   challenges,
   sessions,
+  runs,
   tracks,
   activeTrackId,
   activeSessionId,
@@ -143,6 +146,8 @@ export function Sidebar({
   /** Every session the learner has, across every Track. The sidebar does the
    *  grouping now — it is the thing drawing the groups. */
   sessions: SessionSummary[];
+  /** Live agent turns keyed by the session that owns them. */
+  runs: Record<string, AgentRun>;
   tracks: Track[];
   activeTrackId?: string | undefined;
   activeSessionId?: string | undefined;
@@ -200,6 +205,7 @@ export function Sidebar({
       onRenameStart={() => setRenaming(session.id)}
       onRequestDelete={() => setPendingDelete(session)}
       renaming={renaming === session.id}
+      working={runs[session.id]?.status === "streaming"}
       session={session}
       subject={(session.activeQuestion ? subjects[session.activeQuestion.id] : "") || session.currentFocus[0] || ""}
     />
@@ -263,7 +269,7 @@ export function Sidebar({
                  keeps the label constant and moves the highlight. */
               // A single challenge is a page under Challenges, so the section
               // stays lit rather than the nav going blank while it is open.
-              page === id || (id === "today" && page === "baseline") || (id === "history" && page === "challenge")
+              page === id || (id === "home" && (page === "baseline" || page === "ability")) || (id === "history" && page === "challenge")
                 ? "bg-[var(--sidebar-accent-active)]"
                 : "hover:bg-[var(--sidebar-accent)]",
             )}
@@ -477,6 +483,7 @@ function SessionRow({
   subject,
   active,
   renaming,
+  working,
   actions,
   onOpen,
   onRenameStart,
@@ -487,6 +494,7 @@ function SessionRow({
   subject: string;
   active: boolean;
   renaming: boolean;
+  working: boolean;
   actions: SessionActions;
   onOpen(): void;
   onRenameStart(): void;
@@ -578,6 +586,13 @@ function SessionRow({
               subject={subject}
             />
             <RowTitle>{label}</RowTitle>
+            {working && (
+              <Loader2
+                aria-label="Agent working"
+                className="ml-auto size-3.5 shrink-0 animate-spin text-muted-foreground transition-opacity motion-reduce:animate-none group-hover/session:opacity-0 group-focus-within/session:opacity-0"
+                role="status"
+              />
+            )}
           </button>
 
           {/* No `flex` utility here: display is CSS's to own, because it is the

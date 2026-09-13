@@ -175,10 +175,9 @@ function Hint({ keys, children }: { keys: string; children: string }) {
 /** Nav glyphs, matching the sidebar's — a row that sends you to Challenges is
  *  drawn with the icon that is already sitting next to the word Challenges. */
 const PLACE_ICON: Record<PalettePlace["page"], React.ComponentType<{ className?: string }>> = {
-  today: Waypoints,
+  home: Waypoints,
   tracks: Target,
   track: Target,
-  progress: Map,
   history: History,
   problems: Library,
   visualizer: Eye,

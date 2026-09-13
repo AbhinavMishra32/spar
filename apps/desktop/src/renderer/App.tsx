@@ -9,7 +9,8 @@ import { Sidebar, type Page, type SessionActions } from "./components/shell/Side
 import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
 import { SearchPalette } from "./components/common/SearchPalette";
-import { TodayPage } from "./components/pages/TodayPage";
+import { HomePage } from "./components/pages/HomePage";
+import type { ChallengeTrail } from "./components/workspace/ChallengeStepper";
 import { BaselinePage } from "./components/pages/BaselinePage";
 import { SIDEBAR_SLIDE, SIDEBAR_SLIDE_CSS } from "./components/shell/sidebarMotion";
 import { TracksPage } from "./components/pages/TracksPage";
@@ -18,7 +19,6 @@ import { ProblemsPage } from "./components/pages/ProblemsPage";
 import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
-import { ProgressPage } from "./components/pages/ProgressPage";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
 import { ConceptSheet } from "./components/concepts/ConceptSheet";
 import { ChallengePage } from "./components/pages/ChallengePage";
@@ -38,10 +38,9 @@ const api: SparApi | undefined = window.spar;
 /** Pages the shell puts a plain toolbar over. "workspace" and "challenge" draw
  *  their own, because both carry a back button and their own actions. */
 const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge" | "baseline">, string> = {
-  today: "Today",
+  home: "Home",
   tracks: "Tracks",
   track: "Track",
-  progress: "Progress",
   history: "History",
   problems: "Problems",
   visualizer: "Visualize",
@@ -54,13 +53,13 @@ const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge" | "baseline">, 
 export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState<Page>("today");
+  const [page, setPage] = useState<Page>("home");
   /* Where the window has been. A browser's model, not a stack's — see
      `hooks/navigation`. Every place-changing call below records into it exactly
      once, and `applyView` is the only thing that moves without recording. */
-  const [history, setHistory] = useState<History>({ entries: [{ page: "today" }], index: 0 });
+  const [history, setHistory] = useState<History>({ entries: [{ page: "home" }], index: 0 });
   /* Which ability the Progress surface is showing. It used to live inside
-     ProgressPage, which put one of the app's real places out of reach of the
+     HomePage, which put one of the app's real places out of reach of the
      history — back from an ability could only land on the Progress index. */
   const [ability, setAbility] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -187,10 +186,10 @@ export function App() {
      here because the sign-in page is returned long before `signedOut` is. */
   const signedIn = useCallback(async () => {
     setError(null);
-    setPage("today");
+    setPage("home");
     /* A different account is a different window. Keeping the old history would
        let Back reopen the last person's session. */
-    setHistory({ entries: [{ page: "today" }], index: 0 });
+    setHistory({ entries: [{ page: "home" }], index: 0 });
 
     await refresh();
   }, [refresh]);
@@ -301,9 +300,9 @@ export function App() {
       const key = event.key.toLowerCase();
       if (key === "n") {
         event.preventDefault();
-        setPage("today");
+        setPage("home");
         setDetail(null);
-        setHistory((current) => visit(current, { page: "today" }));
+        setHistory((current) => visit(current, { page: "home" }));
       }
       if (key === "k") {
         event.preventDefault();
@@ -334,9 +333,9 @@ export function App() {
         setHistory((current) => visit(current, { page: "settings" }));
       }
       if (command === "new-session") {
-        setPage("today");
+        setPage("home");
         setDetail(null);
-        setHistory((current) => visit(current, { page: "today" }));
+        setHistory((current) => visit(current, { page: "home" }));
       }
     });
   }, []);
@@ -473,6 +472,33 @@ export function App() {
      same sheet, so they all read from this. */
   const conceptContext = { challenges: data.challenges, summaries: conceptSummaries, onOpen: setConcept };
 
+  /**
+   * One session's challenges, as a series to step through.
+   *
+   * Built here because the two surfaces that draw it are not the same component
+   * and neither of them knows the session's other challenges: the workspace has
+   * the live one, and the practice page has one challenge and the id of the
+   * session it came from. Both get the same list, and the same rule about where
+   * a step lands — the live challenge is the session, and every other stop is
+   * the practice sandbox, which records nothing.
+   */
+  const trailFor = (sessionId: string | undefined): ChallengeTrail | undefined => {
+    if (!sessionId) return undefined;
+    const liveId = data.sessions.find((session) => session.id === sessionId)?.activeQuestion?.id ?? null;
+    const stops = data.challenges
+      .filter((challenge) => challenge.sessionId === sessionId)
+      .sort((a, b) => a.ordinal - b.ordinal)
+      .map((challenge) => ({ id: challenge.id, ordinal: challenge.ordinal, title: challenge.title, live: challenge.id === liveId }));
+    if (stops.length < 2) return undefined;
+    return {
+      stops,
+      onGo: (stop) => {
+        if (stop.live) void openSession(sessionId).catch((cause) => setError(message(cause)));
+        else openChallenge(stop.id);
+      },
+    };
+  };
+
   const open = (session: SessionSummary) => void openSession(session.id).catch((cause) => setError(message(cause)));
   const openTrack = async (track: Track, record = true) => {
     if (!api) return;
@@ -553,7 +579,7 @@ export function App() {
       setHistory((current) => forget(current, session.id));
       if (detailRef.current?.summary.id === session.id) {
         setDetail(null);
-        show("today");
+        show("home");
       }
       clearRun(session.id);
       await sdk.deleteSession(session.id);
@@ -587,10 +613,10 @@ export function App() {
   const signedOut = async () => {
     setRuns({});
     setDetail(null);
-    setPage("today");
+    setPage("home");
     /* A different account is a different window. Keeping the old history would
        let Back reopen the last person's session. */
-    setHistory({ entries: [{ page: "today" }], index: 0 });
+    setHistory({ entries: [{ page: "home" }], index: 0 });
 
     setError(null);
     await refresh();
@@ -669,6 +695,7 @@ export function App() {
             nav={nav}
             onPage={navigate}
             page={page}
+            runs={runs}
             sessionActions={sessionActions}
             /* Every Track's sessions, not just the open one's: the sidebar groups
                them under their Tracks now, and a list that can only show you the
@@ -735,8 +762,8 @@ export function App() {
         )}
 
         <div className="min-h-0 flex-1">
-          {page === "today" && <TodayPage busy={opening} data={data} onBaseline={beginBaseline} onCreateTrack={() => navigate("tracks")} onMode={setTrainingMode} onOpen={open} onProgress={() => navigate("progress")} />}
-          {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("progress")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
+
+          {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
           {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
           {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
           {page === "problems" && (
@@ -752,18 +779,23 @@ export function App() {
               keeping warm behind four other surfaces. */}
           {page === "visualizer" && <VisualizerPage api={api} dark={dark} onError={setError} />}
           {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
-          {(page === "progress" || page === "ability") && (
-            <ProgressPage
+          {(page === "home" || page === "ability") && (
+            <HomePage
               abilities={data.abilities}
               ability={ability}
               api={api}
+              busy={opening}
               challenges={data.challenges}
               concepts={data.concepts}
-              onOpenAbility={(next) => (next ? openAbility(next) : navigate("progress"))}
+              data={data}
+              onBaseline={beginBaseline}
+              onCreateTrack={() => navigate("tracks")}
+              onMode={setTrainingMode}
+              onOpen={open}
+              onOpenAbility={(next) => (next ? openAbility(next) : navigate("home"))}
               onOpenConcept={setConcept}
               onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
               onPractise={practise}
-              progress={data.progress}
             />
           )}
           {(page === "history" || page === "challenges") && (
@@ -784,6 +816,7 @@ export function App() {
               onError={setError}
               onExpandSidebar={expandSidebar}
               onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+              trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
             />
           )}
           {page === "settings" && (
@@ -826,6 +859,7 @@ export function App() {
                       onRefresh={() => openSession(detail.summary.id)}
                       question={detail.question}
                       run={runs[detail.summary.id] ?? null}
+                      trail={trailFor(detail.summary.id)}
                     />
                   ) : sessionMode(detail) === "chat" ? (
                     <ChatView

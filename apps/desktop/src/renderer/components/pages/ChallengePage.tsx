@@ -13,11 +13,14 @@ import {
   RotateCcw,
   ShieldCheck,
   Target,
+  TriangleAlert,
   XCircle,
+  WrapText,
 } from "lucide-react";
 import type { ChallengeDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
+import { presentSourcedStatement } from "@/lib/sourcedStatement";
 import { fileName, message, relativeTime, shortTime } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
@@ -25,9 +28,12 @@ import { useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
 import { FileGlyph, LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ChallengeEmblem } from "../workspace/ChallengeEmblem";
+import { ChallengeStepper, type ChallengeTrail } from "../workspace/ChallengeStepper";
 import { DifficultyPill } from "../workspace/Difficulty";
 import { PaneHandle } from "../workspace/PaneHandle";
 import { ProblemStatement } from "../workspace/ProblemStatement";
+import { SourceHints } from "../workspace/SourceHints";
+import { SourceBadge } from "../common/SourceBadge";
 import { ResultPanel, type ResultTab, type RunOutcome } from "../workspace/ResultPanel";
 import { SparDots } from "@/components/common/SparDots";
 
@@ -88,12 +94,19 @@ function Verdict({ outcome }: { outcome: NonNullable<RunOutcome> }) {
 
 function Brief({
   detail,
+  onOpenExternal,
   onOpenSession,
 }: {
   detail: ChallengeDetail;
+  /** Opens the problem at its source in the real browser. */
+  onOpenExternal?: ((url: string) => void) | undefined;
   onOpenSession(): void;
 }) {
   const { summary } = detail;
+  const presented = useMemo(
+    () => presentSourcedStatement(detail.statement, detail.source),
+    [detail.source, detail.statement],
+  );
 
   return (
     <div className="app-scroll h-full overflow-y-auto">
@@ -116,6 +129,17 @@ function Brief({
               <span className="text-ui-sm text-muted-foreground">{KIND_LABEL[detail.kind]}</span>
               <span className="text-ui-sm text-muted-foreground/50">·</span>
               <span className="text-ui-sm text-muted-foreground">{relativeTime(summary.createdAt)}</span>
+              {/* Where the problem is actually from. A real problem from a real
+                  site is a different thing to sit down to than one Spar wrote,
+                  and this page was the one surface that never said which it had
+                  — the workspace, the libraries and the palette all do. */}
+              {detail.source && (
+                <SourceBadge
+                  size="compact"
+                  source={detail.source}
+                  {...(onOpenExternal ? { onOpen: onOpenExternal } : {})}
+                />
+              )}
             </div>
           </div>
         </div>
@@ -179,7 +203,16 @@ function Brief({
         )}
 
         <Section title="THE PROBLEM">
-          <ProblemStatement language={summary.language} source={detail.statement} />
+          <ProblemStatement language={summary.language} source={presented.statement} />
+          {detail.source?.localRunNote && (
+            <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-lg)] border border-[color-mix(in_oklab,var(--warning)_30%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_6%,transparent)] px-3 py-2 text-ui leading-[1.55] text-muted-foreground">
+              <TriangleAlert className="mt-[0.15em] size-3.5 shrink-0 text-[var(--warning)]" />
+              <p><span className="font-medium text-foreground/80">Local run unavailable. </span>{detail.source.localRunNote}</p>
+            </div>
+          )}
+          {detail.source?.source === "leetcode" && (
+            <SourceHints className="mt-4" hints={presented.hints} language={summary.language} />
+          )}
         </Section>
 
         {(summary.replacesQuestionTitle || summary.replacedByQuestionTitle) && (
@@ -243,6 +276,7 @@ export function ChallengePage({
   onError,
   onExpandSidebar,
   onOpenSession,
+  trail,
 }: {
   api: SparApi | undefined;
   challengeId: string;
@@ -252,6 +286,9 @@ export function ChallengePage({
   onError(value: string): void;
   onExpandSidebar?: (() => void) | undefined;
   onOpenSession(sessionId: string): void;
+  /** The session this challenge came from, as a series to step through. Absent
+   *  when its session produced only this one. */
+  trail?: ChallengeTrail | undefined;
 }) {
   const [detail, setDetail] = useState<ChallengeDetail | null>(null);
   const [missing, setMissing] = useState(false);
@@ -260,6 +297,7 @@ export function ChallengePage({
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [terminal, setTerminal] = useState("");
   const [running, setRunning] = useState(false);
+  const [wordWrap, setWordWrap] = useState(false);
   const [checking, setChecking] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [settled, setSettled] = useState(false);
@@ -553,12 +591,18 @@ export function ChallengePage({
         nav={nav}
         onExpandSidebar={onExpandSidebar}
         subtitle={detail.summary.sessionTitle}
-        title={`Challenge ${detail.summary.ordinal}`}
+        title={trail && trail.stops.length > 1
+          ? <ChallengeStepper currentId={detail.summary.id} trail={trail} />
+          : `Challenge ${detail.summary.ordinal}`}
       />
 
       <PanelGroup autoSaveId="spar-challenge" className="min-h-0 flex-1" direction="horizontal">
         <Panel defaultSize={44} minSize={30} order={1}>
-          <Brief detail={detail} onOpenSession={() => onOpenSession(detail.summary.sessionId)} />
+          <Brief
+            detail={detail}
+            onOpenExternal={(url) => void api?.openExternal(url)}
+            onOpenSession={() => onOpenSession(detail.summary.sessionId)}
+          />
         </Panel>
 
         <PaneHandle />
@@ -591,6 +635,16 @@ export function ChallengePage({
                   <div className="ml-auto flex items-center gap-1 pr-1">
                     <span className="mr-1 text-ui-sm text-muted-foreground/60">⌘S</span>
                     <button
+                      aria-label="Word wrap"
+                      aria-pressed={wordWrap}
+                      className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", wordWrap && "bg-accent text-foreground")}
+                      onClick={() => setWordWrap((value) => !value)}
+                      title={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+                      type="button"
+                    >
+                      <WrapText className="size-3.5" />
+                    </button>
+                    <button
                       className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                       onClick={resultPanel.toggle}
                       title="Toggle the result panel"
@@ -614,6 +668,7 @@ export function ChallengePage({
                     }}
                     onMount={mount}
                     options={{
+                      wordWrap: wordWrap ? "on" : "off",
                       fontSize: 12.5,
                       lineHeight: 1.65,
                       fontFamily: "SF Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -664,8 +719,9 @@ export function ChallengePage({
                   onTab={setResultTab}
                   busyLabel={checking ? "Running the visible and hidden cases…" : undefined}
                   outcome={outcome}
-                  question={{ visibleTestFiles, source: detail.source }}
+                  question={{ id: detail.summary.id, visibleTestFiles, source: detail.source }}
                   running={running || checking}
+                  submitting={checking}
                   tab={resultTab}
                   terminal={terminal}
                   testFiles={testFiles}

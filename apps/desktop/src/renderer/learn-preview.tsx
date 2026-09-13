@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BootstrapData, SparApi } from "../shared/api";
-import { TodayPage } from "./components/pages/TodayPage";
-import { ProgressPage } from "./components/pages/ProgressPage";
+import { HomePage } from "./components/pages/HomePage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import "./theme.css";
 
@@ -128,21 +127,19 @@ const api = {
 } as unknown as SparApi;
 
 function Harness() {
-  const [page, setPage] = useState<"today" | "progress" | "settings">("today");
+  const [page, setPage] = useState<"home" | "settings">("home");
   const [dark, setDark] = useState(true);
   const [ability, setAbility] = useState<string | null>(null);
   return (
     <div className={dark ? "dark" : ""}>
       <div className="flex h-screen flex-col bg-[var(--app-window-fill)] text-foreground">
         <div className="flex shrink-0 gap-2 px-3 py-2">
-          <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setPage("today")} type="button">Today</button>
-          <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setPage("progress")} type="button">Progress</button>
+          <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setPage("home")} type="button">Home</button>
           <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setPage("settings")} type="button">Settings</button>
           <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setDark((value) => !value)} type="button">{dark ? "Light" : "Dark"}</button>
         </div>
         <div className="min-h-0 flex-1 bg-background">
-          {page === "today" && <TodayPage busy={false} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onOpen={() => {}} onProgress={() => setPage("progress")} />}
-          {page === "progress" && <ProgressPage abilities={abilityLedger} ability={ability} api={api} challenges={[]} concepts={[]} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} progress={progress} />}
+          {page === "home" && <HomePage abilities={abilityLedger} ability={ability} api={api} busy={false} challenges={[]} concepts={[]} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onOpen={() => {}} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} />}
           {page === "settings" && <SettingsPage api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
         </div>
       </div>

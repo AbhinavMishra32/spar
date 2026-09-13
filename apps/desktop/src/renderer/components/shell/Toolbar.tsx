@@ -12,7 +12,9 @@ export function Toolbar({
   actions,
   className,
 }: {
-  title: string;
+  /** A node, not only a string: a surface that is one of a series puts its
+   *  stepper here, because the stepper *is* the title — see `ChallengeStepper`. */
+  title: React.ReactNode;
   subtitle?: string;
   /** The window's back and forward. Drawn here only while the sidebar — which
    *  normally carries them — is hidden, so the window never shows two pairs. */
