@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { HISTORY_LIMIT, canGoBack, canGoForward, forget, step, visit, type History, type View } from "./navigation";
 
-const start: History = { entries: [{ page: "today" }], index: 0 };
+const start: History = { entries: [{ page: "home" }], index: 0 };
 const workspace = (sessionId: string): View => ({ page: "workspace", sessionId });
 const ability = (abilityId: string): View => ({ page: "ability", abilityId });
 
@@ -49,11 +49,11 @@ describe("visit", () => {
   });
 
   it("discards the forward tail when visiting from the middle", () => {
-    const forward = visit(visit(start, { page: "settings" }), { page: "progress" });
+    const forward = visit(visit(start, { page: "settings" }), { page: "sessions" });
     const back = step(forward, -1)!.history;
     const history = visit(back, workspace("a"));
 
-    expect(history.entries.map((view) => view.page)).toEqual(["today", "settings", "workspace"]);
+    expect(history.entries.map((view) => view.page)).toEqual(["home", "settings", "workspace"]);
     expect(canGoForward(history)).toBe(false);
   });
 
@@ -68,13 +68,13 @@ describe("visit", () => {
 
 describe("step", () => {
   it("moves back and forward over the same entries", () => {
-    const history = visit(visit(start, { page: "settings" }), { page: "progress" });
+    const history = visit(visit(start, { page: "settings" }), { page: "sessions" });
 
     const back = step(history, -1)!;
     expect(back.view).toEqual({ page: "settings" });
 
     const forward = step(back.history, 1)!;
-    expect(forward.view).toEqual({ page: "progress" });
+    expect(forward.view).toEqual({ page: "sessions" });
   });
 
   it("returns nothing at either end", () => {
@@ -102,11 +102,11 @@ describe("forget", () => {
   it("drops the baseline surface of the same session too", () => {
     const history = visit(start, { page: "baseline", sessionId: "a" });
     const after = forget(history, "a");
-    expect(after.entries).toEqual([{ page: "today" }]);
+    expect(after.entries).toEqual([{ page: "home" }]);
   });
 
   it("keeps the cursor on the view it was on", () => {
-    const history = visit(visit(visit(start, workspace("a")), { page: "settings" }), { page: "progress" });
+    const history = visit(visit(visit(start, workspace("a")), { page: "settings" }), { page: "sessions" });
     const after = forget(step(history, -1)!.history, "a");
     expect(at(after)).toEqual({ page: "settings" });
   });
@@ -120,14 +120,14 @@ describe("forget", () => {
   it("collapses entries left duplicated by the removal", () => {
     /* today → workspace a → today would leave two adjacent "today", so back
        would appear to do nothing once. */
-    const history = visit(visit(start, workspace("a")), { page: "today" });
+    const history = visit(visit(start, workspace("a")), { page: "home" });
     const after = forget(history, "a");
-    expect(after.entries).toEqual([{ page: "today" }]);
+    expect(after.entries).toEqual([{ page: "home" }]);
     expect(after.index).toBe(0);
   });
 
   it("never empties, so there is always somewhere to be", () => {
     const after = forget({ entries: [workspace("a")], index: 0 }, "a");
-    expect(after).toEqual({ entries: [{ page: "today" }], index: 0 });
+    expect(after).toEqual({ entries: [{ page: "home" }], index: 0 });
   });
 });

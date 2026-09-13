@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Panel, PanelGroup } from "react-resizable-panels";
-import { Check, FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send } from "lucide-react";
+import { Check, FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send, WrapText } from "lucide-react";
 import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { runEvidence } from "../../../shared/testReport";
@@ -15,6 +15,7 @@ import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
 import { useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
+import { ChallengeStepper, type ChallengeTrail } from "./ChallengeStepper";
 import { FileGlyph } from "../common/LanguageGlyph";
 import { SourceGlyph } from "../common/SourceGlyph";
 import type { AgentRun } from "../agent/agentRun";
@@ -46,6 +47,7 @@ export function Workspace({
   onExpandSidebar,
   onOpenSettings,
   onAbandon,
+  trail,
   context = "training",
 }: {
   detail: SessionDetail;
@@ -62,6 +64,9 @@ export function Workspace({
   onExpandSidebar?: (() => void) | undefined;
   onOpenSettings?: (() => void) | undefined;
   onAbandon(reason: string): Promise<void>;
+  /** The session's own challenges, for stepping back into the ones already
+   *  solved. Absent for a session with only one. */
+  trail?: ChallengeTrail | undefined;
   context?: "training" | "baseline";
 }) {
   // Editable files are what the learner switches between; read-only test files
@@ -79,6 +84,7 @@ export function Workspace({
   const [testFiles, setTestFiles] = useState<Record<string, string>>({});
   const [terminal, setTerminal] = useState("");
   const [running, setRunning] = useState(false);
+  const [wordWrap, setWordWrap] = useState(false);
   // One rim sweep when a run lands, so finishing is felt without leaving a
   // second animation running against the busy state forever.
   const [settled, setSettled] = useState(false);
@@ -160,7 +166,7 @@ export function Workspace({
     let cancelled=false;
     void api.attemptComplexityStatus({sessionId:detail.summary.id,attemptId:question.attemptId}).then((saved)=>{
       if(cancelled||!saved)return;
-      setComplexityCheckpoint({phase:saved.review?"reviewed":"answering",time:saved.time,space:saved.space,review:saved.review});
+      setComplexityCheckpoint({phase:saved.review?"reviewed":"answering",time:saved.time,space:saved.space,review:saved.review,verdict:saved.verdict});
     }).catch(()=>undefined);
     return()=>{cancelled=true;};
   },[api,detail.summary.id,question.attemptCompletedAt,question.attemptId]);
@@ -307,7 +313,7 @@ export function Workspace({
     setComplexityCheckpoint({...complexityCheckpoint,phase:"reviewing"});
     try{
       const result=await api.reviewAttemptComplexity({sessionId:detail.summary.id,attemptId:question.attemptId,timeComplexity:complexityCheckpoint.time,spaceComplexity:complexityCheckpoint.space});
-      setComplexityCheckpoint((current)=>current?{...current,phase:"reviewed",review:result.review}:current);
+      setComplexityCheckpoint((current)=>current?{...current,phase:"reviewed",review:result.review,verdict:result.verdict}:current);
     }catch(error){
       setComplexityCheckpoint((current)=>current?{...current,phase:"answering"}:current);
       onError(message(error));
@@ -530,7 +536,14 @@ export function Workspace({
         nav={nav}
         onExpandSidebar={onExpandSidebar}
         subtitle={context === "baseline" ? `Adaptive calibration · ${question.abilityTitle}` : detail.summary.title}
-        title={context === "baseline" ? `Baseline probe ${question.ordinal}` : `Challenge ${question.ordinal}`}
+        /* The stepper stands in for the title once there is more than one
+           challenge to step through: it says the same thing — which challenge of
+           how many — and is the way back to the rest of them. */
+        title={context === "baseline"
+          ? `Baseline probe ${question.ordinal}`
+          : trail && trail.stops.length > 1
+            ? <ChallengeStepper currentId={question.id} trail={trail} />
+            : `Challenge ${question.ordinal}`}
       />
 
       {/* The conversation is the surface; the working panes are sheets inset into
@@ -634,6 +647,16 @@ export function Workspace({
                     <div className="ml-auto flex items-center gap-1 pr-1">
                       <span className="mr-1 text-ui-sm text-muted-foreground/60">⌘S</span>
                       <button
+                        aria-label="Word wrap"
+                        aria-pressed={wordWrap}
+                        className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", wordWrap && "bg-accent text-foreground")}
+                        onClick={() => setWordWrap((value) => !value)}
+                        title={wordWrap ? "Disable word wrap" : "Enable word wrap"}
+                        type="button"
+                      >
+                        <WrapText className="size-3.5" />
+                      </button>
+                      <button
                         className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                         onClick={() => void load(activeFile)}
                         title="Revert to the saved file"
@@ -661,6 +684,7 @@ export function Workspace({
                       }}
                       onMount={mount}
                       options={{
+                        wordWrap: wordWrap ? "on" : "off",
                         fontSize: 12.5,
                         lineHeight: 1.65,
                         fontFamily: "SF Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -717,6 +741,7 @@ export function Workspace({
                   outcome={outcome}
                   question={question}
                   running={running || submitting}
+                  submitting={submitting}
                   tab={resultTab}
                   terminal={terminal}
                   testFiles={testFiles}

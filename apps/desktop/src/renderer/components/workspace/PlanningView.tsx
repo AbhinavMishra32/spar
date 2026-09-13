@@ -6,6 +6,7 @@ import { message } from "@/lib/format";
 import { Toolbar } from "../shell/Toolbar";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer } from "../agent/Composer";
+import { ComposerModelPicker } from "../agent/ModelPicker";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
 import type { AgentRun } from "../agent/agentRun";
 import { useStopTurn } from "@/hooks/use-stop-turn";
@@ -157,6 +158,7 @@ export function PlanningView({
                     onStop={stop}
                     onSubmit={() => void send()}
                     placeholder="Send the agent a note…"
+                    trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
                     value={draft}
                   />
                 )}

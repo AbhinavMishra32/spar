@@ -90,7 +90,7 @@ export function forget(history: History, sessionId: string): History {
     kept.push(view);
   }
 
-  if (kept.length === 0) return { entries: [{ page: "today" }], index: 0 };
+  if (kept.length === 0) return { entries: [{ page: "home" }], index: 0 };
 
   /* The cursor follows the view it was on when that view survived, and falls to
      the end when it did not — the end being the most recent place still real. */
