@@ -219,6 +219,22 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
   );
 }
 
+function ComplexityCheckRow({api}:{api:SparApi|undefined}){
+  const [enabled,setEnabled]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [failure,setFailure]=useState("");
+  useEffect(()=>{void api?.complexityCheckStatus().then((value)=>setEnabled(value.enabled)).catch((cause)=>setFailure(message(cause)));},[api]);
+  const change=(next:boolean)=>{if(!api)return;setBusy(true);setFailure("");void api.setComplexityCheckEnabled(next).then(()=>setEnabled(next)).catch((cause)=>setFailure(message(cause))).finally(()=>setBusy(false));};
+  return <Row className="items-center gap-4 py-3">
+    <div className="min-w-0 flex-1">
+      <p className="text-content font-medium">Complexity check after a solve</p>
+      <p className="mt-0.5 max-w-[28rem] text-ui leading-[1.55] text-muted-foreground">Before the full post-solve review, ask for time and space complexity and compare both with the submitted code.</p>
+      {failure&&<p className="mt-1 text-ui text-destructive">{failure}</p>}
+    </div>
+    <Switch aria-label="Complexity check after a solve" checked={enabled} disabled={busy||!api} onCheckedChange={change}/>
+  </Row>;
+}
+
 /** A labelled stack of rows. The label sits above the card, not inside it — the
  *  card is then one uninterrupted surface instead of a header plus a body. */
 /* The page's own two names for the shared vocabulary, kept so every existing
@@ -659,6 +675,7 @@ export function SettingsPage({
         {section === "learning" && <><Group label="Baseline">
           <Row><div className="min-w-0 flex-1"><p className="text-content font-medium">Build your baseline</p><p className="mt-0.5 text-ui text-muted-foreground">{baseline.status === "complete" ? `Complete · ${Math.round(baseline.confidence*100)}% confidence from ${baseline.directEvidenceCount} direct calibration attempts.` : "Direct adaptive calibration is required before personalization can fully begin."}</p></div><Button onClick={onBaseline} size="sm" variant="outline">{baseline.status === "not-started" || baseline.status === "skipped" ? "Begin" : baseline.status === "complete" ? "Recalibrate" : "Continue"}</Button></Row>
         </Group><Group label="Training preferences">
+          <ComplexityCheckRow api={api}/>
           <Row className="items-center gap-6 py-3">
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Default language</p>

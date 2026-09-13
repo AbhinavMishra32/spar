@@ -12,6 +12,7 @@ import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { DifficultyPill } from "./Difficulty";
 import { ProblemView } from "./ProblemView";
 import type { ConceptContext } from "../concepts/ConceptChip";
+import { ComplexityCheckpoint, type ComplexityCheckpointState } from "./ComplexityCheckpoint";
 
 type View = "problem" | "chat";
 const ORDER: View[] = ["problem", "chat"];
@@ -33,6 +34,10 @@ export function AgentPanel({
   onOpenSettings,
   onOpenExternal,
   testFiles,
+  complexityCheckpoint,
+  onComplexityChange,
+  onComplexityReview,
+  onComplexityAcknowledge,
 }: {
   concepts?: ConceptContext | undefined;
   detail: SessionDetail;
@@ -45,6 +50,10 @@ export function AgentPanel({
   /** Opens a sourced challenge's problem page in the real browser. */
   onOpenExternal?: ((url: string) => void) | undefined;
   testFiles: Record<string, string>;
+  complexityCheckpoint: ComplexityCheckpointState | null;
+  onComplexityChange(next: Pick<ComplexityCheckpointState, "time" | "space">): void;
+  onComplexityReview(): void;
+  onComplexityAcknowledge(): void;
 }) {
   const [view, setView] = useState<View>("problem");
   const busy = run?.status === "streaming";
@@ -140,7 +149,12 @@ export function AgentPanel({
 
       <div className="shrink-0 px-4 pb-3 pt-1">
         <div className="mx-auto w-full max-w-[46rem]">
-          <Composer
+          {complexityCheckpoint ? <ComplexityCheckpoint
+            onAcknowledge={onComplexityAcknowledge}
+            onChange={onComplexityChange}
+            onReview={onComplexityReview}
+            state={complexityCheckpoint}
+          /> : <Composer
             busy={busy}
             leading={
               <ComposerPill title={LANGUAGE_LABEL[question.language]}>
@@ -158,7 +172,7 @@ export function AgentPanel({
             placeholder="Ask for a hint, or explain your approach…"
             trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}
-          />
+          />}
         </div>
       </div>
     </div>

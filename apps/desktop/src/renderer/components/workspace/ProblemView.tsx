@@ -54,19 +54,15 @@ export function ProblemView({
         <div className="mb-4 flex items-center gap-2.5">
           <ChallengeEmblem className="shrink-0" question={question} size={38} />
           <div className="min-w-0 flex-1">
-            {/* A sourced challenge is not "set for you" in the same sense: it is a
-                real problem the world already asks, chosen for you. Saying the
-                same words over both would overclaim one and undersell the other. */}
-            <p className="text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">
-              {question.source ? "CHOSEN FOR YOU" : "CHALLENGE SET FOR YOU"}
-            </p>
-            {/* The problem's own name, which is what the learner calls it and
-                what they will search for later. The ability under it is what it
-                is training — related, and not the same thing: the header used to
-                lead with the ability, so the biggest words on the page were a
-                topic while the problem itself was a line of toolbar chrome. */}
+            {/* The problem's name, and under it what Spar is using the problem to
+                test. The eyebrow that used to sit above this said "CHALLENGE SET
+                FOR YOU", which is true of every challenge in the app and so told
+                nobody anything — and it pushed the title down a line to make
+                room for itself. */}
             <p className="truncate text-[1.0625rem] font-semibold leading-[1.25] tracking-[-0.015em]">{question.title}</p>
-            {question.abilityTitle && <p className="truncate text-ui text-muted-foreground">{question.abilityTitle}</p>}
+            {question.abilityTitle && (
+              <p className="truncate text-ui text-muted-foreground">Testing: {question.abilityTitle}</p>
+            )}
           </div>
           {question.source && (
             <SourceBadge

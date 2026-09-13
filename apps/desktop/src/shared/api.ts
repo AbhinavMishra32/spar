@@ -20,6 +20,8 @@ export const ipc = {
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
   settingsWebSearchEnabled: "settings:web-search-enabled",
+  settingsComplexityCheck: "settings:complexity-check", settingsComplexityCheckEnabled: "settings:complexity-check-enabled",
+  attemptComplexityStatus: "attempt:complexity-status", attemptComplexityReview: "attempt:complexity-review", attemptComplexityAcknowledge: "attempt:complexity-acknowledge",
   attemptAbandon: "attempt:abandon", attemptReset: "attempt:reset", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
@@ -86,6 +88,14 @@ export const sessionFlagInput = z.object({ sessionId: z.string().uuid(), value: 
 export const sessionStatusInput = z.object({ sessionId: z.string().uuid(), status: z.enum(["completed", "paused"]) });
 const workspacePath = z.string().min(1).max(500).transform(canonicalWorkspacePath);
 export const workspacePathInput = z.object({ sessionId: z.string().uuid(), path: workspacePath });
+export const complexityReviewInput = z.object({
+  sessionId: z.string().uuid(),
+  attemptId: z.string().uuid(),
+  timeComplexity: z.string().trim().min(1).max(120),
+  spaceComplexity: z.string().trim().min(1).max(120),
+});
+export const complexityAcknowledgeInput = complexityReviewInput.pick({ sessionId: true, attemptId: true });
+export type SubmissionResult = { outcome: "passed" | "failed"; exitCode: number; durationMs: number; output: string; summary: string; requiresComplexity: boolean };
 /* Practising a challenge out of history is addressed by challenge id alone. The
    session it came from is looked up rather than passed, so a renderer can never
    name one challenge and a different session's sandbox. */
@@ -434,7 +444,10 @@ export interface SparApi {
   run(input: z.infer<typeof runInput>): Promise<{ id: string }>;
   /** `output` is the runner's own stdout+stderr, so the result panel can read the
       submission as test cases instead of only reporting the verdict. */
-  submitAttempt(input:{sessionId:string;attemptId:string}):Promise<{outcome:"passed"|"failed";exitCode:number;durationMs:number;output:string;summary:string}>;
+  submitAttempt(input:{sessionId:string;attemptId:string}):Promise<SubmissionResult>;
+  attemptComplexityStatus(input: z.infer<typeof complexityAcknowledgeInput>): Promise<{ time: string; space: string; review: string } | null>;
+  reviewAttemptComplexity(input: z.infer<typeof complexityReviewInput>): Promise<{ review: string }>;
+  acknowledgeAttemptComplexity(input: z.infer<typeof complexityAcknowledgeInput>): Promise<void>;
   sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
   /** Stops the turn running for this session, if there is one.
    *
@@ -530,6 +543,8 @@ export interface SparApi {
    *  someone can keep their key and still want a session that only reads their
    *  own record. */
   setWebSearchEnabled(enabled: boolean): Promise<void>;
+  complexityCheckStatus(): Promise<{ enabled: boolean }>;
+  setComplexityCheckEnabled(enabled: boolean): Promise<void>;
   startProviderOAuth(provider: Extract<ProviderId, "openai-codex" | "claude-code" | "github-copilot">): Promise<{ flowId: string }>;
   submitProviderOAuth(flowId: string, value: string): Promise<void>;
   cancelProviderOAuth(flowId: string): Promise<void>;

@@ -4,7 +4,7 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { baselineStateSchema, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -555,6 +555,22 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
    * the attempt would put an outage into the learner's evidence.
    */
   const noteBaselineEvidence=(sessionId:string)=>{const baseline=deps.store.getBaseline();if(baseline.status!=="in-progress"||baseline.sessionId!==sessionId)return{baseline:false,complete:false};const directEvidenceCount=baseline.directEvidenceCount+1;const required=baseline.importedEvidenceCount>=4?2:3;const complete=directEvidenceCount>=required;const importedContribution=Math.min(0.15,baseline.importedEvidenceCount*0.03);deps.store.setBaseline({directEvidenceCount,confidence:Math.min(0.85,directEvidenceCount/required*0.7+importedContribution),...(complete?{status:"complete" as const,completedAt:new Date().toISOString()}:{})});return{baseline:true,complete};};
+  const complexityCheckEnabled=()=>deps.store.getSetting<boolean>("complexity-check-enabled",true);
+  const finishPassedAttempt=(input:{sessionId:string;attemptId:string;bundle:NonNullable<ReturnType<LocalStore["submissionBundle"]>>;source?:NonNullable<NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"]>})=>{
+    const {sessionId,attemptId,bundle}=input;
+    const complexity=[...deps.store.readAttempt(attemptId)].reverse().find((event)=>event.type==="learner_remark"&&event.payload.kind==="complexity-claim");
+    const complexityNote=complexity?` The learner claimed time ${String(complexity.payload.timeComplexity??"")} and space ${String(complexity.payload.spaceComplexity??"")}; the quick complexity review is recorded in the attempt and conversation. Take whether they understood those bounds into account.`:"";
+    deps.store.appendNextEvent({id:randomUUID(),attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed",...(input.source?{judge:input.source.source}:{})},source:"system",schemaVersion:1});
+    deps.store.completeAttempt(attemptId,"passed");
+    const calibration=noteBaselineEvidence(sessionId);
+    if(calibration.baseline){
+      if(!calibration.complete)void startAgentTurn(sessionId,`Baseline probe ${attemptId} passed every visible and hidden test.${complexityNote} Replay the full trajectory and interpret it as calibration evidence, not as proof of mastery. Update the relevant ability state and readable memory, then choose one materially different diagnostic target that reduces the largest remaining uncertainty. Create exactly one next probe; do not open a general chat or create a Track.`,"system","attempt-complete");
+      return;
+    }
+    const source=input.source;
+    const verdict=source?`${source.source==="leetcode"?"LeetCode":"Codeforces"} accepted the submission against every hidden case it has`:`every visible and hidden test passes${requirementsNote(bundle.design)}`;
+    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId} — ${verdict}.${complexityNote} Replay attempt ${attemptId} first and read how they got here, including their complexity claim and its quick review. Update the relevant ability document, commit exactly one next pedagogical action, and either ask about a specific moment the replay could not explain or aim the next target and validated question. The new target and question must explicitly respond to this attempt without overreacting to it.${source?" Prefer another real problem when one fits the target.":""}`,"system","attempt-complete");
+  };
   const submitToSource = async (input: { sessionId: string; attemptId: string; bundle: NonNullable<ReturnType<LocalStore["submissionBundle"]>>; source: NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"] }) => {
     const { sessionId, attemptId, bundle } = input;
     const source = input.source!;
@@ -568,7 +584,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (verdict.outcome === "errored") {
       /* Not recorded. The learner is told plainly and their attempt is exactly
          where it was, because an outage is not something they did. */
-      return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output: verdict.status, summary: `${name} could not judge that submission (${verdict.status}). Nothing was recorded — try again in a moment.` };
+      return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output: verdict.status, summary: `${name} could not judge that submission (${verdict.status}). Nothing was recorded — try again in a moment.`, requiresComplexity:false } satisfies SubmissionResult;
     }
     append("submission_created", { questionId: bundle.question_id, judge: source.source, url: verdict.submissionUrl }, "learner");
     append("test_run", {
@@ -581,14 +597,11 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     append("submission_evaluated", { outcome: verdict.outcome, judge: source.source, status: verdict.status, url: verdict.submissionUrl }, "system");
     const output = sourceSubmissionOutput(verdict, name);
     if (verdict.outcome === "failed") {
-      return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output, summary: `${name} says ${verdict.status}${verdict.totalCases ? ` — ${verdict.passedCases} of ${verdict.totalCases} cases passed` : ""}. Keep going and submit again, or give up to move on.` };
+      return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output, summary: `${name} says ${verdict.status}${verdict.totalCases ? ` — ${verdict.passedCases} of ${verdict.totalCases} cases passed` : ""}. Keep going and submit again, or give up to move on.`, requiresComplexity:false } satisfies SubmissionResult;
     }
-    append("attempt_completed", { outcome: "passed", judge: source.source }, "system");
-    deps.store.completeAttempt(attemptId, "passed");
-    const calibration=noteBaselineEvidence(sessionId);
-    if(calibration.baseline){if(!calibration.complete)void startAgentTurn(sessionId,`Baseline probe ${attemptId} was accepted by ${name}. Replay it and interpret the trajectory as calibration evidence, not as proof of mastery. Update the relevant ability state and readable memory, then choose one materially different diagnostic target that reduces the largest remaining uncertainty. Create exactly one next probe; do not open a general chat or create a Track.`,"system","attempt-complete");}
-    else void startAgentTurn(sessionId, `The learner solved attempt ${attemptId} — ${name} accepted their submission against every hidden case it has (${verdict.status}${verdict.runtime ? `, ${verdict.runtime}` : ""}). This was a real problem from ${name}, not one you wrote, so the verdict is theirs and it is stronger evidence than a local pass. Replay attempt ${attemptId} first and read how they got here, then read its recorded evaluation, update the relevant ability document, commit exactly one next pedagogical action, and either ask about a specific moment the replay could not explain or aim the next target and challenge. Prefer another real problem when one fits the target.`, "system", "attempt-complete");
-    return { outcome: "passed" as const, exitCode: 0, durationMs: 0, output, summary: `${name} accepted it${verdict.runtime ? ` — ${verdict.runtime}` : ""}. Every hidden case passed.` };
+    const requiresComplexity=complexityCheckEnabled();
+    if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle,source});
+    return { outcome: "passed" as const, exitCode: 0, durationMs: 0, output, summary: `${name} accepted it${verdict.runtime ? ` — ${verdict.runtime}` : ""}. Every hidden case passed.`, requiresComplexity } satisfies SubmissionResult;
   };
 
   ipcMain.handle(ipc.attemptSubmit,async(_event,value)=>{const input=value as {sessionId?:unknown;attemptId?:unknown};const sessionId=zUuid(input.sessionId);const attemptId=zUuid(input.attemptId);const bundle=deps.store.submissionBundle(attemptId);
@@ -596,6 +609,16 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        the ordinary way to arrive here twice is a second submission of an attempt
        that already has its verdict. Said as that, rather than as a lookup miss. */
     if(!bundle||bundle.session_id!==sessionId)throw new Error(deps.store.attemptSubject(attemptId)?"This attempt has already been graded. Spar is preparing what comes next.":"That attempt no longer exists.");
+    /* A pass awaiting its complexity checkpoint is already a verdict. In
+       particular, do not send the same code to a remote judge again during the
+       brief restore window before the renderer has redrawn the checkpoint. */
+    const latestEvaluation=[...deps.store.readAttempt(attemptId)].reverse().find((event)=>event.type==="submission_evaluated");
+    if(latestEvaluation?.payload.outcome==="passed"){
+      const requiresComplexity=complexityCheckEnabled();
+      const source=deps.store.readSession(sessionId)?.question?.source;
+      if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle,...(source?{source}:{})});
+      return{outcome:"passed" as const,exitCode:0,durationMs:0,output:"",summary:"All tests already passed. Finish the complexity check to finalize this solve.",requiresComplexity} satisfies SubmissionResult;
+    }
     /* A challenge from a source with a judge behind it is graded there, by the
        people who wrote the hidden cases. Everything after the verdict is the same
        either way — the same events, the same completion, the same turn — because
@@ -609,8 +632,57 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        keeps working and submits again, every submission is recorded as evidence,
        and Spar is not asked to judge a challenge that is still being solved.
        Giving up is the other way out, and it is the learner's decision. */
-    if(outcome==="failed")return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"Some tests still fail. Keep going and submit again, or give up to move on."};
-    append("attempt_completed",{outcome},"system");deps.store.completeAttempt(attemptId,outcome);const calibration=noteBaselineEvidence(sessionId);if(calibration.baseline){if(!calibration.complete)void startAgentTurn(sessionId,`Baseline probe ${attemptId} passed every visible and hidden test. Replay the full trajectory and interpret it as calibration evidence, not as proof of mastery. Update the relevant ability state and readable memory, then choose one materially different diagnostic target that reduces the largest remaining uncertainty. Create exactly one next probe; do not open a general chat or create a Track.`,"system","attempt-complete");}else void startAgentTurn(sessionId,`The learner solved attempt ${attemptId} — every visible and hidden test passes.${requirementsNote(bundle.design)} They may have submitted several times before this one; every one of those is in the attempt's log. Replay attempt ${attemptId} first and read how they got here — which cases they fixed, which they never passed, which they broke, and when — then read its recorded evaluation, update the relevant ability document, commit exactly one next pedagogical action, and either ask the learner about a specific moment the replay could not explain or aim the next target and validated question. The verdict is already known; what you are looking for is the behaviour behind it. The new target and question must explicitly respond to this attempt without overreacting to it.`,"system","attempt-complete");return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"All visible and hidden tests passed."};});
+    if(outcome==="failed")return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"Some tests still fail. Keep going and submit again, or give up to move on.",requiresComplexity:false} satisfies SubmissionResult;
+    const requiresComplexity=complexityCheckEnabled();
+    if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle});
+    return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"All visible and hidden tests passed.",requiresComplexity} satisfies SubmissionResult;});
+
+  ipcMain.handle(ipc.attemptComplexityStatus,(_event,value)=>{
+    const input=complexityAcknowledgeInput.parse(value);
+    const bundle=deps.store.submissionBundle(input.attemptId);
+    if(!bundle||bundle.session_id!==input.sessionId)return null;
+    const events=deps.store.readAttempt(input.attemptId);
+    if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")return null;
+    const claim=[...events].reverse().find((event)=>event.type==="learner_remark"&&event.payload.kind==="complexity-claim");
+    const review=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
+    return{time:String(claim?.payload.timeComplexity??""),space:String(claim?.payload.spaceComplexity??""),review:String(review?.payload.body??"")};
+  });
+
+  ipcMain.handle(ipc.attemptComplexityReview,async(_event,value)=>{
+    const input=complexityReviewInput.parse(value);
+    const bundle=deps.store.submissionBundle(input.attemptId);
+    if(!bundle||bundle.session_id!==input.sessionId)throw new Error("This complexity checkpoint is no longer active.");
+    const events=deps.store.readAttempt(input.attemptId);
+    if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")throw new Error("Pass every test before reviewing complexity.");
+    const priorReview=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
+    if(priorReview)return{review:String(priorReview.payload.body??"")};
+    const session=deps.store.readSession(input.sessionId);
+    if(!session?.question)throw new Error("The solved challenge is no longer open.");
+    const files:Record<string,string>={};
+    for(const file of session.question.files.filter((entry)=>!entry.readOnly))files[file.path]=await deps.workspaces.read(input.sessionId,file.path);
+    const account=await deps.auth.account();const token=await deps.auth.accessToken();
+    if(!account)throw new Error("Sign in before asking Spar to review complexity");
+    const providers=await deps.providers.resolve(account.id,token);
+    if(!providers.length)throw new Error(NO_PROVIDER);
+    let review="";let failure:unknown;
+    for(const provider of providers){try{const result=await deps.agent.request("complexity-review",{title:session.question.title,statement:session.question.statement,language:session.question.language,timeComplexity:input.timeComplexity,spaceComplexity:input.spaceComplexity,files,provider}).promise as {text?:string};review=result.text?.trim()??"";if(review)break;}catch(error){failure=error;}}
+    if(!review)throw failure instanceof Error?failure:new Error("Spar could not review that complexity yet.");
+    deps.store.appendNextEvent({id:randomUUID(),attemptId:input.attemptId,type:"learner_remark",occurredAt:new Date().toISOString(),payload:{kind:"complexity-claim",timeComplexity:input.timeComplexity,spaceComplexity:input.spaceComplexity},source:"learner",schemaVersion:1});
+    deps.store.appendNextEvent({id:randomUUID(),attemptId:input.attemptId,type:"agent_message",occurredAt:new Date().toISOString(),payload:{kind:"complexity-review",body:review},source:"agent",schemaVersion:1});
+    deps.store.addMessage(input.sessionId,"learner",`Complexity check — time: ${input.timeComplexity}; space: ${input.spaceComplexity}.`);
+    deps.store.addMessage(input.sessionId,"agent",review);
+    return{review};
+  });
+
+  ipcMain.handle(ipc.attemptComplexityAcknowledge,async(_event,value)=>{
+    const input=complexityAcknowledgeInput.parse(value);
+    const bundle=deps.store.submissionBundle(input.attemptId);
+    if(!bundle||bundle.session_id!==input.sessionId)throw new Error("This complexity checkpoint is no longer active.");
+    const reviewed=deps.store.readAttempt(input.attemptId).some((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
+    if(!reviewed)throw new Error("Wait for Spar's complexity review before continuing.");
+    const source=deps.store.readSession(input.sessionId)?.question?.source;
+    finishPassedAttempt({sessionId:input.sessionId,attemptId:input.attemptId,bundle,...(source?{source}:{})});
+  });
   /* Validated here rather than trusted from the window: the renderer is the one
      process in Spar that runs anybody's markdown, and this is the channel that
      spends credentials. The union is the same one the form switches on. */
@@ -703,6 +775,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      and a renderer that can read it is one XSS away from exfiltrating it. */
   ipcMain.handle(ipc.settingsWebSearch, async () => ({ source: await deps.web.keySource(), enabled: deps.store.getSetting<boolean>("web-search-enabled", true) }));
   ipcMain.handle(ipc.settingsWebSearchEnabled, (_event, value) => { deps.store.setSetting("web-search-enabled", value === true); });
+  ipcMain.handle(ipc.settingsComplexityCheck, () => ({ enabled: complexityCheckEnabled() }));
+  ipcMain.handle(ipc.settingsComplexityCheckEnabled, (_event, value) => { deps.store.setSetting("complexity-check-enabled", value === true); });
   ipcMain.handle(ipc.settingsWebSearchSave, async (_event, value) => {
     const key = typeof value === "string" ? value.trim() : "";
     if (!key) throw new Error("An Exa API key is required");
