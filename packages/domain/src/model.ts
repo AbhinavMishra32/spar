@@ -544,7 +544,11 @@ export const sessionDetailSchema = z.object({
      `TRANSCRIPT_ACTIVITY_WINDOW` in the store. `activityCount` is how many steps
      an older message has on disk but not in memory, which is what lets the
      transcript offer them rather than pretend the turn did nothing. */
-  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate, activity: z.array(agentActivityStepSchema).default([]), activityCount: z.number().int().min(0).default(0) })),
+  /* `workedMs` is how long the turn behind an agent message actually ran, so a
+     settled turn can fold its work under the same "Worked for 4s" the live one
+     counts up. Zero for messages written before it was recorded, and for the
+     learner's own, which are not turns. */
+  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate, activity: z.array(agentActivityStepSchema).default([]), activityCount: z.number().int().min(0).default(0), workedMs: z.number().int().min(0).default(0) })),
   events: z.array(z.object({ id, sequence: z.number().int(), type: z.string(), occurredAt: isoDate, payload: z.record(z.unknown()), source: z.string() }))
 });
 export type SessionDetail = z.infer<typeof sessionDetailSchema>;

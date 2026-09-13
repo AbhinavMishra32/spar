@@ -8,6 +8,7 @@ import { ChallengePublished, PROSE_GAP, Reasoning, ROW_GLYPH, RunFailure, SolveR
 import { ExplainedTrace } from "./ExplainedTrace";
 import { SystemEvent } from "./SystemEvent";
 import { groupParts, type AgentRun, type RunPart } from "./agentRun";
+import { RunFold } from "./RunFold";
 
 /** Construct stores the same shape Spar streamed, so the thread needs no
  *  adapter — only the name of the type it reads. */
@@ -70,12 +71,27 @@ function PhaseWait({ phase }: { phase?: string | null | undefined }) {
   );
 }
 
+/**
+ * The turn as it happens: the work, then the answer.
+ *
+ * The split is the worker's own — it says which phase it has opened, and the
+ * phase with no tools is the one that replies. Everything before that point is
+ * the work and folds itself away when the answer starts; everything after is
+ * the answer and stays where the learner is already reading.
+ */
 function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefined }) {
+  const streaming = run.status === "streaming";
+  const boundary = run.finalFrom ?? run.parts.length;
+  const work = run.parts.slice(0, boundary);
+  const reply = run.parts.slice(boundary);
   return (
     <div className="min-w-0">
-      <PhaseLine live={run.status === "streaming"} phase={phase} />
-      <Rows parts={run.parts} />
-      {run.status === "streaming" && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={run.parts} /></div>}
+      <PhaseLine live={streaming} phase={phase} />
+      <RunFold finalStartedAt={run.finalStartedAt} live={streaming} startedAt={run.startedAt}>
+        <Rows parts={work} />
+        {streaming && run.finalStartedAt === undefined && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={work} /></div>}
+      </RunFold>
+      {reply.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={reply} /></div>}
     </div>
   );
 }
@@ -185,26 +201,26 @@ function WaitingLine({ parts }: { parts: RunPart[] }) {
  * of storing them. A turn with no reply is still a turn worth seeing; that is
  * what an attempt-complete turn is, and it used to leave nothing behind at all.
  */
-function AgentMessage({ body, activity, activityCount, messageId }: {
+function AgentMessage({ body, activity, activityCount, messageId, workedMs }: {
   body: string;
   activity: AgentActivityStep[];
   activityCount: number;
   messageId: string;
+  /** How long the turn behind this message ran. Zero for turns recorded before
+   *  it was kept, which fold without naming a length. */
+  workedMs: number;
 }) {
   /* Older turns arrive with their steps left on disk — see the window in the
      store. The row says how many there were and fetches them when asked, so the
      saving is in what is resident rather than in what the learner can see. */
   const [fetched, setFetched] = useState<AgentActivityStep[] | null>(null);
-  const [loading, setLoading] = useState(false);
   const steps = fetched ?? activity;
-  const offered = !steps.length && activityCount > 0;
-  const open = () => {
-    if (loading) return;
-    setLoading(true);
-    void window.spar?.messageActivity({ messageId })
-      .then((value) => setFetched(value))
-      .catch(() => setFetched([]))
-      .finally(() => setLoading(false));
+  /* Steps this turn has on disk but not in memory. The fold offers them and
+     fetches them when it is opened, so an old turn reads as a turn that did
+     work rather than one that did nothing. */
+  const deferred = !steps.length && activityCount > 0;
+  const open = async () => {
+    setFetched(await window.spar!.messageActivity({ messageId }));
   };
   return (
     /* No `space-y` here. It reaches every row `Rows` emits — they are direct
@@ -215,18 +231,13 @@ function AgentMessage({ body, activity, activityCount, messageId }: {
        looked right. Spacing between steps belongs to `Rows`; the only gap this
        element owns is the one before the reply. */
     <div className="min-w-0">
-      {offered && (
-        <button
-          className="flex items-center gap-1.5 py-1 text-ui-sm text-[var(--transcript-step)] transition-colors hover:text-foreground"
-          onClick={open}
-          type="button"
-        >
-          {loading ? "Loading…" : `Show ${activityCount} step${activityCount === 1 ? "" : "s"} from this turn`}
-        </button>
+      {(steps.length > 0 || deferred) && (
+        <RunFold bodyLoaded={!deferred} live={false} onOpen={open} workedMs={workedMs}>
+          <Rows parts={steps.map(storedPart)} />
+        </RunFold>
       )}
-      <Rows parts={steps.map(storedPart)} />
       {body.trim() && (
-        <div className="min-w-0 pb-2" style={{ marginTop: PROSE_GAP }}>
+        <div className="min-w-0 pb-2" style={{ marginTop: steps.length || deferred ? PROSE_GAP : undefined }}>
           <Markdown source={body} />
         </div>
       )}
@@ -444,7 +455,7 @@ export function AgentThread({
                   ) : item.role === "system" ? (
                     <SystemEvent key={item.id} body={item.body} />
                   ) : (
-                    <AgentMessage activity={item.activity} activityCount={item.activityCount ?? 0} body={item.body} key={item.id} messageId={item.id} />
+                    <AgentMessage activity={item.activity} activityCount={item.activityCount ?? 0} body={item.body} key={item.id} messageId={item.id} workedMs={item.workedMs ?? 0} />
                   ),
                 )}
                 {visibleRun ? <LiveRun phase={phase} run={visibleRun} /> : <PhaseWait phase={phase} />}

@@ -183,6 +183,11 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          every streamed event — without which a session card that is not open
          could not tell that the agent is working on it. Both are released
          together, and a retried turn hands the claim to the new run id. */
+      /* When the turn started, so the message it produces can say how long it
+         worked. Taken at the claim rather than at the request, so a turn that
+         fails over to a second provider is timed from the first attempt — the
+         learner waited for all of it. */
+      const startedAt=Date.now();
       const claim=(runId:string)=>{activeAgentRuns.set(sessionId,runId);deps.agentRunSessions.set(runId,sessionId);return runId;};
       const release=(runId:string)=>{activeAgentRuns.delete(sessionId);deps.agentRunSessions.delete(runId);};
       const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);
@@ -195,7 +200,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
         /* Recorded when there is activity even with no reply: an attempt-complete
            turn answers with a challenge rather than a sentence, and it used to
            leave the transcript with no trace that it ran at all. */
-        if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity);
+        if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity,Date.now()-startedAt);
         deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){forgetAgentActivity(request.id);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();

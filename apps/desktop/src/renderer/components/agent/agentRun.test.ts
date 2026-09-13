@@ -168,3 +168,35 @@ describe("streaming a turn", () => {
     expect(thinking.endedAt).toBeGreaterThan(0);
   });
 });
+
+/* A Spar turn is twenty-one phases and every one of them draws rows. Which of
+   them is work and which is the answer is not guessed from watching text
+   arrive — the worker names each phase as it opens it, and the phase with no
+   tools is the one that replies. */
+describe("where the work ends and the answer begins", () => {
+  const phase = (current: AgentRun, detail: string): AgentRun => {
+    const next = reduceRun(current, { runId: "run", type: "status", detail });
+    if (!next) throw new Error("the status event was dropped");
+    return next;
+  };
+
+  it("marks the reply phase, and the parts that came before it as the work", () => {
+    const working = phase(run([tool("read_ability")]), "phase-step:4;active:create_question");
+    expect(working.finalStartedAt).toBeUndefined();
+
+    const answering = phase({ ...working, parts: [tool("read_ability"), tool("create_question")] }, "phase-step:9;active:none");
+    expect(answering.finalStartedAt).toBeDefined();
+    expect(answering.finalFrom).toBe(2);
+  });
+
+  it("keeps the first such phase, so a turn cannot end its work twice", () => {
+    const first = phase(run([]), "phase-step:9;active:none");
+    const again = phase({ ...first, parts: [tool("read_ability")] }, "phase-step:10;active:none");
+    expect(again.finalStartedAt).toBe(first.finalStartedAt);
+    expect(again.finalFrom).toBe(0);
+  });
+
+  it("says nothing about a phase that still has tools to call", () => {
+    expect(phase(run([]), "phase-step:2;active:read_ability,search_learner_model").finalStartedAt).toBeUndefined();
+  });
+});

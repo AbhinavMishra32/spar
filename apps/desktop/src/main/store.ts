@@ -155,6 +155,7 @@ export class LocalStore {
        activity existed only in the live stream and every finished turn collapsed
        to its last sentence. */
     this.ensureColumn("agent_messages", "activity", "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn("agent_messages", "worked_ms", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("sessions", "pinned_at", "TEXT");
     this.ensureColumn("sessions", "archived_at", "TEXT");
     this.ensureColumn("sessions", "track_id", "TEXT");
@@ -210,11 +211,11 @@ export class LocalStore {
      * have on disk so the row can offer to fetch them. Nothing is deleted; this
      * is about what is resident, not what is kept.
      */
-    const rows=this.db.prepare("SELECT id,role,body,created_at,activity FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string;activity:string|null}>;
+    const rows=this.db.prepare("SELECT id,role,body,created_at,activity,worked_ms FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string;activity:string|null;worked_ms:number}>;
     const windowStart=Math.max(0,rows.length-TRANSCRIPT_ACTIVITY_WINDOW);
     const messages=rows.map((m,index)=>{
-      if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0};
-      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:[],activityCount:countActivity(m.activity)};
+      if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0,workedMs:m.worked_ms};
+      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:[],activityCount:countActivity(m.activity),workedMs:m.worked_ms};
     });
     return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
@@ -249,7 +250,7 @@ export class LocalStore {
   /** One older turn's steps, fetched when the learner opens it. The window keeps
    *  them out of memory; this is how they come back. */
   messageActivity(messageId:string):AgentActivityStep[]{const row=this.db.prepare("SELECT activity FROM agent_messages WHERE id=?").get(messageId) as {activity:string|null}|undefined;return parseActivity(row?.activity??null);}
-  addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[]){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity));this.enqueue("agent-message",{sessionId,messages:[value]});return value;}
+  addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[],workedMs=0){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity,worked_ms) VALUES (?,?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity),Math.round(workedMs));this.enqueue("agent-message",{sessionId,messages:[value]});return value;}
   /**
    * Take the conversation back to one of the learner's own messages.
    *

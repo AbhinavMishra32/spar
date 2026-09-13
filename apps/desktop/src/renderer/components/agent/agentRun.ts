@@ -33,6 +33,14 @@ export type AgentRun = {
   parts: RunPart[];
   status: "streaming" | "done" | "error";
   startedAt: number;
+  /* When the agent stopped working and started answering. The worker names each
+     phase as it opens it, and the phase that offers no tools is the one that
+     replies — so this is the turn's own account of where the work ended, not a
+     guess made from watching text arrive. It is what folds the work away. */
+  finalStartedAt?: number;
+  /** How many parts had arrived by then: everything before is the work, and
+   *  everything from here is the reply. */
+  finalFrom?: number;
 };
 
 /**
@@ -168,6 +176,11 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
 
     case "status": {
       const body = event.detail ?? event.text ?? "";
+      /* Read before the noise filter drops it. `active:none` is the phase that
+         has no tools to call, which is the phase that answers. */
+      if (/^phase-step:\d+;active:none$/.test(body) && run.finalStartedAt === undefined) {
+        return { ...run, finalStartedAt: Date.now(), finalFrom: parts.length };
+      }
       // Provider protocol chatter belongs in the raw trace, not the transcript.
       if (!body || isProtocolNoise(body)) return run;
       if (last?.kind === "status") parts[parts.length - 1] = { ...last, body };
