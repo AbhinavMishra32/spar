@@ -47,18 +47,22 @@ describe("provider service", () => {
     } finally { store.close(); }
   });
 
-  /* pi-ai's bundled catalog lags what a ChatGPT subscription can actually run,
-     so the Codex tiers are overlaid on it. The picker has to offer them, and
-     `setDefault` — which refuses a model the provider does not list — has to
-     accept one, or selecting it from the picker fails. */
-  it("offers the current ChatGPT tiers ahead of pi-ai's bundled catalog", async () => {
+  /* The picker has to offer every tier a ChatGPT subscription can actually run,
+     and `setDefault` — which refuses a model the provider does not list — has
+     to accept one, or selecting it from the picker fails. Spar used to overlay
+     the newest tiers by hand because the bundled catalog lagged them; this is
+     the assertion that stayed behind when the overlay went, and it fails the
+     moment pi's catalog falls behind the subscription again. */
+  it("offers the current ChatGPT tiers, including the one it defaults to", async () => {
     const store = new LocalStore(":memory:");
     const service = new ProviderService(new MemoryCredentials() as unknown as AuthService, store, () => undefined, offline);
     try {
       const models = (await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.models ?? [];
-      expect(models.slice(0, 3).map((model) => model.id)).toEqual(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
+      const offered = models.map((model) => model.id);
+      expect(offered).toEqual(expect.arrayContaining(["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]));
+      // The default a fresh install lands on has to be one of them.
+      expect(offered).toContain("gpt-5.6-terra");
       expect(models.find((model) => model.id === "gpt-5.6-luna")).toMatchObject({ name: "GPT-5.6 Luna", reasoning: true });
-      expect(models.some((model) => model.id === "gpt-5.5")).toBe(true);
       service.setDefault("openai-codex", "gpt-5.6-luna");
       expect((await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.selectedModel).toBe("gpt-5.6-luna");
     } finally { store.close(); }
@@ -75,7 +79,10 @@ describe("provider service", () => {
     try {
       const cline = (await service.inventory()).providers.find((provider) => provider.id === "cline");
       expect(cline).toMatchObject({ name: "Cline", kind: "api-key", state: "disconnected", selectedModel: "deepseek/deepseek-v4-flash", baseUrl: "https://api.cline.bot/api/v1" });
-      expect(cline?.models[0]).toMatchObject({ id: "deepseek/deepseek-v4-flash", name: "DeepSeek: DeepSeek V4 Flash (free)", reasoning: true });
+      /* The name is the lab's, so it is checked for the mark Spar adds rather
+         than pinned in full — Cline renames a tier without telling anyone. */
+      expect(cline?.models[0]).toMatchObject({ id: "deepseek/deepseek-v4-flash", reasoning: true });
+      expect(cline?.models[0]?.name).toMatch(/ \(free\)$/);
       // Behind the promoted handful, Cline still offers the catalog it fronts.
       expect(cline?.models.some((model) => model.id === "deepseek/deepseek-v4-pro")).toBe(true);
 
@@ -113,7 +120,8 @@ describe("provider service", () => {
       await new Promise((resolve) => setImmediate(resolve));
       const models = (await service.inventory()).providers.find((provider) => provider.id === "cline")?.models ?? [];
       expect(models[0]).toMatchObject({ id: "acme/brand-new-flash", name: "brand-new-flash (free)" });
-      expect(models.find((model) => model.id === "deepseek/deepseek-v4-flash")?.name).toBe("DeepSeek: DeepSeek V4 Flash");
+      // Dropped from the promotion, it keeps its catalog name and loses the mark.
+      expect(models.find((model) => model.id === "deepseek/deepseek-v4-flash")?.name).not.toMatch(/\(free\)/);
     } finally { store.close(); }
   });
 

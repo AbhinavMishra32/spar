@@ -1,9 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { shell } from "electron";
-import { getModels, type Api, type Model, type OAuthCredentials } from "@mariozechner/pi-ai";
-import { getOAuthApiKey, getOAuthProvider } from "@mariozechner/pi-ai/oauth";
+import type { AuthEvent, AuthPrompt, Api, Model, MutableModels, OAuthCredentials } from "@earendil-works/pi-ai";
+import { getModels } from "@earendil-works/pi-ai/compat";
 import { apiOrigin } from "./apiOrigin.js";
 import type { AuthService } from "./auth.js";
+import { createSparModels } from "./piModels.js";
 import type { LocalStore } from "./store.js";
 import { anthropicUsage, codexUsageFromHeaders } from "./subscriptionUsage.js";
 import type { ProviderInventory, ProviderOAuthEvent, ReasoningEffort, SubscriptionUsage } from "../shared/api.js";
@@ -61,31 +62,6 @@ const descriptors: Descriptor[] = [
   { id: "custom", runtimeId: "custom", name: "Add custom provider", kind: "custom", description: "Add an OpenAI-compatible provider", defaultModel: "my-model", defaultBaseUrl: "https://example.com/v1" },
 ];
 
-/** pi-ai's model catalog is a snapshot taken when the package was published, and
- *  ChatGPT ships Codex tiers faster than pi-ai republishes — 0.73.1 still stops
- *  at GPT-5.5, so the picker was offering a subscription less than it can run.
- *  These are the tiers ChatGPT's own `/backend-api/codex/models` currently
- *  returns with `visibility: "list"`, in the priority order it sorts them by.
- *  Merged over the bundled catalog rather than replacing it, so an id pi-ai
- *  learns about later keeps pi-ai's own entry and this list can just shrink.
- *  Per-token cost is not published for these tiers; the nearest tier pi-ai does
- *  price stands in, which only affects the spend estimate shown for a turn. */
-const codexTiers: Model<Api>[] = [
-  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 } },
-  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 } },
-  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", cost: { input: 0.75, output: 4.5, cacheRead: 0.075, cacheWrite: 0 } },
-].map((tier) => ({
-  ...tier,
-  api: "openai-codex-responses" as const,
-  provider: "openai-codex",
-  baseUrl: "https://chatgpt.com/backend-api",
-  reasoning: true,
-  thinkingLevelMap: { xhigh: "xhigh", minimal: "low" },
-  input: ["text", "image"],
-  contextWindow: 272_000,
-  maxTokens: 128_000,
-}));
-
 const descriptorById = new Map(descriptors.map((item) => [item.id, item]));
 const oauthRuntimeId = (id: ProviderId) => id === "claude-code" ? "anthropic" : id;
 /** Spar's own gateway is the only credential the learner does not hold; it is
@@ -98,15 +74,22 @@ const USAGE_CACHE_MS = 60_000;
  *  release, so it is re-read through the day — but nowhere near as often as the
  *  composer re-reads the inventory that shows it. */
 const CLINE_TIERS_CACHE_MS = 6 * 60 * 60 * 1_000;
+/** The bundled catalog, which is a snapshot taken when pi was published. Spar
+ *  used to overlay the current ChatGPT tiers on it by hand, because 0.73.1
+ *  stopped at GPT-5.5 and the picker was offering a subscription less than it
+ *  can run. 0.85 ships them — with the per-tier pricing the hand-written
+ *  entries could only approximate — so the overlay is gone rather than
+ *  standing in front of better data. */
 const modelsFor = (provider: string) => {
-  let bundled: Model<Api>[] = [];
-  try { bundled = (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { bundled = []; }
-  if (provider !== "openai-codex") return bundled;
-  return [...codexTiers.filter((tier) => !bundled.some((model) => model.id === tier.id)), ...bundled];
+  try { return (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { return []; }
 };
 
 export class ProviderService {
   private readonly flows = new Map<string, { providerId: ProviderId; controller: AbortController; prompt: { resolve(value: string): void; reject(error: Error): void } | undefined }>();
+  /** pi's runtime collection, reading and writing the learner's tokens through
+   *  Spar's own keychain — see piModels.ts. Holds no state of its own beyond
+   *  the provider catalog, so one per service is enough. */
+  private readonly models: MutableModels;
 
   constructor(
     private readonly auth: AuthService,
@@ -115,7 +98,9 @@ export class ProviderService {
     /** Only Cline's tier list is read over the network from here. Injected so a
      *  test exercises the catalog it seeds with rather than today's promotion. */
     private readonly fetcher: typeof fetch = fetch,
-  ) {}
+  ) {
+    this.models = createSparModels(auth);
+  }
 
   /** Every provider's model catalog. pi-ai answers for the ones it ships;
    *  Cline's is assembled from its own tier list — see clineCatalog.ts. */
@@ -206,12 +191,13 @@ export class ProviderService {
     const cached = this.store.getSetting<SubscriptionUsage | null>("provider-usage:claude-code", null);
     if (cached && Date.now() - cached.capturedAt < USAGE_CACHE_MS) return cached;
     try {
-      const credentials = await this.auth.readProviderOAuth<OAuthCredentials>("claude-code");
-      if (!credentials) return null;
-      const result = await getOAuthApiKey("anthropic", { anthropic: credentials });
-      if (!result) return cached;
-      if (JSON.stringify(result.newCredentials) !== JSON.stringify(credentials)) await this.auth.saveProviderOAuth("claude-code", result.newCredentials);
-      const usage = await anthropicUsage(result.apiKey);
+      if (!await this.auth.readProviderOAuth("claude-code")) return null;
+      /* Refresh and the rotated token's persistence are pi's now, and they run
+         inside the store's per-provider lock — so a quota reading taken while a
+         turn is starting can no longer race it to write the same entry. */
+      const resolved = await this.models.getAuth("anthropic");
+      if (!resolved?.auth.apiKey) return cached;
+      const usage = await anthropicUsage(resolved.auth.apiKey);
       if (!usage) return cached;
       this.store.setSetting("provider-usage:claude-code", usage);
       return usage;
@@ -263,28 +249,20 @@ export class ProviderService {
 
   startOAuth(providerId: ProviderId) {
     const runtimeId = oauthRuntimeId(providerId);
-    const provider = getOAuthProvider(runtimeId);
-    if (!provider || descriptorById.get(providerId)?.kind !== "subscription") throw new Error("Subscription sign-in is not available for this provider");
+    const oauth = this.models.getProvider(runtimeId)?.auth.oauth;
+    if (!oauth || descriptorById.get(providerId)?.kind !== "subscription") throw new Error("Subscription sign-in is not available for this provider");
     const flowId = randomUUID();
     const controller = new AbortController();
     this.flows.set(flowId, { providerId, controller, prompt: undefined });
-    this.emit({ flowId, provider: providerId, status: "starting", message: `Starting ${provider.name} sign-in…` });
-    void provider.login({
+    this.emit({ flowId, provider: providerId, status: "starting", message: `Starting ${oauth.name} sign-in…` });
+    void this.models.login(runtimeId, "oauth", {
       signal: controller.signal,
-      onAuth: (info) => {
-        this.emit({ flowId, provider: providerId, status: "waiting", url: info.url, message: info.instructions ?? "Finish signing in in your browser." });
-        void shell.openExternal(info.url);
-      },
-      onProgress: (message) => this.emit({ flowId, provider: providerId, status: "waiting", message }),
-      onPrompt: (prompt) => new Promise<string>((resolve, reject) => {
-        const flow = this.flows.get(flowId);
-        if (!flow) return reject(new Error("OAuth flow was cancelled"));
-        flow.prompt = { resolve, reject };
-        this.emit({ flowId, provider: providerId, status: "prompt", message: prompt.message, ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}), ...(prompt.allowEmpty !== undefined ? { allowEmpty: prompt.allowEmpty } : {}) });
-      }),
-    }).then(async (credentials) => {
+      notify: (event) => this.announce(flowId, providerId, event),
+      prompt: (prompt) => this.ask(flowId, providerId, prompt),
+    }).then(async () => {
       if (controller.signal.aborted) return;
-      await this.auth.saveProviderOAuth(providerId, credentials);
+      /* No save here: `login` persists what it returns through the credential
+         store, which is Spar's keychain under this same provider id. */
       this.store.setSetting(`provider-auth-expired:${providerId}`, false);
       const descriptor = descriptorById.get(providerId)!;
       this.select(providerId, descriptor.defaultModel);
@@ -293,6 +271,63 @@ export class ProviderService {
       if (!controller.signal.aborted) this.emit({ flowId, provider: providerId, status: "error", message: safeError(error) });
     }).finally(() => this.flows.delete(flowId));
     return { flowId };
+  }
+
+  /** What the flow wants the learner to see. `auth_url` and `device_code` are
+   *  the two ways a provider hands off to the browser — Claude and ChatGPT open
+   *  a page, GitHub Copilot reads out a code to type into one — and both end up
+   *  as the same waiting row with a link. */
+  private announce(flowId: string, providerId: ProviderId, event: AuthEvent) {
+    if (event.type === "auth_url") {
+      this.emit({ flowId, provider: providerId, status: "waiting", url: event.url, message: event.instructions ?? "Finish signing in in your browser." });
+      void shell.openExternal(event.url);
+      return;
+    }
+    if (event.type === "device_code") {
+      this.emit({ flowId, provider: providerId, status: "waiting", url: event.verificationUri, message: `Enter the code ${event.userCode} in your browser to finish signing in.` });
+      void shell.openExternal(event.verificationUri);
+      return;
+    }
+    this.emit({ flowId, provider: providerId, status: "waiting", message: event.message });
+  }
+
+  /** What the flow wants the learner to answer.
+   *
+   *  A `select` never reaches them. The only provider that asks is ChatGPT,
+   *  choosing between browser sign-in and headless device-code sign-in, and
+   *  Spar is a desktop app with a browser — asking the learner to pick would be
+   *  asking them to answer a question about Spar's own deployment. The default,
+   *  which pi lists first, is the answer. */
+  private ask(flowId: string, providerId: ProviderId, prompt: AuthPrompt): Promise<string> {
+    if (prompt.type === "select") return Promise.resolve(prompt.options[0]?.id ?? "");
+    return new Promise<string>((resolve, reject) => {
+      const flow = this.flows.get(flowId);
+      if (!flow) return reject(new Error("OAuth flow was cancelled"));
+      const done = <T,>(settle: (value: T) => void) => (value: T) => {
+        if (flow.prompt === entry) flow.prompt = undefined;
+        prompt.signal?.removeEventListener("abort", abandon);
+        settle(value);
+      };
+      /* The prompt can be overtaken: Claude and ChatGPT offer a paste box while
+         racing a loopback callback, and abort it the moment the browser wins.
+         Without this the dialog would sit asking for a code that has already
+         been exchanged. */
+      const abandon = () => {
+        done(reject)(new Error("Sign-in completed in the browser"));
+        this.emit({ flowId, provider: providerId, status: "waiting", message: "Finishing sign-in…" });
+      };
+      const entry = { resolve: done(resolve), reject: done(reject) };
+      flow.prompt = entry;
+      prompt.signal?.addEventListener("abort", abandon, { once: true });
+      this.emit({
+        flowId, provider: providerId, status: "prompt", message: prompt.message,
+        ...(prompt.placeholder ? { placeholder: prompt.placeholder } : {}),
+        /* Only a free-text prompt takes a blank answer, and it means something
+           there: Copilot asks for an Enterprise domain, and empty is github.com.
+           A code or a secret blank is just an empty submission. */
+        ...(prompt.type === "text" ? { allowEmpty: true } : {}),
+      });
+    });
   }
 
   submitOAuth(flowId: string, value: string) {
@@ -321,15 +356,26 @@ export class ProviderService {
       if (credentials) {
         try {
           const runtimeId = oauthRuntimeId(selected);
-          const result = await getOAuthApiKey(runtimeId, { [runtimeId]: credentials });
-          if (result) {
-            if (JSON.stringify(result.newCredentials) !== JSON.stringify(credentials)) await this.auth.saveProviderOAuth(selected, result.newCredentials);
+          const resolved = await this.models.getAuth(runtimeId);
+          if (resolved?.auth.apiKey) {
             this.store.setSetting(`provider-auth-expired:${selected}`, false);
             const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
-            const provider = getOAuthProvider(runtimeId);
-            const available = provider?.modifyModels?.(this.catalog(runtimeId), result.newCredentials) ?? this.catalog(runtimeId);
+            const catalog = this.catalog(runtimeId);
+            /* Re-read rather than reuse: `getAuth` may have just rotated the
+               token, and which models a subscription can run is decided from the
+               credential — Copilot's list is the one its last login enabled. */
+            const fresh = await this.auth.readProviderOAuth<OAuthCredentials>(selected);
+            const provider = this.models.getProvider(runtimeId);
+            const available = provider?.filterModels?.(catalog, fresh ? { type: "oauth", ...fresh } : undefined) ?? catalog;
             const model = available.find((item) => item.id === modelId) ?? available[0];
-            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: model.baseUrl, apiKey: result.apiKey, ...(model.headers ? { headers: model.headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort() });
+            /* pi spells "drop this header" as a null value, which is why the
+               merge is filtered rather than spread straight through: the null
+               has already overwritten the model's own entry by the time it is
+               dropped, which is what dropping it is supposed to mean. */
+            const headers = Object.fromEntries(
+              Object.entries({ ...model?.headers, ...resolved.auth.headers }).filter((entry): entry is [string, string] => entry[1] !== null),
+            );
+            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: resolved.auth.baseUrl ?? model.baseUrl, apiKey: resolved.auth.apiKey, ...(Object.keys(headers).length ? { headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort() });
           } else {
             this.store.setSetting(`provider-auth-expired:${selected}`, true);
           }

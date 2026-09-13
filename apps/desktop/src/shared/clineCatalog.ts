@@ -1,4 +1,5 @@
-import { getModels, type Api, type Model } from "@mariozechner/pi-ai";
+import { getModels } from "@earendil-works/pi-ai/compat";
+import type { Api, Model } from "@earendil-works/pi-ai";
 
 /**
  * Cline is one OpenAI-compatible Chat Completions endpoint in front of every

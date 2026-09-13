@@ -1,6 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
+import { getModels } from "@earendil-works/pi-ai/compat";
 import { createPiMastraModel } from "../workers/piMastraModel.js";
 import { clineBaseUrl, clineModelFor, clineModels, clineSeedTiers, clineTiersFrom, clineTiersUrl, fetchClineTiers } from "./clineCatalog.js";
 
@@ -43,7 +44,11 @@ describe("Cline catalog", () => {
   it("points OpenRouter's catalog at Cline, and charges nothing for a free model", () => {
     const models = clineModels(clineSeedTiers);
     const flash = models.find((model) => model.id === "deepseek/deepseek-v4-flash")!;
-    expect(flash).toMatchObject({ provider: "cline", baseUrl: clineBaseUrl, api: "openai-completions", contextWindow: 1_048_576, reasoning: true });
+    expect(flash).toMatchObject({ provider: "cline", baseUrl: clineBaseUrl, api: "openai-completions", reasoning: true });
+    /* Asserted against the entry it is copied from rather than against a number
+       written down here: a pinned figure only proves the catalog said this once,
+       and goes stale the next time the lab publishes a longer window. */
+    expect(flash.contextWindow).toBe(getModels("openrouter").find((model) => model.id === "deepseek/deepseek-v4-flash")?.contextWindow);
     expect(flash.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
     // Paid models keep the rate the catalog publishes for them.
     expect(models.find((model) => model.id === "deepseek/deepseek-v4-pro")?.cost.input).toBeGreaterThan(0);

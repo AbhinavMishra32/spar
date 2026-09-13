@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
 import keytar from "keytar";
-import { fauxAssistantMessage, fauxText, fauxToolCall, getModels, registerFauxProvider } from "@mariozechner/pi-ai";
-import { getOAuthApiKey, type OAuthCredentials } from "@mariozechner/pi-ai/oauth";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { getModels, registerFauxProvider } from "@earendil-works/pi-ai/compat";
+import { createSparModels } from "./piModels.js";
 import { clineBaseUrl } from "../shared/clineCatalog.js";
 import { createPiMastraModel, piTransportForApi } from "../workers/piMastraModel.js";
+
+const SERVICE = "ai.spar.desktop";
+/** The keychain, behind the same three calls `ProviderService` hands pi. The
+ *  verification below then resolves its token through exactly the adapter the
+ *  app resolves through, rather than through a second path that could work
+ *  while the app's does not. */
+const keychain = {
+  async readProviderOAuth<T>(provider: string): Promise<T | null> {
+    const raw = await keytar.getPassword(SERVICE, `provider-oauth:${provider}`);
+    return raw ? (JSON.parse(raw) as T) : null;
+  },
+  saveProviderOAuth: (provider: string, credentials: unknown) => keytar.setPassword(SERVICE, `provider-oauth:${provider}`, JSON.stringify(credentials)),
+  async deleteProviderOAuth(provider: string) { await keytar.deletePassword(SERVICE, `provider-oauth:${provider}`); },
+};
 
 describe("Pi to Mastra model adapter", () => {
   it("uses SSE for ChatGPT subscription inference", () => {
@@ -34,14 +49,12 @@ describe("Pi to Mastra model adapter", () => {
   });
 
   it.runIf(process.env.SPAR_VERIFY_CHATGPT === "1")("calls a tool through the connected ChatGPT subscription", async () => {
-    const raw = await keytar.getPassword("ai.spar.desktop", "provider-oauth:openai-codex");
-    if (!raw) throw new Error("ChatGPT subscription credential is not connected");
-    const credentials = JSON.parse(raw) as OAuthCredentials;
-    const resolved = await getOAuthApiKey("openai-codex", { "openai-codex": credentials });
-    if (!resolved) throw new Error("ChatGPT subscription credential could not be refreshed");
+    if (!await keychain.readProviderOAuth("openai-codex")) throw new Error("ChatGPT subscription credential is not connected");
+    const resolved = await createSparModels(keychain).getAuth("openai-codex");
+    if (!resolved?.auth.apiKey) throw new Error("ChatGPT subscription credential could not be refreshed");
     const source = getModels("openai-codex").find((model) => model.id === "gpt-5.4-mini");
     if (!source) throw new Error("GPT-5.4 Mini is unavailable in the ChatGPT subscription catalog");
-    const model = createPiMastraModel({ provider: source.provider, model: source.id, api: source.api, baseUrl: source.baseUrl, apiKey: resolved.apiKey });
+    const model = createPiMastraModel({ provider: source.provider, model: source.id, api: source.api, baseUrl: resolved.auth.baseUrl ?? source.baseUrl, apiKey: resolved.auth.apiKey });
     const result = await model.doGenerate({
       prompt: [
         { role: "system", content: "Call the supplied tool exactly once." },

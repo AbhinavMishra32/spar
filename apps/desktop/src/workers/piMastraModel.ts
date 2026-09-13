@@ -6,10 +6,13 @@ import type {
   LanguageModelV2StreamPart,
   LanguageModelV2Usage,
 } from "@ai-sdk/provider";
+/* The runtime entry points come from the compat surface, which is where pi
+   keeps the standalone `stream`/`complete`/catalog functions now that the
+   library's own preferred entry is a `Models` collection. Spar resolves its own
+   credentials and builds its own model descriptor, so the collection would only
+   be a second source of truth for things this file already knows. */
+import { completeSimple as piComplete, getModels, streamSimple as piStream } from "@earendil-works/pi-ai/compat";
 import {
-  completeSimple as piComplete,
-  getModels,
-  streamSimple as piStream,
   type Api,
   type AssistantMessage,
   type Context,
@@ -21,7 +24,7 @@ import {
   type ThinkingContent,
   type ToolCall,
   type Usage,
-} from "@mariozechner/pi-ai";
+} from "@earendil-works/pi-ai";
 import type { ReasoningEffort } from "../shared/api.js";
 import { clineModelFor } from "../shared/clineCatalog.js";
 
@@ -116,8 +119,43 @@ export function createPiMastraModel(input: PiProviderInput): LanguageModelV2 {
   };
 }
 
+/**
+ * Which tool the model is allowed to pick, in the shape this API asks for it.
+ *
+ * Spar's phase controller is built on forcing one tool at a time — twenty-one of
+ * its phases require a specific call, and the whole deterministic sequence is
+ * that requirement. Mastra passes the demand down as `toolChoice` on the call
+ * options, and this adapter dropped it on the floor: it read `temperature`,
+ * `maxOutputTokens` and `abortSignal` off the options and nothing else. So the
+ * requirement never reached the provider, and every "required" phase was really
+ * a sentence in the prompt asking nicely, backed by the retry ladder in
+ * `agent.ts` for when the model answered in prose instead.
+ *
+ * pi carries this per API rather than through one portable field — its own
+ * provider-neutral `ToolChoice` is `"auto" | "none"` and cannot express
+ * "required" — so the demand is translated for the family being spoken to.
+ * Anthropic and Bedrock say `any` and take a named tool as an object; the
+ * OpenAI and Mistral families say `required`; Google says `any` and has no way
+ * to name one. A named choice degrades to "some tool, you pick" wherever it
+ * cannot be expressed, which is what `activeTools` has already narrowed anyway.
+ */
+export function toolChoiceFor(api: string, choice: LanguageModelV2CallOptions["toolChoice"]) {
+  if (!choice) return undefined;
+  if (choice.type === "auto") return "auto";
+  if (choice.type === "none") return "none";
+  const anthropicShaped = api === "anthropic-messages" || api === "bedrock-converse-stream";
+  const named = choice.type === "tool" ? choice.toolName : "";
+  if (anthropicShaped) return named ? { type: "tool", name: named } : "any";
+  if (api.startsWith("google")) return "any";
+  /* The OpenAI families (completions, responses, codex-responses) and Mistral.
+     Codex Responses takes no named form, so it gets the bare demand. */
+  if (named && api !== "openai-codex-responses") return { type: "function", function: { name: named } };
+  return "required";
+}
+
 function streamOptions(input: PiProviderInput, options: LanguageModelV2CallOptions) {
   const transport = piTransportForApi(input.api);
+  const toolChoice = toolChoiceFor(input.api, options.toolChoice);
   return {
     apiKey: input.apiKey,
     // ChatGPT subscription inference currently exposes the Codex Responses
@@ -128,6 +166,11 @@ function streamOptions(input: PiProviderInput, options: LanguageModelV2CallOptio
     ...(options.abortSignal ? { signal: options.abortSignal } : {}),
     ...(options.maxOutputTokens ? { maxTokens: options.maxOutputTokens } : {}),
     ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+    /* Typed loosely on purpose: pi's published `SimpleStreamOptions.toolChoice`
+       is narrower than the request builders behind it, which pass a string
+       through as `{type: value}` and an object verbatim. The shape is chosen per
+       API above; this is the one place that knows it is wider than the type. */
+    ...(toolChoice !== undefined ? { toolChoice: toolChoice as never } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
     // "off" (the default) sends no reasoning directive at all — each pi-ai provider
     // already falls back to today's behavior in that case, so this never changes
