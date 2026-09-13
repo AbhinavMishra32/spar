@@ -116,5 +116,6 @@ it("accepts an authored challenge whose hidden suite actually sweeps",async()=>{
   });
   expect(report.checks.find(check=>check.name==="case volume")?.passed).toBe(true);
   expect(report.checks.find(check=>check.name==="curated visible cases")?.passed).toBe(true);
+  expect(report.caseCounts).toEqual({ visible: 5, hidden: 30 });
   expect(report.valid).toBe(true);
 });

@@ -34,7 +34,7 @@ import { PaneHandle } from "../workspace/PaneHandle";
 import { ProblemStatement } from "../workspace/ProblemStatement";
 import { SourceHints } from "../workspace/SourceHints";
 import { SourceBadge } from "../common/SourceBadge";
-import { ResultPanel, type ResultTab, type RunOutcome } from "../workspace/ResultPanel";
+import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "../workspace/ResultPanel";
 import { SparDots } from "@/components/common/SparDots";
 
 /**
@@ -299,6 +299,9 @@ export function ChallengePage({
   const [running, setRunning] = useState(false);
   const [wordWrap, setWordWrap] = useState(false);
   const [checking, setChecking] = useState(false);
+  /* Which suite produced what the result panel is showing — held past the end of
+     the run, because the panel needs it while it is showing that output. */
+  const [suite, setSuite] = useState<RunSuite>("visible");
   const [resetting, setResetting] = useState(false);
   const [settled, setSettled] = useState(false);
   const [outcome, setOutcome] = useState<RunOutcome>(null);
@@ -412,6 +415,7 @@ export function ChallengePage({
     if (!api || busy) return;
     try {
       setRunning(true);
+      setSuite("visible");
       setOutcome(null);
       setResultTab("result");
       resultPanel.expand();
@@ -431,6 +435,7 @@ export function ChallengePage({
     if (!api || busy) return;
     try {
       setChecking(true);
+      setSuite("hidden");
       setOutcome(null);
       setResultTab("result");
       resultPanel.expand();
@@ -719,9 +724,9 @@ export function ChallengePage({
                   onTab={setResultTab}
                   busyLabel={checking ? "Running the visible and hidden cases…" : undefined}
                   outcome={outcome}
-                  question={{ id: detail.summary.id, visibleTestFiles, source: detail.source }}
+                  question={{ id: detail.summary.id, visibleTestFiles, hiddenTestCount: detail.hiddenTestCount, source: detail.source }}
                   running={running || checking}
-                  submitting={checking}
+                  suite={suite}
                   tab={resultTab}
                   terminal={terminal}
                   testFiles={testFiles}

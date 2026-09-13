@@ -438,6 +438,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
   const callCounts = new Map<string, number>();
   const phaseExecutions = new Map<string, { phase: number; promise: Promise<unknown> }>();
   let currentPhase = -1;
+  let controlPhaseTimeout: ((waiting: boolean) => void) | null = null;
   const protocolFailures = new Map<string, { count: number; detail: string }>();
   const record = (name: string, input: unknown, value: unknown) => {
     outcomes.set(name, [...(outcomes.get(name) ?? []), { input, result: value }]);
@@ -455,7 +456,13 @@ async function runTurn(request: Request, stopped: AbortSignal) {
     const signature = phaseExecutionKey(name, stableJson(splitActionTitle(input).arguments));
     const cached = phaseExecutions.get(signature);
     if (cached?.phase === currentPhase) return cached.promise;
-    const promise = callHostTool(request.id, request.payload.sessionId, name, input, record);
+    const promise = name === "ask_user_question"
+      ? (async () => {
+          controlPhaseTimeout?.(true);
+          try { return await callHostTool(request.id, request.payload.sessionId, name, input, record); }
+          finally { controlPhaseTimeout?.(false); }
+        })()
+      : callHostTool(request.id, request.payload.sessionId, name, input, record);
     phaseExecutions.set(signature, { phase: currentPhase, promise });
     return promise;
   };
@@ -475,6 +482,9 @@ async function runTurn(request: Request, stopped: AbortSignal) {
        A learner who says "in Python, not Java" three phases before the challenge
        is written meant it for the challenge. */
     const interruptions: string[] = [];
+    /* A provider phase normally has a hard wall-clock budget. Learner time is
+       not provider time: while ask_user_question is waiting, pause that clock
+       and give the provider a fresh phase budget after the answer arrives. */
     for (let step = 0; step < AGENT_MAX_STEPS; step += 1) {
       /* Checked first, so a stop that lands while a tool is in flight ends the
          turn before the next phase is even planned. What the model already said
@@ -528,7 +538,12 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         : stage.activeTools;
       const prompt = orchestrationPrompt(request, outcomes, asked, step, protocolFailures.get(stageKey)?.detail, spent, evidenceBudget, interruptions);
       const phaseAbort = new AbortController();
-      const phaseTimer = setTimeout(() => phaseAbort.abort(new Error(`Spar's provider phase exceeded ${AGENT_PHASE_TIMEOUT_MS / 1_000} seconds.`)), AGENT_PHASE_TIMEOUT_MS);
+      const timeout = () => phaseAbort.abort(new Error(`Spar's provider phase exceeded ${AGENT_PHASE_TIMEOUT_MS / 1_000} seconds.`));
+      let phaseTimer = setTimeout(timeout, AGENT_PHASE_TIMEOUT_MS);
+      controlPhaseTimeout = (waiting) => {
+        clearTimeout(phaseTimer);
+        if (!waiting && !phaseAbort.signal.aborted && !stopped.aborted) phaseTimer = setTimeout(timeout, AGENT_PHASE_TIMEOUT_MS);
+      };
       /* pi owns the run's own signal, so stopping reaches it by aborting the
          agent rather than by handing a signal down. Both halves are covered:
          the stream ends, and any tool still running sees the abort. */
@@ -575,6 +590,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         await agent.prompt(prompt.text);
         if (text.trim()) finalText = text;
       } finally {
+        controlPhaseTimeout = null;
         unsubscribe();
         endPhase.removeEventListener("abort", abortAgent);
         clearTimeout(phaseTimer);

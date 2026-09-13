@@ -27,8 +27,9 @@ import type { WebSearchService } from "./webSearch.js";
 import { requestsChallengeRevision } from "./agentIntent.js";
 import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
+import type { AgentQuestions } from "./agentQuestions.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentRunSessions: Map<string, string>; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentQuestions: AgentQuestions; agentRunSessions: Map<string, string>; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
@@ -129,7 +130,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) }));
     return { id: request.id };
   });
-  const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:AgentTurnKind="learner-message")=>{
+  const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:AgentTurnKind="learner-message",visibleMessage=message)=>{
     const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};
     const starting=startingAgentRuns.get(sessionId);if(starting)return starting;
     const launch=(async()=>{
@@ -141,7 +142,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       if(!account)throw new Error("Sign in before starting Spar");
       const providers=await deps.providers.resolve(account.id,token);
       if(!providers.length)throw new Error(NO_PROVIDER);
-      deps.store.addMessage(sessionId,role,message);
+      deps.store.addMessage(sessionId,role,visibleMessage);
       const session=deps.store.readSession(sessionId);if(!session)throw new Error("Session not found");
       const target=deps.store.latestTarget(sessionId);const defaultObjective="Investigating your prior evidence and defining the first training target.";
       /* Onboarding is evidence like any other: what the learner said about their
@@ -201,7 +202,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
            turn answers with a challenge rather than a sentence, and it used to
            leave the transcript with no trace that it ran at all. */
         if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity,Date.now()-startedAt);
-        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){forgetAgentActivity(request.id);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
+        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);
@@ -324,7 +325,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       action: record.action,
       files: challengeFiles(record.design, content),
       source: record.source,
-      hiddenTestCount: Object.keys(record.design.hiddenTests).length,
+      hiddenTestCount: record.hiddenTestCount,
       practiceEdited,
       timeline: challengeTimeline(record.attempts),
     };
@@ -525,7 +526,30 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const sessionId = zUuid((value as { sessionId?: unknown }).sessionId);
     const runId = activeAgentRuns.get(sessionId);
     if (!runId) return;
+    deps.agentQuestions.cancel(sessionId);
     await deps.agent.request("abort", { requestId: runId }).promise.catch(() => undefined);
+  });
+
+  ipcMain.handle(ipc.agentAnswer, async (_event, value) => {
+    const input = value as { sessionId?: unknown; answer?: unknown };
+    const sessionId = zUuid(input.sessionId);
+    if (typeof input.answer !== "string" || !input.answer.trim()) throw new Error("Answer is required");
+    const answer = input.answer.trim();
+    clearAutoResume(sessionId);
+    const result = deps.agentQuestions.answer(sessionId, answer);
+    const runId = activeAgentRuns.get(sessionId);
+    if (result.resumed && runId) return { runId, resumed: true };
+
+    /* A persisted question can outlive the process which asked it. There is no
+       promise to resume after a relaunch, so recover with one new run while
+       keeping the transcript learner-facing: store the answer, not this control
+       prompt. The ordinary live path above never creates a second run. */
+    const session = deps.store.readSession(sessionId);
+    const body = session && openQuestion(session)
+      ? `The learner answered your pending question: ${answer}\nUse it as evidence about the active challenge. Do not create another challenge.`
+      : `The learner answered your pending question: ${answer}\nContinue the session from that answer.`;
+    const started = await startAgentTurn(sessionId, body, "learner", session?.question ? "learner-message" : "session-start", answer);
+    return { ...started, resumed: false };
   });
 
   /**

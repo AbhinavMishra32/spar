@@ -22,6 +22,10 @@ import { AttemptsPanel } from "./AttemptsPanel";
 export type ResultTab = "testcase" | "result" | "attempts";
 export type RunOutcome = { kind: "passed" | "failed"; summary: string } | null;
 
+/** Which suite a run exercised: the examples on disk, the hidden sweep behind a
+ *  submission, or a judge at the problem's source. */
+export type RunSuite = "visible" | "hidden" | "source";
+
 function Tab({ active, label, badge, onClick }: { active: boolean; label: string; badge?: React.ReactNode; onClick(): void }) {
   return (
     <button
@@ -219,6 +223,15 @@ export function caseToShow(cases: TestCaseResult[], selectedId: string): TestCas
   return cases.find((item) => item.id === selectedId) ?? cases.find((item) => item.status === "failed");
 }
 
+/** The full grid for one run. A fail-fast result contains only the prefix that
+ * actually ran; the remaining positions stay present without a status so
+ * `CaseDots` renders them as grey, unvisited cases. */
+export function casesForGrid(report: TestReport, running: boolean, stopped: boolean, suiteSize: number): CaseDot[] {
+  if (running) return blankCases(suiteSize);
+  if (!stopped || suiteSize <= report.cases.length) return report.cases;
+  return [...report.cases, ...blankCases(suiteSize, report.cases.length)];
+}
+
 export function ResultPanel({
   question,
   tab,
@@ -226,7 +239,7 @@ export function ResultPanel({
   testFiles,
   terminal,
   running,
-  submitting,
+  suite,
   busyLabel,
   outcome,
   events,
@@ -241,16 +254,19 @@ export function ResultPanel({
      sourced problem publishes its cases and they are the cases — the generated
      test file is downstream of them. */
   /* `id` is what the remembered suite sizes are keyed by — see `suiteSize`. */
-  question: Pick<ActiveQuestion, "id" | "visibleTestFiles"> & Partial<Pick<ActiveQuestion, "source">>;
+  question: Pick<ActiveQuestion, "id" | "visibleTestFiles" | "hiddenTestCount"> & Partial<Pick<ActiveQuestion, "source">>;
   tab: ResultTab;
   onTab(tab: ResultTab): void;
   testFiles: Record<string, string>;
   terminal: string;
   running: boolean;
-  /** Whether the run in flight is a submission. It decides which suite's size
-   *  the loader draws at and which one this run's count is remembered as — the
-   *  visible cases and the hidden sweep are different grids. */
-  submitting: boolean;
+  /** Which suite the output in the panel came from — the run in flight, or the
+   *  last one to finish. It decides which suite's size the loader draws at and
+   *  which one this run's count is remembered as; the examples and the hidden
+   *  sweep are different grids, and a judge at the source is a third thing whose
+   *  count belongs to neither and is never written down. Owned by the caller,
+   *  because only the caller still knows once the run is over. */
+  suite: RunSuite;
   /** What is in flight — a submission runs the hidden suite too, so saying
       "visible cases" through that wait would be a lie. */
   busyLabel?: string | undefined;
@@ -312,69 +328,57 @@ export function ResultPanel({
      draw a grid for, and so the only one that gets the rail layout. */
   const graded = report.parsed && report.cases.length > 0;
 
-  /* How big the suite is, known *before* it runs.
-
-     A grid that learns its size from its results can only be drawn once they are
-     in, which is too late to have been the thing you were watching. Two suites,
-     two ways of knowing. The visible one is on the learner's disk and is simply
-     parsed. The hidden one cannot be: it is a generated sweep — a seeded loop
-     against a brute-force oracle — so its count exists only once the loop has
-     run, and there is nothing in the file to count. That one is remembered
-     instead, per challenge and for good, so a hidden suite is unknown exactly
-     once and every run after that draws at the right size from the first frame.
-
-     Which suite is running is decided when the run starts and held, because by
-     the time its results are being written down `submitting` has gone false and
-     the panel would otherwise file a hidden count under the visible name. */
-  const ranHidden = useRef(false);
-  if (running) ranHidden.current = submitting;
-  /* Memoised because the terminal streams: this panel re-renders many times a
-     second during a run, and a synchronous localStorage read on each of them is
-     a needless stall on the same thread the wave is drawn from. */
+  /* Which suite this is comes from the caller that started the run and remains
+     stable after it finishes. The remembered count is compatibility for old
+     challenges whose validation report did not carry measured case totals. It
+     is read only at run edges because the terminal streams many renders. */
+  const hiddenRun = suite === "hidden";
   const remembered = useMemo(
     () => ({ hidden: knownSuiteSize(question.id, true), visible: knownSuiteSize(question.id, false) }),
-    [question.id, running, report.cases.length],
+    [question.id, running, suite],
   );
-  /* Only a run that reached the end of its suite knows how long the suite is. A
-     submission cut short at case three is not a three-case suite, and writing
-     that down would teach the panel a number that gets smaller every time the
-     learner fails earlier. */
-  useEffect(() => {
-    if (graded && !stoppedAtFailure(terminal)) {
-      rememberSuiteSize(question.id, ranHidden.current, report.cases.length);
-    }
-  }, [graded, question.id, report.cases.length, terminal]);
-  /* Best available, in order of how well it knows.
+  /* Written only by a finished run that reached the end of its suite.
 
-     The declared count is parsed from the visible test file, and it is exactly
-     right for a visible run — when it exists. It does not always: the parser
-     reads `test(…)` blocks and C++ `check(…)` calls, so a Python challenge
-     declares nothing to it, and that is why a suite this panel had already run
-     three times could still find no number to draw a grid with. Every other
-     entry in the chain is a count some run of this same challenge actually
-     produced, so it ends in something measured rather than in nothing. The other
-     suite's size is the last resort and the weakest: three visible cases is not
-     thirty-five hidden ones, but it is the right kind of number, and a grid that
-     grows once beats the run having no grid at all. */
-  const suiteSize = ranHidden.current
-    ? remembered.hidden || declared.cases.length || remembered.visible
-    : declared.cases.length || remembered.visible || remembered.hidden;
+     Both halves of that matter and both were bugs. A submission cut short at
+     case three is not a three-case suite, and writing it down would teach the
+     panel a number that gets smaller every time the learner fails earlier. And a
+     run still in flight is not a suite of any size yet — mid-run this fired on
+     every chunk of streamed output, so the count of however many cases had
+     reported so far was written down as the whole suite, and the next
+     submission drew a grid the size of a partial result. */
+  useEffect(() => {
+    /* A judge at the source reports whatever it reports — one synthetic case for
+       a whole hidden suite, or two hundred for a problem with two hundred — and
+       it is a count of neither of this challenge's own suites. Not written. */
+    if (suite !== "source" && !running && graded && !stoppedAtFailure(terminal)) {
+      rememberSuiteSize(question.id, hiddenRun, report.cases.length);
+    }
+  }, [graded, hiddenRun, question.id, report.cases.length, running, suite, terminal]);
+  /* A local submission executes the visible contract and the private cases in
+     one fail-fast process. The compiler measured the private half before the
+     challenge was published; adding the declared visible half gives the exact
+     grid the runner is walking, even when it stops on case one. Persisted
+     challenges from before measured counts fall back to a completed run. */
+  const measuredSubmissionSize = question.hiddenTestCount > 0
+    ? declared.cases.length + question.hiddenTestCount
+    : 0;
+  const suiteSize = hiddenRun
+    ? measuredSubmissionSize || remembered.hidden
+    : declared.cases.length || remembered.visible;
   /* The same element either way, so the wave is not restarted by the results it
      was waiting for. While it runs the dots carry no verdicts — see `CaseDots`;
      when it stops they are the verdicts themselves. */
-  const blank = useMemo(() => blankCases(suiteSize), [suiteSize]);
   /* A submission stops at its first failing case, so the cases past it have no
      verdict because they were never reached. Drawn, and drawn grey: the suite's
      shape is the learner's own bearing on how far they got, and a grid that
      shrank to the three cases that ran would hide that this was case three of
-     thirty-five. They are only added when the size is known from a run that
-     finished — the grid never pads itself out to a number nobody measured. */
+     thirty-five. The suite size was measured by the trusted reference run during
+     validation, so these positions are evidence-backed rather than guessed. */
   const stopped = graded && stoppedAtFailure(terminal);
-  const gridCases = useMemo(() => {
-    if (running) return blank;
-    if (!stopped || suiteSize <= report.cases.length) return report.cases;
-    return [...report.cases, ...blankCases(suiteSize, report.cases.length)];
-  }, [blank, report.cases, running, stopped, suiteSize]);
+  const gridCases = useMemo(
+    () => casesForGrid(report, running, stopped, suiteSize),
+    [report, running, stopped, suiteSize],
+  );
   /* Where it stopped, for the rail to say. */
   const failedAt = stopped ? report.cases.find((item) => item.status === "failed")?.ordinal ?? 0 : 0;
   const railed = running ? suiteSize > 0 : graded;
@@ -425,7 +429,7 @@ export function ResultPanel({
                   report.failed ? "bg-destructive/15 text-destructive" : "bg-[var(--success)]/15 text-[var(--success)]",
                 )}
               >
-                {report.passed}/{report.cases.length}
+                {report.passed}/{suiteSize || report.cases.length}
               </span>
             ) : undefined
           }
@@ -567,7 +571,7 @@ export function ResultPanel({
                           {running ? "Testing" : "Checking results…"}
                         </p>
                       ) : (
-                        <div className="animate-in fade-in-0 duration-500 ease-out motion-reduce:animate-none">
+                        <div className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-700 ease-out motion-reduce:animate-none">
                           <VerdictRail failedAt={failedAt} report={report} suiteSize={suiteSize} />
                         </div>
                       )}
@@ -583,16 +587,18 @@ export function ResultPanel({
                           )}
                         </p>
                       ) : verdictSettled ? (
-                        <div className="animate-in fade-in-0 duration-500 ease-out motion-reduce:animate-none">
-                          {cleared && !activeResult && <Cleared report={report} submitted={ranHidden.current} />}
+                        /* Reveal the verdict and its evidence together once the
+                           dots have completed their animation. */
+                        <div className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-700 ease-out motion-reduce:animate-none">
+                          {cleared && !activeResult && <Cleared report={report} submitted={hiddenRun} />}
                           {activeResult && <CaseDetail declared={declaredForResult} result={activeResult} />}
-                          <OtherFailures activeId={activeResult?.id} cases={report.cases} onSelect={setSelectedResult} />
+                          <OtherFailures activeId={activeResult?.id} cases={report.cases} declared={declared.cases} onSelect={setSelectedResult} />
                         </div>
                       ) : null}
                     </div>
                   </div>
                   {!running && verdictSettled && (
-                    <div className="animate-in fade-in-0 duration-500 ease-out motion-reduce:animate-none">
+                    <div className="animate-in fade-in-0 fill-mode-both duration-700 ease-out motion-reduce:animate-none">
                       <RawOutput open={rawShown} onToggle={() => setRawOpen(!rawShown)} terminal={terminal} endRef={rawEnd} />
                     </div>
                   )}
@@ -742,6 +748,37 @@ export type CaseValue = { input: string; output?: string; expected: string };
  * equality proves actual === expected, so using the expected value as Output is
  * not a guess. A failure only uses the runner's actual value; if an old harness
  * did not report it, the UI says so rather than manufacturing one. */
+/**
+ * A case's name, split into what it checks and what it checks it on.
+ *
+ * Generated suites name a case by its intent and its arguments at once —
+ * `repeated shrinking is required: target=6, values=[1, 1, 1, 1, 4]` — which is
+ * a good name for a test runner's log and a bad heading for a panel. It put the
+ * input in the one place the learner cannot read it as an input: inline, in
+ * prose, in the title, while the two blocks underneath were labelled Output and
+ * Expected. Three values, one of them disguised as a sentence.
+ *
+ * Split, the heading says what the case is about and the input takes its place
+ * beside the answers it produced. This is also the only way a hidden case's
+ * input can be shown at all: the suite is not on the learner's disk, so unless
+ * the runner reported the input in its diagnostics the case's own name is the
+ * only record of what it ran.
+ *
+ * Conservative on purpose. The tail is only treated as arguments when it looks
+ * like arguments — an `=`, a bracket, a paren — so a case called `handles an
+ * empty list: nothing to do` keeps its whole name.
+ */
+const NAMED_INPUT = /^(.*?):\s*([^:]+)$/;
+
+export function caseLabel(name: string): { label: string; input: string } {
+  const whole = name.trim();
+  const match = NAMED_INPUT.exec(whole);
+  const tail = match?.[2]?.trim() ?? "";
+  const head = match?.[1]?.trim() ?? "";
+  if (!head || !tail || !/[=[(]/.test(tail)) return { label: whole, input: "" };
+  return { label: head, input: tail };
+}
+
 export function caseValues(result: TestCaseResult, declared?: DeclaredCase): CaseValue[] {
   const assertions = declared?.assertions ?? [];
   if (!assertions.length && (result.failure?.expected !== undefined || result.failure?.actual !== undefined)) {
@@ -750,7 +787,7 @@ export function caseValues(result: TestCaseResult, declared?: DeclaredCase): Cas
        can fill this column. Without it the panel says a hidden case failed and
        refuses to say on what, which is the one piece of information that makes
        the failure actionable. */
-    return [{ input: result.failure.input ?? "—", expected: result.failure.expected ?? "—", ...(result.failure.actual === undefined ? {} : { output: result.failure.actual }) }];
+    return [{ input: result.failure.input || caseLabel(result.name).input || "—", expected: result.failure.expected ?? "—", ...(result.failure.actual === undefined ? {} : { output: result.failure.actual }) }];
   }
   return assertions.map((assertion, index) => ({
     input: (index === 0 ? result.failure?.input : undefined) || assertion.call || "—",
@@ -790,37 +827,49 @@ function InputLine({ label, value }: { label: string; value: string }) {
 function CaseDetail({ result, declared }: { result: TestCaseResult; declared: DeclaredCase | undefined }) {
   const failure = result.failure;
   const message = headline(failure?.message);
+  const { label, input: named } = caseLabel(result.name);
   const values = caseValues(result, declared);
+  /* A passing hidden case reports nothing but its name, and the name still
+     carries what it ran on — worth showing on its own rather than leaving the
+     pane blank under the heading. */
+  const shown = values.length === 0 && named ? [{ input: named, expected: "" }] : values;
 
   return (
     <div>
-      <div className="flex items-center gap-1.5">
-        <StatusMark className="size-3.5" status={result.status} />
-        <p className="min-w-0 flex-1 truncate text-content font-medium">{result.name}</p>
+      <div className="flex items-baseline gap-2">
+        <StatusMark className="shrink-0 translate-y-0.5" status={result.status} />
+        <p className="min-w-0 flex-1 text-content font-medium leading-[1.35]">{label}</p>
         {result.durationMs !== undefined && (
-          <span className="shrink-0 text-ui-sm text-muted-foreground/70 tabular-nums">{result.durationMs.toFixed(1)} ms</span>
+          <span className="shrink-0 text-ui-sm tabular-nums text-muted-foreground/70">{result.durationMs.toFixed(1)} ms</span>
         )}
       </div>
 
-      {values.length > 0 && (
-        <div className="mt-2 space-y-3.5">
-          {values.map((value, index) => (
-            <div key={index}>
-              {/* The input leads, but as a line rather than as a third panel.
-                  It is the given, not a result — a bordered block the same weight
-                  as Output and Expected made three equals out of one question and
-                  two answers, and cost the height of a whole pane to say
-                  `sales=[('cat', 7)]`. Long or multi-line inputs still get the
-                  block: those are the ones worth reading carefully. */}
-              <InputLine label={values.length > 1 ? `Input ${index + 1}` : "Input"} value={value.input} />
-              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-2">
-                <ValueBlock
-                  label="Output"
-                  value={value.output ?? "Not reported"}
-                  {...(result.status === "failed" && value.output !== undefined ? { tone: "actual" as const } : {})}
-                />
-                <ValueBlock label="Expected" tone="expected" value={value.expected} />
-              </div>
+      {shown.length > 0 && (
+        <div className="mt-2.5 space-y-3">
+          {shown.map((value, index) => (
+            <div className="space-y-2" key={index}>
+              {/* Input, then what it produced against what it owed — the order
+                  the learner reads a failure in, and the order every judge they
+                  have ever used states one in. The input used to be a thin line
+                  above the pair, on the theory that it is the given rather than a
+                  result; but a given they cannot see is the reason a failure is
+                  unreadable, and three labelled blocks is the shape this is
+                  supposed to have. */}
+              <ValueBlock label={shown.length > 1 ? `Input ${index + 1}` : "Input"} value={value.input} />
+              {(value.output !== undefined || (value.expected && value.expected !== "—")) && (
+                <div className="flex flex-wrap gap-x-3 gap-y-2">
+                  {value.output !== undefined && (
+                    <ValueBlock
+                      label="Output"
+                      value={value.output}
+                      {...(result.status === "failed" ? { tone: "actual" as const } : {})}
+                    />
+                  )}
+                  {value.expected && value.expected !== "—" && (
+                    <ValueBlock label="Expected" tone="expected" value={value.expected} />
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -829,11 +878,11 @@ function CaseDetail({ result, declared }: { result: TestCaseResult; declared: De
 
       {failure && (
         <>
-          {message && <p className="mt-1.5 text-ui leading-[1.6] text-foreground/85">{message}</p>}
-          {values.length === 0 && (failure.expected !== undefined || failure.actual !== undefined) && (
-            <div className="mt-2.5 grid grid-cols-2 gap-2">
+          {message && <p className="mt-2 text-ui leading-[1.6] text-foreground/85">{message}</p>}
+          {shown.length === 0 && (failure.expected !== undefined || failure.actual !== undefined) && (
+            <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-2">
+              <ValueBlock label="Output" tone="actual" value={failure.actual ?? "—"} />
               <ValueBlock label="Expected" tone="expected" value={failure.expected ?? "—"} />
-              <ValueBlock label="Your output" tone="actual" value={failure.actual ?? "—"} />
             </div>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-muted-foreground/70">
@@ -847,20 +896,23 @@ function CaseDetail({ result, declared }: { result: TestCaseResult; declared: De
 }
 
 /**
- * The cases the panel is not currently showing, by name.
+ * The cases the panel is not currently showing: what each one checks, and what
+ * it checks it on.
  *
  * The grid answers "how many, and where" and the detail answers "what happened
  * to this one" — between them nothing answers "what are the other six", which is
  * the question you actually have when seven dots are red. Six red dots are six
  * identical marks; six names are a pattern, and the pattern is usually the bug:
- * every failing case is an empty input, or every one of them is negative.
+ * every failing case is an empty input, or every one of them is negative. The
+ * inputs are on the rows for that reason — the pattern is usually in them, and
+ * reading it should not cost six clicks.
  *
  * When nothing failed it lists the whole suite instead. A clean run is the one
  * result the panel used to have nothing to show for — the dots went green and
  * the column beside them stayed empty, which is a strange way to treat the only
  * outcome worth reading in full. The names are also the only place the hidden
- * suite is ever visible: thirty-nine dots say a number, and thirty-nine names
- * say what was actually checked.
+ * suite is ever visible: forty-nine dots say a number, and forty-nine cases say
+ * what was actually checked.
  *
  * It sits under the detail rather than beside it because it is also what the
  * panel's spare height is for. A short failure — `false` where `true` was wanted
@@ -869,10 +921,14 @@ function CaseDetail({ result, declared }: { result: TestCaseResult; declared: De
  */
 function OtherFailures({
   cases,
+  declared,
   activeId,
   onSelect,
 }: {
   cases: TestCaseResult[];
+  /** The visible suite as parsed from disk, for the inputs it declares — an
+   *  example case names its intent only, and its call is in the file. */
+  declared: DeclaredCase[];
   activeId: string | undefined;
   onSelect(id: string): void;
 }) {
@@ -880,31 +936,38 @@ function OtherFailures({
   const rest = cases.filter((item) => (broken ? item.status === "failed" : true) && item.id !== activeId);
   if (rest.length === 0) return null;
   return (
-    <div className="mt-4">
-      <p className="text-ui-sm text-muted-foreground/60">
+    <div className="mt-5">
+      <p className="text-ui-sm font-medium uppercase tracking-[0.06em] text-muted-foreground/50">
         {broken
           ? `${rest.length} more ${rest.length === 1 ? "failure" : "failures"}`
-          : `${rest.length} ${rest.length === 1 ? "case" : "cases"}, all passed`}
+          : `${rest.length} ${rest.length === 1 ? "case" : "cases"}`}
       </p>
-      <div className="mt-1.5 -mx-1.5">
-        {rest.map((item) => (
-          <button
-            className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-accent"
-            key={item.id}
-            onClick={() => onSelect(item.id)}
-            type="button"
-          >
-            <StatusMark className="shrink-0 translate-y-0.5 opacity-70" status={item.status} />
-            <span className="min-w-0 flex-1 truncate text-ui text-foreground/80">{item.name}</span>
-            {/* The verdict in its shortest honest form. A case whose failure
-                carried no values says nothing here rather than guessing. */}
-            {item.failure?.actual !== undefined && item.failure.expected !== undefined && (
-              <span className="shrink-0 truncate font-mono text-ui-sm text-muted-foreground/70">
-                {item.failure.actual} <span className="text-muted-foreground/40">≠</span> {item.failure.expected}
-              </span>
-            )}
-          </button>
-        ))}
+      <div className="mt-1 -mx-1.5">
+        {rest.map((item) => {
+          const { label, input } = caseLabel(item.name);
+          const call = input || declared.find((one) => one.ordinal === item.ordinal)?.assertions[0]?.call || "";
+          return (
+            <button
+              className="flex w-full min-w-0 items-baseline gap-2 rounded-md px-1.5 py-[5px] text-left transition-colors hover:bg-accent"
+              key={item.id}
+              onClick={() => onSelect(item.id)}
+              type="button"
+            >
+              <StatusMark className="shrink-0 translate-y-0.5 opacity-70" status={item.status} />
+              <span className="min-w-0 shrink-0 max-w-[55%] truncate text-ui text-foreground/80">{label}</span>
+              {call && (
+                <span className="min-w-0 flex-1 truncate text-right font-mono text-ui-sm text-muted-foreground/55">{call}</span>
+              )}
+              {/* The verdict in its shortest honest form. A case whose failure
+                  carried no values says nothing here rather than guessing. */}
+              {item.failure?.actual !== undefined && item.failure.expected !== undefined && (
+                <span className="shrink-0 truncate font-mono text-ui-sm text-muted-foreground/70">
+                  {item.failure.actual} <span className="text-muted-foreground/40">≠</span> {item.failure.expected}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
     </div>
   );

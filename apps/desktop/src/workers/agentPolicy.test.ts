@@ -31,6 +31,7 @@ describe("Training Agent controller policy", () => {
     const sourced=new Map<string,unknown[]>([["assign_practice_problem",[{result:{status:"playable",source:"codeforces"}}]]]);
     expect(completionInstruction("session-start",local)).toContain("tailored local prerequisite");
     expect(completionInstruction("session-start",local)).toContain("compact micro-lesson");
+    expect(completionInstruction("cold-start",local)).toContain("compact micro-lesson");
     expect(completionInstruction("session-start",local)).toContain("never describe it as a real");
     expect(completionInstruction("session-start",sourced)).toContain("connected-provider problem");
   });
@@ -63,6 +64,15 @@ describe("Training Agent controller policy", () => {
   it("bounds cold-start retrieval the same way", () => {
     const outcomes = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [] } }]]]);
     expect(nextToolStage("cold-start", outcomes, 15, {}).activeTools).toEqual(["ask_user_question"]);
+  });
+
+  it("continues the cold-start run after the learner answers", () => {
+    const outcomes = new Map<string, unknown[]>([
+      ["search_learner_model", [{ result: { passages: [] } }]],
+      ["search_attempt_history", [{ result: { attempts: [] } }]],
+      ["ask_user_question", [{ result: { pending: false, status: "answered", answer: "Some Python" } }]],
+    ]);
+    expect(nextToolStage("cold-start", outcomes, 15, {}).activeTools).toEqual(["set_session_objective"]);
   });
 
   it("lets the single agent choose tools or prose for learner chat", () => {
@@ -265,15 +275,14 @@ describe("Training Agent controller policy", () => {
     expect(stage().activeTools).toEqual(["create_question"]);
   });
 
-  it("suspends the turn on a question rather than publishing a challenge over it", () => {
+  it("continues the same turn from an answered question before publishing a challenge", () => {
     const outcomes = new Map<string, unknown[]>();
-    for (const name of ["replay_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) {
+    for (const name of ["replay_attempt", "evaluate_attempt", "inspect_current_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) {
       outcomes.set(name, [{ result: { ok: true } }]);
     }
-    outcomes.set("ask_user_question", [{ result: { pending: true } }]);
+    outcomes.set("ask_user_question", [{ result: { pending: false, status: "answered", answer: "The shrink ran only once" } }]);
 
-    // The learner's answer arrives as its own turn and brings the target with it.
-    expect(nextToolStage("attempt-complete", outcomes)).toEqual({ activeTools: [], toolChoice: "none" });
+    expect(nextToolStage("attempt-complete", outcomes)).toEqual({ activeTools: ["set_training_target"], toolChoice: "required" });
   });
 
   it("retries rejected challenge compilations within the bounded budget", () => {

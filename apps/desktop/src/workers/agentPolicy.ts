@@ -8,7 +8,7 @@ export type ToolStage = { activeTools: string[]; toolChoice: "required" | "auto"
  */
 export function completionInstruction(turnKind:AgentTurnKind,outcomes:Map<string,unknown[]>):string{
   const playable=(name:string)=>(outcomes.get(name)??[]).some((value)=>Boolean(value&&typeof value==="object"&&(value as {result?:{status?:unknown}}).result?.status==="playable"));
-  if(turnKind==="session-start"){
+  if(turnKind==="session-start"||turnKind==="cold-start"){
     const provenance=playable("assign_practice_problem")
       ? "A connected-provider problem is now playable. Name it as a provider problem only from the successful assignment result."
       : "A tailored local prerequisite challenge is now playable. Call it local and tailored; never describe it as a real, sourced, judged, Codeforces, or LeetCode problem.";
@@ -108,7 +108,7 @@ export const SOURCE_TOOLS = [...SOURCE_READ_TOOLS, "assign_practice_problem"];
 export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false, webSearch = false, practiceSource = false): Set<string> {
   const web = webSearch ? WEB_TOOLS : [];
   const source = practiceSource ? SOURCE_TOOLS : [];
-  if (turnKind === "cold-start") return new Set(["search_learner_model", "search_attempt_history", "ask_user_question"]);
+  if (turnKind === "cold-start") return allowedTools("session-start", hasActiveQuestion, webSearch, practiceSource);
   if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
   if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, "replay_attempt", "inspect_current_attempt", "evaluate_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
   /* Both ways of changing the challenge, because "give me a real problem instead"
@@ -207,7 +207,10 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     const retrieval = nextRetrieval(outcomes, ["search_learner_model", "search_attempt_history"]);
     if (retrieval) return { activeTools: [retrieval], toolChoice: "required" };
     if (!completed("ask_user_question")) return { activeTools: ["ask_user_question"], toolChoice: "required" };
-    return { activeTools: [], toolChoice: "none" };
+    /* The question's tool call remains open until the learner answers, so this
+       is still the same run. Continue through the ordinary session-start stages
+       instead of ending here and manufacturing a second learner turn. */
+    return nextToolStage("session-start", outcomes, challengeCompilationLimit, context);
   }
   if (playableQuestion) return { activeTools: [], toolChoice: "none" };
   /* A challenge the learner has not finished is the session's current state, and
@@ -255,12 +258,6 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
     if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };
     return challengeStage();
   }
-  /* A question asked of the learner suspends the turn where it is asked. The
-     answer arrives as its own turn and carries the target and the next challenge
-     with it, so continuing to the compiler here would publish a challenge aimed
-     at a gap the learner is in the middle of explaining. */
-  if (completed("ask_user_question")) return { activeTools: [], toolChoice: "none" };
-
   /* The replay comes before everything else on an attempt-complete turn: it is
      the account of how the challenge was solved, and every judgement made after
      it — the ability update, the decision, the next target — is supposed to be a
@@ -303,7 +300,10 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
      question has been read by now, so the agent either aims it or says that the
      trace raised something only the learner can answer — and asking is a first
      class outcome of reading a replay rather than a failure to decide. */
-  if (!completed("set_training_target")) return { activeTools: ["ask_user_question", "set_training_target"], toolChoice: "required" };
+  if (!completed("set_training_target")) return {
+    activeTools: [...(completed("ask_user_question") ? [] : ["ask_user_question"]), "set_training_target"],
+    toolChoice: "required",
+  };
   if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };
   return challengeStage();
 }

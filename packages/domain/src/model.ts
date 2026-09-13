@@ -188,6 +188,10 @@ export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visi
   avoidTesting: z.array(z.string()),
   files: z.array(workspaceFileEntrySchema),
   visibleTestFiles: z.array(z.string()),
+  /** Number of hidden cases measured when the reference solution was validated.
+   *  Their contents stay private; their count gives fail-fast results their full
+   *  grid, including the cases the runner did not reach. */
+  hiddenTestCount: z.number().int().nonnegative().default(0),
   /** What this challenge is training, so the learner can see it while they work
    *  rather than only afterwards in history. */
   concepts: z.array(conceptTagSchema),

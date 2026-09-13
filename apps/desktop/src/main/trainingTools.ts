@@ -11,6 +11,7 @@ import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 import { practiceSourceName } from "./practiceChoice.js";
 import { SOURCE_READ_TOOLS, VISUALIZER_TOOLS } from "../workers/agentPolicy.js";
 import type { VisualizerToolbox } from "./visualizerTools.js";
+import type { AgentQuestions } from "./agentQuestions.js";
 
 /**
  * A published challenge's language becomes the Track's.
@@ -46,6 +47,7 @@ export async function executeTrainingTool(
      this directly, and standing up a tracer to assert that `read_ability` reads
      an ability would be a fixture with no bearing on the thing under test. */
   visualizer?: VisualizerToolbox,
+  questions?: AgentQuestions,
 ) {
   if (!sessionId) throw new Error("Training tool call is missing its session context");
   const value = input as Record<string, unknown>;
@@ -103,6 +105,7 @@ export async function executeTrainingTool(
   if (name === "set_training_target") { const target=local.setTrainingTarget(sessionId, value as { ability: string; specificGap: string; desiredEvidence: string; avoidTesting: string[] });local.ensureAbility(target.abilityId,target.abilityTitle,trackId);local.queueAbilitySync(target.abilityId);return { committed: true, ...target }; }
   if (name === "commit_session_decision") return { committed: true, ...local.commitDecision(sessionId, value as { action: string; reason: string }) };
   if (name === "ask_user_question") {
+    if (questions) return questions.ask(sessionId, value as AskUserQuestionInput);
     /* `pending` says whether the learner still has to answer. It used to be a
        constant `true`, so a question that came back already answered — the
        repeat ask after an answer reopens the turn — still read as waiting, and

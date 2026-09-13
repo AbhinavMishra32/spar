@@ -50,7 +50,8 @@ export function ChatView({
     setBusy(true);
     setDraft("");
     try {
-      await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
+      if (answer !== undefined) await api.answerAgentQuestion({ sessionId: detail.summary.id, answer: body });
+      else await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
       await onRefresh();
     } catch (error) {
       onError(message(error));
@@ -142,7 +143,7 @@ export function ChatView({
                place here exactly as it does while planning. Without this the
                question was drawn as a tool row in the transcript and nowhere
                else: visible, unanswerable, and holding the turn open. */
-            <AskUserQuestion busy={busy || streaming} onSubmit={(answer) => void send(answer)} request={pending} />
+            <AskUserQuestion busy={busy} onSubmit={(answer) => void send(answer)} request={pending} />
           ) : <Composer
             busy={busy || streaming}
             steerable={streaming && !busy}

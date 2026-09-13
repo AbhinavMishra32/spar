@@ -59,7 +59,7 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
   const send = async (answer: string) => {
     if (!api || !detail) return;
     setAnswering(true);
-    try { await api.sendAgentMessage({ sessionId: detail.summary.id, message: answer }); await onRefresh(); }
+    try { await api.answerAgentQuestion({ sessionId: detail.summary.id, answer }); await onRefresh(); }
     catch (cause) { onError(message(cause)); }
     finally { setAnswering(false); }
   };
@@ -76,7 +76,7 @@ export function BaselinePage({ api, data, detail, run, dark, busy, onStart, onRe
                 <h1 className="mt-3 text-[1.25rem] font-semibold tracking-[-0.02em]">One thing before the next probe</h1>
                 <p className="mt-1.5 text-content leading-6 text-muted-foreground">Spar only asks when the answer changes what a fair diagnostic should test.</p>
               </div>
-              <AskUserQuestion busy={answering || run?.status === "streaming"} onSubmit={(answer) => void send(answer)} request={pending} />
+              <AskUserQuestion busy={answering} onSubmit={(answer) => void send(answer)} request={pending} />
             </>
           ) : detail ? (
             <div className="text-center">

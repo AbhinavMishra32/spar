@@ -28,7 +28,7 @@ import { FloatingFileTree } from "./FloatingFileTree";
 import { introSeen, markIntroSeen } from "@/lib/introSeen";
 import { ChallengeIntro } from "./ChallengeIntro";
 import { AttemptClock } from "./AttemptClock";
-import { ResultPanel, type ResultTab, type RunOutcome } from "./ResultPanel";
+import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "./ResultPanel";
 import type { ComplexityCheckpointState } from "./ComplexityCheckpoint";
 
 /** Named here rather than derived, so the buttons say "LeetCode" instead of
@@ -90,6 +90,10 @@ export function Workspace({
   // second animation running against the busy state forever.
   const [settled, setSettled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  /* Which suite the output in the terminal came from. Held past the end of the
+     run, because the result panel needs it while it is *showing* that output —
+     see its `hiddenRun` prop. */
+  const [suite, setSuite] = useState<RunSuite>("visible");
   const [sending, setSending] = useState(false);
   const [outcome, setOutcome] = useState<RunOutcome>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("testcase");
@@ -229,6 +233,7 @@ export function Workspace({
     if (!api || running || submitting) return;
     try {
       setRunning(true);
+      setSuite("visible");
       setOutcome(null);
       setResultTab("result");
       resultPanel.expand();
@@ -260,6 +265,7 @@ export function Workspace({
     if (!api || !question.source || running || submitting) return;
     try {
       setRunning(true);
+      setSuite("source");
       setOutcome(null);
       setResultTab("result");
       resultPanel.expand();
@@ -287,6 +293,7 @@ export function Workspace({
     if (!api || running || submitting || question.attemptCompletedAt) return;
     try {
       setSubmitting(true);
+      setSuite("hidden");
       setOutcome(null);
       setResultTab("result");
       resultPanel.expand();
@@ -351,6 +358,22 @@ export function Workspace({
       onError(message(error));
     } finally {
       sendingRef.current=false;
+      setSending(false);
+    }
+  };
+
+  const answerQuestion = async (answer: string) => {
+    const body = answer.trim();
+    if (!body || !api || sendingRef.current) return;
+    sendingRef.current = true;
+    setSending(true);
+    try {
+      await api.answerAgentQuestion({ sessionId: detail.summary.id, answer: body });
+      await onRefresh();
+    } catch (error) {
+      onError(message(error));
+    } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
@@ -557,6 +580,7 @@ export function Workspace({
       <PanelGroup autoSaveId="spar-problem" className="min-h-0 flex-1" direction="horizontal">
         <Panel defaultSize={44} minSize={32} order={1}>
           <AgentPanel
+            answering={sending}
             concepts={concepts}
             complexityCheckpoint={complexityCheckpoint}
             detail={detail}
@@ -568,7 +592,7 @@ export function Workspace({
             onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSettings={onOpenSettings}
             onSend={() => void send()}
-            onAnswer={(answer) => void send(answer)}
+            onAnswer={(answer) => void answerQuestion(answer)}
             onEditMessage={edit}
             undoable={undoable}
             question={question}
@@ -749,7 +773,7 @@ export function Workspace({
                   outcome={outcome}
                   question={question}
                   running={running || submitting}
-                  submitting={submitting}
+                  suite={suite}
                   tab={resultTab}
                   terminal={terminal}
                   testFiles={testFiles}

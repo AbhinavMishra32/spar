@@ -20,7 +20,14 @@
  * cases and submitting to the hidden ones are three dots and thirty-five, and
  * remembering one number for both means every run redraws at the other's size.
  */
-const KEY = "spar.suite.size";
+/* Versioned, and deliberately started over once. The first version of the panel
+   around this wrote sizes from runs that were still in flight and from mounts
+   that had not run anything at all, so an install that saw those builds is
+   carrying numbers that were never a suite's size — a partial count filed as the
+   whole, or a hidden sweep's total filed under the examples. There is no way to
+   tell a bad entry from a good one by looking at it, and the cost of discarding
+   them all is one run per challenge with an honest loader. */
+const KEY = "spar.suite.size.v2";
 const LIMIT = 400;
 
 type Sizes = Record<string, number>;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caseToShow, caseValues, reportForRun, ungradedReason } from "./ResultPanel";
+import { caseLabel, casesForGrid, caseToShow, caseValues, reportForRun, ungradedReason } from "./ResultPanel";
 
 describe("ungraded result explanation", () => {
   it("recognizes provider exception class names as pre-verdict failures", () => {
@@ -66,5 +66,59 @@ describe("which case opens under the grid", () => {
 
   it("falls back to the failure when the selection is from a previous run", () => {
     expect(caseToShow([passed(1), failed(2)], "stale")?.ordinal).toBe(2);
+  });
+});
+
+describe("fail-fast result grid", () => {
+  it("keeps every unvisited case grey after execution stops on case one", () => {
+    const report = {
+      parsed: true,
+      cases: [{ id: "c1", ordinal: 1, name: "first hidden case", status: "failed" as const }],
+      passed: 0,
+      failed: 1,
+      skipped: 0,
+    };
+    const grid = casesForGrid(report, false, true, 35);
+    expect(grid).toHaveLength(35);
+    expect(grid[0]?.status).toBe("failed");
+    expect(grid.slice(1).every((item) => item.status === undefined)).toBe(true);
+  });
+});
+
+describe("reading a generated case name", () => {
+  it("splits what the case checks from what it checks it on", () => {
+    expect(caseLabel("repeated shrinking is required: target=6, values=[1, 1, 1, 1, 4]")).toEqual({
+      label: "repeated shrinking is required",
+      input: "target=6, values=[1, 1, 1, 1, 4]",
+    });
+  });
+
+  it("splits at the last colon, so a colon in the prose is not the split", () => {
+    expect(caseLabel("edge case: empty input: values=[]")).toEqual({
+      label: "edge case: empty input",
+      input: "values=[]",
+    });
+  });
+
+  it("leaves a name alone when the tail is prose rather than arguments", () => {
+    expect(caseLabel("handles an empty list: nothing to do")).toEqual({
+      label: "handles an empty list: nothing to do",
+      input: "",
+    });
+  });
+
+  it("leaves a name with no colon alone", () => {
+    expect(caseLabel("single-value windows")).toEqual({ label: "single-value windows", input: "" });
+  });
+
+  it("gives a hidden failure an input from its name when the runner reported none", () => {
+    const [value] = caseValues({
+      id: "1",
+      ordinal: 1,
+      name: "seeded case 23: values=[7, -2, 9, 6], k=-1",
+      status: "failed",
+      failure: { expected: "1", actual: "2" },
+    });
+    expect(value?.input).toBe("values=[7, -2, 9, 6], k=-1");
   });
 });

@@ -89,7 +89,8 @@ export function PlanningView({
     setBusy(true);
     try {
       setDraft("");
-      await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
+      if (answer !== undefined) await api.answerAgentQuestion({ sessionId: detail.summary.id, answer: body });
+      else await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
       await onRefresh();
     } catch (error) {
       onError(message(error));
@@ -153,7 +154,7 @@ export function PlanningView({
             <div className="shrink-0 px-4 pb-4">
               <div className="transcript-column">
                 {pending ? (
-                  <AskUserQuestion busy={busy || streaming} onSubmit={(answer) => void send(answer)} request={pending} />
+                  <AskUserQuestion busy={busy} onSubmit={(answer) => void send(answer)} request={pending} />
                 ) : (
                   <Composer
                     busy={busy || streaming}

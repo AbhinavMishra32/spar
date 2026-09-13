@@ -12,7 +12,7 @@ export const ipc = {
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
   workspaceStateSave: "workspace:state-save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
-  workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
+  workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentAnswer: "agent:answer", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
@@ -469,6 +469,8 @@ export interface SparApi {
    *  boundary — rather than being dropped, which is what used to happen.
    *  `steered` says which of the two occurred. */
   sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string; steered?: boolean }>;
+  /** Resume the exact agent tool call which put this question on screen. */
+  answerAgentQuestion(input: { sessionId: string; answer: string }): Promise<{ runId: string; resumed: boolean }>;
   /** Stops the turn running for this session, if there is one.
    *
    *  Real cancellation, not a hidden one: the worker aborts its own loop, which

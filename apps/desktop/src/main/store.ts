@@ -6,11 +6,41 @@ import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, chal
 
 type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null };
 const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at";
-type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:Language; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; replaces_question_id:string|null; source_ref:string|null; created_at:string };
+type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:Language; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; validation_report:string; replaces_question_id:string|null; source_ref:string|null; created_at:string };
 type ConceptRow = { id:string; slug:string; title:string; kind:string; parent_slug:string|null; description:string };
 type TrackRow = { id:string;title:string;goal:string;status:Track["status"];language:string|null;emphasis:string;priorities:string;investigating:string;monitoring:string;created_at:string;updated_at:string };
 type EvidenceInterpretation={eventId:string;statement:string;polarity:LearnerEvidence["polarity"];independence:LearnerEvidence["independence"];strength:number};
 type PatternInterpretation={title:string;description:string;status:LearnerPattern["status"];evidenceEventIds:string[]};
+
+/**
+ * The number of private cases a validated challenge actually runs.
+ *
+ * A hidden test file is commonly a generated sweep containing dozens of cases,
+ * so counting files produces the misleading `1` the result grid used to show.
+ * New reports carry structured counts. The check-detail fallback keeps existing
+ * challenges correct without rewriting their persisted validation reports.
+ */
+export function validatedHiddenCaseCount(value: unknown): number {
+  let report: unknown = value;
+  if (typeof value === "string") {
+    try { report = JSON.parse(value); } catch { return 0; }
+  }
+  if (!report || typeof report !== "object") return 0;
+  const record = report as { caseCounts?: unknown; checks?: unknown };
+  if (record.caseCounts && typeof record.caseCounts === "object") {
+    const hidden = (record.caseCounts as { hidden?: unknown }).hidden;
+    if (Number.isInteger(hidden) && (hidden as number) >= 0) return hidden as number;
+  }
+  const checks = record.checks;
+  if (!Array.isArray(checks)) return 0;
+  const detail = (name: string) => {
+    const check = checks.find((item: unknown) => item && typeof item === "object" && (item as { name?: unknown }).name === name);
+    return check && typeof check === "object" ? String((check as { detail?: unknown }).detail ?? "") : "";
+  };
+  const total = Number(/(?:^Only\s+)?(\d+)\s+cases\s+(?:executed|ran)/i.exec(detail("case volume"))?.[1]);
+  const visible = Number(/(?:^Only\s+)?(\d+)\s+(?:named\s+)?visible\s+cases/i.exec(detail("curated visible cases"))?.[1]);
+  return Number.isInteger(total) && Number.isInteger(visible) ? Math.max(0, total - visible) : 0;
+}
 
 /* ---- What a restore arrives as ------------------------------------------
    The shapes the API's `/v1/restore/*` routes answer with, named here because
@@ -194,7 +224,7 @@ export class LocalStore {
     let active: SessionDetail["question"]=null; let events:SessionDetail["events"]=[];
     // An abandoned challenge stops being the session's live question, which is
     // what returns the app to general chat until the learner asks for another.
-    if(question&&question.status!=="abandoned"){const target=this.db.prepare("SELECT * FROM training_targets WHERE id=?").get(question.training_target_id) as Record<string,unknown>;const attempt=this.db.prepare("SELECT * FROM attempts WHERE question_id=? ORDER BY started_at DESC LIMIT 1").get(question.id) as {id:string;latest_event_sequence:number;started_at:string;completed_at:string|null}|undefined;const design=JSON.parse(question.design) as QuestionDesign;if(attempt)events=this.readAttempt(attempt.id);if(attempt)active={id:question.id,sessionId:id,trainingTargetId:question.training_target_id,ordinal:question.ordinal,title:question.title,statement:question.statement,language:question.language,kind:question.kind,status:question.status,difficulty:question.difficulty,replacesQuestionId:question.replaces_question_id,createdAt:question.created_at,abilityId:String(target.ability_id),abilityTitle:String(target.ability_title),specificGap:String(target.specific_gap),desiredEvidence:String(target.desired_evidence),avoidTesting:JSON.parse(String(target.avoid_testing)) as string[],files:challengeFileEntries(design).map(({path,language,readOnly})=>({path,language,readOnly})),visibleTestFiles:Object.keys(design.visibleTests),concepts:this.questionConcepts(question.id),source:parseSourceRef(question.source_ref),attemptId:attempt.id,attemptStartedAt:events[0]?.occurredAt??attempt.started_at,attemptCompletedAt:attempt.completed_at,latestEventSequence:attempt.latest_event_sequence};}
+    if(question&&question.status!=="abandoned"){const target=this.db.prepare("SELECT * FROM training_targets WHERE id=?").get(question.training_target_id) as Record<string,unknown>;const attempt=this.db.prepare("SELECT * FROM attempts WHERE question_id=? ORDER BY started_at DESC LIMIT 1").get(question.id) as {id:string;latest_event_sequence:number;started_at:string;completed_at:string|null}|undefined;const design=JSON.parse(question.design) as QuestionDesign;if(attempt)events=this.readAttempt(attempt.id);if(attempt)active={id:question.id,sessionId:id,trainingTargetId:question.training_target_id,ordinal:question.ordinal,title:question.title,statement:question.statement,language:question.language,kind:question.kind,status:question.status,difficulty:question.difficulty,replacesQuestionId:question.replaces_question_id,createdAt:question.created_at,abilityId:String(target.ability_id),abilityTitle:String(target.ability_title),specificGap:String(target.specific_gap),desiredEvidence:String(target.desired_evidence),avoidTesting:JSON.parse(String(target.avoid_testing)) as string[],files:challengeFileEntries(design).map(({path,language,readOnly})=>({path,language,readOnly})),visibleTestFiles:Object.keys(design.visibleTests),hiddenTestCount:validatedHiddenCaseCount(question.validation_report),concepts:this.questionConcepts(question.id),source:parseSourceRef(question.source_ref),attemptId:attempt.id,attemptStartedAt:events[0]?.occurredAt??attempt.started_at,attemptCompletedAt:attempt.completed_at,latestEventSequence:attempt.latest_event_sequence};}
     /**
      * The transcript, with the expensive half of it windowed.
      *
@@ -621,11 +651,11 @@ export class LocalStore {
    *  and every attempt at it in order. Read by the standalone challenge page,
    *  which practises against a sandbox and so never touches an attempt. */
   challengeRecord(id:string){
-    const row=this.db.prepare("SELECT q.id,q.session_id,q.training_target_id,q.statement,q.kind,q.design,q.source_ref,s.original_goal,s.status session_status FROM questions q JOIN sessions s ON s.id=q.session_id WHERE q.id=?").get(id) as {id:string;session_id:string;training_target_id:string;statement:string;kind:QuestionRow["kind"];design:string;source_ref:string|null;original_goal:string;session_status:SessionSummary["status"]}|undefined;
+    const row=this.db.prepare("SELECT q.id,q.session_id,q.training_target_id,q.statement,q.kind,q.design,q.validation_report,q.source_ref,s.original_goal,s.status session_status FROM questions q JOIN sessions s ON s.id=q.session_id WHERE q.id=?").get(id) as {id:string;session_id:string;training_target_id:string;statement:string;kind:QuestionRow["kind"];design:string;validation_report:string;source_ref:string|null;original_goal:string;session_status:SessionSummary["status"]}|undefined;
     if(!row)return null;
     const target=this.db.prepare("SELECT ability_title,specific_gap,desired_evidence,action FROM training_targets WHERE id=?").get(row.training_target_id) as {ability_title:string;specific_gap:string;desired_evidence:string;action:TrainingTarget["action"]}|undefined;
     const attempts=(this.db.prepare("SELECT id FROM attempts WHERE question_id=? ORDER BY started_at").all(id) as Array<{id:string}>).map((attempt,index)=>({ordinal:index+1,events:this.readAttempt(attempt.id)}));
-    return{sessionId:row.session_id,statement:row.statement,kind:row.kind,design:JSON.parse(row.design) as QuestionDesign,source:parseSourceRef(row.source_ref),sessionGoal:row.original_goal,sessionStatus:row.session_status,abilityTitle:target?.ability_title??"",specificGap:target?.specific_gap??"",desiredEvidence:target?.desired_evidence??"",action:target?.action??null,attempts};
+    return{sessionId:row.session_id,statement:row.statement,kind:row.kind,design:JSON.parse(row.design) as QuestionDesign,hiddenTestCount:validatedHiddenCaseCount(row.validation_report),source:parseSourceRef(row.source_ref),sessionGoal:row.original_goal,sessionStatus:row.session_status,abilityTitle:target?.ability_title??"",specificGap:target?.specific_gap??"",desiredEvidence:target?.desired_evidence??"",action:target?.action??null,attempts};
   }
   /** Every challenge's starter excerpt, keyed by id. Its own read rather than a
    *  column on the history row: bootstrap carries that row whether or not the

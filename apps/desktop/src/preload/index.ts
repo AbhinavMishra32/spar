@@ -26,6 +26,7 @@ const api: SparApi = {
   reviewAttemptComplexity: (input) => ipcRenderer.invoke(ipc.attemptComplexityReview, input),
   acknowledgeAttemptComplexity: (input) => ipcRenderer.invoke(ipc.attemptComplexityAcknowledge, input),
   sendAgentMessage: (input) => ipcRenderer.invoke(ipc.agentSend, input),
+  answerAgentQuestion: (input) => ipcRenderer.invoke(ipc.agentAnswer, input),
   stopAgentTurn: (input) => ipcRenderer.invoke(ipc.agentStop, input),
   editAgentMessage: (input) => ipcRenderer.invoke(ipc.agentEdit, input),
   abandonAttempt: (input) => ipcRenderer.invoke(ipc.attemptAbandon, input),

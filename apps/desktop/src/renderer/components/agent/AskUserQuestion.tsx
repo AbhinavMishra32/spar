@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ArrowUp, Check, Loader2, Pencil } from "lucide-react";
 import type { AskUserQuestionRequest } from "@spar/domain";
 import { cn } from "@/lib/utils";
+import { Inline } from "./Markdown";
 
 type Answer = { type: "select"; labels: string[] } | { type: "custom"; value: string };
 
@@ -28,7 +29,10 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
   const customField = useRef<HTMLTextAreaElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const question = request.questions[step];
-  const answer = answers[step] ?? { type: "select" as const, labels: [] };
+  /* No offered choices means the answer is prose, not a one-item menu whose
+     item merely reveals the prose field. This is the native Construct shape. */
+  const sole = question ? question.options.length === 0 && question.custom : false;
+  const answer = answers[step] ?? (sole ? { type: "custom" as const, value: "" } : { type: "select" as const, labels: [] });
   const last = step === request.questions.length - 1;
   const currentComplete = answer.type === "custom" ? answer.value.trim().length > 0 : answer.labels.length > 0;
   const allComplete = request.questions.every((_, index) => {
@@ -113,7 +117,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
 
         {/* Reads at the size of a chat message, because that is what it is: the
             agent's turn, waiting on yours. */}
-        <h3 className="mt-1 px-1 text-content font-medium leading-[1.5] text-foreground">{question.question}</h3>
+        <h3 className="mt-1 px-1 text-content font-medium leading-[1.5] text-foreground"><Inline text={question.question} /></h3>
 
         <div className="mt-2 flex flex-col gap-px" role={question.multiple ? "group" : "radiogroup"}>
           {question.options.map((option, index) => {
@@ -128,7 +132,6 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
                    reachability, which is all a row of this kind needs. */
                 className={cn(
                   "group/option flex w-full items-center gap-2 rounded-[var(--radius-item)] px-2 py-1.5 text-left transition-colors outline-none",
-                  "focus-visible:ring-1 focus-visible:ring-ring",
                   selected ? "bg-accent/60" : "hover:bg-accent/35",
                   busy && "pointer-events-none opacity-60",
                 )}
@@ -139,7 +142,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
               >
                 <Marker multiple={question.multiple} selected={selected} />
                 <span className={cn("min-w-0 flex-1 text-ui leading-[1.45]", selected ? "font-medium text-foreground" : "text-foreground/85")}>
-                  {option.label}
+                  <Inline text={option.label} />
                 </span>
                 {index < DIGITS && (
                   <kbd className="shrink-0 font-sans text-ui-sm tabular-nums text-muted-foreground/55 transition-colors group-hover/option:text-muted-foreground">
@@ -154,14 +157,16 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
               made "Custom answer" look like a further thing the agent had offered,
               when it is the way out of the choices it offered. */}
           {question.custom && (custom ? (
-            <div className="mt-0.5 rounded-[var(--radius-item)] bg-accent/35 px-2 py-1.5">
-              <label className="flex items-center gap-1.5 text-ui-sm font-medium text-muted-foreground" htmlFor="ask-custom">
-                <Pencil className="size-3" />
-                In your own words
-              </label>
+            <div className={cn("rounded-[var(--radius-item)] px-2 py-1.5", sole ? "" : "mt-0.5 bg-accent/35")}>
+              {!sole && <label className="flex items-center gap-1.5 text-ui-sm font-medium text-muted-foreground" htmlFor="ask-custom">
+                <Pencil className="size-3" /> In your own words
+              </label>}
               <textarea
                 ref={customField}
-                className="app-scroll mt-1 field-sizing-content block max-h-40 min-h-[2.25rem] w-full resize-none bg-transparent text-ui leading-[1.55] outline-none placeholder:text-muted-foreground/55"
+                className={cn(
+                  "app-scroll field-sizing-content block max-h-40 w-full resize-none bg-transparent outline-none placeholder:text-muted-foreground/75",
+                  sole ? "min-h-[4rem] text-content leading-[1.6]" : "mt-1 min-h-[2.25rem] text-ui leading-[1.55]",
+                )}
                 disabled={busy}
                 id="ask-custom"
                 onChange={(event) => setAnswers((current) => ({ ...current, [step]: { type: "custom", value: event.target.value } }))}
@@ -171,7 +176,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
                     proceed();
                   }
                 }}
-                placeholder="Whatever is actually true — it calibrates the first challenge."
+                placeholder={sole ? "Answer in your own words." : "Whatever is actually true. It sets where Spar starts you."}
                 value={answer.value}
               />
             </div>
@@ -182,8 +187,8 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
               onClick={writeOwn}
               type="button"
             >
-              <Pencil className="size-3.5 shrink-0 text-muted-foreground/70" />
-              None of these — let me write it
+              <Pencil className="size-3.5 shrink-0 text-muted-foreground/85" />
+              None of these, I will write my own
             </button>
           ))}
         </div>

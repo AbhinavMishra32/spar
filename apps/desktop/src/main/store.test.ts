@@ -4,10 +4,34 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { LocalStore } from "./store.js";
+import { LocalStore, validatedHiddenCaseCount } from "./store.js";
 import type { QuestionDesign } from "@spar/domain";
 
 const design=(title:string):QuestionDesign=>({title,language:"javascript",kind:"function",statement:"Implement the target behavior while preserving the declared invariant through every transition.",starterFiles:{"src/index.js":"export function solve(){ throw new Error(\"implement\") }"},referenceFiles:{"src/index.js":"export function solve(){ return true }"},visibleTests:{"tests/visible.test.js":"// visible"},hiddenTests:{"tests/hidden.test.js":"// hidden"},knownIncorrectFiles:[{"src/index.js":"export function solve(){ return false }"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["returns before restoring the invariant"]});
+
+describe("validated hidden case count",()=>{
+  it("reads the structured count from new validation reports",()=>{
+    expect(validatedHiddenCaseCount({caseCounts:{visible:5,hidden:30}})).toBe(30);
+  });
+
+  it("recovers the count for challenges saved before structured counts",()=>{
+    expect(validatedHiddenCaseCount({checks:[
+      {name:"case volume",detail:"35 cases executed against the reference"},
+      {name:"curated visible cases",detail:"5 named visible cases state the contract"},
+    ]})).toBe(30);
+  });
+
+  it("carries the measured count into live and reopened challenge details",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{sessionId}=store.createSession("Practise arrays");
+      store.setTrainingTarget(sessionId,{ability:"Array traversal",specificGap:"Stop at the boundary",desiredEvidence:"Stops at the first invalid value",avoidTesting:[]});
+      const question=store.createQuestion(sessionId,design("Stop at the boundary"),{caseCounts:{visible:5,hidden:30}});
+      expect(store.readSession(sessionId)?.question?.hiddenTestCount).toBe(30);
+      expect(store.challengeRecord(question.id)?.hiddenTestCount).toBe(30);
+    }finally{store.close();}
+  });
+});
 
 it("persists the device theme across store reloads",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-theme-"));const database=path.join(directory,"state.sqlite3");try{const first=new LocalStore(database);first.setSetting("theme","dark");first.close();const reopened=new LocalStore(database);try{expect(reopened.getSetting("theme","system")).toBe("dark");}finally{reopened.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
 

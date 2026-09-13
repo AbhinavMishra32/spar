@@ -4,7 +4,17 @@ import { runLimits } from "./limits.js";
 
 export type ValidationRun = { exitCode: number; stdout: string; stderr: string; durationMs: number };
 export type ValidationRunner = (files: Record<string,string>, command: string, limits: { timeoutMs: number; memoryMb: number }) => Promise<ValidationRun>;
-export type ValidationReport = { id: string; valid: boolean; contentHash: string; checks: Array<{ name: string; passed: boolean; detail: string }>; validatedAt: string };
+export type ValidationReport = {
+  id: string;
+  valid: boolean;
+  contentHash: string;
+  checks: Array<{ name: string; passed: boolean; detail: string }>;
+  /** Measured from the reference runs, not inferred from how many test files
+   *  contain them. The renderer needs this before a fail-fast submission starts
+   *  so every unvisited case can still have a grey place in the grid. */
+  caseCounts?: { visible: number; hidden: number };
+  validatedAt: string;
+};
 
 /** Cases the reference must actually pass before a challenge is publishable.
  *  Not reachable by hand, which is the point — see the `case volume` check. */
@@ -101,7 +111,17 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
   });
   checks.push({ name: "accidental difficulty budget", passed: design.accidentalDifficulty.length <= 3, detail: design.accidentalDifficulty.join(", ") || "No incidental complexity declared" });
   const contentHash = createHash("sha256").update(stableJson(design)).digest("hex");
-  return { design, report: { id: randomUUID(), valid: checks.every((check) => check.passed), contentHash, checks, validatedAt: new Date().toISOString() } };
+  return {
+    design,
+    report: {
+      id: randomUUID(),
+      valid: checks.every((check) => check.passed),
+      contentHash,
+      checks,
+      caseCounts: { visible: curated.total, hidden: Math.max(0, volume.total - curated.total) },
+      validatedAt: new Date().toISOString(),
+    },
+  };
 }
 
 type VerdictKind = "passed" | "failed";

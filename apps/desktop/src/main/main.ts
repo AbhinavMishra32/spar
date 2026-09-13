@@ -22,6 +22,7 @@ import { ProviderService } from "./provider.js";
 import { createMainWindow, fitWindowTo } from "./window.js";
 import { WorkspaceService } from "./workspaces.js";
 import { themePreferenceSchema } from "../shared/api.js";
+import { AgentQuestions } from "./agentQuestions.js";
 
 let mainWindow: BrowserWindow | null = null;
 let store: LocalStore;
@@ -57,7 +58,8 @@ else {
        right for a page the learner is driving. The toolbox is what holds a run
        still between tool calls so a turn can ask several questions about it. */
     const visualizerTools = new VisualizerToolbox(visualizer, store, workspaces);
-    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice, visualizerTools));
+    const agentQuestions = new AgentQuestions(store);
+    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice, visualizerTools, agentQuestions));
     const sync=new CloudSyncService(store,auth,origin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
     /* Writes the checkpoints that make a session resumable on another machine.
        Nothing wrote them before, so `checkpoints` was empty on every install and
@@ -93,7 +95,7 @@ else {
     const signedIn = Boolean(await auth.account());
     const needsRestore = signedIn && !store.getProfile();
     const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : "app" as const;
-    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentRunSessions, sync, checkpoints, restore, web, visualizer, window: () => mainWindow });
+    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentQuestions, agentRunSessions, sync, checkpoints, restore, web, visualizer, window: () => mainWindow });
     updates = new UpdateService(store, () => mainWindow, prepareToExit);
     updates.installIpc();
     installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); updates.start();

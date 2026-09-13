@@ -25,6 +25,7 @@ const ORDER: View[] = ["problem", "chat"];
  * question is always one click away from the statement.
  */
 export function AgentPanel({
+  answering,
   concepts,
   detail,
   question,
@@ -43,6 +44,7 @@ export function AgentPanel({
   onComplexityReview,
   onComplexityAcknowledge,
 }: {
+  answering: boolean;
   concepts?: ConceptContext | undefined;
   detail: SessionDetail;
   question: ActiveQuestion;
@@ -167,7 +169,7 @@ export function AgentPanel({
                underneath it, so the turn sat waiting on an answer the learner
                had no way to send. It takes the composer's slot here as it does
                everywhere else. */
-            <AskUserQuestion busy={busy} onSubmit={(answer) => { setView("chat"); onAnswer(answer); }} request={pending} />
+            <AskUserQuestion busy={answering} onSubmit={(answer) => { setView("chat"); onAnswer(answer); }} request={pending} />
           ) : complexityCheckpoint ? <ComplexityCheckpoint
             onAcknowledge={onComplexityAcknowledge}
             onChange={onComplexityChange}
