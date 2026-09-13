@@ -148,6 +148,16 @@ agreeing with you is not measuring anything.
 An attempt ends when a submission passes. Not when you run out of patience, not
 when the model decides it's satisfied.
 
+<p align="center">
+  <video src="https://github.com/AbhinavMishra32/spar/raw/main/docs/assets/screenshots/submission.mp4" controls muted playsinline width="780"></video>
+</p>
+
+<p align="center">
+  <sub>A submission going through: the tests run, each case reports back, and the
+  first failure is selected for you with its input, your output and the expected
+  value side by side.</sub>
+</p>
+
 ### The workspace
 
 A file tree, a real editor, the problem statement, your test results, and a

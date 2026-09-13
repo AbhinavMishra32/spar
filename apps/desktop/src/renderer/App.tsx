@@ -930,16 +930,21 @@ function sessionMode(detail: SessionDetail): "challenge" | "chat" | "planning" {
 
 /** The first thing the app shows, while the local store is being read.
  *
- *  The mark rather than the word: at this size the dot grid is the thing people
- *  recognise from the dock icon they just clicked, and — unlike a wordmark — it
- *  can move, so the screen says "starting" without a line of text saying it.
- *  The wave loops, because a boot has no progress to imply and no known end. */
+ *  The mark rather than the word: the dot grid is the thing people recognise
+ *  from the dock icon they just clicked, and — unlike a wordmark — it can move,
+ *  so the screen says "starting" without a line of text saying it.
+ *
+ *  Quiet on purpose. This is a screen nobody chose to look at, and on a fast
+ *  start it is gone before it is read, so it sits in the muted tone at a size
+ *  that reads as a mark rather than as a banner. `sweep` over `wave` for the
+ *  same reason: one brief pass with a gap behind it, instead of a continuous
+ *  swell that would claim the app is busier than it is. */
 function BootShell() {
   return (
     <div className="app-drag app-pane grid h-full place-items-center">
       {/* The mark carries the status role and the name — it is the only thing on
           the screen, and the wordmark it replaced was what used to announce it. */}
-      <SparDots className="boot-mark text-foreground" label="Starting Spar" pattern="wave" size={112} />
+      <SparDots className="boot-mark text-muted-foreground" label="Starting Spar" pattern="sweep" size={56} />
     </div>
   );
 }
