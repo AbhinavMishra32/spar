@@ -1,4 +1,4 @@
-import { describe,expect,it } from "vitest";
+import { afterEach,describe,expect,it,vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -423,4 +423,39 @@ describe("adaptive product state",()=>{
     expect(store.activeTrack()?.id).toBe(local.track.id);
     expect(store.listTracks().map((track)=>track.title)).not.toContain("Old cloud track");
   }finally{store.close();}});
+});
+
+/**
+ * The ability write and the challenge that follows it, inside one millisecond.
+ *
+ * This is the CI machine, and it is the reason the number was wrong there and
+ * right on every laptop it was written on. `targetProgress` asks which of the
+ * two came first by comparing ISO timestamps, and ISO timestamps stop at the
+ * millisecond — so on hardware quick enough to do both inside one, the tie read
+ * as "the challenge came first" and the count of challenges since the ability
+ * last changed came back zero.
+ *
+ * Freezing the clock is the honest version of that machine: every wall-clock
+ * reading is now identical, which is the worst case rather than a rare one. The
+ * ordering has to come from the sequence of writes instead.
+ */
+describe("target progress with a clock that does not move",()=>{
+  afterEach(()=>{vi.useRealTimers();});
+
+  it("counts a challenge set after an ability update in the same millisecond",()=>{
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-13T12:00:00.000Z"));
+    const store=new LocalStore(":memory:");
+    try{
+      const {sessionId}=store.createSession("practice python hashmap");
+      const target=store.setTrainingTarget(sessionId,{ability:"Frequency counting",specificGap:"Building and updating a count map",desiredEvidence:"Returns a completed frequency map unaided",avoidTesting:["parsing"]});
+      store.createQuestion(sessionId,design("Count Value Frequencies"),{valid:true});
+      store.updateAbility({abilityId:target.abilityId,markdown:"# Frequency counting\n\nBuilds the map.",evidenceEventIds:[]});
+      /* Nothing has been set since the update yet, and the challenge before it
+         must not drift to the wrong side of the tie either. */
+      expect(store.targetProgress(sessionId)?.challengesSinceAbilityChanged).toBe(0);
+      store.createQuestion(sessionId,design("Count Email Domains"),{valid:true});
+      expect(store.targetProgress(sessionId)?.challengesSinceAbilityChanged).toBe(1);
+    }finally{store.close();}
+  });
 });

@@ -54,6 +54,8 @@ const CHALLENGE_OUTCOME_SQL = `
 
 export class LocalStore {
   private readonly db: Database.Database;
+  /** The last timestamp `stamp()` handed out. See it for why this exists. */
+  private lastStamp = "";
   constructor(path: string) {
     this.db = new Database(path);
     this.db.pragma("journal_mode = WAL");
@@ -232,7 +234,7 @@ export class LocalStore {
     const id=randomUUID();const trackId=this.trackIdForSession(sessionId);const existing=this.db.prepare("SELECT id FROM ability_documents WHERE track_id IS ? AND lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(trackId,input.ability) as {id:string}|undefined;const abilityId=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO training_targets VALUES (?,?,?,?,?,?,?,?,?)").run(id,sessionId,abilityId,input.ability,input.specificGap,input.desiredEvidence,avoidTesting,action,now);this.db.prepare("UPDATE sessions SET current_focus=?,updated_at=? WHERE id=?").run(JSON.stringify([input.ability]),now,sessionId);return{id,sessionId,abilityId,abilityTitle:input.ability,specificGap:input.specificGap,desiredEvidence:input.desiredEvidence,avoidTesting:input.avoidTesting,action,createdAt:now};
   }
   latestTarget(sessionId:string){return this.db.prepare("SELECT * FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 1").get(sessionId) as Record<string,unknown>|undefined;}
-  createQuestion(sessionId:string,design:QuestionDesign,report:unknown,options:{replacesQuestionId?:string|null;concepts?:ConceptTagInput[];source?:ChallengeSource|null}={}){const target=this.latestTarget(sessionId);if(!target)throw new Error("A persisted training target is required before question creation");const id=randomUUID();const attemptId=randomUUID();const now=new Date().toISOString();const ordinal=(this.db.prepare("SELECT COALESCE(MAX(ordinal),0)+1 value FROM questions WHERE session_id=?").get(sessionId) as {value:number}).value;const tagged=this.db.transaction(()=>{this.db.prepare("INSERT INTO questions (id,session_id,training_target_id,ordinal,title,statement,language,kind,status,difficulty,design,validation_report,created_at,replaces_question_id,source_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id,sessionId,String(target.id),ordinal,design.title,design.statement,design.language,design.kind,"active",design.difficulty??"developing",JSON.stringify(design),JSON.stringify(report),now,options.replacesQuestionId??null,options.source?JSON.stringify(options.source):null);this.db.prepare("INSERT INTO attempts VALUES (?,?,?,?,?,?,NULL)").run(attemptId,id,sessionId,"active",0,now);const event={id:randomUUID(),attemptId,sequence:0,type:"attempt_started",occurredAt:now,payload:{questionId:id,...(options.replacesQuestionId?{replacesQuestionId:options.replacesQuestionId}:{})},source:"system",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);
+  createQuestion(sessionId:string,design:QuestionDesign,report:unknown,options:{replacesQuestionId?:string|null;concepts?:ConceptTagInput[];source?:ChallengeSource|null}={}){const target=this.latestTarget(sessionId);if(!target)throw new Error("A persisted training target is required before question creation");const id=randomUUID();const attemptId=randomUUID();const now=this.stamp();const ordinal=(this.db.prepare("SELECT COALESCE(MAX(ordinal),0)+1 value FROM questions WHERE session_id=?").get(sessionId) as {value:number}).value;const tagged=this.db.transaction(()=>{this.db.prepare("INSERT INTO questions (id,session_id,training_target_id,ordinal,title,statement,language,kind,status,difficulty,design,validation_report,created_at,replaces_question_id,source_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").run(id,sessionId,String(target.id),ordinal,design.title,design.statement,design.language,design.kind,"active",design.difficulty??"developing",JSON.stringify(design),JSON.stringify(report),now,options.replacesQuestionId??null,options.source?JSON.stringify(options.source):null);this.db.prepare("INSERT INTO attempts VALUES (?,?,?,?,?,?,NULL)").run(attemptId,id,sessionId,"active",0,now);const event={id:randomUUID(),attemptId,sequence:0,type:"attempt_started",occurredAt:now,payload:{questionId:id,...(options.replacesQuestionId?{replacesQuestionId:options.replacesQuestionId}:{})},source:"system",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);
     // Tagged inside the same transaction as the challenge it describes: an
     // untagged challenge is invisible to every concept rollup, so a challenge
     // that exists without its concepts is worse than neither existing.
@@ -352,7 +354,7 @@ export class LocalStore {
    * the date it was earned, not the date the document was last edited.
    */
   private writeAbility(input:{id:string;trackId?:string|null;title:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation},existing?:AbilityRow){
-    const now=new Date().toISOString();
+    const now=this.stamp();
     const evidenceIds=[...new Set([...(existing?JSON.parse(existing.evidence_ids) as string[]:[]),...input.evidenceEventIds])];
     const version=(existing?.version??0)+1;
     const status=input.status??abilityStatusFor(evidenceIds.length);
@@ -538,6 +540,24 @@ export class LocalStore {
       challengesSinceAbilityChanged:since,
     };
   }
+  /**
+   * A timestamp strictly later than any this store has already issued.
+   *
+   * ISO-8601 carries milliseconds, and the sequence that matters here happens
+   * faster than one: the agent writes the ability document and then creates the
+   * challenge that follows it, and on a quick machine both land in the same
+   * millisecond. `targetProgress` then asks which came first by comparing the
+   * two strings, gets a tie, and reports that no challenge has been set since
+   * the ability last changed — the one number that is supposed to say whether
+   * the current approach is producing anything.
+   *
+   * The order of those two writes is a fact about the sequence, not about the
+   * clock, so the clock is not asked to settle it. Only the two writes whose
+   * relative order is read back use this; everything else still stamps the wall
+   * clock directly, because nothing compares those to each other.
+   */
+  private stamp(){const now=new Date().toISOString();const next=now>this.lastStamp?now:new Date(Date.parse(this.lastStamp)+1).toISOString();this.lastStamp=next;return next;}
+
   recentChallengeCoverage(limit=12,trackId?:string|null){return this.searchChallenges("",limit,trackId).map((row)=>({title:row.title,goal:row.sessionTitle,primaryConcept:row.concepts[0]?.slug??null,difficulty:row.difficulty,outcome:row.lastOutcome,askedAt:row.createdAt}));}
   /** Whether this exact title has been asked before anywhere. The session-scoped
    *  check let the same challenge come back under a new session, which is what
