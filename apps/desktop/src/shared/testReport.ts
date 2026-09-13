@@ -49,6 +49,22 @@ export type TestReport = {
   durationMs?: number;
 };
 
+/**
+ * What the runner writes when it cuts a suite short at its first failure.
+ *
+ * Shared because it is a handshake: the runner is the only thing that knows the
+ * rest of the suite was never reached, and the panel is the only thing that can
+ * say so. Without it a stopped run and a suite that happens to have four cases
+ * are the same four verdicts, and the grid would have to guess which it was
+ * looking at.
+ */
+export const STOPPED_AT_FAILURE = "Stopped at the first failing case — the rest of the suite was not run.";
+
+/** Whether this run was cut short at its first failure. */
+export function stoppedAtFailure(output: string): boolean {
+  return output.includes(STOPPED_AT_FAILURE);
+}
+
 export const EMPTY_REPORT: TestReport = { parsed: false, cases: [], passed: 0, failed: 0, skipped: 0 };
 
 const POINT = /^(not ok|ok)\s+(\d+)\s*-?\s*(.*)$/;
