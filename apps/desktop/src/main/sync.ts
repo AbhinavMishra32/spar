@@ -2,11 +2,47 @@ import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 
 export class CloudSyncService {
-  private timer: NodeJS.Timeout | null=null; private running=false;
-  constructor(private readonly store:LocalStore,private readonly auth:AuthService,private readonly origin:string,private readonly onState:(state:"offline"|"pending"|"synced")=>void){}
+  private timer: NodeJS.Timeout | null=null; private running=false; private retryAfter=0;
+  constructor(private readonly store:LocalStore,private readonly auth:AuthService,private readonly origin:string,private readonly onState:(state:"offline"|"pending"|"synced")=>void,private readonly request:typeof fetch=fetch){}
   start(){this.timer=setInterval(()=>void this.flush(),5_000);void this.flush();}
   stop(){if(this.timer)clearInterval(this.timer);this.timer=null;}
-  async flush(){if(this.running)return;try{const token=await this.auth.accessToken();if(!token){this.onState("offline");return;}const items=this.store.pendingSync();if(!items.length){this.onState("synced");return;}this.running=true;this.onState("pending");const acknowledged:string[]=[];for(const item of items){const target=route(item.kind,JSON.parse(item.payload) as Record<string,unknown>);if(!target){acknowledged.push(item.id);continue;}const response=await fetch(`${this.origin}${target.path}`,{method:target.method,headers:{authorization:`Bearer ${token}`,"content-type":"application/json","idempotency-key":item.id},body:JSON.stringify(target.body)});if(response.ok){acknowledged.push(item.id);continue;}if(response.status===401)throw new Error("Authentication expired");this.store.markSyncFailed(item.id);}this.store.acknowledgeSync(acknowledged);this.onState(this.store.pendingSync(1).length?"pending":"synced");}catch{this.onState("offline");}finally{this.running=false;}}
+  async flush(){
+    if(this.running)return;
+    if(Date.now()<this.retryAfter){this.onState("offline");return;}
+    try{
+      const token=await this.auth.accessToken();
+      if(!token){this.onState("offline");return;}
+      const items=this.store.pendingSync();
+      if(!items.length){this.retryAfter=0;this.onState("synced");return;}
+      this.running=true;this.onState("pending");
+      const acknowledged:string[]=[];
+      for(const item of items){
+        const target=route(item.kind,JSON.parse(item.payload) as Record<string,unknown>);
+        if(!target){acknowledged.push(item.id);continue;}
+        const response=await this.request(`${this.origin}${target.path}`,{
+          method:target.method,
+          headers:{authorization:`Bearer ${token}`,"content-type":"application/json","idempotency-key":item.id},
+          body:JSON.stringify(target.body),
+          /* A background convenience must never own the app indefinitely. This
+             also covers a host that resolves but accepts no traffic. */
+          signal:AbortSignal.timeout(10_000),
+        });
+        if(response.ok){acknowledged.push(item.id);continue;}
+        if(response.status===401||response.status>=500)throw new Error(response.status===401?"Authentication expired":`Cloud unavailable (${response.status})`);
+        /* A 4xx belongs to this record, so file it and move on. A 5xx belongs to
+           the service: continuing would replay the entire outbox into the same
+           outage and emit one server stack trace per local event. */
+        this.store.markSyncFailed(item.id);
+      }
+      this.store.acknowledgeSync(acknowledged);this.retryAfter=0;
+      this.onState(this.store.pendingSync(1).length?"pending":"synced");
+    }catch{
+      /* Keep every unacknowledged record and retry later. The timer still ticks
+         so recovery is automatic, but an outage is probed once per 30 seconds,
+         not once per five seconds for every row in the queue. */
+      this.retryAfter=Date.now()+30_000;this.onState("offline");
+    }finally{this.running=false;}
+  }
 }
 /** One outbox kind to one request. A kind with no case here is acknowledged and
  *  dropped by `flush`, which is what lets an older row left by a previous build

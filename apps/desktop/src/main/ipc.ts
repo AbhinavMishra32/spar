@@ -4,7 +4,7 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { baselineStateSchema, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -170,7 +170,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       /* Bound once, because it now answers two questions: what the Track is, and
          which language its challenges are written in. */
       const track=session.summary.trackId?deps.store.listTracks().find((item)=>item.id===session.summary.trackId)??null:null;
-      const payload={sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),track,relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4,session.summary.trackId),
+      const payload={sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,targetProgress:deps.store.targetProgress(sessionId),checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),track,relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4,session.summary.trackId),
         /* Carried unconditionally, unlike `relevantAbilitySummary`, which is
            scoped to the goal and so cannot show a topic the goal never mentions.
            Repetition across sessions is exactly the thing a goal-scoped view
@@ -365,7 +365,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const root = await deps.workspaces.writeValidation(record.sessionId, validationId, { ...practised, ...record.design.hiddenTests });
     let result: { exitCode: number; stdout: string; stderr: string; durationMs: number };
     try {
-      result = await deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: runLimits(record.design.language).timeoutMs }).promise as typeof result;
+      /* Fail-fast, same as a real submission — this is the same grader, and the
+         whole point of the practice copy is that it behaves like the thing. */
+      result = await deps.runner.request("run", { root, language: record.design.language, command: "test", timeoutMs: runLimits(record.design.language).timeoutMs, failFast: true }).promise as typeof result;
     } finally {
       await deps.workspaces.removeValidation(record.sessionId, validationId);
     }
@@ -556,6 +558,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
    */
   const noteBaselineEvidence=(sessionId:string)=>{const baseline=deps.store.getBaseline();if(baseline.status!=="in-progress"||baseline.sessionId!==sessionId)return{baseline:false,complete:false};const directEvidenceCount=baseline.directEvidenceCount+1;const required=baseline.importedEvidenceCount>=4?2:3;const complete=directEvidenceCount>=required;const importedContribution=Math.min(0.15,baseline.importedEvidenceCount*0.03);deps.store.setBaseline({directEvidenceCount,confidence:Math.min(0.85,directEvidenceCount/required*0.7+importedContribution),...(complete?{status:"complete" as const,completedAt:new Date().toISOString()}:{})});return{baseline:true,complete};};
   const complexityCheckEnabled=()=>deps.store.getSetting<boolean>("complexity-check-enabled",true);
+  /* Attempt events are JSON on disk and are read back from rows written by older
+     versions of this handler, so the verdict is parsed rather than cast: a review
+     recorded before it existed has none, and that is a valid answer. */
+  const readVerdict=(value:unknown):ComplexityVerdict|null=>complexityVerdictSchema.safeParse(value).data??null;
   const finishPassedAttempt=(input:{sessionId:string;attemptId:string;bundle:NonNullable<ReturnType<LocalStore["submissionBundle"]>>;source?:NonNullable<NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"]>})=>{
     const {sessionId,attemptId,bundle}=input;
     const complexity=[...deps.store.readAttempt(attemptId)].reverse().find((event)=>event.type==="learner_remark"&&event.payload.kind==="complexity-claim");
@@ -626,7 +632,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        what the evidence itself says. */
     const submissionSource=deps.store.readSession(sessionId)?.question?.source;
     if(submissionSource?.remoteJudge)return submitToSource({sessionId,attemptId,bundle,source:submissionSource});
-    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:runLimits(bundle.language).timeoutMs}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
+    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:runLimits(bundle.language).timeoutMs,failFast:true}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
     /* A failed submission leaves the attempt open. Solving it is the point, so a
        wrong answer is a step in the attempt rather than the end of it: the learner
        keeps working and submits again, every submission is recorded as evidence,
@@ -645,7 +651,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")return null;
     const claim=[...events].reverse().find((event)=>event.type==="learner_remark"&&event.payload.kind==="complexity-claim");
     const review=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
-    return{time:String(claim?.payload.timeComplexity??""),space:String(claim?.payload.spaceComplexity??""),review:String(review?.payload.body??"")};
+    return{time:String(claim?.payload.timeComplexity??""),space:String(claim?.payload.spaceComplexity??""),review:String(review?.payload.body??""),verdict:readVerdict(review?.payload.verdict)};
   });
 
   ipcMain.handle(ipc.attemptComplexityReview,async(_event,value)=>{
@@ -655,7 +661,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const events=deps.store.readAttempt(input.attemptId);
     if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")throw new Error("Pass every test before reviewing complexity.");
     const priorReview=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
-    if(priorReview)return{review:String(priorReview.payload.body??"")};
+    if(priorReview)return{review:String(priorReview.payload.body??""),verdict:readVerdict(priorReview.payload.verdict)};
     const session=deps.store.readSession(input.sessionId);
     if(!session?.question)throw new Error("The solved challenge is no longer open.");
     const files:Record<string,string>={};
@@ -664,14 +670,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if(!account)throw new Error("Sign in before asking Spar to review complexity");
     const providers=await deps.providers.resolve(account.id,token);
     if(!providers.length)throw new Error(NO_PROVIDER);
-    let review="";let failure:unknown;
-    for(const provider of providers){try{const result=await deps.agent.request("complexity-review",{title:session.question.title,statement:session.question.statement,language:session.question.language,timeComplexity:input.timeComplexity,spaceComplexity:input.spaceComplexity,files,provider}).promise as {text?:string};review=result.text?.trim()??"";if(review)break;}catch(error){failure=error;}}
+    let review="";let verdict:ComplexityVerdict|null=null;let failure:unknown;
+    for(const provider of providers){try{const result=await deps.agent.request("complexity-review",{title:session.question.title,statement:session.question.statement,language:session.question.language,timeComplexity:input.timeComplexity,spaceComplexity:input.spaceComplexity,files,provider}).promise as {text?:string;verdict?:unknown};review=result.text?.trim()??"";verdict=readVerdict(result.verdict);if(review)break;}catch(error){failure=error;}}
     if(!review)throw failure instanceof Error?failure:new Error("Spar could not review that complexity yet.");
     deps.store.appendNextEvent({id:randomUUID(),attemptId:input.attemptId,type:"learner_remark",occurredAt:new Date().toISOString(),payload:{kind:"complexity-claim",timeComplexity:input.timeComplexity,spaceComplexity:input.spaceComplexity},source:"learner",schemaVersion:1});
-    deps.store.appendNextEvent({id:randomUUID(),attemptId:input.attemptId,type:"agent_message",occurredAt:new Date().toISOString(),payload:{kind:"complexity-review",body:review},source:"agent",schemaVersion:1});
+    deps.store.appendNextEvent({id:randomUUID(),attemptId:input.attemptId,type:"agent_message",occurredAt:new Date().toISOString(),payload:{kind:"complexity-review",body:review,...(verdict?{verdict}:{})},source:"agent",schemaVersion:1});
     deps.store.addMessage(input.sessionId,"learner",`Complexity check — time: ${input.timeComplexity}; space: ${input.spaceComplexity}.`);
     deps.store.addMessage(input.sessionId,"agent",review);
-    return{review};
+    return{review,verdict};
   });
 
   ipcMain.handle(ipc.attemptComplexityAcknowledge,async(_event,value)=>{

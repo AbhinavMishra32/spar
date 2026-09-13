@@ -95,6 +95,22 @@ export const complexityReviewInput = z.object({
   spaceComplexity: z.string().trim().min(1).max(120),
 });
 export const complexityAcknowledgeInput = complexityReviewInput.pick({ sessionId: true, attemptId: true });
+/**
+ * What the complexity checkpoint decided, per axis.
+ *
+ * Optional everywhere it appears: the reviewer answers in JSON, and a model that
+ * answers in prose instead still produces a review worth reading. What it does
+ * not produce is a claim about which half the learner got right — so the card
+ * marks the fields only when this is here, rather than defaulting to a tick.
+ */
+export const complexityVerdictSchema = z.object({
+  time: z.string(),
+  space: z.string(),
+  timeMatches: z.boolean(),
+  spaceMatches: z.boolean(),
+  why: z.string().optional(),
+});
+export type ComplexityVerdict = z.infer<typeof complexityVerdictSchema>;
 export type SubmissionResult = { outcome: "passed" | "failed"; exitCode: number; durationMs: number; output: string; summary: string; requiresComplexity: boolean };
 /* Practising a challenge out of history is addressed by challenge id alone. The
    session it came from is looked up rather than passed, so a renderer can never
@@ -445,8 +461,8 @@ export interface SparApi {
   /** `output` is the runner's own stdout+stderr, so the result panel can read the
       submission as test cases instead of only reporting the verdict. */
   submitAttempt(input:{sessionId:string;attemptId:string}):Promise<SubmissionResult>;
-  attemptComplexityStatus(input: z.infer<typeof complexityAcknowledgeInput>): Promise<{ time: string; space: string; review: string } | null>;
-  reviewAttemptComplexity(input: z.infer<typeof complexityReviewInput>): Promise<{ review: string }>;
+  attemptComplexityStatus(input: z.infer<typeof complexityAcknowledgeInput>): Promise<{ time: string; space: string; review: string; verdict: ComplexityVerdict | null } | null>;
+  reviewAttemptComplexity(input: z.infer<typeof complexityReviewInput>): Promise<{ review: string; verdict: ComplexityVerdict | null }>;
   acknowledgeAttemptComplexity(input: z.infer<typeof complexityAcknowledgeInput>): Promise<void>;
   sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
   /** Stops the turn running for this session, if there is one.

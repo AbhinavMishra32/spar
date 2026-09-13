@@ -12,6 +12,51 @@ describe("background sync failures", () => {
     await expect(sync.flush()).resolves.toBeUndefined();
     expect(states).toEqual(["offline"]);
   });
+
+  it("stops at the first server outage without dropping queued records", async () => {
+    const states: string[] = [];
+    const requests: string[] = [];
+    const marked: string[] = [];
+    const acknowledged: string[][] = [];
+    const store = {
+      pendingSync: () => [
+        { id: "one", kind: "session-create", payload: JSON.stringify({ sessionId: "s1", goal: "Practise arrays", title: "Arrays" }) },
+        { id: "two", kind: "session-create", payload: JSON.stringify({ sessionId: "s2", goal: "Practise maps", title: "Maps" }) },
+      ],
+      markSyncFailed: (id: string) => marked.push(id),
+      acknowledgeSync: (ids: string[]) => acknowledged.push(ids),
+    } as unknown as LocalStore;
+    const auth = { accessToken: async () => "token" } as unknown as AuthService;
+    const request = (async (input: string | URL | Request) => {
+      requests.push(String(input));
+      return new Response(null, { status: 503 });
+    }) as typeof fetch;
+    const sync = new CloudSyncService(store, auth, "https://api.test", (state) => states.push(state), request);
+
+    await sync.flush();
+
+    expect(requests).toEqual(["https://api.test/v1/sessions"]);
+    expect(marked).toEqual([]);
+    expect(acknowledged).toEqual([]);
+    expect(states).toEqual(["pending", "offline"]);
+  });
+
+  it("does not hammer an unavailable service on every timer tick", async () => {
+    let requests = 0;
+    const store = {
+      pendingSync: () => [{ id: "one", kind: "profile-save", payload: "{}" }],
+      markSyncFailed: () => undefined,
+      acknowledgeSync: () => undefined,
+    } as unknown as LocalStore;
+    const auth = { accessToken: async () => "token" } as unknown as AuthService;
+    const request = (async () => { requests += 1; return new Response(null, { status: 500 }); }) as typeof fetch;
+    const sync = new CloudSyncService(store, auth, "https://api.test", () => undefined, request);
+
+    await sync.flush();
+    await sync.flush();
+
+    expect(requests).toBe(1);
+  });
 });
 
 /* The outbox is a table of `kind` strings and JSON payloads, and `route` is the

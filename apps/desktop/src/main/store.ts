@@ -71,6 +71,14 @@ export class LocalStore {
       CREATE TABLE IF NOT EXISTS attempt_events (id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, occurred_at TEXT NOT NULL, payload TEXT NOT NULL, source TEXT NOT NULL, schema_version INTEGER NOT NULL, UNIQUE(attempt_id, sequence));
       CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sync_outbox (id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
+      /* These are the access paths behind every shell refresh. Without them the
+         challenge/concept summaries run correlated full scans of attempt history
+         and opening a thread eventually beach-balls as the learner's record
+         grows. They are migrations as well as schema: IF NOT EXISTS adds them to
+         existing local stores without rewriting or discarding any history. */
+      CREATE INDEX IF NOT EXISTS attempts_question_idx ON attempts(question_id);
+      CREATE INDEX IF NOT EXISTS attempt_events_attempt_type_sequence_idx ON attempt_events(attempt_id, type, sequence);
+      CREATE INDEX IF NOT EXISTS sync_outbox_created_idx ON sync_outbox(created_at);
       CREATE TABLE IF NOT EXISTS learner_profile (id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
       /* The shared vocabulary: what a challenge is about, two levels deep.
          parent_slug rather than a parent id so the seeded taxonomy can be
@@ -116,6 +124,13 @@ export class LocalStore {
       CREATE TABLE IF NOT EXISTS agent_visualizations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, title TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
     `);
     this.ensureColumn("questions", "replaces_question_id", "TEXT");
+    /* Indexed here rather than up in the schema block, because the column it
+       indexes is added by the line above it. On a store that already had the
+       column — every developer's own, which is why this survived review — the
+       index built fine from the schema block; on a fresh database it was an
+       index over a column that did not exist yet, and the whole constructor
+       threw. A migrated column's index belongs with its migration. */
+    this.db.exec("CREATE INDEX IF NOT EXISTS questions_replaces_idx ON questions(replaces_question_id);");
     /* Where a challenge came from, as one JSON column rather than eight. Null for
        everything Spar wrote, which is every row that existed before this. */
     this.ensureColumn("questions", "source_ref", "TEXT");
@@ -486,6 +501,43 @@ export class LocalStore {
    *  never thinks to ask. Carried on every planning turn's context so the same
    *  primary concept coming back for the thirteenth time is visible before the
    *  target is set rather than after the challenge is published. */
+  /**
+   * How far the session has got on the target it is currently working.
+   *
+   * The agent already sees the last dozen challenges and the active target, and
+   * can in principle notice it has asked the same thing twelve times — but it
+   * has to infer that from a list of titles, and it does not. One session in the
+   * wild ran thirteen challenges against a single target over eight days while
+   * the ability it was aimed at never left "developing": every individual turn
+   * was a defensible call, and nobody was counting.
+   *
+   * So the counting happens here. These are facts about what has happened, not
+   * a budget or a threshold — what to do about a target that four challenges
+   * have not settled stays the agent's judgement, and a fifth challenge is a
+   * legitimate answer. It just has to be a decision rather than an oversight.
+   */
+  targetProgress(sessionId:string){
+    const target=this.latestTarget(sessionId);
+    if(!target)return null;
+    const abilityId=String(target.ability_id);
+    const rows=this.db.prepare(`SELECT ch.outcome, ch.created_at FROM (${CHALLENGE_OUTCOME_SQL}) ch WHERE ch.training_target_id=? ORDER BY ch.created_at`).all(String(target.id)) as Array<{outcome:string;created_at:string}>;
+    const ability=this.abilityRow(abilityId);
+    /* Challenges set since the ability document last changed. The ability moving
+       is the only thing that says a challenge taught anybody anything; a run of
+       them with a flat document is the shape of a session going nowhere. */
+    const since=ability?rows.filter((row)=>row.created_at>ability.updated_at).length:rows.length;
+    return {
+      abilityTitle:String(target.ability_title),
+      desiredEvidence:String(target.desired_evidence),
+      setAt:String(target.created_at),
+      challengesSet:rows.length,
+      passed:rows.filter((row)=>row.outcome==="passed").length,
+      failed:rows.filter((row)=>row.outcome==="failed").length,
+      abilityStatus:ability?.status??"uncertain",
+      abilityVersion:ability?.version??0,
+      challengesSinceAbilityChanged:since,
+    };
+  }
   recentChallengeCoverage(limit=12,trackId?:string|null){return this.searchChallenges("",limit,trackId).map((row)=>({title:row.title,goal:row.sessionTitle,primaryConcept:row.concepts[0]?.slug??null,difficulty:row.difficulty,outcome:row.lastOutcome,askedAt:row.createdAt}));}
   /** Whether this exact title has been asked before anywhere. The session-scoped
    *  check let the same challenge come back under a new session, which is what

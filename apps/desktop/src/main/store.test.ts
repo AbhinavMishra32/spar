@@ -22,6 +22,50 @@ it("keeps the onboarding profile out of the next account",()=>{const store=new L
   // behind would skip onboarding for whoever signs in next, on their predecessor's answers.
   store.clearAccountData();expect(store.getProfile()).toBeNull();}finally{store.close();}});
 
+describe("target progress",()=>{
+  /* The counting exists because one real session ran thirteen challenges against
+     a single target while the ability never left "developing", and nothing in
+     the agent's context said so. */
+  it("counts what the active target has cost, and what has happened since the ability moved",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const {sessionId}=store.createSession("practice python hashmap");
+      const target=store.setTrainingTarget(sessionId,{ability:"Frequency counting",specificGap:"Building and updating a count map",desiredEvidence:"Returns a completed frequency map unaided",avoidTesting:["parsing"]});
+      expect(store.targetProgress(sessionId)).toMatchObject({challengesSet:0,challengesSinceAbilityChanged:0,abilityTitle:"Frequency counting"});
+
+      /* The outcome lives in the event log, not on the attempt row —
+         `completeAttempt` only closes the attempt — so grading is recorded the
+         way the runner records it. */
+      const grade=(attemptId:string,outcome:"passed"|"failed")=>{store.appendNextEvent({id:randomUUID(),attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome},source:"system",schemaVersion:1});store.completeAttempt(attemptId,outcome);};
+      const first=store.createQuestion(sessionId,design("Count Value Frequencies"),{valid:true});
+      grade(first.attemptId,"passed");
+      const second=store.createQuestion(sessionId,design("Group Words By First Letter"),{valid:true});
+      grade(second.attemptId,"failed");
+      expect(store.targetProgress(sessionId)).toMatchObject({challengesSet:2,passed:1,failed:1});
+
+      /* Writing the ability is the only thing that says a challenge taught
+         anybody anything, so the count of challenges since restarts there. */
+      store.updateAbility({abilityId:target.abilityId,markdown:"# Frequency counting\n\nBuilds the map; the missing-key case is still shaky.",evidenceEventIds:[]});
+      expect(store.targetProgress(sessionId)?.challengesSinceAbilityChanged).toBe(0);
+
+      store.createQuestion(sessionId,design("Count Email Domains"),{valid:true});
+      const progress=store.targetProgress(sessionId);
+      expect(progress).toMatchObject({challengesSet:3,challengesSinceAbilityChanged:1});
+      /* The target itself rides along, so the position is readable without
+         cross-referencing another field of the context. */
+      expect(progress?.desiredEvidence).toBe("Returns a completed frequency map unaided");
+    }finally{store.close();}
+  });
+
+  it("has nothing to say before a target is set",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const {sessionId}=store.createSession("wanna learn linked list");
+      expect(store.targetProgress(sessionId)).toBeNull();
+    }finally{store.close();}
+  });
+});
+
 describe("local learning state",()=>{it("persists an evidence-bearing two-question adaptive chain",()=>{const store=new LocalStore(":memory:");try{const {sessionId}=store.createSession("Learn invariant-driven algorithms deeply");store.setObjective(sessionId,"Distinguish recognizing an invariant from restoring it repeatedly.");const first=store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Repeated restoration after one mutation",desiredEvidence:"Uses a loop until validity returns",avoidTesting:["parsing"]});const q1=store.createQuestion(sessionId,design("Restore the window"),{valid:true});const remark=randomUUID();store.appendEvent({id:remark,attemptId:q1.attemptId,sequence:1,type:"learner_remark",occurredAt:new Date().toISOString(),payload:{body:"I know the invariant but I only repaired it once."},source:"learner",schemaVersion:1});
 /* Cited, not merely written beside: confidence follows the number of linked
    evidence events, so an update with nothing behind it correctly stays
