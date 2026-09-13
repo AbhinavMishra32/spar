@@ -374,7 +374,7 @@
           "type": "object"
         },
         "statement": {
-          "description": "The complete learner-facing problem page in professional Markdown: description, numbered examples with Input and Output, then constraints. No agent commentary, selection rationale, validation notes, or hidden-test details.",
+          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details.",
           "minLength": 30,
           "type": "string"
         },
@@ -1149,7 +1149,7 @@
           "type": "object"
         },
         "statement": {
-          "description": "The complete learner-facing problem page in professional Markdown: description, numbered examples with Input and Output, then constraints. No agent commentary, selection rationale, validation notes, or hidden-test details.",
+          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details.",
           "minLength": 30,
           "type": "string"
         },

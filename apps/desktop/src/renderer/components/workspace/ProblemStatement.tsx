@@ -49,6 +49,14 @@ export function ProblemStatement({ source, language }: { source: string; languag
                   <ArrowRight className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
                   <code className="min-w-0 break-words font-mono text-ui-sm text-[var(--success)]">{example.result}</code>
                 </span>
+                {/* Why this one is the answer. The agent writes it and it is
+                    often the whole point of the example — which case the
+                    boundary lands on, why the obvious answer is wrong — so it
+                    travels with the example rather than being dropped for
+                    tidiness. */}
+                {example.note && (
+                  <Markdown className="md-prose-content mt-0.5 min-w-0 text-muted-foreground" source={example.note} />
+                )}
               </div>
             ))}
           </div>
