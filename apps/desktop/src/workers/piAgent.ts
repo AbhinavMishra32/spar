@@ -1,6 +1,7 @@
 import { Agent, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core";
 import { completeSimple, streamSimple } from "@earendil-works/pi-ai/compat";
-import type { AssistantMessageEvent, Message, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import type { AssistantMessage, AssistantMessageEvent, Message, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { agentToolSchemas } from "./agentTools.js";
 import { piModelFor, piTransportForApi, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
 import type { NormalizedAgentStreamPart } from "./agentStream.js";
@@ -97,6 +98,19 @@ export function createTrainingAgent(input: PiProviderInput, systemPrompt: string
        be a different agent with the same prompts. */
     shouldStopAfterTurn: () => true,
   });
+}
+
+/**
+ * Whether the turn came back because the prompt did not fit.
+ *
+ * Worth having pi answer rather than Spar: providers do not agree on how they
+ * say this, and several do not say it at all — some accept the oversized
+ * request and answer from a truncated prompt, which is only visible as usage
+ * exceeding the window, and one reports it as a length stop with no output.
+ * pi carries all of that, keyed on the model's own context window.
+ */
+export function turnOverflowed(message: AssistantMessage | null | undefined, input: PiProviderInput): boolean {
+  return message ? isContextOverflow(message, piModelFor(input).contextWindow) : false;
 }
 
 /** How the controller spells a phase's tool rule for this provider. Named here

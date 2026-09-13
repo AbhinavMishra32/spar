@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { languageSchema, type Language } from "@spar/domain";
 import { piFinishReason, piUsage, type PiProviderInput } from "./piProvider.js";
-import { createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentTools, piCompleteText, toolErrorText, type ToolChoiceRef } from "./piAgent.js";
+import { createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentTools, piCompleteText, toolErrorText, turnOverflowed, type ToolChoiceRef } from "./piAgent.js";
+import { fitEvidence, nextEvidenceBudget, stableJson } from "./evidence.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
 import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 import { normalizeAgentStreamPart } from "./agentStream.js";
@@ -46,6 +48,12 @@ const CHALLENGE_COMPILATION_LIMIT = 15;
  * stage, then quote the fault, then skip the phase.
  */
 const PROTOCOL_RETRY_LIMIT = 4;
+
+/** How many times one turn may shrink its evidence and try again. Each attempt
+ *  halves, so three of them is a sixteenth of what first overflowed — past that
+ *  the prompt is not the problem and saying so beats trying a fourth time on a
+ *  learner's clock. */
+const OVERFLOW_RETRY_LIMIT = 3;
 
 /** After this many failures a stage offering several tools is narrowed to its
  *  last one — the phase's own tool, the co-offered extras dropped. A model that
@@ -430,6 +438,11 @@ async function runTurn(request: Request, stopped: AbortSignal) {
     const usage: unknown[] = [];
     let finalText = "";
     let finishReason = "stop";
+    /* Cut once and kept cut for the rest of the turn. Evidence only grows, so a
+       budget that was needed at phase 6 is needed at phase 7, and re-discovering
+       that by overflowing again would cost a round trip per phase. */
+    let evidenceBudget = Number.POSITIVE_INFINITY;
+    let overflowRetries = 0;
     for (let step = 0; step < AGENT_MAX_STEPS; step += 1) {
       /* Checked first, so a stop that lands while a tool is in flight ends the
          turn before the next phase is even planned. What the model already said
@@ -471,7 +484,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       const asked = failures > NARROW_AFTER && stage.activeTools.length > 1 && stage.toolChoice === "required"
         ? stage.activeTools.slice(-1)
         : stage.activeTools;
-      const prompt = orchestrationPrompt(request, outcomes, asked, step, protocolFailures.get(stageKey)?.detail, spent);
+      const prompt = orchestrationPrompt(request, outcomes, asked, step, protocolFailures.get(stageKey)?.detail, spent, evidenceBudget);
       const phaseAbort = new AbortController();
       const phaseTimer = setTimeout(() => phaseAbort.abort(new Error(`Spar's provider phase exceeded ${AGENT_PHASE_TIMEOUT_MS / 1_000} seconds.`)), AGENT_PHASE_TIMEOUT_MS);
       /* pi owns the run's own signal, so stopping reaches it by aborting the
@@ -481,6 +494,10 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       const abortAgent = () => agent.abort();
       endPhase.addEventListener("abort", abortAgent, { once: true });
       let text = "";
+      /* The turn as it ended, which is the only thing that can say whether the
+         prompt fit — some providers report that as an error, some as usage past
+         the window, one as a length stop with nothing in it. */
+      let lastMessage: AssistantMessage | null = null;
       /* The transcript is rebuilt for every phase rather than grown across them.
          This is the shape the controller has always had — each phase states its
          own evidence and asks for one call — and keeping it is what makes this
@@ -505,6 +522,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         }
         if (event.type === "turn_end" && event.message.role === "assistant") {
           const message = event.message;
+          lastMessage = message;
           text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
           if (message.errorMessage) streamError = message.errorMessage;
           finishReason = piFinishReason(message.stopReason);
@@ -512,12 +530,29 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         }
       });
       try {
-        await agent.prompt(prompt);
+        await agent.prompt(prompt.text);
         if (text.trim()) finalText = text;
       } finally {
         unsubscribe();
         endPhase.removeEventListener("abort", abortAgent);
         clearTimeout(phaseTimer);
+      }
+      /* The prompt did not fit. Nothing here can be summarised — the transcript
+         is one message and it is this phase's own instruction — so what gets cut
+         is the restated evidence, and the phase is asked again. The alternative
+         is failing a turn the learner is waiting on over a block that was only
+         ever a convenience copy of results the agent can re-read with a tool. */
+      if (!stopped.aborted && turnOverflowed(lastMessage, request.payload.provider)) {
+        const next = overflowRetries < OVERFLOW_RETRY_LIMIT
+          ? nextEvidenceBudget(prompt.evidenceChars, evidenceBudget, prompt.evidenceEntries)
+          : null;
+        if (next === null) throw new Error(prompt.evidenceEntries === 0
+          ? `This turn does not fit in ${request.payload.provider.model}'s context window before Spar has gathered anything — the session's own history is already too long for this model.`
+          : `Spar's turn did not fit in ${request.payload.provider.model}'s context window, and trimming what earlier phases found did not make it fit.`);
+        evidenceBudget = next;
+        overflowRetries += 1;
+        parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: `context-overflow:${stageKey}:${next}` } });
+        continue;
       }
       /* A stop aborts the run, and pi reports that as an aborted turn rather
          than by throwing. That is the expected end of a stopped turn, not a
@@ -659,13 +694,14 @@ const ACCUMULATING_TOOLS = new Set(["visualize_read_step", "visualize_find"]);
  *  are the one thing here a single turn can ask for indefinitely. */
 const ACCUMULATED_LIMIT = 6;
 
-function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string, spent: Set<string> = new Set()) {
-  const evidence = Object.fromEntries([...outcomes.entries()].map(([name, values]) => [name, ACCUMULATING_TOOLS.has(name) ? values.slice(-ACCUMULATED_LIMIT) : values.at(-1)]));
+function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string, spent: Set<string> = new Set(), evidenceBudget = Number.POSITIVE_INFINITY) {
+  const evidence = fitEvidence(Object.fromEntries([...outcomes.entries()].map(([name, values]) => [name, ACCUMULATING_TOOLS.has(name) ? values.slice(-ACCUMULATED_LIMIT) : values.at(-1)])), evidenceBudget);
   const compilationFeedback = activeTools.some((tool)=>tool==="create_question"||tool==="replace_current_question"||tool==="assign_practice_problem") ? latestRejectedCompilationFeedback(outcomes) : "";
   const phaseInstruction=protocolFailure
     ? `Your previous response did not produce a schema-valid host tool call: ${protocolFailure}. Call exactly one tool from ${activeTools.join(", ")} now. Correct only the tool-call JSON shape; do not answer in prose.`
     : activeTools.length?(request.payload.turnKind==="learner-message"?`${compilationFeedback?`The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Fix that exact failure before trying again. `:""}${request.payload.activeQuestion?`An active challenge exists (question ${request.payload.activeQuestion.id}, attempt ${request.payload.activeQuestion.attemptId}). create_question is intentionally unavailable. If the learner says the challenge is too difficult, asks to change it, or confirms "do it", inspect the current attempt if needed, adjust the target if needed, then call replace_current_question. Never answer that a replacement cannot be launched merely because a challenge is active; replacement is the supported operation. `:"No active challenge exists, so create_question is the supported creation operation. "}Respond to the learner's actual request. Use a tool whenever they ask you to inspect or change real tests, challenges, account history, or abilities. You may call one best tool now, or answer concisely if no tool is needed. Never claim a state change without its successful tool result.`:`${compilationFeedback ? `The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Revise the candidate to fix that exact failure. A known-incorrect implementation must pass every visible test and fail a hidden test; do not submit a placeholder or deliberately visible-failing implementation. ` : ""}Before the call, write one short sentence addressed to the learner saying what you are about to do and why it follows from what you just found — one sentence, present tense, no preamble and no restating this instruction. Then call the single best required next tool from this allowlist: ${activeTools.join(", ")}. Do not write anything else: the sentence and the call, nothing more.`):`${spent.size?`You have already called ${[...spent].join(", ")} this turn and the results are in the evidence above; calling again returns the same thing. Answer the learner now from what you have. `:""}${completionInstruction(request.payload.turnKind,outcomes)}`;
-  return `${request.payload.context}\n\nLatest learner action:\n${request.payload.message}\n\nDurable results from earlier phases of this same Spar turn:\n${stableJson(evidence)}\n\nPhase ${step + 1}. ${phaseInstruction}`;
+  const rendered = stableJson(evidence);
+  return { text: `${request.payload.context}\n\nLatest learner action:\n${request.payload.message}\n\nDurable results from earlier phases of this same Spar turn:\n${rendered}\n\nPhase ${step + 1}. ${phaseInstruction}`, evidenceChars: rendered.length, evidenceEntries: Object.keys(evidence).length };
 }
 
 /**
@@ -693,11 +729,6 @@ function assertNoExtremeToolLoop(signatures: string[]) {
   let identical = 0;
   for (let index = signatures.length - 1; index >= 0 && signatures[index] === latest; index -= 1) identical += 1;
   if (identical >= IDENTICAL_TOOL_CALL_LIMIT) throw new Error(`Spar stopped after ${identical} identical tool calls; probable provider loop.`);
-}
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)).map(([key, nested]) => `${JSON.stringify(key)}:${stableJson(nested)}`).join(",")}}`;
-  return JSON.stringify(value) ?? "undefined";
 }
 function settle(message: Record<string, unknown>) { const pending = pendingTools.get(String(message.id)); if (!pending) return; pendingTools.delete(String(message.id)); if (message.ok) pending.resolve(message.value); else pending.reject(new Error(String(message.error))); }
 /**
