@@ -5,7 +5,7 @@ const tool = (name: string): Extract<RunPart, { kind: "tool" }> => ({
   kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", startedAt: 0,
 });
 
-const run = (parts: RunPart[], status: AgentRun["status"] = "streaming"): AgentRun => ({ runId: "run", parts, status, startedAt: 0 });
+const run = (parts: RunPart[], status: AgentRun["status"] = "streaming"): AgentRun => ({ runId: "run", parts, status, startedAt: 0, steersConsumed: 0 });
 
 describe("what a tool row is called", () => {
   it("prefers the title the agent wrote for this particular call", () => {
@@ -198,5 +198,22 @@ describe("where the work ends and the answer begins", () => {
 
   it("says nothing about a phase that still has tools to call", () => {
     expect(phase(run([]), "phase-step:2;active:read_ability,search_learner_model").finalStartedAt).toBeUndefined();
+  });
+});
+
+/* A message typed mid-turn is queued when it is sent and picked up at the next
+   phase boundary. Until the turn says it has taken it, the thread shows it as
+   waiting — otherwise the learner assumes they were ignored. */
+describe("a message the turn has not picked up yet", () => {
+  const status = (detail: string): AgentRun => {
+    const next = reduceRun(run([]), { runId: "run", type: "status", detail });
+    if (!next) throw new Error("the status event was dropped");
+    return next;
+  };
+
+  it("counts what the turn reports having drained", () => {
+    expect(run([]).steersConsumed).toBe(0);
+    expect(status("steered:1").steersConsumed).toBe(1);
+    expect(status("steered:3").steersConsumed).toBe(3);
   });
 });

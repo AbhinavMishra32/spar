@@ -285,7 +285,7 @@ function storedPart(step: AgentActivityStep, index: number): RunPart {
  * that, because a control that promised to undo the record would be lying about
  * the one thing the learner would most want to be true.
  */
-function LearnerMessage({ body, editable, onEdit }: { body: string; editable: boolean; onEdit?: ((body: string) => void) | undefined }) {
+function LearnerMessage({ body, editable, queued = false, onEdit }: { body: string; editable: boolean; queued?: boolean; onEdit?: ((body: string) => void) | undefined }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(body);
 
@@ -356,7 +356,16 @@ function LearnerMessage({ body, editable, onEdit }: { body: string; editable: bo
           <PencilLine className="size-3.5" />
         </button>
       )}
-      <div className="max-w-[min(fit-content,85%)] min-w-0 break-words rounded-xl bg-secondary px-3 py-1.5 text-content leading-[1.55] whitespace-pre-wrap">
+      {/* Held back until the turn picks it up: dimmed, with the reason on hover.
+          The bubble is the learner's own words either way — what changes is
+          whether the agent has them yet. */}
+      <div
+        className={cn(
+          "max-w-[min(fit-content,85%)] min-w-0 break-words rounded-xl bg-secondary px-3 py-1.5 text-content leading-[1.55] whitespace-pre-wrap transition-opacity",
+          queued && "opacity-60",
+        )}
+        {...(queued ? { title: "Waiting for the agent to finish this step" } : {})}
+      >
         {body}
       </div>
     </div>
@@ -428,6 +437,18 @@ export function AgentThread({
      never started. */
   const isEmpty = messages.length === 0 && !visibleRun && !phase;
 
+  /* Which of the learner's messages the running turn has not picked up yet.
+     Anything they said after the turn started was queued, and the turn drains
+     the queue at its next phase boundary — so until it reports having done so,
+     the message is in the thread but not yet in front of the agent. Saying so is
+     the difference between a wait the learner understands and one where they
+     assume they have been ignored. */
+  const queued = new Set<string>();
+  if (run && run.status === "streaming") {
+    const sent = messages.filter((item) => item.role === "learner" && new Date(item.createdAt).getTime() >= run.startedAt);
+    for (const item of sent.slice(run.steersConsumed)) queued.add(item.id);
+  }
+
   return (
     <div className={cn("agent-transcript relative min-h-0 min-w-0 flex-1", className)}>
       {/* overflow-x-hidden: the column never scrolls sideways. Anything genuinely
@@ -450,6 +471,7 @@ export function AgentThread({
                       key={item.id}
                       body={item.body}
                       editable={undoable?.has(item.id) ?? false}
+                      queued={queued.has(item.id)}
                       {...(onEditMessage ? { onEdit: (body: string) => onEditMessage(item.id, body) } : {})}
                     />
                   ) : item.role === "system" ? (

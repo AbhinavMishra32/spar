@@ -41,6 +41,12 @@ export type AgentRun = {
   /** How many parts had arrived by then: everything before is the work, and
    *  everything from here is the reply. */
   finalFrom?: number;
+  /* How many of the learner's mid-turn messages this turn has actually picked
+     up. They are queued when sent and drained at the next phase boundary, so
+     until this counts one, what they said is in the transcript but not yet in
+     front of the agent — and the thread says so rather than letting them assume
+     it was read. */
+  steersConsumed: number;
 };
 
 /**
@@ -89,7 +95,7 @@ export function reduceRunBatch(current: AgentRun | null, events: readonly AgentS
 export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): AgentRun | null {
   const run: AgentRun = current && current.runId === event.runId
     ? current
-    : { runId: event.runId, parts: [], status: "streaming", startedAt: Date.now() };
+    : { runId: event.runId, parts: [], status: "streaming", startedAt: Date.now(), steersConsumed: 0 };
 
   const parts = [...run.parts];
   const last = parts[parts.length - 1];
@@ -178,6 +184,8 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       const body = event.detail ?? event.text ?? "";
       /* Read before the noise filter drops it. `active:none` is the phase that
          has no tools to call, which is the phase that answers. */
+      const steered = /^steered:(\d+)$/.exec(body);
+      if (steered) return { ...run, steersConsumed: run.steersConsumed + Number(steered[1]) };
       if (/^phase-step:\d+;active:none$/.test(body) && run.finalStartedAt === undefined) {
         return { ...run, finalStartedAt: Date.now(), finalFrom: parts.length };
       }
