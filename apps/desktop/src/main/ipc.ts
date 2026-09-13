@@ -523,25 +523,85 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     await deps.agent.request("abort", { requestId: runId }).promise.catch(() => undefined);
   });
 
+  /**
+   * A learner's message, rewritten, answered again.
+   *
+   * The cut is the conversation only — see `rewindToMessage`. What ran on the
+   * first version stays run, which is why the confirmation in the thread says
+   * so rather than promising an undo Spar cannot perform: a challenge that was
+   * published was attempted, and an attempt is evidence.
+   */
+  ipcMain.handle(ipc.agentEdit, async (_event, value) => {
+    const input = value as { sessionId?: unknown; messageId?: unknown; message?: unknown };
+    const sessionId = zUuid(input.sessionId);
+    const messageId = zUuid(input.messageId);
+    if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
+    /* The running turn is the one being rewound. Cutting the transcript under a
+       turn that is still writing into it would leave its reply orphaned above
+       the message that no longer exists. */
+    if (activeAgentRuns.has(sessionId)) throw new Error("Stop the turn before editing the message it is answering.");
+    clearAutoResume(sessionId);
+    const rewound = deps.store.rewindToMessage(sessionId, messageId);
+    if (!rewound) throw new Error("That message is no longer in this conversation.");
+    const session = deps.store.readSession(sessionId);
+    const turnKind = session?.question && requestsChallengeRevision(input.message, session.messages) ? "challenge-revision" : "learner-message";
+    return startAgentTurn(sessionId, input.message.trim(), "learner", turnKind);
+  });
+
+  /**
+   * The learner's message, whether or not the agent is already working.
+   *
+   * A turn used to claim the session for its whole duration, and anything typed
+   * during one was dropped on the floor — the handler returned the running
+   * turn's id, which read to the renderer as "sent". So the learner watched
+   * their own correction disappear, then watched the agent finish doing the
+   * thing they had just asked it not to do.
+   *
+   * Now it steers: the message is recorded in the transcript where they can see
+   * it, and handed to the running turn, which picks it up at its next phase
+   * boundary. If the turn finished while they were typing, the steer does not
+   * land and this falls through to starting a turn with it, which is what the
+   * learner meant either way.
+   */
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
     const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
+    const said = input.message.trim();
     clearAutoResume(sessionId);
+    /* Steering and starting a turn are the same act from the learner's side, so
+       which one happens is decided here rather than at four call sites. The
+       message is recorded only once the steer is known to have landed: a
+       transcript entry is a thing the agent has, and writing one for a turn that
+       ended mid-keystroke would leave the learner reading a message nothing will
+       ever answer. That race falls through to starting a turn instead. */
+    const deliver = async (body: string, turnKind: AgentTurnKind, visible = body) => {
+      const target = activeAgentRuns.get(sessionId);
+      if (target) {
+        const landed = await deps.agent.request("steer", { requestId: target, text: body }).promise
+          .then((result) => Boolean((result as { steered?: unknown } | null)?.steered)).catch(() => false);
+        if (landed) {
+          deps.store.addMessage(sessionId, "learner", visible);
+          return { runId: target, steered: true };
+        }
+      }
+      return startAgentTurn(sessionId, body, "learner", turnKind);
+    };
     if(deps.store.pendingIntake(sessionId)){
-      deps.store.answerIntake(sessionId,input.message.trim());
+      deps.store.answerIntake(sessionId,said);
       /* An answer given while a challenge is open is context for that challenge,
          not the start of a session: the agent asked something about work in
          progress, and a session-start turn would try to publish a second
          challenge over the one the learner is still on. */
       const answered=deps.store.readSession(sessionId);
+      const deliverIntake=(body:string)=>deliver(body,"session-start",said);
       if(answered&&openQuestion(answered)){
-        return startAgentTurn(sessionId,`The learner answered your question: ${input.message.trim()}\nUse it as evidence about the challenge they are working on now. A challenge is already active, so do not create another one.`,"learner","learner-message");
+        return deliver(`The learner answered your question: ${said}\nUse it as evidence about the challenge they are working on now. A challenge is already active, so do not create another one.`,"learner-message",said);
       }
-      if(answered?.summary.context==="baseline")return startAgentTurn(sessionId,`The learner answered the baseline context question: ${input.message.trim()}\nUse only what materially changes calibration. Set one diagnostic Training Target and create exactly one fair coding probe in their preferred language. Stay inside the dedicated baseline; do not create a Track, syllabus, or general chat.`,"learner","session-start");
-      return startAgentTurn(sessionId,`The learner answered the cold-start placement question: ${input.message.trim()}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`,"learner","session-start");
+      if(answered?.summary.context==="baseline")return deliverIntake(`The learner answered the baseline context question: ${said}\nUse only what materially changes calibration. Set one diagnostic Training Target and create exactly one fair coding probe in their preferred language. Stay inside the dedicated baseline; do not create a Track, syllabus, or general chat.`);
+      return deliverIntake(`The learner answered the cold-start placement question: ${said}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`);
     }
     const session=deps.store.readSession(sessionId);
     const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
-    return startAgentTurn(sessionId,input.message.trim(),"learner",turnKind);
+    return deliver(said,turnKind);
   });
   /**
    * A submission judged by the source that wrote the problem.

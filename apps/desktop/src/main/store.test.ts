@@ -72,6 +72,65 @@ describe("local learning state",()=>{it("persists an evidence-bearing two-questi
    uncertain. This chain claims to be evidence-bearing, so it cites the remark. */
 store.updateAbility({abilityId:first.abilityId,markdown:"# Invariant restoration\n\nRecognizes the invariant; repeated restoration remains uncertain.",evidenceEventIds:[remark]});store.completeAttempt(q1.attemptId,"passed");store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Transfer repeated restoration to an event stream",desiredEvidence:"Restores validity independently in a new representation",avoidTesting:["advanced syntax"]});store.createQuestion(sessionId,design("Repair the event stream"),{valid:true});const detail=store.readSession(sessionId);expect(detail?.summary.questionTitles).toHaveLength(2);expect(detail?.summary.completedQuestions).toBe(1);expect(detail?.question?.title).toBe("Repair the event stream");expect(store.readAbility(first.abilityId)).toMatchObject({version:1,status:"developing"});expect(store.readAttempt(q1.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({type:"learner_remark"})]));}finally{store.close();}});});
 
+/* One intake row per session, and the answered branch used to win for any later
+   question — so the second thing a session ever asked was swallowed and the
+   first one's answer handed back in its place. The agent read a reply to
+   something it had not asked, asked again, and the learner watched it spin with
+   nothing on screen to answer. */
+it("asks a second question instead of replaying the answer to the first",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const{sessionId}=store.createSession("Sliding window in Python");
+    const placement={questions:[{header:"Starting point",question:"Which best describes your sliding-window experience?",options:[{label:"New to it"},{label:"Comfortable"}],multiple:false,custom:true}]};
+    store.setPendingIntake(sessionId,placement);
+    store.answerIntake(sessionId,"New to it");
+
+    // The same question again is the repeat ask after an answer: it gets the answer.
+    const repeat=store.setPendingIntake(sessionId,placement);
+    expect(repeat.status).toBe("answered");
+    expect(repeat.answer).toBe("New to it");
+
+    // A different question is a new question.
+    const fresh={questions:[{header:"Quick Python check",question:"For values = [1, 2, 4] and k = 2, what should the result be?",options:[{label:"[1.5, 3.0]"},{label:"[1.5, 3.0, 2.0]"}],multiple:false,custom:true}]};
+    const asked=store.setPendingIntake(sessionId,fresh);
+    expect(asked.status).toBe("pending");
+    expect(store.readSession(sessionId)?.pendingLearnerQuestion?.questions[0]?.header).toBe("Quick Python check");
+    store.answerIntake(sessionId,"[1.5, 3.0]");
+    expect(store.answeredIntake(sessionId)).toBe("[1.5, 3.0]");
+  }finally{store.close();}
+});
+
+/* The conversation rewinds; the record does not. */
+it("cuts the conversation at an edited message and leaves the record standing",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const{sessionId}=store.createSession("Binary search");
+    const first=store.addMessage(sessionId,"learner","teach me binary serch")!;
+    store.addMessage(sessionId,"agent","Here is a challenge.");
+    store.addMessage(sessionId,"learner","actually make it harder");
+    const target=store.setTrainingTarget(sessionId,{ability:"Binary search bounds",specificGap:"Off-by-one on the upper bound",desiredEvidence:"Correct bounds",avoidTesting:[]});
+    store.createQuestion(sessionId,{...design("Find the insert point"),difficulty:"developing"},{valid:true});
+
+    const rewound=store.rewindToMessage(sessionId,first.id);
+    expect(rewound).toEqual({body:"teach me binary serch",removed:3});
+    expect(store.readSession(sessionId)?.messages).toHaveLength(0);
+    // Published work is the record, not the conversation, and stays where it is.
+    expect(store.readSession(sessionId)?.question?.abilityId).toBe(target.abilityId);
+  }finally{store.close();}
+});
+
+it("refuses to rewind to anything but one of the learner's own messages",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const{sessionId}=store.createSession("Graphs");
+    store.addMessage(sessionId,"learner","hello");
+    const reply=store.addMessage(sessionId,"agent","Hello back.")!;
+    expect(store.rewindToMessage(sessionId,reply.id)).toBeNull();
+    expect(store.rewindToMessage(sessionId,randomUUID())).toBeNull();
+    expect(store.readSession(sessionId)?.messages).toHaveLength(2);
+  }finally{store.close();}
+});
+
 it("durably pauses an evidence-empty session for placement",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Understand the Node.js event loop");expect(store.hasLearnerEvidence()).toBe(false);const intake={questions:[{header:"Experience",question:"How comfortable are you with callbacks and Promises?",options:[{label:"New — I have not used them"},{label:"Some — I have seen them in small programs"}],multiple:false,custom:true}]};store.setPendingIntake(sessionId,intake);expect(store.readSession(sessionId)?.pendingLearnerQuestion?.questions[0]?.question).toContain("Promises");store.answerIntake(sessionId,"I have not used Promises yet.");expect(store.readSession(sessionId)?.pendingLearnerQuestion).toBeNull();expect(store.answeredIntake(sessionId)).toBe("I have not used Promises yet.");expect(store.setPendingIntake(sessionId,intake).status).toBe("answered");expect(store.readSession(sessionId)?.pendingLearnerQuestion).toBeNull();const target=store.setTrainingTarget(sessionId,{ability:"Function-call sequencing",specificGap:"Follow ordinary calls before asynchronous scheduling",desiredEvidence:"Predicts direct calls",avoidTesting:["Promises","timers"]});store.createQuestion(sessionId,{...design("Trace direct calls"),difficulty:"foundation"},{valid:true});const detail=store.readSession(sessionId);expect(detail?.question?.difficulty).toBe("foundation");expect(detail?.question?.abilityId).toBe(target.abilityId);}finally{store.close();}});
 
 it("allocates live attempt sequences inside the authoritative transaction",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Practise JavaScript");store.setTrainingTarget(sessionId,{ability:"Control flow",specificGap:"Trace branches",desiredEvidence:"Explains the selected branch",avoidTesting:[]});const question=store.createQuestion(sessionId,design("Trace a branch"),{valid:true});const base={attemptId:question.attemptId,occurredAt:new Date().toISOString(),source:"learner" as const,schemaVersion:1 as const};const first=store.appendNextEvent({...base,id:randomUUID(),type:"file_changed",payload:{path:"src/index.js"}});const second=store.appendNextEvent({...base,id:randomUUID(),type:"learner_remark",payload:{body:"I expect the first branch."}});expect([first.sequence,second.sequence]).toEqual([1,2]);expect(store.readSession(sessionId)?.question?.latestEventSequence).toBe(2);expect(store.readAttempt(question.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({sequence:1,type:"file_changed"}),expect.objectContaining({sequence:2,type:"learner_remark"})]));}finally{store.close();}});

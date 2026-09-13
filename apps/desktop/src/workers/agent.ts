@@ -5,6 +5,7 @@ import { languageSchema, type Language } from "@spar/domain";
 import { piFinishReason, piUsage, type PiProviderInput } from "./piProvider.js";
 import { createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentTools, piCompleteText, toolErrorText, turnOverflowed, type ToolChoiceRef } from "./piAgent.js";
 import { fitEvidence, nextEvidenceBudget, stableJson } from "./evidence.js";
+import { clampSteer, steeringSection } from "./steering.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
 import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 import { normalizeAgentStreamPart } from "./agentStream.js";
@@ -55,6 +56,7 @@ const PROTOCOL_RETRY_LIMIT = 4;
  *  learner's clock. */
 const OVERFLOW_RETRY_LIMIT = 3;
 
+
 /** After this many failures a stage offering several tools is narrowed to its
  *  last one — the phase's own tool, the co-offered extras dropped. A model that
  *  cannot produce this call is not helped by also being allowed to draw. */
@@ -102,6 +104,20 @@ type ComplexityReviewRequest = { kind: "request"; id: string; payload: { title: 
  * mid-stream and a turn about to start its ninth identical read.
  */
 const running = new Map<string, AbortController>();
+/**
+ * What the learner said while the turn was already working, by request id.
+ *
+ * pi has a steering queue of its own and it cannot be used here: the loop drains
+ * it only when `shouldStopAfterTurn` says to keep going, and Spar's says stop
+ * after every turn because one turn is one phase. So the queue lives at the
+ * boundary that is actually Spar's — the phase — and the controller drains it
+ * there, which is the same moment pi would have.
+ *
+ * Before this, a learner who typed while the agent worked had their message
+ * silently dropped: the turn was already claimed, and the host returned the
+ * running turn's id as though the message had been taken.
+ */
+const steering = new Map<string, string[]>();
 parentPort.on("message", (event) => {
   const message = event.data as Record<string, unknown>;
   if (message.kind === "request" && message.method === "abort") {
@@ -111,6 +127,18 @@ parentPort.on("message", (event) => {
        already finished: the caller is holding a promise on this id, and a stop
        that arrives a moment too late is a no-op, not a failure. */
     parentPort.postMessage({ kind: "result", id: message.id, ok: true, value: {} });
+    return;
+  }
+  if (message.kind === "request" && message.method === "steer") {
+    const payload = message.payload as { requestId?: unknown; text?: unknown } | null;
+    const target = String(payload?.requestId);
+    const text = typeof payload?.text === "string" ? payload.text.trim() : "";
+    /* Answered with whether it landed. A turn that finished while the learner
+       was typing is not an error — it is a message that now belongs to the next
+       turn, and the host needs to know that to start one. */
+    const live = text.length > 0 && running.has(target);
+    if (live) steering.set(target, [...(steering.get(target) ?? []), text]);
+    parentPort.postMessage({ kind: "result", id: message.id, ok: true, value: { steered: live } });
     return;
   }
   if (message.kind === "request" && message.method === "suggest") { void suggest(message as unknown as SuggestRequest); return; }
@@ -390,7 +418,7 @@ function countLines(content: string): number {
 async function run(request: Request) {
   const stopped = new AbortController();
   running.set(request.id, stopped);
-  try { await runTurn(request, stopped.signal); } finally { running.delete(request.id); }
+  try { await runTurn(request, stopped.signal); } finally { running.delete(request.id); steering.delete(request.id); }
 }
 
 async function runTurn(request: Request, stopped: AbortSignal) {
@@ -443,6 +471,10 @@ async function runTurn(request: Request, stopped: AbortSignal) {
        that by overflowing again would cost a round trip per phase. */
     let evidenceBudget = Number.POSITIVE_INFINITY;
     let overflowRetries = 0;
+    /* Kept for the rest of the turn rather than shown to one phase and dropped.
+       A learner who says "in Python, not Java" three phases before the challenge
+       is written meant it for the challenge. */
+    const interruptions: string[] = [];
     for (let step = 0; step < AGENT_MAX_STEPS; step += 1) {
       /* Checked first, so a stop that lands while a tool is in flight ends the
          turn before the next phase is even planned. What the model already said
@@ -453,6 +485,16 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         return;
       }
       currentPhase = step;
+      /* Drained here and nowhere else. The learner types at a keyboard while a
+         phase is mid-stream, and cutting into a half-written tool call to insert
+         it would produce a request the provider rejects — so it lands at the
+         seam between phases, where the transcript is rebuilt anyway. */
+      const arrived = steering.get(request.id) ?? [];
+      if (arrived.length) {
+        steering.set(request.id, []);
+        interruptions.push(...arrived.map(clampSteer));
+        parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: `steered:${arrived.length}` } });
+      }
       const spent = spentTools(callCounts);
       /* Only the open stages are narrowed. A required stage is the controller's
          own sequence and it advances on the outcome being recorded at all, so a
@@ -484,7 +526,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       const asked = failures > NARROW_AFTER && stage.activeTools.length > 1 && stage.toolChoice === "required"
         ? stage.activeTools.slice(-1)
         : stage.activeTools;
-      const prompt = orchestrationPrompt(request, outcomes, asked, step, protocolFailures.get(stageKey)?.detail, spent, evidenceBudget);
+      const prompt = orchestrationPrompt(request, outcomes, asked, step, protocolFailures.get(stageKey)?.detail, spent, evidenceBudget, interruptions);
       const phaseAbort = new AbortController();
       const phaseTimer = setTimeout(() => phaseAbort.abort(new Error(`Spar's provider phase exceeded ${AGENT_PHASE_TIMEOUT_MS / 1_000} seconds.`)), AGENT_PHASE_TIMEOUT_MS);
       /* pi owns the run's own signal, so stopping reaches it by aborting the
@@ -694,14 +736,18 @@ const ACCUMULATING_TOOLS = new Set(["visualize_read_step", "visualize_find"]);
  *  are the one thing here a single turn can ask for indefinitely. */
 const ACCUMULATED_LIMIT = 6;
 
-function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string, spent: Set<string> = new Set(), evidenceBudget = Number.POSITIVE_INFINITY) {
+function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string, spent: Set<string> = new Set(), evidenceBudget = Number.POSITIVE_INFINITY, interruptions: string[] = []) {
   const evidence = fitEvidence(Object.fromEntries([...outcomes.entries()].map(([name, values]) => [name, ACCUMULATING_TOOLS.has(name) ? values.slice(-ACCUMULATED_LIMIT) : values.at(-1)])), evidenceBudget);
   const compilationFeedback = activeTools.some((tool)=>tool==="create_question"||tool==="replace_current_question"||tool==="assign_practice_problem") ? latestRejectedCompilationFeedback(outcomes) : "";
   const phaseInstruction=protocolFailure
     ? `Your previous response did not produce a schema-valid host tool call: ${protocolFailure}. Call exactly one tool from ${activeTools.join(", ")} now. Correct only the tool-call JSON shape; do not answer in prose.`
     : activeTools.length?(request.payload.turnKind==="learner-message"?`${compilationFeedback?`The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Fix that exact failure before trying again. `:""}${request.payload.activeQuestion?`An active challenge exists (question ${request.payload.activeQuestion.id}, attempt ${request.payload.activeQuestion.attemptId}). create_question is intentionally unavailable. If the learner says the challenge is too difficult, asks to change it, or confirms "do it", inspect the current attempt if needed, adjust the target if needed, then call replace_current_question. Never answer that a replacement cannot be launched merely because a challenge is active; replacement is the supported operation. `:"No active challenge exists, so create_question is the supported creation operation. "}Respond to the learner's actual request. Use a tool whenever they ask you to inspect or change real tests, challenges, account history, or abilities. You may call one best tool now, or answer concisely if no tool is needed. Never claim a state change without its successful tool result.`:`${compilationFeedback ? `The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Revise the candidate to fix that exact failure. A known-incorrect implementation must pass every visible test and fail a hidden test; do not submit a placeholder or deliberately visible-failing implementation. ` : ""}Before the call, write one short sentence addressed to the learner saying what you are about to do and why it follows from what you just found — one sentence, present tense, no preamble and no restating this instruction. Then call the single best required next tool from this allowlist: ${activeTools.join(", ")}. Do not write anything else: the sentence and the call, nothing more.`):`${spent.size?`You have already called ${[...spent].join(", ")} this turn and the results are in the evidence above; calling again returns the same thing. Answer the learner now from what you have. `:""}${completionInstruction(request.payload.turnKind,outcomes)}`;
   const rendered = stableJson(evidence);
-  return { text: `${request.payload.context}\n\nLatest learner action:\n${request.payload.message}\n\nDurable results from earlier phases of this same Spar turn:\n${rendered}\n\nPhase ${step + 1}. ${phaseInstruction}`, evidenceChars: rendered.length, evidenceEntries: Object.keys(evidence).length };
+  /* Placed after the evidence and before the phase instruction, which is where
+     its authority belongs: newer than everything above it, and not a licence to
+     abandon what the phase was told to do. */
+  const interrupted = steeringSection(interruptions);
+  return { text: `${request.payload.context}\n\nLatest learner action:\n${request.payload.message}\n\nDurable results from earlier phases of this same Spar turn:\n${rendered}${interrupted}\n\nPhase ${step + 1}. ${phaseInstruction}`, evidenceChars: rendered.length, evidenceEntries: Object.keys(evidence).length };
 }
 
 /**

@@ -36,13 +36,14 @@ export function Page({ children, className, width = "regular" }: { children: Rea
  * page is for is a paragraph nobody reads twice, and the page has to work
  * without it anyway.
  */
-export function PageHeader({ action, eyebrow, title }: {
+export function PageHeader({ action, className, eyebrow, title }: {
   action?: React.ReactNode;
+  className?: string | undefined;
   eyebrow?: React.ReactNode;
   title: React.ReactNode;
 }) {
   return (
-    <header className="mb-7 flex items-baseline justify-between gap-6">
+    <header className={cn("mb-7 flex items-baseline justify-between gap-6", className)}>
       <div className="min-w-0">
         {eyebrow && <p className="mb-1 text-ui text-muted-foreground">{eyebrow}</p>}
         <h1 className="text-[1.6rem] font-semibold leading-[1.15] tracking-[-0.035em]">{title}</h1>

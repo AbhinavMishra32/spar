@@ -5,6 +5,7 @@ import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { ViewSwitch } from "@/components/ui/view-switch";
 import { AgentThread } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";
+import { AskUserQuestion } from "../agent/AskUserQuestion";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
 import { useStopTurn } from "@/hooks/use-stop-turn";
@@ -31,6 +32,9 @@ export function AgentPanel({
   draft,
   onDraft,
   onSend,
+  onAnswer,
+  onEditMessage,
+  undoable,
   onOpenSettings,
   onOpenExternal,
   testFiles,
@@ -46,6 +50,12 @@ export function AgentPanel({
   draft: string;
   onDraft(value: string): void;
   onSend(): void;
+  /** Answering the agent's question, which is a message like any other — but
+   *  one the composer never held, so it cannot come from the draft. */
+  onAnswer(answer: string): void;
+  /** Rewriting one of the learner's own messages; see `useEditMessage`. */
+  onEditMessage(messageId: string, body: string): void;
+  undoable: ReadonlySet<string>;
   onOpenSettings?: (() => void) | undefined;
   /** Opens a sourced challenge's problem page in the real browser. */
   onOpenExternal?: ((url: string) => void) | undefined;
@@ -57,6 +67,7 @@ export function AgentPanel({
 }) {
   const [view, setView] = useState<View>("problem");
   const busy = run?.status === "streaming";
+  const pending = detail.pendingLearnerQuestion;
   const stop = useStopTurn(detail.summary.id);
 
   // The incoming view enters from the side it sits on in the switch, so the
@@ -141,7 +152,7 @@ export function AgentPanel({
             {view === "problem" ? (
               <ProblemView concepts={concepts} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
             ) : (
-              <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} run={run} />
+              <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} onEditMessage={onEditMessage} run={run} undoable={undoable} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -149,13 +160,22 @@ export function AgentPanel({
 
       <div className="shrink-0 px-4 pb-3 pt-1">
         <div className="mx-auto w-full max-w-[46rem]">
-          {complexityCheckpoint ? <ComplexityCheckpoint
+          {pending ? (
+            /* A question asked while a challenge is open is asked *about* that
+               challenge, and it was the one place the answer could not be given:
+               the workspace drew the ask as a tool row and left the composer
+               underneath it, so the turn sat waiting on an answer the learner
+               had no way to send. It takes the composer's slot here as it does
+               everywhere else. */
+            <AskUserQuestion busy={busy} onSubmit={(answer) => { setView("chat"); onAnswer(answer); }} request={pending} />
+          ) : complexityCheckpoint ? <ComplexityCheckpoint
             onAcknowledge={onComplexityAcknowledge}
             onChange={onComplexityChange}
             onReview={onComplexityReview}
             state={complexityCheckpoint}
           /> : <Composer
             busy={busy}
+            steerable={busy}
             leading={
               <ComposerPill title={LANGUAGE_LABEL[question.language]}>
                 <LanguageGlyph className="size-3.5" language={question.language} />

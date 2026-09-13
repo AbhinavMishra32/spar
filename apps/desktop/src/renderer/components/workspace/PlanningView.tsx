@@ -10,6 +10,7 @@ import { ComposerModelPicker } from "../agent/ModelPicker";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
 import type { AgentRun } from "../agent/agentRun";
 import { useStopTurn } from "@/hooks/use-stop-turn";
+import { useEditMessage } from "@/hooks/use-edit-message";
 
 const STAGES = ["History retrieval", "Target selection", "Challenge compilation", "Deterministic validation"];
 
@@ -98,6 +99,7 @@ export function PlanningView({
   };
 
   const streaming = run?.status === "streaming";
+  const { undoable, edit } = useEditMessage(detail, streaming, onRefresh, onError);
   const stop = useStopTurn(detail.summary.id, onError);
   const transcriptMessages = pending
     ? detail.messages.filter((item) => item.role !== "agent" || !pending.questions.some((question) => question.question === item.body))
@@ -114,6 +116,8 @@ export function PlanningView({
 
       <div className="flex min-h-0 flex-1 flex-col">
             <AgentThread
+              onEditMessage={edit}
+              undoable={undoable}
               header={streaming && run ? <PlanningPresence run={run} /> : undefined}
               empty={
                 <div className="flex flex-col items-center pt-10 text-center">
@@ -153,6 +157,7 @@ export function PlanningView({
                 ) : (
                   <Composer
                     busy={busy || streaming}
+                    steerable={streaming && !busy}
                     onChange={setDraft}
                     {...(onOpenSettings ? { onOpenSettings } : {})}
                     onStop={stop}

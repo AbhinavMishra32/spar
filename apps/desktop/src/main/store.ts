@@ -250,6 +250,30 @@ export class LocalStore {
    *  them out of memory; this is how they come back. */
   messageActivity(messageId:string):AgentActivityStep[]{const row=this.db.prepare("SELECT activity FROM agent_messages WHERE id=?").get(messageId) as {activity:string|null}|undefined;return parseActivity(row?.activity??null);}
   addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[]){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity) VALUES (?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity));this.enqueue("agent-message",{sessionId,messages:[value]});return value;}
+  /**
+   * Take the conversation back to one of the learner's own messages.
+   *
+   * What this removes is the conversation from that message onward — the
+   * message itself included, because the caller is about to send a rewritten
+   * one in its place. What it does not remove is anything the agent recorded on
+   * the way: a challenge that was published, an attempt that was made, evidence
+   * that was written into the learner model. Those are not conversation, they
+   * are the record, and a record that rewrites itself when somebody rephrases a
+   * question is not a record. The caller says so plainly in the confirmation.
+   *
+   * Ordered by rowid rather than `created_at`: insertion order is what "after
+   * this message" means, and two messages written in the same millisecond would
+   * otherwise cut in whichever order the timestamps happened to sort.
+   */
+  rewindToMessage(sessionId:string,messageId:string):{body:string;removed:number}|null{
+    const target=this.db.prepare("SELECT rowid,role,body FROM agent_messages WHERE id=? AND session_id=?").get(messageId,sessionId) as {rowid:number;role:string;body:string}|undefined;
+    if(!target||target.role!=="learner")return null;
+    const removed=this.db.prepare("DELETE FROM agent_messages WHERE session_id=? AND rowid>=?").run(sessionId,target.rowid).changes;
+    /* Not enqueued for sync: the cloud transcript is append-only and has no
+       delete route, so a row here would be written and dropped on the next
+       drain. The local conversation is the one the learner is rewinding. */
+    return {body:target.body,removed};
+  }
   hasLearnerEvidence(trackId?:string|null){const scope=this.learningTrackId(trackId);if(!scope)return false;const abilities=(this.db.prepare("SELECT COUNT(*) count FROM ability_documents WHERE track_id=?").get(scope) as {count:number}).count;const completed=(this.db.prepare("SELECT COUNT(*) count FROM attempts a JOIN sessions s ON s.id=a.session_id WHERE a.status='completed' AND s.track_id=?").get(scope) as {count:number}).count;return abilities>0||completed>0;}
   /**
    * Evidence that can calibrate this goal, rather than any row sharing a generic
@@ -280,7 +304,34 @@ export class LocalStore {
         AND s.track_id=? ORDER BY e.occurred_at DESC LIMIT 500`).all(scope) as Array<{title:string;type:string;payload:string}>;
     return events.some((row)=>evidenceRelevance(`${row.title}\n${row.type}\n${row.payload}`,terms)>=threshold);
   }
-  setPendingIntake(sessionId:string,input:AskUserQuestionInput){const existing=this.db.prepare("SELECT question,status,answer FROM session_intake WHERE session_id=?").get(sessionId) as {question:string;status:string;answer:string|null}|undefined;if(existing?.status==="answered"){let request:AskUserQuestionRequest;try{request=askUserQuestionRequestSchema.parse(JSON.parse(existing.question));}catch{request=legacyQuestionRequest(existing.question);}return{request,status:"answered" as const,answer:existing.answer};}const now=new Date().toISOString();const request=askUserQuestionRequestSchema.parse({id:randomUUID(),...input});this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,JSON.stringify(request),now);return{request,status:"pending" as const};}
+  /**
+   * Put a question from the agent in front of the learner.
+   *
+   * The answered branch exists for one case and one case only: the agent asks,
+   * the turn ends, the learner answers, and the answer opens a new turn in which
+   * the phase controller requires `ask_user_question` again. Handing back the
+   * answer there is what stops it asking the same thing forever.
+   *
+   * It used to do that for *any* later question, because this table holds one
+   * row per session. So the second question a session ever asked was swallowed
+   * and the first one's answer returned in its place — the agent would see a
+   * reply to something it had not asked, ask again, and the learner would watch
+   * it spin having never been shown anything to answer. A question that differs
+   * from the answered one is a new question and replaces it.
+   */
+  setPendingIntake(sessionId:string,input:AskUserQuestionInput){
+    const existing=this.db.prepare("SELECT question,status,answer FROM session_intake WHERE session_id=?").get(sessionId) as {question:string;status:string;answer:string|null}|undefined;
+    if(existing?.status==="answered"){
+      let previous:AskUserQuestionRequest;
+      try{previous=askUserQuestionRequestSchema.parse(JSON.parse(existing.question));}catch{previous=legacyQuestionRequest(existing.question);}
+      if(sameIntake(previous,input))return{request:previous,status:"answered" as const,answer:existing.answer};
+    }
+    const now=new Date().toISOString();
+    const request=askUserQuestionRequestSchema.parse({id:randomUUID(),...input});
+    this.db.prepare("INSERT INTO session_intake (session_id,question,status,answer,created_at,answered_at) VALUES (?,?,'pending',NULL,?,NULL) ON CONFLICT(session_id) DO UPDATE SET question=excluded.question,status='pending',answer=NULL,created_at=excluded.created_at,answered_at=NULL").run(sessionId,JSON.stringify(request),now);
+    return{request,status:"pending" as const};
+  }
+
   pendingIntake(sessionId:string):AskUserQuestionRequest|undefined{const row=this.db.prepare("SELECT question FROM session_intake WHERE session_id=? AND status='pending'").get(sessionId) as {question:string}|undefined;if(!row)return undefined;try{return askUserQuestionRequestSchema.parse(JSON.parse(row.question));}catch{return legacyQuestionRequest(row.question);}}
   answeredIntake(sessionId:string):string|undefined{const row=this.db.prepare("SELECT answer FROM session_intake WHERE session_id=? AND status='answered'").get(sessionId) as {answer:string|null}|undefined;return row?.answer??undefined;}
   answerIntake(sessionId:string,answer:string){const result=this.db.prepare("UPDATE session_intake SET status='answered',answer=?,answered_at=? WHERE session_id=? AND status='pending'").run(answer,new Date().toISOString(),sessionId);if(result.changes!==1)throw new Error("No pending placement question exists for this session");return{answered:true};}
@@ -1064,6 +1115,17 @@ function parseStringArray(value:string){try{const parsed=JSON.parse(value);retur
 /** A `training_targets` row as the domain shape. Exported because a checkpoint
  *  carries the session's target and is composed outside this file. */
 export function normalizeTarget(row:Record<string,unknown>):TrainingTarget{return{id:String(row.id),sessionId:String(row.session_id),abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),specificGap:String(row.specific_gap),desiredEvidence:String(row.desired_evidence),avoidTesting:JSON.parse(String(row.avoid_testing)) as string[],action:String(row.action) as TrainingTarget["action"],createdAt:String(row.created_at)};}
+/**
+ * Whether the agent is asking what it already asked.
+ *
+ * Compared on what the learner would actually see — the prompts and the choices
+ * offered for them — and not on the request id, which is minted fresh on every
+ * call and would make every repeat look new.
+ */
+function sameIntake(previous:AskUserQuestionRequest,input:AskUserQuestionInput):boolean{
+  const shape=(questions:AskUserQuestionRequest["questions"]|AskUserQuestionInput["questions"])=>JSON.stringify(questions.map((item)=>[item.header,item.question,item.options.map((option)=>option.label)]));
+  return shape(previous.questions)===shape(input.questions);
+}
 function legacyQuestionRequest(question:string):AskUserQuestionRequest{return{id:randomUUID(),questions:[{header:"Placement",question,options:[{label:"New to this — start me from the prerequisites"},{label:"Some experience — calibrate with an applied question"},{label:"Comfortable — go straight to an interview-style diagnostic"}],multiple:false,custom:true}]};}
 /** A challenge's source, read back defensively. Null is the ordinary answer —
  *  every challenge Spar wrote itself has none — and a row written by a build that

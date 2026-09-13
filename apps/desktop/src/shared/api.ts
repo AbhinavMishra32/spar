@@ -12,7 +12,7 @@ export const ipc = {
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
   workspaceStateSave: "workspace:state-save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
-  workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentStop: "agent:stop", attemptSubmit: "attempt:submit",
+  workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
@@ -464,7 +464,11 @@ export interface SparApi {
   attemptComplexityStatus(input: z.infer<typeof complexityAcknowledgeInput>): Promise<{ time: string; space: string; review: string; verdict: ComplexityVerdict | null } | null>;
   reviewAttemptComplexity(input: z.infer<typeof complexityReviewInput>): Promise<{ review: string; verdict: ComplexityVerdict | null }>;
   acknowledgeAttemptComplexity(input: z.infer<typeof complexityAcknowledgeInput>): Promise<void>;
-  sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string }>;
+  /** Send to this session's agent. While a turn is running this steers it —
+   *  the message is recorded and the running turn picks it up at its next phase
+   *  boundary — rather than being dropped, which is what used to happen.
+   *  `steered` says which of the two occurred. */
+  sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string; steered?: boolean }>;
   /** Stops the turn running for this session, if there is one.
    *
    *  Real cancellation, not a hidden one: the worker aborts its own loop, which
@@ -473,6 +477,20 @@ export interface SparApi {
    *  writes to the learner's record. What the agent had already said is kept, so
    *  stopping ends the turn rather than erasing it. */
   stopAgentTurn(input: { sessionId: string }): Promise<void>;
+  /**
+   * Rewrite one of your own messages and have the agent answer it again.
+   *
+   * The conversation is cut at that message — it and everything after it leave
+   * the transcript — and the rewritten message is sent in its place. What the
+   * agent already recorded is not withdrawn: a challenge it published, an
+   * attempt you made on it, evidence written into your learner model. Those are
+   * the record rather than the conversation, and rewording a question does not
+   * unmake them.
+   *
+   * Refused while a turn is running, because the turn being rewound is the one
+   * still writing. Stop it first.
+   */
+  editAgentMessage(input: { sessionId: string; messageId: string; message: string }): Promise<{ runId: string }>;
   /** Give up on the active challenge; the session returns to general chat. */
   abandonAttempt(input: { sessionId: string; attemptId: string; reason: string }): Promise<void>;
   /** Start a clean evidence segment without throwing away the learner's files. */

@@ -6,7 +6,9 @@ import { message } from "@/lib/format";
 import { Toolbar } from "../shell/Toolbar";
 import { AgentThread } from "../agent/AgentThread";
 import { useStopTurn } from "@/hooks/use-stop-turn";
+import { useEditMessage } from "@/hooks/use-edit-message";
 import { Composer } from "../agent/Composer";
+import { AskUserQuestion } from "../agent/AskUserQuestion";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
 
@@ -37,11 +39,13 @@ export function ChatView({
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const pending = detail.pendingLearnerQuestion;
   const streaming = run?.status === "streaming";
   const stop = useStopTurn(detail.summary.id, onError);
+  const { undoable, edit } = useEditMessage(detail, streaming, onRefresh, onError);
 
-  const send = async () => {
-    const body = draft.trim();
+  const send = async (answer?: string) => {
+    const body = (answer ?? draft).trim();
     if (!api || !body) return;
     setBusy(true);
     setDraft("");
@@ -89,6 +93,8 @@ export function ChatView({
       />
 
       <AgentThread
+        onEditMessage={edit}
+        undoable={undoable}
         header={
           <div className="rounded-xl border border-border bg-card px-3 py-2.5 shadow-[var(--app-shadow-card)]">
             <div className="flex items-center gap-2">
@@ -131,8 +137,15 @@ export function ChatView({
 
       <div className="shrink-0 px-4 pb-4">
         <div className="transcript-column">
-          <Composer
+          {pending ? (
+            /* The agent asked something, so the question takes the composer's
+               place here exactly as it does while planning. Without this the
+               question was drawn as a tool row in the transcript and nowhere
+               else: visible, unanswerable, and holding the turn open. */
+            <AskUserQuestion busy={busy || streaming} onSubmit={(answer) => void send(answer)} request={pending} />
+          ) : <Composer
             busy={busy || streaming}
+            steerable={streaming && !busy}
             onChange={setDraft}
             {...(onOpenSettings ? { onOpenSettings } : {})}
             onStop={stop}
@@ -140,7 +153,7 @@ export function ChatView({
             placeholder="Ask the agent anything…"
             trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}
-          />
+          />}
         </div>
       </div>
     </div>

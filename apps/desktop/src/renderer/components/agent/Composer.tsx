@@ -23,6 +23,7 @@ export function Composer({
   onAttach,
   onOpenSettings,
   busy = false,
+  steerable = false,
   minLength = 1,
   placeholder = "Ask Spar anything…",
   autoFocus = false,
@@ -38,6 +39,11 @@ export function Composer({
   onAttach?(): void;
   onOpenSettings?(): void;
   busy?: boolean;
+  /** Whether a message sent during a running turn reaches that turn. When it
+   *  does the field stays live, because the learner correcting course is the
+   *  one moment they most need to be able to type — and the send button only
+   *  yields to Stop once the draft is empty and there is nothing to say. */
+  steerable?: boolean;
   /** Shortest draft the receiver will accept. A chat message needs one
    *  character; a session goal is validated at three in the main process, and
    *  refusing it here is what keeps that contract from arriving as an error. */
@@ -76,7 +82,12 @@ export function Composer({
     };
   }, [resize]);
 
-  const canSend = value.trim().length >= Math.max(1, minLength) && !busy && ready;
+  const drafted = value.trim().length >= Math.max(1, minLength);
+  const canSend = drafted && (!busy || steerable) && ready;
+  /* Stop is what an empty field offers while a turn runs. A draft in the field
+     means the learner has something to say to the turn, and taking the send
+     button away from them there is how the message used to get lost. */
+  const showStop = busy && Boolean(onStop) && !(steerable && drafted);
 
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -142,10 +153,16 @@ export function Composer({
         <div className="min-w-0 flex-1 truncate px-1 text-ui text-muted-foreground/65">
           {/* The notice above already says why nothing can be sent; a second
               line about Return would be instructions for a key that does nothing. */}
-          {ready ? hint ?? (focused && !value ? "Return to send · Shift + Return for a new line" : null) : null}
+          {ready
+            ? hint ?? (busy && steerable && drafted
+              ? "Return to send — the agent picks this up at its next step"
+              : focused && !value
+                ? "Return to send · Shift + Return for a new line"
+                : null)
+            : null}
         </div>
         {trailing}
-        {busy && onStop ? (
+        {showStop && onStop ? (
           <button
             aria-label="Stop"
             className="grid size-7 shrink-0 place-items-center rounded-full border border-[var(--border-strong)] bg-[var(--color-background-elevated-secondary)] text-foreground transition-colors hover:bg-accent"
@@ -169,7 +186,7 @@ export function Composer({
             title="Send"
             type="button"
           >
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
+            {busy && !steerable ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
           </button>
         )}
       </div>

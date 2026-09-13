@@ -791,6 +791,7 @@ export function App() {
               onBaseline={beginBaseline}
               onCreateTrack={() => navigate("tracks")}
               onMode={setTrainingMode}
+              onNavigate={navigate}
               onOpen={open}
               onOpenAbility={(next) => (next ? openAbility(next) : navigate("home"))}
               onOpenConcept={setConcept}
@@ -927,10 +928,18 @@ function sessionMode(detail: SessionDetail): "challenge" | "chat" | "planning" {
   return "planning";
 }
 
+/** The first thing the app shows, while the local store is being read.
+ *
+ *  The mark rather than the word: at this size the dot grid is the thing people
+ *  recognise from the dock icon they just clicked, and — unlike a wordmark — it
+ *  can move, so the screen says "starting" without a line of text saying it.
+ *  The wave loops, because a boot has no progress to imply and no known end. */
 function BootShell() {
   return (
-    <div aria-busy="true" className="app-drag app-pane grid h-full place-items-center" role="status">
-      <SparWordmark className="boot-wordmark text-[3.5rem] leading-none" />
+    <div className="app-drag app-pane grid h-full place-items-center">
+      {/* The mark carries the status role and the name — it is the only thing on
+          the screen, and the wordmark it replaced was what used to announce it. */}
+      <SparDots className="boot-mark text-foreground" label="Starting Spar" pattern="wave" size={112} />
     </div>
   );
 }

@@ -892,6 +892,13 @@
      travels across it — slower and over a wider gradient than the working
      shimmer, because at this size a 2.4s sweep reads as a loading bar. Whatever
      the app is doing before its first paint is not the learner's business. */
+  /* The boot mark: the app icon's grid at room scale, waving while the local
+     store is read. It fades and settles up into place rather than appearing,
+     so the window opening and the mark arriving read as one movement. */
+  .boot-mark {
+    animation: boot-mark-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
   .boot-wordmark {
     background: linear-gradient(
       90deg,
@@ -1492,6 +1499,17 @@
   }
 }
 
+@keyframes boot-mark-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @keyframes boot-wordmark-in {
   from {
     opacity: 0;
@@ -1744,6 +1762,12 @@
      be the logo rather than nothing. */
   .spar-dots circle {
     animation: none !important;
+  }
+
+  /* Under reduced motion the mark is simply there, at rest — the dots' own
+     `animation: none` above already leaves it drawn as the icon draws it. */
+  .boot-mark {
+    animation: none;
   }
 
   .thinking-shimmer,

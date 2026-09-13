@@ -20,6 +20,7 @@ import { FileGlyph } from "../common/LanguageGlyph";
 import { SourceGlyph } from "../common/SourceGlyph";
 import type { AgentRun } from "../agent/agentRun";
 import { AgentPanel } from "./AgentPanel";
+import { useEditMessage } from "@/hooks/use-edit-message";
 import type { ConceptContext } from "../concepts/ConceptChip";
 import { PaneHandle } from "./PaneHandle";
 import { FileTree } from "./FileTree";
@@ -122,6 +123,7 @@ export function Workspace({
      only bundles an active one. */
   const graded = Boolean(question.attemptCompletedAt);
   const agentBusy = sending || run?.status === "streaming";
+  const { undoable, edit } = useEditMessage(detail, run?.status === "streaming", onRefresh, onError);
 
   /* Tell the main process which file the learner is in, so the checkpoint it
      writes can reopen the session on the file they left rather than on the first
@@ -333,9 +335,12 @@ export function Workspace({
     }
   };
 
-  const send = async () => {
-    const body = draft.trim();
-    if (!body || !api || sendingRef.current || run?.status === "streaming") return;
+  const send = async (answer?: string) => {
+    const body = (answer ?? draft).trim();
+    /* A running turn no longer refuses the message: it steers it. The guard
+       that remains is against two sends racing each other, not against the
+       agent being busy — being busy is exactly when a correction matters. */
+    if (!body || !api || sendingRef.current) return;
     sendingRef.current=true;
     setSending(true);
     setDraft("");
@@ -563,6 +568,9 @@ export function Workspace({
             onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSettings={onOpenSettings}
             onSend={() => void send()}
+            onAnswer={(answer) => void send(answer)}
+            onEditMessage={edit}
+            undoable={undoable}
             question={question}
             run={run}
             testFiles={testFiles}

@@ -8,19 +8,28 @@ import { approximateRating } from "./ratingScale";
 import { SourceGlyph } from "../common/SourceGlyph";
 
 /**
- * The rating, with its uncertainty attached rather than explained: the
- * provisional flag, the move since the last point, and a curve you can read a
- * shape off.
+ * The rating, as the page's headline.
+ *
+ * This is the one number Spar is for, so it is drawn as one: the figure at
+ * display size, the move since the last point beside it, the two contest scales
+ * it approximately corresponds to underneath, and a curve you can read a shape
+ * off to its right. Everything on the collapsed face is a fact about where the
+ * learner stands — nothing here is a caption.
  *
  * Clicking it opens the history — every change, what moved it, and by how much.
- * That is the whole reason the collapsed state can be three figures and a line:
+ * That is the whole reason the collapsed state can be four figures and a line:
  * the argument is one click away rather than printed over the top of it.
+ *
+ * `footer` is whatever the page wants to hang off the same surface. Home puts
+ * its four counts there, because a row of figures under the headline figure is
+ * one panel of standing rather than two — and the alternative, a second bordered
+ * strip directly beneath this one, reads as a card that failed to close.
  *
  * The chart is deliberately unlabelled on the x axis. These points are attempts,
  * not days; spacing them by time would draw a flat line through a week off and a
  * cliff through a long session, and neither is what happened.
  */
-export function RatingBand({ progress }: { progress: LearnerProgress }) {
+export function RatingHero({ footer, progress }: { footer?: React.ReactNode; progress: LearnerProgress }) {
   const [open, setOpen] = useState(false);
   const history = progress.ratingHistory;
   const previous = history.length > 1 ? history[history.length - 2] : undefined;
@@ -30,57 +39,62 @@ export function RatingBand({ progress }: { progress: LearnerProgress }) {
     <Panel className="overflow-hidden">
       <button
         aria-expanded={open}
-        className="flex w-full items-center justify-between gap-6 px-5 py-4 text-left outline-none transition-colors hover:bg-accent/20"
+        className="flex w-full items-end justify-between gap-6 px-5 pb-4 pt-3.5 text-left outline-none transition-colors hover:bg-accent/15 focus-visible:bg-accent/15"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
         <div className="min-w-0">
-          <p className="flex items-center gap-1 text-ui text-muted-foreground">
+          <span className="flex items-center gap-1 text-ui text-muted-foreground">
             Spar Rating
             <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
-          </p>
-          <div className="mt-1 flex items-baseline gap-2">
-            <strong className="text-[2rem] font-semibold leading-none tabular-nums tracking-[-0.045em]">{progress.rating.rating}</strong>
+          </span>
+
+          <span className="mt-1 flex items-baseline gap-2.5">
+            <strong className="text-[2.6rem] font-semibold leading-none tabular-nums tracking-[-0.05em]">{progress.rating.rating}</strong>
             {delta !== null && delta !== 0 && (
-              <span className={cn("text-content tabular-nums", delta > 0 ? "text-[var(--success)]" : "text-muted-foreground")}>
+              <span className={cn("text-content font-medium tabular-nums", delta > 0 ? "text-[var(--success)]" : "text-muted-foreground")}>
                 {delta > 0 ? "+" : ""}{delta}
               </span>
             )}
-            {progress.rating.provisional && <span className="text-ui text-muted-foreground">Provisional</span>}
-          </div>
+            {progress.rating.provisional && (
+              <span className="rounded-[var(--radius-md)] bg-[var(--surface-tertiary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground">Provisional</span>
+            )}
+          </span>
+
+          {/* What the number means somewhere the learner already has a feel for.
+              Promoted onto the collapsed face, because "am I a 1600 on LeetCode
+              yet" is the question the headline figure is being read to answer,
+              and it was two clicks down. Labelled approximate and rounded
+              coarsely, because it is a translation of Spar's own evidence and not
+              a score either site has given anybody. */}
+          <span className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-ui-sm text-muted-foreground/60">Roughly</span>
+            <Equivalent label="LeetCode" source="leetcode" value={approximateRating(progress.rating.rating, "leetcode")} />
+            <Equivalent label="Codeforces" source="codeforces" value={approximateRating(progress.rating.rating, "codeforces")} />
+          </span>
         </div>
 
-        <div className="hidden w-[15rem] shrink-0 sm:block">
-          <RatingChart points={history} />
-          <div className="mt-1 flex justify-between text-ui-sm text-muted-foreground/70">
+        <div className="hidden w-[19rem] shrink-0 sm:block">
+          <RatingChart className="h-16" points={history} />
+          <span className="mt-1 flex justify-between text-ui-sm text-muted-foreground/70">
             <span>{history.length > 1 ? `${history.length} changes` : "First rating"}</span>
             <span>{relativeTime(progress.rating.occurredAt)}</span>
-          </div>
+          </span>
         </div>
       </button>
 
       {open && (
-        <div className="border-t-[length:var(--hairline)] border-[var(--border-surface-strong)]">
-          {/* The chart is the history. Listing every change under it was a list
-              with one row per attempt — fine at five points, a page of identical
-              rows at fifty — so each point carries its own reason and gives it
-              up on hover instead. Nothing is hidden that was not already
-              impossible to read. */}
-          <div className="px-5 pb-1 pt-4">
-            <RatingChart className="h-28" points={history} showPoints />
-          </div>
-
-          {/* What the number means somewhere the learner already has a feel for.
-              Labelled approximate and rounded coarsely, because it is a
-              translation of Spar's own evidence and not a score either site
-              has given anybody. */}
-          <div className="mt-2 flex items-center gap-5 border-t-[length:var(--hairline)] border-[var(--border-surface-strong)] px-5 py-3">
-            <span className="text-ui-sm text-muted-foreground/70">Roughly equivalent to</span>
-            <Equivalent label="LeetCode" source="leetcode" value={approximateRating(progress.rating.rating, "leetcode")} />
-            <Equivalent label="Codeforces" source="codeforces" value={approximateRating(progress.rating.rating, "codeforces")} />
-          </div>
+        /* The chart is the history. Listing every change under it was a list
+           with one row per attempt — fine at five points, a page of identical
+           rows at fifty — so each point carries its own reason and gives it
+           up on hover instead. Nothing is hidden that was not already
+           impossible to read. */
+        <div className="border-t-[length:var(--hairline)] border-[var(--border-surface-strong)] px-5 pb-4 pt-4">
+          <RatingChart className="h-28" points={history} showPoints />
         </div>
       )}
+
+      {footer && <div className="border-t-[length:var(--hairline)] border-[var(--border-surface-strong)]">{footer}</div>}
     </Panel>
   );
 }
@@ -88,8 +102,8 @@ export function RatingBand({ progress }: { progress: LearnerProgress }) {
 function Equivalent({ label, source, value }: { label: string; source: "leetcode" | "codeforces"; value: number }) {
   return (
     <span className="flex items-center gap-1.5 text-ui" title={`Approximate ${label} rating`}>
-      <SourceGlyph className="size-3.5" source={source} />
-      <span className="tabular-nums">~{value}</span>
+      <SourceGlyph className="size-4" source={source} />
+      <span className="tabular-nums font-medium text-foreground/85">~{value}</span>
     </span>
   );
 }

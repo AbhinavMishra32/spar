@@ -267,11 +267,12 @@ function storedPart(step: AgentActivityStep, index: number): RunPart {
 /**
  * Something the learner said, and the chance to say it differently.
  *
- * Editing is a rewind, not a correction of the text: everything after this
- * message is undone — the files the agent wrote, the concepts and tasks it
- * recorded, the replies — and the conversation runs again from here. That is
- * why the control is offered only where an undo point was actually recorded,
- * and why the confirmation says what will happen rather than "are you sure".
+ * Editing is a rewind of the conversation: this message and everything after it
+ * leave the thread, and the rewritten one is answered in its place. What the
+ * agent recorded on the way does not leave — a challenge it published was
+ * attempted, and an attempt is evidence. The line in the footer says exactly
+ * that, because a control that promised to undo the record would be lying about
+ * the one thing the learner would most want to be true.
  */
 function LearnerMessage({ body, editable, onEdit }: { body: string; editable: boolean; onEdit?: ((body: string) => void) | undefined }) {
   const [editing, setEditing] = useState(false);
@@ -297,7 +298,7 @@ function LearnerMessage({ body, editable, onEdit }: { body: string; editable: bo
             value={draft}
           />
           <div className="mt-1 flex items-center justify-end gap-1.5 px-1">
-            <span className="mr-auto min-w-0 truncate text-ui-sm text-muted-foreground/85">Everything after this is undone</span>
+            <span className="mr-auto min-w-0 truncate text-ui-sm text-muted-foreground/85">Replies after this leave the thread · your record stays</span>
             <button
               className="rounded-md px-2 py-0.5 text-ui text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => {
@@ -374,8 +375,9 @@ export function AgentThread({
   footer?: React.ReactNode;
   /** Rewrites one of the learner's messages and runs again from there. */
   onEditMessage?: ((messageId: string, body: string) => void) | undefined;
-  /** Message ids with an undo point behind them. Editing is offered only for
-   *  these — anything else would promise a rewind that cannot happen. */
+  /** Message ids that can still be rewound to: the learner's own, while no turn
+   *  is running. Editing under a live turn would cut the transcript beneath the
+   *  turn still writing into it. */
   undoable?: ReadonlySet<string> | undefined;
   className?: string;
 }) {
