@@ -93,7 +93,7 @@ authority on whether your code is correct. A tutor that can be talked into
 agreeing with you is not measuring anything.
 
 <p align="center">
-  <img src="docs/assets/screenshots/submission.webp" alt="Submitting a challenge in Spar: hitting Submit, the committed tests running, and the per-case verdicts filling in under the editor." width="780">
+  <video src="https://tryspar.dev/submission.mp4" poster="https://github.com/AbhinavMishra32/spar/raw/main/docs/assets/screenshots/submission.webp" controls muted loop playsinline width="780"></video>
 </p>
 
 <p align="center">
