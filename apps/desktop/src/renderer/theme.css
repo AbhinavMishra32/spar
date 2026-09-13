@@ -298,6 +298,17 @@
   --border-surface-strong: oklch(14.5% 0 0 / 15%);
   --brand: oklch(14.5% 0 0);
   --code-foreground: #33363b;
+  /* Inline code, light mode.
+
+     The chip was a 10% wash of the code ink laid over the page: grey on white,
+     carrying ink a shade lighter than the near-black sentence it sits inside,
+     so an identifier in prose read as faded rather than as an object. The ink
+     is pulled back toward the body's darkness and the wash becomes a real
+     surface with a hairline — the chip is found by its edge, not by being
+     darker than what surrounds it. */
+  --code-inline-foreground: color-mix(in oklab, var(--code-foreground) 50%, var(--foreground));
+  --code-inline-background: color-mix(in oklab, var(--foreground) 4.5%, var(--background));
+  --code-inline-border: color-mix(in oklab, var(--foreground) 11%, transparent);
   --code-comment: #727780;
   --code-keyword: #ce2734;
   --code-type: #7b4bd2;
@@ -415,6 +426,11 @@
   --border-surface-strong: oklch(98.5% 0 0 / 20%);
   --brand: oklch(98.5% 0 0);
   --code-foreground: #c9d1d9;
+  /* On a dark page the wash already reads as an object, and a hairline on top
+     of it only adds a second edge, so the dark chip keeps the tint it had. */
+  --code-inline-foreground: var(--code-foreground);
+  --code-inline-background: color-mix(in oklab, var(--code-foreground) 12%, transparent);
+  --code-inline-border: transparent;
   --code-comment: #8b949e;
   --code-keyword: #ff8177;
   --code-type: #d2a8ff;
@@ -780,7 +796,7 @@
   }
 
   /* The superellipse, back on for the whole thread.
-     
+
      The app opts every radius under the sheet scale back out to a circular arc
      (see the `corner-shape` block in @layer base) because at 6–10px the curve
      is invisible and only lends the corner weight. Inside the transcript that
@@ -1210,19 +1226,19 @@
      entries and anything else that renders agent prose can share one scale. */
   .md-prose {
     /* 13.5px: prose, not a headline.
-       
+
        Chrome and prose are different jobs and want different sizes — the agent's
        text was set at 13px, the size of a toolbar label, which is why a
        paragraph of teaching had the density of a settings row. But ChatGPT's own
        16px assumes a column about twice this panel's width, and at 380px that
        reads as oversized.
-       
+
        Half a step above the app's UI size is enough to change how it reads.
        Every margin, heading, pill and list indent below is a multiple of this,
        so moving this one line rescales the whole system together. */
     --md-font-size: 0.84375rem;
     /* The system face, and the system's own optical sizing.
-       
+
        `--font-display` is named for the job rather than for a file: on macOS it
        resolves through `-apple-system` exactly as `--font-sans` does, and the
        platform picks the Text or Display cut from the size. Naming it here is
@@ -1366,8 +1382,9 @@
   .md-prose :not(pre) > code {
     display: inline;
     border-radius: calc(var(--radius-sm) + 1px);
-    background: color-mix(in oklab, var(--code-foreground) 10%, transparent);
-    color: var(--code-foreground);
+    border: 1px solid var(--code-inline-border);
+    background: var(--code-inline-background);
+    color: var(--code-inline-foreground);
     padding: calc(var(--md-space) * 0.5) calc(var(--md-space) * 1.5);
     font-family: var(--font-mono);
     font-size: var(--md-small-font-size);
@@ -1382,7 +1399,7 @@
   .md-prose :is(table) { font-size: var(--md-small-font-size); }
 
   /* The problem pane runs at the app's content size, not the transcript's.
-     
+
      `.md-prose` is scaled for the thread, which is a reading surface. A problem
      statement sits beside the editor in a column the learner is scanning against
      code, and it was 13px there before the two surfaces started sharing one
@@ -1395,9 +1412,9 @@
 
   .code-inline {
     border-radius: 0.35rem;
-    border: 1px solid color-mix(in srgb, var(--code-border) 82%, var(--code-foreground) 8%);
-    background: color-mix(in srgb, var(--code-background) 70%, transparent);
-    color: var(--code-foreground);
+    border: 1px solid var(--code-inline-border);
+    background: var(--code-inline-background);
+    color: var(--code-inline-foreground);
     padding: 0.05em 0.32em;
     font-family: var(--font-mono);
     font-size: 0.92em;
@@ -1601,6 +1618,44 @@
   100% {
     transform: scale(var(--dot-rest));
     opacity: var(--dot-tone);
+  }
+}
+
+/* One case in a suite, as a dot — see components/workspace/CaseDots.tsx.
+
+   Two states, one mark. While the suite runs the grid sweeps: a band travels
+   through the dots in the order they will report in, which is the same motion
+   the loaders use and says the same thing — work is moving through something.
+   When the verdicts land each dot arrives on its own beat, so a suite of forty
+   resolves as a sweep of colour rather than as forty dots appearing at once. */
+/* The dots' colour and ring. Their size and opacity are not here — the wave is
+   driven a frame at a time from `CaseDots.tsx`, because it has to be able to
+   stop from wherever it happens to be.
+   
+   This was three rounds of keyframes before it was a loop, and every one of them
+   popped. The last and closest attempt pinned the rest frame at scale(1) and put
+   the excursion at 50%, with a registered custom property for amplitude that the
+   element transitioned to zero — the theory being that the dip would flatten
+   smoothly out from under a dot while its colour crossfaded in. It does not:
+   a `var()` read inside a keyframe is resolved when the animation's effect is
+   built, not sampled every frame, so the amplitude arrives as a step and the dot
+   snaps to full size. Nothing about the arrangement of the keyframes fixes that,
+   which is why the wave is no longer made of any.
+   
+   What is left here is what genuinely wants to be declarative: the verdict
+   colour, which crossfades, and the halo, which does not need to know anything
+   about the wave at all. */
+.case-dot {
+  transition:
+    /* Matched to REVEAL_MS in CaseDots.tsx, and to the curve the wave eases out
+       on, so a dot arrives at its size and its colour on the same frame. */
+    background-color 1200ms cubic-bezier(0.33, 1, 0.68, 1),
+    box-shadow 700ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .case-dot {
+    transition: background-color 120ms linear;
   }
 }
 

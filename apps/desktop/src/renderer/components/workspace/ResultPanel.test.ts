@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caseValues, reportForRun, ungradedReason } from "./ResultPanel";
+import { caseToShow, caseValues, reportForRun, ungradedReason } from "./ResultPanel";
 
 describe("ungraded result explanation", () => {
   it("recognizes provider exception class names as pre-verdict failures", () => {
@@ -42,5 +42,29 @@ describe("legacy silent assertion results", () => {
 
   it("does not invent which case failed from a suite-level non-zero exit", () => {
     expect(reportForRun("assertion failed\ncode:1", false, { kind: "failed", summary: "" }, declared).parsed).toBe(false);
+  });
+});
+
+describe("which case opens under the grid", () => {
+  const passed = (ordinal: number) => ({ id: `c${ordinal}`, ordinal, name: `case ${ordinal}`, status: "passed" as const });
+  const failed = (ordinal: number) => ({ id: `c${ordinal}`, ordinal, name: `case ${ordinal}`, status: "failed" as const });
+
+  it("opens nothing when everything passed", () => {
+    /* 40 green dots and "40/40 passed" is the entire verdict. Opening case one
+       there put "this case passed, but the test did not declare its input and
+       expected value" under a clean submission. */
+    expect(caseToShow([passed(1), passed(2), passed(3)], "")).toBeUndefined();
+  });
+
+  it("opens the first failure without being asked", () => {
+    expect(caseToShow([passed(1), failed(2), failed(3)], "")?.ordinal).toBe(2);
+  });
+
+  it("opens the case the learner picked, failing or not", () => {
+    expect(caseToShow([passed(1), failed(2)], "c1")?.ordinal).toBe(1);
+  });
+
+  it("falls back to the failure when the selection is from a previous run", () => {
+    expect(caseToShow([passed(1), failed(2)], "stale")?.ordinal).toBe(2);
   });
 });
