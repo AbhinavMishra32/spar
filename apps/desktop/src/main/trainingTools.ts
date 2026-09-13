@@ -168,7 +168,14 @@ export async function executeTrainingTool(
     rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report };
   }
-  if (name === "inspect_current_attempt" || name === "read_attempt") return { events: local.readAttempt(String(value.attemptId)) };
+  if (name === "inspect_current_attempt" || name === "read_attempt") {
+    /* The code comes with the log. Reading what someone wrote is the cheapest
+       and most direct thing an agent can do about a failing attempt, and until
+       this it was the one thing no tool did — so a turn that wanted to see the
+       code reached for the tracer, which is a run of the program and a payload
+       to match, to find out what a file already said. */
+    return { events: local.readAttempt(String(value.attemptId)), files: await attemptFiles(sessionId, workspaces) };
+  }
   if (name === "evaluate_attempt") return { events: local.readAttempt(String(value.attemptId)) };
   if (name === "review_solution") {
     const attemptId = String(value.attemptId);
@@ -486,4 +493,30 @@ async function compileCandidate(input:unknown,sessionId:string,workspaces:Worksp
     try{return await runner.request("run",{root,language:String(value.language),command:"test",timeoutMs:limits.timeoutMs}).promise as {exitCode:number;stdout:string;stderr:string;durationMs:number};}
     finally{await workspaces.removeValidation(sessionId,validationId);}
   },origin);
+}
+
+/** Longest a file may be before the agent is given its head instead. Enough for
+ *  any challenge's solution; short enough that a learner who pasted a library
+ *  into their workspace cannot spend the turn's context on it. */
+const MAX_FILE = 6_000;
+
+/**
+ * What the learner has written, right now.
+ *
+ * Their own files, not the tests and not the harness: the tests are the
+ * challenge's, the agent set them, and handing them back costs context to say
+ * something the agent already knows. Failures come with their own case detail
+ * from the run, so nothing is lost by leaving them out.
+ */
+async function attemptFiles(sessionId: string, workspaces: WorkspaceService): Promise<Array<{ path: string; text: string }>> {
+  const paths = await workspaces.list(sessionId).catch(() => [] as string[]);
+  const mine = paths.filter((file) => {
+    const name = file.split("/").pop() ?? file;
+    return !name.startsWith("test_") && !name.endsWith("_test.py") && !name.includes(".test.") && !name.endsWith(".md") && !name.endsWith(".json");
+  }).slice(0, 6);
+  const files = await Promise.all(mine.map(async (path) => {
+    const text = await workspaces.read(sessionId, path).catch(() => "");
+    return { path, text: text.length > MAX_FILE ? `${text.slice(0, MAX_FILE)}\n… (${text.length - MAX_FILE} more characters)` : text };
+  }));
+  return files.filter((file) => file.text.trim());
 }

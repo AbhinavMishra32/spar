@@ -70,7 +70,7 @@ export const toolDefinitions = {
   set_training_target: ["Persist one primary evidence target.", z.object({ ability: z.string(), specificGap: z.string(), desiredEvidence: z.string(), avoidTesting: z.array(z.string()) })],
   create_question: ["Compile and validate a complete question from the active target. All paths are relative and the reference implementation must replace starter implementation files.", questionInputSchema],
   replace_current_question: ["Compile a validated replacement for the active challenge while preserving its attempt, tests, and replacement lineage in history.", questionInputSchema.extend({reason:z.string().min(3).max(500)})],
-  inspect_current_attempt: ["Inspect current immutable events, diffs, test runs, and submission evidence.", z.object({ attemptId: z.string().uuid() })],
+  inspect_current_attempt: ["Read the learner's code as it stands right now, with the attempt's events, diffs, test runs and submission evidence. This is the cheap first look: when the question is what they wrote or why a case fails, read this before reaching for the tracer — a trace is a whole program run and costs far more than a file that already says it.", z.object({ attemptId: z.string().uuid() })],
   replay_attempt: [
     "Read the attempt's own log: every recorded event in order — edits, runs, submissions, verdicts — with its offset from when the attempt opened, plus one line per test case inside every run with its expected/actual values. Nothing in it is summarised or interpreted; it is what was recorded. Two derived sections come with it because a log in order cannot show them: each case's verdict across every run (a transpose) and each run's newly-passing and newly-failing cases (a diff). Take the whole log when the attempt is small — that is the default — and use the parameters to narrow it when it is long or when you only need one metric. This is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
     z.object({
@@ -139,7 +139,7 @@ export const toolDefinitions = {
     }),
   ],
   visualize_read_step: [
-    "Read one instant of a traced run exactly: every local, every heap object, the branch decision if there was one, and what the step before it was not.",
+    "Read one instant of a traced run exactly: every local in scope, the objects those locals point at, the branch decision if there was one, and what changed since the step before. Read the steps that carry the explanation, not the run — visualize_find names them, and a digest plus two or three read steps is a finished answer.",
     z.object({ runId: z.string().min(1), step: z.number().int().min(0).describe("The step index, from visualize_find or the digest.") }),
   ],
   visualize_explain: [

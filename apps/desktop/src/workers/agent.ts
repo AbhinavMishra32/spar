@@ -394,8 +394,30 @@ function describeToolResult(name: string, value: unknown): string {
     const digest = record.digest as { steps?: unknown; error?: unknown } | undefined;
     return typeof digest?.steps === "number" ? `${digest.steps} steps${digest.error ? " · ended in an error" : ""}` : "";
   }
-  if (name === "visualize_find" && typeof record.total === "number") return `${record.total} matching step${record.total === 1 ? "" : "s"}`;
-  if (name === "visualize_read_step" && typeof record.step === "number") return `step ${record.step} · line ${String(record.line ?? "")}`;
+  /* The finding, not the count.
+     "3 matching steps" is the least informative true thing a step search can
+     report: the learner is watching the agent look for the moment a variable
+     went wrong, and the answer is the moment — `w_sum: 6 → 10` at step 14. The
+     count comes after it, and only when there were others. */
+  if (name === "visualize_find" && typeof record.total === "number") {
+    const first = Array.isArray(record.moments) ? record.moments[0] as Record<string, unknown> | undefined : undefined;
+    const why = typeof first?.why === "string" ? first.why : "";
+    const at = typeof first?.step === "number" ? `step ${first.step}` : "";
+    const rest = record.total > 1 ? `${record.total} in all` : "";
+    const found = [why, at].filter(Boolean).join(" at ");
+    if (!found) return record.total ? `${record.total} matching step${record.total === 1 ? "" : "s"}` : "nothing matched";
+    return [found, rest].filter(Boolean).join(" · ").slice(0, 120);
+  }
+  /* What the step did, for the same reason. A step number and a line number are
+     coordinates; what the learner came for is what moved at them. */
+  if (name === "visualize_read_step" && typeof record.step === "number") {
+    const changed = Array.isArray(record.changed) ? record.changed.filter((entry): entry is string => typeof entry === "string") : [];
+    const where = `step ${record.step}`;
+    if (changed.length) return `${where} · ${changed.slice(0, 2).join(", ")}${changed.length > 2 ? ` +${changed.length - 2}` : ""}`.slice(0, 120);
+    const locals = record.locals && typeof record.locals === "object" ? Object.entries(record.locals as Record<string, unknown>) : [];
+    if (locals.length) return `${where} · ${locals.slice(0, 2).map(([key, value]) => `${key}=${String(value)}`).join(", ")}`.slice(0, 120);
+    return `${where} · line ${String(record.line ?? "")}`;
+  }
   if (name === "visualize_explain" && typeof record.steps === "number") return `${record.steps} step${record.steps === 1 ? "" : "s"} shown`;
   if (typeof record.error === "string" && typeof record.note === "string") return record.note.slice(0, 200);
   if (Array.isArray(value)) return `${value.length} result${value.length === 1 ? "" : "s"}`;

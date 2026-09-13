@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Trace } from "@spar/visualizer";
-import { VisualizerToolbox } from "./visualizerTools.js";
+import { compactFrame, VisualizerToolbox } from "./visualizerTools.js";
 import type { LocalStore } from "./store.js";
 import type { VisualizerService } from "./visualizer.js";
 import type { WorkspaceService } from "./workspaces.js";
@@ -104,6 +104,37 @@ describe("reading a run", () => {
     expect(report.line).toBe(2);
     expect(report.source).toBe("total = 0");
     expect(report.changed).toEqual(["total = 0 (new)"]);
+  });
+
+  /* Every one of these was in the payload twice or was an empty container, and
+     a turn that reads eight steps pays for all of it eight times. */
+  it("sends the state of a step once, not the same state three ways", () => {
+    const compact = compactFrame({
+      step: 4, of: 9, line: 3, source: "total += n", event: "step", function: "f", condition: null,
+      locals: { total: "6", seen: "@l1" },
+      changed: ["total: 3 → 6"],
+      heap: [{ id: "l1", type: "list", kind: "sequence", summary: "[1, 2]" }, { id: "l9", type: "list", kind: "sequence", summary: "[]" }],
+      stack: [{ name: "f", line: 3, locals: { total: "6", seen: "@l1" } }],
+      output: "",
+      clipped: [],
+    });
+
+    expect(compact).toMatchObject({ step: 4, line: 3, source: "total += n", locals: { total: "6", seen: "@l1" }, changed: ["total: 3 → 6"] });
+    // The one object something in scope points at, and not the one nothing does.
+    expect(compact.heap).toEqual([{ id: "l1", type: "list", kind: "sequence", summary: "[1, 2]" }]);
+    // The current frame is not also a stack entry, and nothing empty is sent at all.
+    expect(compact).not.toHaveProperty("stack");
+    for (const key of ["callers", "output", "clipped", "condition"]) expect(compact).not.toHaveProperty(key);
+  });
+
+  it("keeps the callers by name when there are any, without their locals", () => {
+    const compact = compactFrame({
+      step: 2, of: 9, line: 7, source: "return n", event: "step", function: "inner", condition: null,
+      locals: { n: "1" }, changed: [], heap: [],
+      stack: [{ name: "outer", line: 2, locals: { big: "…" } }, { name: "inner", line: 7, locals: { n: "1" } }],
+      output: "", clipped: [],
+    });
+    expect(compact.callers).toEqual(["outer:2"]);
   });
 
   it("finds where a variable moved", async () => {

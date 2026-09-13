@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Language } from "@spar/domain";
-import { canVisualize, digestTrace, findMoments, frameReport, sliceView, type Trace } from "@spar/visualizer";
+import { canVisualize, digestTrace, findMoments, frameReport, sliceView, type FrameReport, type Trace } from "@spar/visualizer";
 import type { LocalStore } from "./store.js";
 import type { VisualizerService } from "./visualizer.js";
 import type { WorkspaceService } from "./workspaces.js";
@@ -154,7 +154,7 @@ export class VisualizerToolbox {
   private readStep(input: Record<string, unknown>, sessionId: string) {
     const run = this.run_(sessionId, input.runId);
     if ("error" in run) return run;
-    return frameReport(run.trace, Number(input.step ?? 0), run.language);
+    return compactFrame(frameReport(run.trace, Number(input.step ?? 0), run.language));
   }
 
   private find(input: Record<string, unknown>, sessionId: string) {
@@ -299,3 +299,53 @@ const VISUALIZER_SKILL = [
   "",
   "The hard rule this does not suspend: a trace of a correct solution is a solution. Never trace, and never show, a working implementation of the challenge the learner is currently on. Illustrate the mechanism on different data or a smaller analogous problem, or trace their own code and show them the step where it diverges from what they expected. The visualiser exists to make them see their state, not to hand them the answer in pictures.",
 ].join("\n");
+
+/**
+ * The same instant, without the parts of it the agent is reading twice.
+ *
+ * `frameReport` is written for the visualiser page, which draws a panel per
+ * section and can afford a field that is empty or repeated. A tool result is
+ * read by a model that pays per token for all of it, and this one was paying
+ * three times over: the current frame's locals are also `stack[0].locals`, the
+ * heap ships whether or not anything in scope points into it, and `changed`,
+ * `output` and `clipped` are sent as empty containers on most steps.
+ *
+ * So nothing a step actually shows is dropped — every local, the source line,
+ * what moved since the step before — only the second copy of it.
+ */
+export function compactFrame(report: FrameReport): Record<string, unknown> {
+  const locals = report.locals;
+  /* A local that points at an object formats as `@id`, so the text of what is
+     in scope is exactly the list of what is worth sending — plus whatever those
+     objects point at in turn, or a tree arrives as its root and no children. */
+  const kept = new Map(report.heap.map((object) => [object.id, object]));
+  const reachable = new Set<string>();
+  let frontier = [...Object.values(locals), ...report.changed].join(" ");
+  for (let depth = 0; depth < 6 && frontier; depth += 1) {
+    const found = [...frontier.matchAll(/@([A-Za-z0-9_]+)/g)].map((match) => match[1] as string).filter((id) => kept.has(id) && !reachable.has(id));
+    for (const id of found) reachable.add(id);
+    frontier = found.map((id) => kept.get(id)?.summary ?? "").join(" ");
+  }
+  const heap = report.heap.filter((object) => reachable.has(object.id));
+
+  /* Callers, not the current frame — that is the duplicate — and by name and
+     line only. What the caller's locals were is a different step, and the agent
+     can read that step if it turns out to matter. */
+  const callers = report.stack.slice(0, -1).map((entry) => `${entry.name}:${entry.line}`);
+
+  return {
+    step: report.step,
+    of: report.of,
+    line: report.line,
+    source: report.source,
+    event: report.event,
+    function: report.function,
+    locals,
+    ...(report.condition ? { condition: report.condition } : {}),
+    ...(report.changed.length ? { changed: report.changed } : {}),
+    ...(heap.length ? { heap } : {}),
+    ...(callers.length ? { callers } : {}),
+    ...(report.output ? { output: report.output } : {}),
+    ...(report.clipped.length ? { clipped: report.clipped } : {}),
+  };
+}

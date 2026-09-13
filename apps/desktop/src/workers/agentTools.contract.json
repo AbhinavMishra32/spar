@@ -436,7 +436,7 @@
     }
   },
   "inspect_current_attempt": {
-    "description": "Inspect current immutable events, diffs, test runs, and submission evidence.",
+    "description": "Read the learner's code as it stands right now, with the attempt's events, diffs, test runs and submission evidence. This is the cheap first look: when the question is what they wrote or why a case fails, read this before reaching for the tracer — a trace is a whole program run and costs far more than a file that already says it.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -1909,7 +1909,7 @@
     }
   },
   "visualize_read_step": {
-    "description": "Read one instant of a traced run exactly: every local, every heap object, the branch decision if there was one, and what the step before it was not.",
+    "description": "Read one instant of a traced run exactly: every local in scope, the objects those locals point at, the branch decision if there was one, and what changed since the step before. Read the steps that carry the explanation, not the run — visualize_find names them, and a digest plus two or three read steps is a finished answer.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
