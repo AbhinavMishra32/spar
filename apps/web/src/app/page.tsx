@@ -15,6 +15,7 @@ import { Models } from "@/components/sections/Models";
 import { NoCourse } from "@/components/sections/NoCourse";
 import { ProofRun } from "@/components/sections/Proof";
 import { Sources } from "@/components/sections/Sources";
+import { Submission } from "@/components/sections/Submission";
 import { TheAgent } from "@/components/sections/TheAgent";
 import { TheApp } from "@/components/sections/TheApp";
 import { Workspace } from "@/components/sections/Workspace";
@@ -45,6 +46,7 @@ export default async function Home() {
         <Sources />
         <TheApp />
         <ProofRun />
+        <Submission />
         <TheAgent />
         <Workspace />
         <Models />

@@ -35,7 +35,7 @@ export function Models() {
   return (
     <Section id="models" bloom="tr">
       <SectionHead
-        index="10"
+        index="11"
         label="Bring your own model"
         title="Use whichever model you want to drive it."
         lede="Spar doesn't ship one and doesn't resell one. There is no Spar subscription — point it at a model you already pay for, or run one on your own machine. Your ability map, attempts and history belong to Spar's training system, not to a model provider, so switching models doesn't reset what it knows about you."

@@ -21,7 +21,7 @@ export function TheAgent() {
   return (
     <Section id="agent" bloom="br">
       <SectionHead
-        index="08"
+        index="09"
         label="The training agent"
         title="One agent, with your whole history to read from."
         lede="Spar isn't a chatbot that happens to generate coding questions — the agent is what runs the training system, and it answers from the evidence. Scripted here, because from a landing page it can't have yours. Try the third question."
