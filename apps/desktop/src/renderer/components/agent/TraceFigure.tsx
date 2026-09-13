@@ -37,7 +37,7 @@ export function TraceFigure({ focus = [], frame, language, previous }: {
 }) {
   const subjects = subjectsFor(frame, focus);
   if (!subjects.length) {
-    return <p className="px-4 text-ui text-[var(--transcript-step)]">Nothing is in scope on this step.</p>;
+    return <p className="px-4 text-thread text-[var(--transcript-step)]">Nothing is in scope on this step.</p>;
   }
   const names = Object.keys(frame.locals);
   /* Anything that points at anything is drawn as the structure it is, and only
@@ -219,8 +219,8 @@ function Figure({ language, names, previous, subject }: {
       <div className="flex items-baseline gap-2">
         {subject.names.length
           ? subject.names.map((name) => <Label color={colorFor(names, name)} key={name} text={name} />)
-          : <span className="font-mono text-ui-sm text-[var(--transcript-step-mark)]">@{object.id}</span>}
-        <span className="ml-auto pl-3 font-mono text-ui-sm text-[var(--transcript-step-mark)]">{object.type}</span>
+          : <span className="font-mono text-thread text-[var(--transcript-step-mark)]">@{object.id}</span>}
+        <span className="ml-auto pl-3 font-mono text-thread text-[var(--transcript-step-mark)]">{object.type}</span>
       </div>
 
       {object.items && (
@@ -269,7 +269,7 @@ function Figure({ language, names, previous, subject }: {
         </div>
       )}
 
-      {object.truncated && <p className="mt-1 text-ui-sm text-[var(--transcript-step-mark)]">preview — more than is shown</p>}
+      {object.truncated && <p className="mt-1 text-thread text-[var(--transcript-step-mark)]">preview — more than is shown</p>}
     </Card>
   );
 }
@@ -289,7 +289,7 @@ function Card({ children, moved }: { children: React.ReactNode; moved: boolean }
 
 function Label({ color, text }: { color: string; text: string }) {
   return (
-    <span className="flex items-center gap-1.5 font-mono text-ui font-medium">
+    <span className="flex items-center gap-1.5 font-mono text-thread font-medium">
       <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={{ background: color }} />
       {text}
     </span>
@@ -318,7 +318,7 @@ function Cell({ index, language, moved, value }: { index: number | null; languag
     <div className="flex flex-col items-center">
       <div
         className={cn(
-          "min-w-9 rounded-lg border px-2 py-1 text-center font-mono text-ui tabular-nums transition-colors duration-300",
+          "min-w-9 rounded-lg border px-2 py-1 text-center font-mono text-thread tabular-nums transition-colors duration-300",
           moved ? "border-[var(--trace-change)]/60 text-[var(--trace-change)]" : "border-border text-foreground",
         )}
       >
@@ -331,7 +331,7 @@ function Cell({ index, language, moved, value }: { index: number | null; languag
 
 function Row({ changed, language, name, value }: { changed: boolean; language: Language; name: string; value: Value }) {
   return (
-    <div className="flex items-baseline gap-1.5 font-mono text-ui">
+    <div className="flex items-baseline gap-1.5 font-mono text-thread">
       <span className="text-[var(--transcript-step)]">{name}</span>
       <span className="text-[var(--transcript-step-mark)]">→</span>
       <span className={cn("tabular-nums", changed ? "text-[var(--trace-change)]" : "text-foreground")}>{formatIn(language, value)}</span>
@@ -340,5 +340,5 @@ function Row({ changed, language, name, value }: { changed: boolean; language: L
 }
 
 function More({ count }: { count: number }) {
-  return <span className="self-center font-mono text-ui-sm text-[var(--transcript-step-mark)]">+{count} more</span>;
+  return <span className="self-center font-mono text-thread text-[var(--transcript-step-mark)]">+{count} more</span>;
 }

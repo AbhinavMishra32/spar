@@ -90,7 +90,7 @@ export function ExplainedTrace({ part }: { part: ToolPart }) {
   if (state === "loading") {
     return (
       <Shell>
-        <div className="flex items-center gap-2 px-3.5 py-3 text-ui text-[var(--transcript-step)]">
+        <div className="flex items-center gap-2 px-3.5 py-3 text-thread text-[var(--transcript-step)]">
           <Loader2 className="size-3.5 animate-spin" />
           Drawing what happened…
         </div>
@@ -105,7 +105,7 @@ export function ExplainedTrace({ part }: { part: ToolPart }) {
   if (state === "missing" || !view || !step) {
     return (
       <Shell>
-        <p className="px-3.5 py-3 text-ui text-[var(--transcript-step)]">
+        <p className="px-3.5 py-3 text-thread text-[var(--transcript-step)]">
           {part.actionTitle || "This diagram is no longer stored."}
         </p>
       </Shell>
@@ -120,8 +120,8 @@ export function ExplainedTrace({ part }: { part: ToolPart }) {
           useful, secondary, and on its own line where its length is nobody
           else's problem. */}
       <header className="min-w-0 px-3.5 pt-3">
-        <h4 className="text-ui font-medium text-foreground">{view.title}</h4>
-        {view.setup && <p className="mt-0.5 truncate font-mono text-ui-sm text-[var(--transcript-step-mark)]">{view.setup}</p>}
+        <h4 className="text-thread font-medium text-foreground">{view.title}</h4>
+        {view.setup && <p className="mt-0.5 truncate font-mono text-thread text-[var(--transcript-step-mark)]">{view.setup}</p>}
       </header>
 
       <Stage focus={step.focus} frame={step.frame} language={view.language} previous={step.previous} />
@@ -146,16 +146,16 @@ export function ExplainedTrace({ part }: { part: ToolPart }) {
       <Rail hold={step.hold} index={index} onSelect={go} playing={playing} steps={steps} />
 
       <div className="flex items-baseline gap-2 px-3.5 pb-3 pt-2">
-        <span className="shrink-0 font-mono text-ui-sm text-[var(--transcript-step-mark)]">line {step.frame.line}</span>
-        <code className="min-w-0 flex-1 truncate font-mono text-ui-sm text-[var(--transcript-step)]">{step.source || step.frame.function}</code>
+        <span className="shrink-0 font-mono text-thread text-[var(--transcript-step-mark)]">line {step.frame.line}</span>
+        <code className="min-w-0 flex-1 truncate font-mono text-thread text-[var(--transcript-step)]">{step.source || step.frame.function}</code>
       </div>
 
       {view.takeaway && (
-        <p className="border-t border-border/60 px-3.5 py-2.5 text-ui leading-[1.55] text-[var(--transcript-step-strong)]">{view.takeaway}</p>
+        <p className="border-t border-border/60 px-3.5 py-2.5 text-thread leading-[1.55] text-[var(--transcript-step-strong)]">{view.takeaway}</p>
       )}
 
       {view.error && (
-        <p className="border-t border-border/60 px-3.5 py-2 text-ui-sm text-destructive/85">This run ended in an error: {view.error}</p>
+        <p className="border-t border-border/60 px-3.5 py-2 text-thread text-destructive/85">This run ended in an error: {view.error}</p>
       )}
     </Shell>
   );
@@ -254,7 +254,7 @@ function Caption({ index, text }: { index: number; text: string }) {
       <AnimatePresence initial={false} mode="wait">
         <motion.p
           animate={{ opacity: 1, y: 0 }}
-          className="min-w-0 text-ui leading-[1.55] text-foreground"
+          className="min-w-0 text-thread leading-[1.55] text-foreground"
           exit={reduced ? { opacity: 0 } : { opacity: 0, y: forward ? -4 : 4 }}
           initial={reduced ? { opacity: 0 } : { opacity: 0, y: forward ? 6 : -6 }}
           key={index}

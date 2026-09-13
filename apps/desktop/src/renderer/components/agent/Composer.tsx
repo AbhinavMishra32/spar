@@ -102,7 +102,7 @@ export function Composer({
         {/* Inside the shell rather than floated above it: this is a condition of
             the input, not a passing alert, and it stays until it is fixed. */}
         {!ready && (
-          <div className="flex items-center gap-2 border-b border-[var(--glass-hairline)] px-3 py-2 text-ui">
+          <div className="flex items-center gap-2 border-b border-[var(--glass-hairline)] px-3 py-2 text-thread">
             <Unplug className="size-3.5 shrink-0 text-warning" />
             <span className="min-w-0 flex-1 leading-[1.5] text-muted-foreground">
               <span className="font-medium text-foreground/90">No model provider connected.</span>{" "}
@@ -110,7 +110,7 @@ export function Composer({
             </span>
             {onOpenSettings && (
               <button
-                className="shrink-0 rounded-md border border-[var(--border-strong)] px-2 py-0.5 text-ui font-medium text-foreground transition-colors hover:bg-accent"
+                className="shrink-0 rounded-md border border-[var(--border-strong)] px-2 py-0.5 text-thread font-medium text-foreground transition-colors hover:bg-accent"
                 onClick={onOpenSettings}
                 type="button"
               >
@@ -136,7 +136,7 @@ export function Composer({
           autoFocus={autoFocus}
           // Vertical padding matches the 28px control height, so the first line
           // sits on the same centre line as the attach button beside it.
-          className="app-scroll block w-full resize-none bg-transparent px-1.5 py-1 text-content leading-[1.55] outline-none placeholder:text-muted-foreground/65"
+          className="app-scroll block w-full resize-none bg-transparent px-1.5 py-1 text-thread leading-[1.55] outline-none placeholder:text-muted-foreground/65"
           onBlur={() => setFocused(false)}
           onChange={(event) => onChange(event.target.value)}
           onFocus={() => setFocused(true)}
@@ -150,7 +150,7 @@ export function Composer({
 
       <div className="mt-1.5 flex items-center gap-1 px-0.5">
         {leading}
-        <div className="min-w-0 flex-1 truncate px-1 text-ui text-muted-foreground/65">
+        <div className="min-w-0 flex-1 truncate px-1 text-thread text-muted-foreground/65">
           {/* The notice above already says why nothing can be sent; a second
               line about Return would be instructions for a key that does nothing. */}
           {ready
@@ -216,7 +216,7 @@ export function ComposerPill({
   return (
     <Tag
       className={cn(
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-ui transition-colors",
+        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-thread transition-colors",
         tone === "warning" ? "text-warning" : "text-muted-foreground",
         onClick && "hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground",
         active && "bg-[var(--color-background-elevated-secondary)] text-foreground",

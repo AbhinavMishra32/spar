@@ -107,17 +107,17 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
         {/* One muted line, not a titled header bar. A hairline under a label this
             short divides the surface into two rooms for no reason. */}
         <div className="flex items-center gap-1.5 px-1">
-          <p className="min-w-0 flex-1 truncate text-ui-sm font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
+          <p className="min-w-0 flex-1 truncate text-thread font-medium uppercase tracking-[0.06em] text-muted-foreground/80">
             {question.header}
           </p>
           {request.questions.length > 1 && (
-            <span className="shrink-0 text-ui-sm tabular-nums text-muted-foreground/60">{step + 1}/{request.questions.length}</span>
+            <span className="shrink-0 text-thread tabular-nums text-muted-foreground/60">{step + 1}/{request.questions.length}</span>
           )}
         </div>
 
         {/* Reads at the size of a chat message, because that is what it is: the
             agent's turn, waiting on yours. */}
-        <h3 className="mt-1 px-1 text-content font-medium leading-[1.5] text-foreground"><Inline text={question.question} /></h3>
+        <h3 className="mt-1 px-1 text-thread font-medium leading-[1.5] text-foreground"><Inline text={question.question} /></h3>
 
         <div className="mt-2 flex flex-col gap-px" role={question.multiple ? "group" : "radiogroup"}>
           {question.options.map((option, index) => {
@@ -141,11 +141,11 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
                 type="button"
               >
                 <Marker multiple={question.multiple} selected={selected} />
-                <span className={cn("min-w-0 flex-1 text-ui leading-[1.45]", selected ? "font-medium text-foreground" : "text-foreground/85")}>
+                <span className={cn("min-w-0 flex-1 text-thread leading-[1.45]", selected ? "font-medium text-foreground" : "text-foreground/85")}>
                   <Inline text={option.label} />
                 </span>
                 {index < DIGITS && (
-                  <kbd className="shrink-0 font-sans text-ui-sm tabular-nums text-muted-foreground/55 transition-colors group-hover/option:text-muted-foreground">
+                  <kbd className="shrink-0 font-sans text-thread tabular-nums text-muted-foreground/55 transition-colors group-hover/option:text-muted-foreground">
                     {index + 1}
                   </kbd>
                 )}
@@ -158,14 +158,14 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
               when it is the way out of the choices it offered. */}
           {question.custom && (custom ? (
             <div className={cn("rounded-[var(--radius-item)] px-2 py-1.5", sole ? "" : "mt-0.5 bg-accent/35")}>
-              {!sole && <label className="flex items-center gap-1.5 text-ui-sm font-medium text-muted-foreground" htmlFor="ask-custom">
+              {!sole && <label className="flex items-center gap-1.5 text-thread font-medium text-muted-foreground" htmlFor="ask-custom">
                 <Pencil className="size-3" /> In your own words
               </label>}
               <textarea
                 ref={customField}
                 className={cn(
                   "app-scroll field-sizing-content block max-h-40 w-full resize-none bg-transparent outline-none placeholder:text-muted-foreground/75",
-                  sole ? "min-h-[4rem] text-content leading-[1.6]" : "mt-1 min-h-[2.25rem] text-ui leading-[1.55]",
+                  sole ? "min-h-[4rem] text-thread leading-[1.6]" : "mt-1 min-h-[2.25rem] text-thread leading-[1.55]",
                 )}
                 disabled={busy}
                 id="ask-custom"
@@ -182,7 +182,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
             </div>
           ) : (
             <button
-              className="inline-flex w-full items-center gap-2 rounded-[var(--radius-item)] px-2 py-1.5 text-ui text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+              className="inline-flex w-full items-center gap-2 rounded-[var(--radius-item)] px-2 py-1.5 text-thread text-muted-foreground transition-colors hover:bg-accent/35 hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
               disabled={busy}
               onClick={writeOwn}
               type="button"
@@ -197,7 +197,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
       {/* The composer's own toolbar row: hint left, one round control right,
           outside the shell rather than inside it. */}
       <div className="mt-1.5 flex items-center gap-1 px-0.5">
-        <p className="min-w-0 flex-1 truncate px-1 text-ui text-muted-foreground/65">
+        <p className="min-w-0 flex-1 truncate px-1 text-thread text-muted-foreground/65">
           {busy
             ? "Sending…"
             : custom
@@ -210,7 +210,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
         </p>
         {step > 0 && (
           <button
-            className="shrink-0 rounded-full px-2 py-1 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+            className="shrink-0 rounded-full px-2 py-1 text-thread text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
             disabled={busy}
             onClick={() => setStep((value) => value - 1)}
             type="button"

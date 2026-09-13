@@ -3,14 +3,14 @@ import { AnimatePresence, motion } from "motion/react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
-import { IconAlert, IconBook, IconCheck, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconList, IconQuestion, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
+import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
 import { ToolDetail } from "./ToolDetail";
 import { toolSubject } from "./toolSubject";
 import { thoughts } from "./thoughts";
 import { useMarkdownLinks } from "./MarkdownLinks";
 import { FadedScroll, RawPayload } from "./ToolPayload";
 import { SourceGlyph } from "../common/SourceGlyph";
-import { diffTotals, isSourceTool, toolRowTitle, type RunPart } from "./agentRun";
+import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
@@ -100,6 +100,47 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "ask_user_question":
     case "ask-user-question":
       return <IconQuestion className={MARK} />;
+
+    /* Spar's own tools. Every one of these was falling through to the neutral
+       dot below, so a turn spent in the visualiser drew six identical grey
+       bullets — a column with no shape to it, where the mark is supposed to be
+       the thing you read before the words. They are marked by what the learner
+       watched happen, not by which module the tool lives in: running code,
+       looking through a run, reading one instant of it, drawing the picture. */
+    case "open_visualizer":
+    case "visualize_run":
+      return <IconPlay className={MARK} />;
+    case "visualize_find":
+      return <IconSearch className={MARK} />;
+    case "visualize_read_step":
+      return <IconList className={MARK} />;
+    case "visualize_explain":
+      return <IconSparkle className={MARK} />;
+    /* A challenge is the thing the learner is handed, and the mark says so
+       whether it was written, replaced, or fell back to a stock one. */
+    case "create_question":
+    case "replace_current_question":
+    case "create_fallback_question":
+    case "assign_practice_problem":
+      return <IconPuzzle className={MARK} />;
+    /* Reading what they wrote. It comes back with their file in it now, so the
+       mark is their code rather than the neutral page every `read_` fell to. */
+    case "inspect_current_attempt":
+    case "read_attempt":
+      return <IconCode className={MARK} />;
+    case "replay_attempt":
+      return <IconHistory className={MARK} />;
+    case "evaluate_attempt":
+      return <IconCheck className={MARK} />;
+    case "upsert_ability":
+    case "propose_ability_update":
+    case "read_ability":
+      return <IconBook className={MARK} />;
+    case "read_concept_graph":
+    case "search_concept_evidence":
+      return <IconChip className={MARK} />;
+    case "commit_session_decision":
+      return <IconLightning className={MARK} />;
     default:
       break;
   }
@@ -123,7 +164,7 @@ function StatusPill({ part }: { part: ToolPart }) {
         ? ["Failed", "text-destructive"]
         : ["Success", "text-[var(--success)]"];
   return (
-    <span className={cn("shrink-0 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-ui-sm font-medium", tone)}>{text}</span>
+    <span className={cn("shrink-0 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-thread font-medium", tone)}>{text}</span>
   );
 }
 
@@ -195,9 +236,50 @@ function ToolTitle({ part }: { part: ToolPart }) {
  * place separately. Every one of those joins was arithmetic that had to be kept
  * true by hand, and none of them survived a change to the row's padding.
  */
-export function ToolRow({ part, continues = false }: { part: ToolPart; continues?: boolean }) {
+/**
+ * The thinking behind one step, inside the step.
+ *
+ * Same shape the folded thought row uses — headings bold, prose under them,
+ * against a rule — so reasoning reads the same wherever it is found. Held to a
+ * height and faded, because a block of thinking is as long as it is and the row
+ * it opens should not push the rest of the turn off the screen.
+ */
+function Thinking({ heading = "Thinking", sections, ruled }: { heading?: string; sections: Array<{ title?: string; body: string }>; ruled: boolean }) {
+  return (
+    <div className={cn("px-3 py-2.5", ruled && "border-b border-[var(--border-surface-strong)]/60")}>
+      <p className="mb-1.5 text-thread font-medium text-[var(--transcript-step-mark)]">{heading}</p>
+      <FadedScroll>
+        <div className="border-l border-border/70 pl-2.5">
+          {sections.map((section, index) => (
+            <div className={index > 0 ? "mt-2" : undefined} key={index}>
+              {section.title ? (
+                <p className="text-thread font-medium leading-[1.6] text-[var(--transcript-step-strong)]">{section.title}</p>
+              ) : null}
+              {section.body ? (
+                <p className="text-thread leading-[1.6] text-[var(--transcript-step)]">{section.body}</p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </FadedScroll>
+    </div>
+  );
+}
+
+/** One line, and short enough to sit after a title. A detail that wrapped would
+ *  turn a row into a paragraph, which is the shape the thread is built to avoid;
+ *  the whole thing is in the panel the row opens. */
+function oneLine(value: string, limit = 72): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+}
+
+export function ToolRow({ part, after, continues = false, thinking }: { part: ToolPart; after?: ReasoningPart | undefined; continues?: boolean; thinking?: ReasoningPart | undefined }) {
   const [open, setOpen] = useState(false);
-  const hasPayload = Boolean(part.input.trim() || part.output.trim());
+  const reasons = thinking ? thoughts(thinking.body) : [];
+  const concluded = after ? thoughts(after.body) : [];
+  const hasCall = Boolean(part.input.trim() || part.output.trim());
+  const hasPayload = hasCall || reasons.length > 0 || concluded.length > 0;
   const totals = diffTotals(part.files);
   const running = part.phase === "running";
 
@@ -205,6 +287,19 @@ export function ToolRow({ part, continues = false }: { part: ToolPart; continues
     <>
       <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
         <ToolTitle part={part} />
+        {/* What the call came back with, beside what it was for.
+            The worker has always written this — `23 steps`, `w_sum: 6 → 10 at
+            step 14`, `status invalid` — and the row threw it away, so a turn
+            spent looking for something read as a list of intentions with no
+            findings: eight rows saying what the agent was about to do and not
+            one saying what it learned. It is the agent's own summary of its
+            result, so it is as specific as the result was.
+
+            Dimmer than the title and after it, because the title is the question
+            and this is the answer to that one question, not a headline. */}
+        {part.phase === "done" && part.detail.trim() && (
+          <span className="ml-1.5 text-[var(--transcript-step-mark)]">{oneLine(part.detail)}</span>
+        )}
         {took(part) && <span className="ml-1.5 tabular-nums text-[var(--transcript-step-mark)]">{took(part)}</span>}
       </span>
       <DiffStat added={totals.added} removed={totals.removed} />
@@ -221,8 +316,10 @@ export function ToolRow({ part, continues = false }: { part: ToolPart; continues
           the gap to the next step held inside the block as padding rather than
           outside it as a margin — a margin is space the thread's line cannot
           cross. The whole row is pulled 4px left of the prose column so the
-          16px mark centres where the reference centres it. */}
-      <div className="relative -mx-1 flex min-w-0 items-start gap-1.5 pb-2">
+          16px mark centres where the reference centres it — left only: the
+          matching right pull bought nothing and pushed every open panel 4px
+          past the column, which is where the thread clipped its edge off. */}
+      <div className="relative -ml-1 flex min-w-0 items-start gap-1.5 pb-2">
         <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
           {/* One element, not three. The line starts below this row's mark and
               runs to the foot of its block — which grows when the panel opens,
@@ -259,10 +356,28 @@ export function ToolRow({ part, continues = false }: { part: ToolPart; continues
 
                     A failed call keeps the raw payload: the error text is the whole
                     point, and a drawn view of arguments that did not work hides it. */}
-                {part.phase === "error" ? (
+                {/* Why it did this, then what it did. The thinking is first
+                    because it is the earlier of the two and because it is the
+                    half that reads as prose — a wall of arguments above it would
+                    bury the sentences that explain them. */}
+                {reasons.length > 0 && <Thinking ruled={hasCall} sections={reasons} />}
+                {/* A call whose only payload is the thinking behind it draws
+                    nothing more. `ToolDetail` is an element rather than null, so
+                    asking it for a view of two empty strings gets an empty panel
+                    rather than no panel. */}
+                {!hasCall ? null : part.phase === "error" ? (
                   <RawPayload input={part.input} output={part.output} />
                 ) : (
                   <ToolDetail input={part.input} output={part.output} tool={part.tool} />
+                )}
+                {/* And what it made of the result, under the result. The turn's
+                    last stretch of thinking has no call of its own to lead to,
+                    and read where it happened it is a wall of headings above the
+                    reply that restates them. */}
+                {concluded.length > 0 && (
+                  <div className="border-t border-[var(--border-surface-strong)]/60">
+                    <Thinking heading="What it made of it" ruled={false} sections={concluded} />
+                  </div>
                 )}
               </div>
             </CollapsibleContent>
@@ -288,7 +403,7 @@ export function ToolRow({ part, continues = false }: { part: ToolPart; continues
    clustered steps land on a 32px pitch once the joining gap is added. The padding
    is small on purpose — the space between steps is what separates them, and paying
    for it twice is what spread a run of five calls over half a screen. */
-const ROW = "relative inline-flex w-fit min-w-0 max-w-full items-center gap-2.5 px-1.5 py-[3px] text-left text-ui";
+const ROW = "relative inline-flex w-fit min-w-0 max-w-full items-center gap-2.5 px-1.5 py-[3px] text-left text-thread";
 /** The icon column every row of a turn hangs its mark in.
  *
  *  Named, and reserved even when there is no mark to put in it. A settled
@@ -342,7 +457,7 @@ const RAIL_LAST = "hidden h-[calc(100%-32px)] group-data-[state=open]/step:block
 /** A row's words: everything except the mark, which is now a column of its own.
  *  Keeps the row's height at exactly the mark's, so the two line up without
  *  either of them being nudged. */
-const LABEL_ROW = "flex min-h-6 w-full min-w-0 items-center justify-start gap-1 overflow-hidden text-left text-ui";
+const LABEL_ROW = "flex min-h-6 w-full min-w-0 items-center justify-start gap-1 overflow-hidden text-left text-thread";
 
 /**
  * The mark that opens a row, kept out of the way until it is wanted.
@@ -392,7 +507,7 @@ function took(part: ToolPart): string {
 function DiffStat({ added, removed }: { added: number; removed: number }) {
   if (added === 0 && removed === 0) return null;
   return (
-    <span className="shrink-0 font-mono text-ui-sm tabular-nums">
+    <span className="shrink-0 font-mono text-thread tabular-nums">
       {added > 0 && <span className="text-[var(--success)]">+{added}</span>}
       {added > 0 && removed > 0 && " "}
       {removed > 0 && <span className="text-destructive">-{removed}</span>}
@@ -410,7 +525,7 @@ function StepDetail({ detail }: { detail: string }) {
   const trimmed = detail.replace(/^status invalid · /, "").trim();
   if (!trimmed) return null;
   return (
-    <p className="min-w-0 break-words text-ui-sm leading-[1.55] text-[var(--transcript-step)]" style={{ paddingLeft: UNDER_LABEL }}>
+    <p className="min-w-0 break-words text-thread leading-[1.55] text-[var(--transcript-step)]" style={{ paddingLeft: UNDER_LABEL }}>
       {trimmed.length > 240 ? `${trimmed.slice(0, 240)}…` : trimmed}
     </p>
   );
@@ -525,7 +640,7 @@ function ThoughtCluster({ sections, settling }: { sections: Array<{ title?: stri
         {/* What is behind the row, counted. "+11" beside a heading is the only
             thing telling the learner that eleven more thoughts exist, so it is
             drawn as a standing chip rather than as dimmed trailing text. */}
-        <span className="shrink-0 rounded-full bg-[var(--transcript-step-mark)]/12 px-1.5 py-px text-ui-sm tabular-nums text-[var(--transcript-step)]">
+        <span className="shrink-0 rounded-full bg-[var(--transcript-step-mark)]/12 px-1.5 py-px text-thread tabular-nums text-[var(--transcript-step)]">
           +{sections.length - 1}
         </span>
         <Caret open={open} standing />
@@ -536,10 +651,10 @@ function ThoughtCluster({ sections, settling }: { sections: Array<{ title?: stri
             {sections.map((section, index) => (
               <div key={index} className={index > 0 ? "mt-2" : undefined}>
                 {section.title ? (
-                  <p className="text-ui-sm leading-[1.6] font-medium text-[var(--transcript-step-strong)]">{section.title}</p>
+                  <p className="text-thread leading-[1.6] font-medium text-[var(--transcript-step-strong)]">{section.title}</p>
                 ) : null}
                 {section.body ? (
-                  <p className="text-ui-sm leading-[1.6] text-[var(--transcript-step)]">{section.body}</p>
+                  <p className="text-thread leading-[1.6] text-[var(--transcript-step)]">{section.body}</p>
                 ) : null}
               </div>
             ))}
@@ -591,7 +706,7 @@ function LiveThought({
       <CollapsibleTrigger className={cn(ROW, TRIGGER)}>{trigger}</CollapsibleTrigger>
       <CollapsibleContent>
         <FadedScroll className="mx-1.5 mb-1" follow watch={body}>
-          <div className="space-y-2 border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-[var(--transcript-step)]">
+          <div className="space-y-2 border-l border-border/70 pl-2.5 text-thread leading-[1.6] text-[var(--transcript-step)]">
             {sections.map((section, index) => (
               <div key={`${id}-live-${index}`}>
                 {/* The heading of a section that has finished. The one still
@@ -661,7 +776,7 @@ function Thought({ title, body, settling }: { title: string; body: string; settl
             then expanded to a screenful on settling would reflow the thread under
             the reader at the exact moment they started reading it. */}
         <FadedScroll className="mx-1.5 mb-1">
-          <p className="border-l border-border/70 pl-2.5 text-ui-sm leading-[1.6] text-[var(--transcript-step)]">{body}</p>
+          <p className="border-l border-border/70 pl-2.5 text-thread leading-[1.6] text-[var(--transcript-step)]">{body}</p>
         </FadedScroll>
       </CollapsibleContent>
     </Collapsible>
@@ -729,7 +844,7 @@ export function ChallengePublished({ part }: { part: ToolPart }) {
         {sourced ? <SourceGlyph className="size-3.5" source={source} /> : <IconCheck className="size-4" />}
       </span>
       <span className="min-w-0 truncate">
-        <span className="text-ui font-medium text-foreground">{part.label || (sourced ? "Problem set" : replaced ? "Challenge replaced" : "Challenge ready")}</span>
+        <span className="text-thread font-medium text-foreground">{part.label || (sourced ? "Problem set" : replaced ? "Challenge replaced" : "Challenge ready")}</span>
         <span className="ml-1.5 text-muted-foreground">
           {sourced ? `· from ${sourceName} · judged there` : replaced ? "· replaced · validated" : "· validated"}
         </span>
@@ -762,14 +877,14 @@ export function RunFailure({ body }: { body: string }) {
       <div className="flex min-w-0 items-start gap-2.5">
         <IconAlert className="mt-px size-4 shrink-0 text-destructive/80" />
         <div className="min-w-0 flex-1">
-          <p className="text-ui font-medium text-foreground">That turn did not finish</p>
-          <p className="mt-0.5 min-w-0 break-words text-ui leading-[1.55] text-muted-foreground">
+          <p className="text-thread font-medium text-foreground">That turn did not finish</p>
+          <p className="mt-0.5 min-w-0 break-words text-thread leading-[1.55] text-muted-foreground">
             {headline?.trim().replace(/\.$/, "") ?? "Construct could not complete that turn"}.
           </p>
           {detail && (
             <>
               <button
-                className="mt-1.5 inline-flex items-center gap-1 text-ui-sm text-muted-foreground/85 transition-colors hover:text-foreground"
+                className="mt-1.5 inline-flex items-center gap-1 text-thread text-muted-foreground/85 transition-colors hover:text-foreground"
                 onClick={() => setOpen((value) => !value)}
                 type="button"
               >
@@ -780,7 +895,7 @@ export function RunFailure({ body }: { body: string }) {
                 {open && (
                   <motion.pre
                     animate={{ height: "auto", opacity: 1 }}
-                    className="mt-1.5 overflow-x-auto rounded-lg bg-[var(--accent)] px-2.5 py-2 font-mono text-ui-sm leading-[1.5] text-muted-foreground/90"
+                    className="mt-1.5 overflow-x-auto rounded-lg bg-[var(--accent)] px-2.5 py-2 font-mono text-thread leading-[1.5] text-muted-foreground/90"
                     exit={{ height: 0, opacity: 0 }}
                     initial={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}

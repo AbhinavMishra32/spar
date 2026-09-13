@@ -64,7 +64,7 @@ export function ModelPicker({
   return (
     <DropdownMenu onOpenChange={(open) => !open && setQuery("")}>
       <DropdownMenuTrigger
-        className="inline-flex h-7 max-w-[12rem] shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-ui text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
+        className="inline-flex h-7 max-w-[12rem] shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-thread text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
         title="Model"
       >
         <ProviderGlyph className="size-4 shrink-0" provider={active.id} />
@@ -82,7 +82,7 @@ export function ModelPicker({
         >
           <Search className="size-3.5 shrink-0 text-muted-foreground/70" />
           <input
-            className="w-full bg-transparent text-content leading-none outline-none placeholder:text-muted-foreground/60"
+            className="w-full bg-transparent text-thread leading-none outline-none placeholder:text-muted-foreground/60"
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search models"
             value={query}
@@ -100,11 +100,11 @@ export function ModelPicker({
                 >
                   <ProviderGlyph className="size-3.5 shrink-0 opacity-80" provider={provider.id} />
                   <span className="min-w-0 flex-1 truncate">{model.name}</span>
-                  <span className="shrink-0 text-ui text-muted-foreground">{provider.name}</span>
+                  <span className="shrink-0 text-thread text-muted-foreground">{provider.name}</span>
                 </DropdownMenuCheckItem>
               ))
             ) : (
-              <p className="px-2.5 py-1.5 text-content text-muted-foreground">No model matches “{query.trim()}”.</p>
+              <p className="px-2.5 py-1.5 text-thread text-muted-foreground">No model matches “{query.trim()}”.</p>
             )
           ) : (
             connected.map((provider) => (
@@ -160,7 +160,7 @@ export function ReasoningPicker({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-ui text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2 text-thread text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
         title="Reasoning effort"
       >
         <span className="truncate">{current.label}</span>

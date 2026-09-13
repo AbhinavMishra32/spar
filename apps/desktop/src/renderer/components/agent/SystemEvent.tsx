@@ -51,7 +51,7 @@ function Row({
   return (
     /* The transcript's own gutter, so a system line starts where every other
        row's label starts instead of a few pixels short of it. */
-    <div className="-mx-1 flex min-w-0 items-center gap-1.5 pb-2 text-ui-sm">
+    <div className="-mx-1 flex min-w-0 items-center gap-1.5 pb-2 text-thread">
       <span aria-hidden className="flex size-6 shrink-0 items-center justify-center">
         <Icon
           className={cn(
@@ -71,7 +71,7 @@ function Collapsible({ body }: { body: string }) {
   return (
     <div className="min-w-0">
       <button
-        className="-mx-1 flex w-full min-w-0 items-center gap-1.5 pb-2 text-left text-ui-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="-mx-1 flex w-full min-w-0 items-center gap-1.5 pb-2 text-left text-thread text-muted-foreground transition-colors hover:text-foreground"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
@@ -85,7 +85,7 @@ function Collapsible({ body }: { body: string }) {
       {/* Flush with the trigger, like every other disclosure in the transcript:
           the expanded text is the same event in full, not a child of it. */}
       {open && (
-        <p className="min-w-0 break-words pb-2 text-ui-sm leading-[1.6] text-muted-foreground/80" style={{ paddingLeft: UNDER_LABEL }}>
+        <p className="min-w-0 break-words pb-2 text-thread leading-[1.6] text-muted-foreground/80" style={{ paddingLeft: UNDER_LABEL }}>
           {body}
         </p>
       )}

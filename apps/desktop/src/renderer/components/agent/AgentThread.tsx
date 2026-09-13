@@ -42,7 +42,7 @@ function PhaseLine({ live, phase }: { live: boolean; phase?: string | null | und
        the slot a tool's mark would take and the label starts where a tool's
        label starts, so the line that names the turn belongs to the list of work
        under it rather than floating to the left of everything. */
-    <p className="-mx-1 mb-1.5 flex items-center gap-1.5 text-ui-sm font-medium tracking-wide uppercase">
+    <p className="-mx-1 mb-1.5 flex items-center gap-1.5 text-thread font-medium tracking-wide uppercase">
       <span aria-hidden className={ROW_GLYPH}>
         <span className="size-1.5 rounded-full bg-[var(--brand)]" />
       </span>
@@ -66,7 +66,7 @@ function PhaseWait({ phase }: { phase?: string | null | undefined }) {
   return (
     <div className="min-w-0">
       <PhaseLine live phase={phase} />
-      <p className="text-ui leading-[1.6] text-muted-foreground">{PHASE_DETAIL[phase]}</p>
+      <p className="text-thread leading-[1.6] text-muted-foreground">{PHASE_DETAIL[phase]}</p>
     </div>
   );
 }
@@ -156,13 +156,13 @@ function Rows({ parts }: { parts: RunPart[] }) {
         if (part.kind === "text") return wrap(<div className="text-foreground"><Markdown source={part.body} /></div>);
         if (part.kind === "reasoning") return wrap(<Reasoning part={part} />);
         if (part.kind === "tool-row") {
-          return wrap(<ToolRow continues={continues} part={part.part} />);
+          return wrap(<ToolRow after={part.after} continues={continues} part={part.part} thinking={part.thinking} />);
         }
         if (part.kind === "challenge") return wrap(<ChallengePublished part={part.part} />);
         if (part.kind === "solve-read") return wrap(<SolveRead part={part.part} />);
         if (part.kind === "explained-trace") return wrap(<ExplainedTrace part={part.part} />);
         if (part.kind === "error") return wrap(<RunFailure body={part.body} />);
-        return wrap(<div className="truncate text-ui-sm text-[var(--transcript-step)]">{part.body}</div>);
+        return wrap(<div className="truncate text-thread text-[var(--transcript-step)]">{part.body}</div>);
       })}
     </>
   );
@@ -188,7 +188,7 @@ function WaitingLine({ parts }: { parts: RunPart[] }) {
         <span className="absolute inset-0 rounded-full bg-[var(--accent)]/10 blur-sm" />
         <ThinkingOrb aria-label="Working" size={20} state="working" style={{ width: 16, height: 16 }} />
       </span>
-      <span className="thinking-shimmer min-w-0 truncate text-ui font-medium">Connecting to the model</span>
+      <span className="thinking-shimmer min-w-0 truncate text-thread font-medium">Connecting to the model</span>
     </div>
   );
 }
@@ -295,7 +295,7 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
         <div className="w-[85%] min-w-0 rounded-xl bg-secondary p-2">
           <textarea
             autoFocus
-            className="app-scroll block max-h-40 w-full resize-none bg-transparent px-1 py-0.5 text-content leading-[1.55] outline-none"
+            className="app-scroll block max-h-40 w-full resize-none bg-transparent px-1 py-0.5 text-thread leading-[1.55] outline-none"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") setEditing(false);
@@ -309,9 +309,9 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
             value={draft}
           />
           <div className="mt-1 flex items-center justify-end gap-1.5 px-1">
-            <span className="mr-auto min-w-0 truncate text-ui-sm text-muted-foreground/85">Replies after this leave the thread · your record stays</span>
+            <span className="mr-auto min-w-0 truncate text-thread text-muted-foreground/85">Replies after this leave the thread · your record stays</span>
             <button
-              className="rounded-md px-2 py-0.5 text-ui text-muted-foreground transition-colors hover:text-foreground"
+              className="rounded-md px-2 py-0.5 text-thread text-muted-foreground transition-colors hover:text-foreground"
               onClick={() => {
                 setDraft(body);
                 setEditing(false);
@@ -321,7 +321,7 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
               Cancel
             </button>
             <button
-              className="click-depth-effect-slightly rounded-md bg-[var(--foreground)] px-2 py-0.5 text-ui font-medium text-[var(--background)] transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="click-depth-effect-slightly rounded-md bg-[var(--foreground)] px-2 py-0.5 text-thread font-medium text-[var(--background)] transition-opacity hover:opacity-90 disabled:opacity-40"
               disabled={!draft.trim()}
               onClick={() => {
                 setEditing(false);
@@ -361,7 +361,7 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
           whether the agent has them yet. */}
       <div
         className={cn(
-          "max-w-[min(fit-content,85%)] min-w-0 break-words rounded-xl bg-secondary px-3 py-1.5 text-content leading-[1.55] whitespace-pre-wrap transition-opacity",
+          "max-w-[min(fit-content,85%)] min-w-0 break-words rounded-xl bg-secondary px-3 py-1.5 text-thread leading-[1.55] whitespace-pre-wrap transition-opacity",
           queued && "opacity-60",
         )}
         {...(queued ? { title: "Waiting for the agent to finish this step" } : {})}

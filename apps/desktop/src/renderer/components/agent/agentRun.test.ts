@@ -38,8 +38,44 @@ describe("transcript rows", () => {
   it("joins thinking that was interrupted by nothing into one thought", () => {
     const think = (id: string, body: string): RunPart => ({ kind: "reasoning", id, body, open: false, startedAt: 0, endedAt: 1 });
     const rows = groupParts([think("a", "**Planning**"), think("b", "**Refining**"), tool("read_ability"), think("c", "**Deciding**")]);
-    expect(rows.map((row) => row.kind)).toEqual(["reasoning", "tool-row", "reasoning"]);
-    expect((rows[0] as Extract<RunPart, { kind: "reasoning" }>).body).toBe("**Planning**\n\n**Refining**");
+    /* Both blocks before the call are one thought, and that thought belongs to
+       the call it led to rather than to a row of its own. The trailing one led
+       nowhere, so it goes back onto the same call as what came of it. */
+    expect(rows.map((row) => row.kind)).toEqual(["tool-row"]);
+    const row = rows[0] as Extract<ReturnType<typeof groupParts>[number], { kind: "tool-row" }>;
+    expect(row.thinking?.body).toBe("**Planning**\n\n**Refining**");
+    expect(row.after?.body).toBe("**Deciding**");
+  });
+
+  /* Half a turn used to be the agent announcing its own next row: "Planning to
+     call open_visualizer", then a row saying it opened it. */
+  it("folds the thinking that led to a call into that call's row", () => {
+    const think: RunPart = { kind: "reasoning", id: "a", body: "**Planning the read**", open: false, startedAt: 0, endedAt: 1 };
+    const rows = groupParts([think, tool("read_ability")]);
+    expect(rows.map((row) => row.kind)).toEqual(["tool-row"]);
+  });
+
+  /* The turn's last stretch of reasoning has no call ahead of it, so it drew a
+     stack of six headings between the work and the reply — the agent describing
+     the work, where the work itself was. */
+  it("puts the thinking after the last call back onto that call", () => {
+    const think: RunPart = { kind: "reasoning", id: "a", body: "**Weighing the fix**", open: false, startedAt: 0, endedAt: 1 };
+    const reply: RunPart = { kind: "text", id: "b", body: "Your loop bound is off by one." };
+    const rows = groupParts([tool("read_ability"), think, reply]);
+    expect(rows.map((row) => row.kind)).toEqual(["tool-row", "text"]);
+    const row = rows[0] as Extract<ReturnType<typeof groupParts>[number], { kind: "tool-row" }>;
+    expect(row.after?.body).toBe("**Weighing the fix**");
+  });
+
+  it("leaves thinking that led to an answer rather than to an action as its own row", () => {
+    const think: RunPart = { kind: "reasoning", id: "a", body: "**Deciding what to say**", open: false, startedAt: 0, endedAt: 1 };
+    const reply: RunPart = { kind: "text", id: "b", body: "Here is the answer." };
+    expect(groupParts([think, reply]).map((row) => row.kind)).toEqual(["reasoning", "text"]);
+  });
+
+  it("never folds away the thought still being written — it is the sign a turn is alive", () => {
+    const live: RunPart = { kind: "reasoning", id: "a", body: "writing", open: true, startedAt: 0 };
+    expect(groupParts([live, tool("read_ability")]).map((row) => row.kind)).toEqual(["reasoning", "tool-row"]);
   });
 
   it("leaves the thought still being written alone", () => {

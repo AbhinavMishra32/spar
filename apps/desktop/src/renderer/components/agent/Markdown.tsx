@@ -193,7 +193,7 @@ function Colorized({ body, language }: { body: string; language: string }) {
   }, [body, language]);
 
   return (
-    <pre className="app-scroll overflow-x-auto px-2.5 py-2 text-[0.75rem] leading-[1.55] text-[var(--code-foreground)]">
+    <pre className="app-scroll overflow-x-auto px-2.5 py-2 text-thread leading-[1.55] text-[var(--code-foreground)]">
       {/* Plain until the grammar resolves, so a block that is still streaming is
           readable rather than blank. Rendered as elements rather than as HTML —
           there is no markup to inject, only text and a colour. */}
@@ -227,7 +227,7 @@ function CodeBlock({ language, body }: { language: string; body: string }) {
       <div className="flex h-7 items-center justify-between border-b border-border/70 px-2.5">
         {marked
           ? <LanguageGlyph className="size-3 text-muted-foreground" language={marked} />
-          : <span className="font-mono text-ui-sm text-muted-foreground">{language}</span>}
+          : <span className="font-mono text-thread text-muted-foreground">{language}</span>}
         <button
           className="grid size-5 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover/code:opacity-100 hover:bg-accent hover:text-foreground"
           onClick={copy}

@@ -9,7 +9,7 @@ import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 import { Inline } from "./Markdown";
 import { useMarkdownLinks } from "./MarkdownLinks";
 import { memoryLabel } from "./toolSubject";
-import { RawPayload } from "./ToolPayload";
+import { FadedScroll, RawPayload } from "./ToolPayload";
 
 /**
  * What a tool call actually did, drawn rather than dumped.
@@ -105,6 +105,29 @@ export function ToolDetail({
       );
     }
 
+    /* The visualiser, which is the one part of this agent the learner watches
+       work. Three calls, three different questions, and all three of them were
+       opening into raw JSON of a trace digest — the single worst payload in the
+       app to read as JSON and the one with the most to show as itself. */
+    case "visualize_run":
+      return <TracedRun result={record(result)} />;
+    case "visualize_find":
+      return <FoundMoments args={args ?? {}} result={record(result)} />;
+    case "visualize_read_step":
+      return <ReadStep result={record(result)} />;
+    /* The attempt, which since the code started coming back with the log is the
+       most-read call in a turn and was the ugliest: five hundred lines of event
+       JSON, and the learner's own file buried somewhere inside it. */
+    case "inspect_current_attempt":
+    case "read_attempt":
+    case "evaluate_attempt": {
+      /* Only when the payload actually arrived. A result too damaged to read is
+         the raw payload's job — a drawn view of nothing says the attempt is
+         empty, which is a different and false claim. */
+      const attempt = record(result);
+      if (!Array.isArray(attempt.events) && !Array.isArray(attempt.files)) break;
+      return <Attempt result={attempt} />;
+    }
     case "flow-memory-fetch":
       return <Memory reads={result} />;
 
@@ -135,13 +158,58 @@ const record = (value: unknown): Record<string, unknown> =>
  *  a truncated one is common enough that failing has to be ordinary. */
 function useJson(body: string): Record<string, unknown> | unknown[] | null {
   return useMemo(() => {
-    try {
-      const parsed: unknown = JSON.parse(body);
-      return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown> | unknown[]) : null;
-    } catch {
-      return null;
-    }
+    const parsed = parseJson(body) ?? parseJson(closeOff(body));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown> | unknown[]) : null;
   }, [body]);
+}
+
+function parseJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A payload that was cut off, made readable up to the cut.
+ *
+ * The worker caps what it stores at 16k, so the long results — an attempt's
+ * whole event log above all — reach the renderer as valid JSON with the end
+ * sawn off. Parsing that fails, and a view handed nothing has no way to tell
+ * "the tool returned nothing" from "I could not read this", which is how a
+ * panel ends up stating the first when the second is true.
+ *
+ * So the half that did arrive is closed: cut back to the last value that
+ * finished, then shut the brackets that were open at that point. Ten of twelve
+ * events is the honest reading of a payload with ten complete events in it.
+ */
+export function closeOff(body: string): string {
+  const stack: string[] = [];
+  let shut: string[] = [];
+  let end = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === "\"") inString = false;
+      continue;
+    }
+    if (character === "\"") inString = true;
+    else if (character === "{" || character === "[") stack.push(character === "{" ? "}" : "]");
+    else if (character === "}" || character === "]") {
+      stack.pop();
+      /* A value just finished, and everything still open at this point is what
+         has to be closed to make the prefix whole. */
+      end = index;
+      shut = [...stack].reverse();
+    }
+  }
+  return end < 0 ? body : body.slice(0, end + 1) + shut.join("");
 }
 
 /** The same, narrowed to a tool's arguments. */
@@ -153,7 +221,7 @@ function useObject(body: string): Record<string, unknown> | null {
 /** The label above a field. One idiom for all of them, so a detail panel reads
  *  as one thing rather than as several. */
 function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pt-2 pb-1 text-ui-sm font-medium tracking-wide text-muted-foreground uppercase">{children}</p>;
+  return <p className="px-2.5 pt-2 pb-1 text-thread font-medium tracking-wide text-muted-foreground uppercase">{children}</p>;
 }
 
 /**
@@ -186,7 +254,7 @@ function Snippet({ body, language }: { body: string; language: string }) {
     <>
       <pre
         className={cn(
-          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-ui-sm leading-[1.55]",
+          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-thread leading-[1.55]",
           !full && lines > 14 && "max-h-[15.5rem] overflow-y-hidden",
         )}
         style={{ color: theme.slots.foreground }}
@@ -205,7 +273,7 @@ function Snippet({ body, language }: { body: string; language: string }) {
       </pre>
       {lines > 14 && (
         <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-ui-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-thread text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => setFull((value) => !value)}
           type="button"
         >
@@ -227,7 +295,7 @@ function Lines({ body }: { body: string }) {
     <>
       <pre
         className={cn(
-          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-ui-sm leading-[1.55] whitespace-pre text-muted-foreground/90",
+          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-thread leading-[1.55] whitespace-pre text-muted-foreground/90",
           !full && lines > 14 && "max-h-[15.5rem] overflow-y-hidden",
         )}
       >
@@ -235,7 +303,7 @@ function Lines({ body }: { body: string }) {
       </pre>
       {lines > 14 && (
         <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-ui-sm text-muted-foreground transition-colors hover:text-foreground"
+          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-thread text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => setFull((value) => !value)}
           type="button"
         >
@@ -267,14 +335,14 @@ function FileView({ body, path, wrote = false }: { body: string; path: string; w
           <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
         )}
         <button
-          className="min-w-0 truncate font-mono text-ui-sm text-foreground/85 transition-colors hover:text-foreground hover:underline"
+          className="min-w-0 truncate font-mono text-thread text-foreground/85 transition-colors hover:text-foreground hover:underline"
           onClick={() => onOpenFile?.(path)}
           title={`Open ${path}`}
           type="button"
         >
           {path}
         </button>
-        {wrote && <span className="shrink-0 text-ui-sm text-muted-foreground">written</span>}
+        {wrote && <span className="shrink-0 text-thread text-muted-foreground">written</span>}
       </div>
       <Snippet body={body} language={language ?? "text"} />
     </div>
@@ -285,7 +353,7 @@ function FileView({ body, path, wrote = false }: { body: string; path: string; w
  *  sort first — the service already returns them that way. */
 function Listing({ entries, where }: { entries: Entry[]; where: string }) {
   const { onOpenFile } = useMarkdownLinks();
-  if (entries.length === 0) return <p className="px-2.5 py-2 text-ui-sm text-muted-foreground">Nothing in there.</p>;
+  if (entries.length === 0) return <p className="px-2.5 py-2 text-thread text-muted-foreground">Nothing in there.</p>;
 
   return (
     <div className="min-w-0">
@@ -311,7 +379,7 @@ function Listing({ entries, where }: { entries: Entry[]; where: string }) {
                 ) : (
                   <span className="size-3.5 shrink-0" />
                 )}
-                <span className={cn("min-w-0 truncate font-mono text-ui-sm", directory ? "text-foreground/70" : "text-muted-foreground")}>
+                <span className={cn("min-w-0 truncate font-mono text-thread", directory ? "text-foreground/70" : "text-muted-foreground")}>
                   {name}
                   {directory && "/"}
                 </span>
@@ -337,12 +405,12 @@ function Command({ command, exitCode, output }: { command: string; exitCode: num
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-start gap-1.5 px-2.5 pt-2 pb-1.5">
-        <span aria-hidden className="mt-px shrink-0 font-mono text-ui-sm text-muted-foreground">
+        <span aria-hidden className="mt-px shrink-0 font-mono text-thread text-muted-foreground">
           $
         </span>
-        <code className="min-w-0 flex-1 font-mono text-ui-sm break-all text-foreground/85">{command}</code>
+        <code className="min-w-0 flex-1 font-mono text-thread break-all text-foreground/85">{command}</code>
         {failed && (
-          <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--destructive)_16%,transparent)] px-1.5 py-px text-ui-sm font-medium text-destructive">
+          <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--destructive)_16%,transparent)] px-1.5 py-px text-thread font-medium text-destructive">
             exit {exitCode}
           </span>
         )}
@@ -350,7 +418,7 @@ function Command({ command, exitCode, output }: { command: string; exitCode: num
       {output.trim() ? (
         <Lines body={output} />
       ) : (
-        <p className="px-2.5 pb-2 text-ui-sm text-muted-foreground">No output.</p>
+        <p className="px-2.5 pb-2 text-thread text-muted-foreground">No output.</p>
       )}
     </div>
   );
@@ -381,10 +449,10 @@ function WebSearch({ query, result }: { query: string; result: unknown }) {
       <div className="flex min-w-0 items-center gap-2 px-2.5 pt-2.5 pb-1.5">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-[var(--accent)] px-2.5 py-1">
           <SearchMark className="size-3.5 shrink-0 text-muted-foreground/85 [&_*]:[stroke-width:1.8]" />
-          <span className="min-w-0 truncate text-ui text-foreground/90">{query}</span>
+          <span className="min-w-0 truncate text-thread text-foreground/90">{query}</span>
         </span>
         {rows.length > 0 && (
-          <span className="shrink-0 text-ui-sm tabular-nums text-muted-foreground">
+          <span className="shrink-0 text-thread tabular-nums text-muted-foreground">
             {rows.length === 1 ? "1 result" : `${rows.length} results`}
           </span>
         )}
@@ -423,7 +491,7 @@ function WebPages({ result, urls }: { result: unknown; urls: string[] }) {
         </div>
       ))}
       {missing.map((url) => (
-        <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-ui-sm text-muted-foreground" key={url}>
+        <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-thread text-muted-foreground" key={url}>
           <Favicon host={host(url)} />
           <span className="min-w-0 truncate">{host(url)} returned nothing to read.</span>
         </div>
@@ -452,14 +520,14 @@ function Result({ row }: { row: Record<string, unknown> }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-baseline gap-1.5">
-          <span className="min-w-0 truncate text-ui text-foreground/90 group-hover/result:text-foreground">{title}</span>
+          <span className="min-w-0 truncate text-thread text-foreground/90 group-hover/result:text-foreground">{title}</span>
         </span>
-        <span className="flex min-w-0 items-baseline gap-1.5 text-ui-sm text-muted-foreground">
+        <span className="flex min-w-0 items-baseline gap-1.5 text-thread text-muted-foreground">
           <span className="min-w-0 truncate">{host(url)}</span>
           {when && <span className="shrink-0">· {when}</span>}
         </span>
         {extract && (
-          <span className="mt-0.5 line-clamp-2 text-ui-sm leading-[1.5] text-muted-foreground/80">{extract}</span>
+          <span className="mt-0.5 line-clamp-2 text-thread leading-[1.5] text-muted-foreground/80">{extract}</span>
         )}
       </span>
     </button>
@@ -469,7 +537,7 @@ function Result({ row }: { row: Record<string, unknown> }) {
 /** A short aside in the detail panel: an Exa error, an unset key, an empty
  *  result. Said in a sentence, where the raw payload used to be. */
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pb-2 text-ui-sm leading-[1.5] text-muted-foreground/85">{children}</p>;
+  return <p className="px-2.5 pb-2 text-thread leading-[1.5] text-muted-foreground/85">{children}</p>;
 }
 
 /** The results out of a `WebSearchResult`, whichever shape the turn stored —
@@ -555,6 +623,266 @@ function host(url: string): string {
 }
 
 /** Flow Memory, read back. One section per note, named for what it holds. */
+/**
+ * A trace, as the shape of the run rather than as its digest.
+ *
+ * What was called, what came back, and which variables moved — the three facts
+ * the agent took this trace to establish, in the order it would say them. The
+ * variable lives are the part worth drawing: `w_sum: 0 → 10, 5 changes` is a
+ * loop's whole story, and it was previously a nested array in a JSON dump.
+ */
+function TracedRun({ result }: { result: Record<string, unknown> }) {
+  const digest = record(result.digest);
+  const failed = text(digest.error) || text(result.error);
+  const variables = Array.isArray(digest.variables) ? digest.variables.map(record) : [];
+  const steps = typeof digest.steps === "number" ? digest.steps : null;
+
+  if (failed && steps === null) return <Note>{text(result.note) || failed}</Note>;
+
+  return (
+    <div className="min-w-0">
+      {text(result.setup) ? (
+        <>
+          <Eyebrow>Traced</Eyebrow>
+          <Snippet body={text(result.setup)} language="python" />
+        </>
+      ) : null}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-2.5 pt-2 pb-2 text-thread text-muted-foreground">
+        {steps !== null && <span className="tabular-nums">{steps} steps</span>}
+        {text(digest.returned) ? (
+          <span>
+            returned <code className="font-mono text-foreground/85">{text(digest.returned)}</code>
+          </span>
+        ) : null}
+        {digest.truncated === true && <span>cut short</span>}
+        {failed ? <span className="text-destructive">{failed}</span> : null}
+      </div>
+      {variables.length > 0 && (
+        <>
+          <Eyebrow>What moved</Eyebrow>
+          <div className="px-2.5 pb-2">
+            {variables.slice(0, 8).map((variable, index) => (
+              <div className="flex min-w-0 items-baseline gap-2 py-px" key={index}>
+                <code className="shrink-0 font-mono text-thread text-foreground/85">{text(variable.name)}</code>
+                <span className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">
+                  {text(variable.first)}
+                  <span className="mx-1 text-muted-foreground/50">→</span>
+                  {text(variable.last)}
+                </span>
+                {typeof variable.changes === "number" && variable.changes > 0 && (
+                  <span className="shrink-0 tabular-nums text-thread text-muted-foreground/60">
+                    {variable.changes}×
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A step search: what was looked for, and every moment that answered.
+ *
+ * `why` is already written for a reader — `w_sum: 6 → 10` — so the row is that
+ * sentence against the step it happened at, with the line of source under it.
+ * This is the view the whole visualiser exists to produce and it was a count.
+ */
+function FoundMoments({ args, result }: { args: Record<string, unknown>; result: Record<string, unknown> }) {
+  const moments = Array.isArray(result.moments) ? result.moments.map(record) : [];
+  const looked = [
+    text(args.variable) && `variable ${text(args.variable)}`,
+    typeof args.line === "number" && `line ${args.line}`,
+    text(args.event) && `${text(args.event)} events`,
+    text(args.value) && `value ${text(args.value)}`,
+    typeof args.branch === "boolean" && `branches that went ${args.branch ? "true" : "false"}`,
+  ].filter(Boolean) as string[];
+
+  return (
+    <div className="min-w-0">
+      {looked.length > 0 && (
+        <p className="px-2.5 pt-2 pb-1 text-thread text-muted-foreground">Looked for {looked.join(", ")}</p>
+      )}
+      {moments.length === 0 ? (
+        <Note>{text(result.note) || "Nothing in the run matched."}</Note>
+      ) : (
+        <div className="px-2.5 pt-1 pb-2">
+          {moments.slice(0, 12).map((moment, index) => (
+            <div className="flex min-w-0 items-baseline gap-2 py-0.5" key={index}>
+              <span className="shrink-0 tabular-nums text-thread text-muted-foreground/60">
+                {typeof moment.step === "number" ? moment.step : "—"}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="text-thread text-foreground/85">{text(moment.why)}</span>
+                {text(moment.source) ? (
+                  <code className="ml-2 font-mono text-thread text-muted-foreground/70">{text(moment.source)}</code>
+                ) : null}
+              </span>
+            </div>
+          ))}
+          {moments.length > 12 && (
+            <p className="pt-1 text-thread text-muted-foreground/60">
+              {moments.length - 12} more
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One instant of the run: the line it was on, what it changed, and everything
+ * in scope. `changed` leads because it is the only part a snapshot cannot say —
+ * the difference between "here is the state" and "here is what this step did".
+ */
+function ReadStep({ result }: { result: Record<string, unknown> }) {
+  const changed = Array.isArray(result.changed) ? result.changed.filter((entry): entry is string => typeof entry === "string") : [];
+  const locals = record(result.locals);
+  const names = Object.keys(locals);
+  if (typeof result.step !== "number") return <Note>{text(result.note) || "That step is not in this run."}</Note>;
+
+  return (
+    <div className="min-w-0">
+      <p className="px-2.5 pt-2 pb-1 text-thread text-muted-foreground">
+        <span className="tabular-nums">
+          Step {result.step}
+          {typeof result.of === "number" ? ` of ${result.of}` : ""}
+        </span>
+        {typeof result.line === "number" ? <span className="tabular-nums"> · line {result.line}</span> : null}
+      </p>
+      {text(result.source) ? <Snippet body={text(result.source)} language="python" /> : null}
+      {changed.length > 0 && (
+        <>
+          <Eyebrow>Changed here</Eyebrow>
+          <div className="px-2.5 pb-2">
+            {changed.map((entry, index) => (
+              <p className="font-mono text-thread text-foreground/85" key={index}>{entry}</p>
+            ))}
+          </div>
+        </>
+      )}
+      {names.length > 0 && (
+        <>
+          <Eyebrow>In scope</Eyebrow>
+          <div className="px-2.5 pb-2">
+            {names.slice(0, 12).map((name) => (
+              <div className="flex min-w-0 items-baseline gap-2 py-px" key={name}>
+                <code className="shrink-0 font-mono text-thread text-foreground/85">{name}</code>
+                <code className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">{text(locals[name])}</code>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the learner has, and what they have done to it.
+ *
+ * Their code first and their history under it, because that is the order the
+ * question comes in: what does it say, and then how did it get here. The log is
+ * one line per event with its own time, which is the part the JSON could never
+ * show — twelve `file_changed` records are a paragraph of identical objects and
+ * a single glance at a column of stamps.
+ */
+function Attempt({ result }: { result: Record<string, unknown> }) {
+  const files = Array.isArray(result.files) ? (result.files as Array<Record<string, unknown>>) : [];
+  const events = Array.isArray(result.events) ? (result.events as Array<Record<string, unknown>>) : [];
+  const opened = events.find((event) => text(event.type) === "attempt_started")?.occurredAt;
+  const since = typeof opened === "string" ? Date.parse(opened) : NaN;
+  if (files.length === 0 && events.length === 0) return <Note>Nothing has been recorded on this attempt yet.</Note>;
+
+  return (
+    <div className="min-w-0">
+      {files.map((file, index) => (
+        <div className="min-w-0" key={text(file.path) || index}>
+          {index > 0 && <div className="mx-2.5 border-t border-border/60" />}
+          <FileView body={text(file.text)} path={text(file.path)} />
+        </div>
+      ))}
+      {events.length > 0 && (
+        <>
+          {files.length > 0 && <div className="mx-2.5 border-t border-border/60" />}
+          <Eyebrow>{events.length === 1 ? "1 event" : `${events.length} events`}</Eyebrow>
+          {/* Held to a height. A long attempt is ninety events, and a panel that
+              tall is one row pushing the rest of the turn off the screen — the
+              same reason the thinking block inside a step is capped. */}
+          <FadedScroll className="px-2.5 pb-2">
+            <div>
+              {events.map((event, index) => (
+                <Moment event={event} key={text(event.id) || index} since={since} />
+              ))}
+            </div>
+          </FadedScroll>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** One recorded event: when it happened, what kind it was, and the one thing
+ *  about it worth reading. The offset rather than the clock time — an attempt is
+ *  read as a stretch of work, and 4:12 into it says something 14:06:22 does not. */
+function Moment({ event, since }: { event: Record<string, unknown>; since: number }) {
+  const payload = record(event.payload);
+  const kind = text(event.type);
+
+  return (
+    <div className="flex min-w-0 items-baseline gap-2 py-px">
+      <span className="w-12 shrink-0 text-right font-mono text-thread whitespace-nowrap tabular-nums text-muted-foreground/70">{offset(text(event.occurredAt), since)}</span>
+      <span className={cn("shrink-0 text-thread", kind === "test_run" && !payload.passed ? "text-[var(--warning)]" : "text-foreground/85")}>{MOMENT[kind] ?? kind.replace(/_/g, " ")}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">{momentDetail(kind, payload)}</span>
+    </div>
+  );
+}
+
+const MOMENT: Record<string, string> = {
+  attempt_started: "opened",
+  file_changed: "edited",
+  command_executed: "ran",
+  test_run: "tested",
+  submission_created: "submitted",
+  submission_evaluated: "reviewed",
+  attempt_completed: "closed",
+  hint_requested: "asked for a hint",
+  learner_remark: "said",
+  agent_message: "replied",
+};
+
+/** The half-line beside an event. Each kind has exactly one thing worth
+ *  reading — a score, a path, a verdict — and everything else in the payload is
+ *  what made the raw version unreadable. */
+function momentDetail(kind: string, payload: Record<string, unknown>): string {
+  if (kind === "test_run") {
+    const passed = typeof payload.passedCases === "number" ? payload.passedCases : null;
+    const failed = typeof payload.failedCases === "number" ? payload.failedCases : null;
+    const scope = text(payload.scope) === "visible" ? "" : text(payload.scope).replace(/-/g, " ");
+    const score = passed === null || failed === null ? (payload.passed ? "passed" : "failed") : `${passed}/${passed + failed}`;
+    return [score, scope].filter(Boolean).join(" · ");
+  }
+  if (kind === "submission_evaluated") return [text(payload.review), text(payload.approach)].filter(Boolean).join(" · ");
+  if (kind === "attempt_completed") return text(payload.outcome);
+  if (kind === "learner_remark" || kind === "agent_message" || kind === "hint_requested") return text(payload.body);
+  if (kind === "command_executed") return text(payload.command);
+  return text(payload.path);
+}
+
+/** How far into the attempt something happened. */
+function offset(at: string, since: number): string {
+  const when = Date.parse(at);
+  if (!Number.isFinite(when) || !Number.isFinite(since)) return "";
+  const seconds = Math.max(0, Math.round((when - since) / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 10) return `${minutes}m${seconds % 60}s`;
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60}m`;
+}
+
 function Memory({ reads }: { reads: unknown }) {
   const rows = Array.isArray(reads) ? (reads as Array<Record<string, unknown>>) : [];
   if (rows.length === 0) return null;
@@ -592,9 +920,9 @@ function Patches({ patches }: { patches: unknown }) {
         <div className="min-w-0" key={index}>
           {index > 0 && <div className="mx-2.5 border-t border-border/60" />}
           <div className="flex min-w-0 items-baseline gap-1.5 px-2.5 pt-2 pb-1">
-            <span className="shrink-0 text-ui-sm text-foreground/85">{memoryLabel(text(row.file)) || "Memory"}</span>
-            <span className="shrink-0 text-ui-sm text-muted-foreground">{PATCH_MODE[text(row.mode)] ?? PATCH_MODE.append}</span>
-            {text(row.reason) && <span className="min-w-0 truncate text-ui-sm text-muted-foreground">· {text(row.reason)}</span>}
+            <span className="shrink-0 text-thread text-foreground/85">{memoryLabel(text(row.file)) || "Memory"}</span>
+            <span className="shrink-0 text-thread text-muted-foreground">{PATCH_MODE[text(row.mode)] ?? PATCH_MODE.append}</span>
+            {text(row.reason) && <span className="min-w-0 truncate text-thread text-muted-foreground">· {text(row.reason)}</span>}
           </div>
           <Lines body={text(row.content)} />
         </div>
@@ -623,7 +951,7 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
 
   return (
     <div className="min-w-0 px-2.5 py-2">
-      <p className="text-ui leading-[1.55] text-foreground/90">
+      <p className="text-thread leading-[1.55] text-foreground/90">
         <Inline text={question} />
       </p>
 
@@ -632,7 +960,7 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
           {spare.map((choice, index) => (
             <li
               key={`${choice}-${index}`}
-              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-ui-sm text-muted-foreground/80"
+              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-thread text-muted-foreground/80"
             >
               <Inline text={choice} />
             </li>
@@ -641,12 +969,12 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
       )}
 
       {answer ? (
-        <p className="mt-2 border-l border-border/70 pl-2.5 text-ui leading-[1.55] whitespace-pre-wrap text-foreground">
+        <p className="mt-2 border-l border-border/70 pl-2.5 text-thread leading-[1.55] whitespace-pre-wrap text-foreground">
           <Inline text={answer} />
         </p>
       ) : (
         /* The row is open while the card below it is still waiting. */
-        <p className="mt-2 text-ui-sm text-muted-foreground/85">Waiting for your answer.</p>
+        <p className="mt-2 text-thread text-muted-foreground/85">Waiting for your answer.</p>
       )}
     </div>
   );

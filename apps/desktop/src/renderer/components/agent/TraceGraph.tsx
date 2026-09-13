@@ -284,7 +284,7 @@ function Node({ changed, names, node }: { changed: boolean; names: string[]; nod
       style={{ height: NODE_H, left: node.x, top: node.y, width: NODE_W }}
       transition={{ duration: 0.25, ease: [0.32, 0.72, 0, 1] }}
     >
-      <span className={cn("font-mono text-ui tabular-nums", changed ? "text-[var(--trace-change)]" : "text-foreground")}>
+      <span className={cn("font-mono text-thread tabular-nums", changed ? "text-[var(--trace-change)]" : "text-foreground")}>
         {node.label}
       </span>
       {/* The name a local gives this node rides on the node, because "we are at

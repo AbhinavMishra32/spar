@@ -114,6 +114,24 @@
   --text-content: 0.8125rem;
   --text-content--line-height: 1.375rem;
 
+  /* The agent thread, at one size.
+
+     It used to run three: the reply at 13.5px, the step rows at 12px, a payload
+     caption at 11px. Stacked in one scrolling column that reads as three
+     surfaces on top of each other, and the sizes were carrying no meaning the
+     colour and the weight were not already carrying. So the thread is one size
+     now, and it is the size the reply was — that is the text in there anyone
+     actually reads at length, and it is not the one to shrink.
+
+     Its own token rather than `--text-ui`, because `--text-ui` is the chrome of
+     every other surface in the app — toolbars, panels, the result rail — and
+     none of those is a reading column. And the same size as the problem
+     statement rather than a fourth number: the challenge on one side and the
+     agent talking about it on the other are the two things a learner reads back
+     and forth between, and they should be set the same. */
+  --text-thread: 0.8125rem;
+  --text-thread--line-height: 1.375rem;
+
   /* The source list runs a step above the rest of the chrome, and deliberately.
      A sidebar is read at a glance and from further away than a toolbar — it is
      the one surface you navigate by shape rather than by reading — so its labels
@@ -536,10 +554,12 @@
     color: inherit;
   }
 
-  button:not(:disabled),
-  [role="button"]:not(:disabled) {
-    cursor: pointer;
-  }
+  /* No hand cursor. This is a desktop app, and on the platform it is drawn for
+     the pointing hand means a hyperlink, not a control — a Mac button, tab or
+     disclosure keeps the arrow. The rule was fought one component at a time by
+     `cursor-default` overrides scattered through the thread; removing it is the
+     same decision made once. `cursor-default` is the browser's own default for
+     a button, so nothing needs to say so. */
 
   ::selection {
     background: color-mix(in srgb, var(--foreground) 16%, transparent);
@@ -892,11 +912,11 @@
      travels across it — slower and over a wider gradient than the working
      shimmer, because at this size a 2.4s sweep reads as a loading bar. Whatever
      the app is doing before its first paint is not the learner's business. */
-  /* The boot mark: the app icon's grid at room scale, waving while the local
-     store is read. It fades and settles up into place rather than appearing,
-     so the window opening and the mark arriving read as one movement. */
+  /* The boot mark: the app icon's grid while the local store is read. It fades
+     up rather than appearing, and only to the muted tone it holds — this is a
+     screen nobody asked for, and it should not arrive at full strength. */
   .boot-mark {
-    animation: boot-mark-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: boot-mark-in 0.7s ease-out both;
   }
 
   .boot-wordmark {
@@ -1240,10 +1260,13 @@
        16px assumes a column about twice this panel's width, and at 380px that
        reads as oversized.
 
-       Half a step above the app's UI size is enough to change how it reads.
-       Every margin, heading, pill and list indent below is a multiple of this,
-       so moving this one line rescales the whole system together. */
-    --md-font-size: 0.84375rem;
+       It used to sit half a step above the app's UI size, and the rest of the
+       thread has come up to meet it rather than the other way round — a thread
+       where the reply is 13.5px, the step rows are 12px and a payload caption is
+       11px reads as three surfaces stacked on each other. Every margin, heading,
+       pill and list indent below is a multiple of this, so moving this one line
+       rescales the whole system together. */
+    --md-font-size: 0.8125rem;
     /* The system face, and the system's own optical sizing.
 
        `--font-display` is named for the job rather than for a file: on macOS it
@@ -1255,7 +1278,9 @@
        ground buzzes; ChatGPT's body sits just under its own maximum too. */
     color: color-mix(in oklab, var(--foreground) 92%, transparent);
     --md-line-height: calc(var(--md-font-size) * 1.625);
-    --md-small-font-size: max(0.8125rem, calc(var(--md-font-size) * 0.875));
+    /* Not smaller: the thread is one size, and a caption that shrinks is the
+       thing this was meant to stop. */
+    --md-small-font-size: var(--md-font-size);
     --md-space: calc(var(--md-font-size) / 4);
     font-size: var(--md-font-size);
     line-height: var(--md-line-height);
@@ -1502,11 +1527,9 @@
 @keyframes boot-mark-in {
   from {
     opacity: 0;
-    transform: scale(0.94);
   }
   to {
-    opacity: 1;
-    transform: none;
+    opacity: 0.75;
   }
 }
 
@@ -1768,6 +1791,7 @@
      `animation: none` above already leaves it drawn as the icon draws it. */
   .boot-mark {
     animation: none;
+    opacity: 0.75;
   }
 
   .thinking-shimmer,

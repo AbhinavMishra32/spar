@@ -111,7 +111,7 @@ export function RunFold({
     <div className="min-w-0">
       <button
         aria-expanded={open}
-        className="group/fold -mx-1 flex min-h-6 items-center gap-1 px-1 text-ui text-muted-foreground transition-colors select-none hover:text-foreground"
+        className="group/fold -mx-1 flex min-h-6 items-center gap-1 px-1 text-thread text-muted-foreground transition-colors select-none hover:text-foreground"
         onClick={() => { if (!open) void load(); setOverride(!open); }}
         type="button"
       >
@@ -131,9 +131,9 @@ export function RunFold({
             tall but still in the document, and without this its buttons stay
             tabbable — the learner would tab into steps they cannot see. */}
         <div className={cn("min-w-0 overflow-hidden", open ? "pt-1" : undefined)} inert={!open}>
-          {!bodyLoaded && loading && <p className="py-1 text-ui text-muted-foreground" role="status">Loading the steps…</p>}
+          {!bodyLoaded && loading && <p className="py-1 text-thread text-muted-foreground" role="status">Loading the steps…</p>}
           {!bodyLoaded && failed && (
-            <button className="py-1 text-ui text-muted-foreground transition-colors hover:text-foreground" onClick={() => void load()} type="button">
+            <button className="py-1 text-thread text-muted-foreground transition-colors hover:text-foreground" onClick={() => void load()} type="button">
               Those steps could not be loaded. Try again
             </button>
           )}

@@ -222,13 +222,15 @@ function closeReasoning(parts: RunPart[], inPlace = false): RunPart[] {
 }
 
 export type ToolPart = Extract<RunPart, { kind: "tool" }>;
+export type ReasoningPart = Extract<RunPart, { kind: "reasoning" }>;
 
 /** A transcript row. Every tool call is one, since each carries the agent's own
  *  account of what it was for; the two that are outcomes rather than steps —
  *  a published challenge, a solve being read — get their own shape. */
 export type GroupedPart =
   | Exclude<RunPart, { kind: "tool" }>
-  | { kind: "tool-row"; id: string; part: ToolPart }
+  /** A tool call, and the thinking that led straight to it — see `bindThinking`. */
+  | { kind: "tool-row"; id: string; part: ToolPart; thinking?: ReasoningPart; after?: ReasoningPart }
   | { kind: "challenge"; id: string; part: ToolPart }
   | { kind: "solve-read"; id: string; part: ToolPart }
   /** A diagram the agent built into its reply. Lifted out of the step rows for
@@ -243,6 +245,54 @@ export type GroupedPart =
  * turn is supposed to look exactly like it did while it ran, and two functions
  * doing this separately is how that stops being true.
  */
+/**
+ * Thinking, folded into the step it was thinking about.
+ *
+ * A turn that works through a problem alternates: a block of reasoning, then the
+ * call it decided on, then more reasoning, then the next call. Drawn as written
+ * that is two rows per step, and the first of each pair says nothing the second
+ * does not — "Planning to call open_visualizer" above `Opening the failing
+ * window trace`, "Preparing parallel visualizer reads" above the four reads it
+ * prepared. Half the transcript was the agent announcing its next row.
+ *
+ * So a settled block of thinking that is immediately followed by a call belongs
+ * to that call, and rides in the panel the row already opens. The thread becomes
+ * what the learner is actually scanning for — the things that happened, in
+ * order, each with what it found — and the reasoning behind any one of them is
+ * one click away rather than in the way of the next.
+ *
+ * Two cases keep their own row, because in both the thinking is the content
+ * rather than a preamble: a block still streaming (that row *is* the agent
+ * thinking, and it is the only sign a long turn is alive), and a block that led
+ * to prose instead of an action — there, it is the thinking behind what the
+ * agent went on to say.
+ */
+function bindThinking(rows: GroupedPart[]): GroupedPart[] {
+  const bound: GroupedPart[] = [];
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!;
+    const next = rows[index + 1];
+    if (row.kind === "reasoning" && !row.open && next?.kind === "tool-row" && !next.thinking) {
+      bound.push({ ...next, thinking: row });
+      index += 1;
+      continue;
+    }
+    /* The thinking a turn does after its last call, before it answers. There is
+       no call ahead of it to belong to, so on its own it draws a stack of
+       headings with nothing behind them — six lines of the agent talking about
+       the work, in place of the work. It goes back onto the call it was
+       reasoning from, so that one row opens into the whole of it: why it
+       looked, what it sent, what came back, and what it made of it. */
+    const held = bound[bound.length - 1];
+    if (row.kind === "reasoning" && !row.open && held?.kind === "tool-row" && !held.after && (!next || next.kind === "text")) {
+      bound[bound.length - 1] = { ...held, after: row };
+      continue;
+    }
+    bound.push(row);
+  }
+  return bound;
+}
+
 export function groupParts(parts: RunPart[]): GroupedPart[] {
   const grouped: GroupedPart[] = [];
   for (const part of parts) {
@@ -287,7 +337,7 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
     }
     else grouped.push(part);
   }
-  return grouped;
+  return bindThinking(grouped);
 }
 
 function last(grouped: GroupedPart[]): GroupedPart | undefined {
