@@ -1,6 +1,7 @@
 import { Fragment, memo, useEffect, useMemo, useState } from "react";
 import { useCodeTheme } from "@/hooks/use-code-theme";
 import { highlight, type Span } from "@/lib/highlight";
+import { plainMath } from "@/lib/tex";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { parseReference, Reference, useMarkdownLinks } from "./MarkdownLinks";
@@ -33,7 +34,10 @@ export function Inline({ text }: { text: string }) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text))) {
       if (match.index > cursor) {
-        result.push({ key: `t${cursor}`, node: text.slice(cursor, match.index) });
+        /* Plain prose only. TeX is unwrapped here rather than over the whole
+           string so a backslash inside a code span stays a backslash — the one
+           place in a message where `\(` means itself. */
+        result.push({ key: `t${cursor}`, node: plainMath(text.slice(cursor, match.index)) });
       }
       const value = match[0];
       const reference = value.startsWith("[[") ? parseReference(value) : null;
@@ -81,7 +85,7 @@ export function Inline({ text }: { text: string }) {
       }
       cursor = match.index + value.length;
     }
-    if (cursor < text.length) result.push({ key: `t${cursor}`, node: text.slice(cursor) });
+    if (cursor < text.length) result.push({ key: `t${cursor}`, node: plainMath(text.slice(cursor)) });
     return result;
   }, [text]);
 

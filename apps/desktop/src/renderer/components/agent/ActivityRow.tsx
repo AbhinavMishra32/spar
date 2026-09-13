@@ -320,7 +320,11 @@ export const LINKED_GAP = "0rem";
  *  most room of anything in a turn: the contrast between a tight cluster of steps
  *  and a sentence with air around it is what makes a long turn scannable. */
 export const STEP_GAP = "0.25rem";
-export const PROSE_GAP = "0.25rem";
+/* Set from the prose side and applied on both, so a paragraph has the same room
+   above it and below it. It was equal to STEP_GAP, which meant a sentence sat as
+   close to the tool row under it as two tool calls sit to each other — the
+   contrast the comment above describes was written down and then not spent. */
+export const PROSE_GAP = "0.875rem";
 /** Exactly where a row's label starts: the inset, plus the icon, plus the gap
  *  after it. A note under a row uses this so it lines up with the words it belongs
  *  to rather than nearly lining up with them. */

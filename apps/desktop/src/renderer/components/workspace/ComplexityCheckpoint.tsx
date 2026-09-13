@@ -1,14 +1,21 @@
-import { ArrowRight, Check, Loader2 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { ArrowRight, Check, Loader2, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { Inline } from "../agent/Markdown";
+import type { ComplexityVerdict } from "../../../shared/api";
 
 export type ComplexityCheckpointState = {
   phase: "answering" | "reviewing" | "reviewed" | "acknowledging";
   time: string;
   space: string;
   review: string;
+  /** Which halves were right, when the reviewer said so in a form that can be
+   *  read. Absent for a review that came back as prose, and for every review
+   *  recorded before the checkpoint returned one — the card then reports without
+   *  marking rather than ticking on faith. */
+  verdict?: ComplexityVerdict | null;
 };
 
 type Growth = "constant" | "logarithmic" | "linear" | "linearithmic" | "quadratic" | "cubic" | "exponential" | "factorial" | "unknown";
@@ -37,38 +44,78 @@ function curve(growth:Growth){
   return values.map((amount,index)=>`${index?"L":"M"} ${8+index*(104/(values.length-1))} ${growth==="constant"?28:48-(amount/max)*36}`).join(" ");
 }
 
-function MiniGraph({value,label}: {value:string;label:string}){
+function MiniGraph({value,label,claim,matched}: {value:string;label:string;claim?:string;matched?:boolean | undefined}){
   const growth=growthFromComplexity(value);
+  const claimed=growthFromComplexity(claim ?? value);
+  const comparing=matched===false;
+  const reducedMotion=useReducedMotion();
+  const transition={duration:reducedMotion ? 0 : 0.6,ease:[0.22,0.61,0.36,1] as const};
   return <div className="rounded-[var(--radius-lg)] border border-[var(--glass-hairline)] bg-[var(--color-background-surface-under)] px-2.5 pb-2 pt-2">
     <div className="mb-1 flex items-center justify-between text-ui-sm"><span className="font-medium text-foreground/80">{label}</span><span className="text-muted-foreground">{LABEL[growth]}</span></div>
-    <svg aria-label={`${label} ${LABEL[growth]} growth preview`} className="h-12 w-full overflow-visible" role="img" viewBox="0 0 120 56">
+    <svg aria-label={comparing ? `${label}: your answer ${claim}; reviewed bound ${value}. Illustrative growth curves.` : `${label} ${LABEL[growth]} growth preview`} className="h-12 w-full overflow-visible" role="img" viewBox="0 0 120 56">
       <path d="M 8 48 H 114 M 8 48 V 8" fill="none" stroke="currentColor" className="text-border" strokeWidth="1" />
-      <path d={curve(growth)} fill="none" stroke="currentColor" className={cn("text-foreground transition-opacity",growth==="unknown"&&"opacity-25")} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
-      <circle cx="112" cy={growth==="constant"?28:12} fill="currentColor" className={cn("text-foreground",growth==="unknown"&&"opacity-25")} r="2.2" />
+      <motion.path initial={false} animate={{d:curve(growth),opacity:growth==="unknown"?0.25:1}} transition={transition} fill="none" stroke="currentColor" className={cn("transition-colors duration-500 motion-reduce:transition-none",matched===undefined ? "text-foreground" : "text-[var(--success)]")} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
+      <motion.path initial={false} animate={{d:curve(claimed),opacity:comparing?1:0}} transition={transition} fill="none" stroke="currentColor" className="text-destructive" strokeDasharray="3 3" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
       <text className="fill-muted-foreground text-[6px]" x="108" y="55">input</text>
     </svg>
+    {matched!==undefined && <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-ui-sm">
+      {comparing && <span className="text-destructive">┄ Your answer · {LABEL[claimed]}</span>}
+      <span className="text-[var(--success)]">— {comparing ? "Reviewed" : "Your answer matches"} · {LABEL[growth]}</span>
+      <span className="w-full text-muted-foreground">Illustrative growth, normalized</span>
+    </div>}
   </div>;
 }
+
+
+/** A field's label, and what the review made of it. The true bound is printed
+ *  beside a claim that missed: the learner asked a question and the answer is a
+ *  bound, not a cross. */
+function Field({label,matched}:{label:string;matched?:boolean|undefined;truth?:string|undefined}){
+  return <span className="flex items-baseline gap-1.5">
+    <span className="text-ui font-medium text-foreground/80">{label}</span>
+    {matched===true&&<Check className="size-3 shrink-0 self-center text-[var(--success)]"/>}
+    {matched===false&&<X className="size-3 shrink-0 self-center text-destructive"/>}
+  </span>;
+}
+
+/** The claim itself, tinted by the verdict. */
+const fieldTone=(matched?:boolean)=>matched===undefined?undefined:matched?"border-[var(--success)]/40":"border-destructive/40 text-destructive";
 
 export function ComplexityCheckpoint({state,onChange,onReview,onAcknowledge}: {state:ComplexityCheckpointState;onChange(next:Pick<ComplexityCheckpointState,"time"|"space">):void;onReview():void;onAcknowledge():void}){
   const locked=state.phase!=="answering";
   const canReview=state.time.trim().length>0&&state.space.trim().length>0;
+  /* Only once the review is in. Marking a field while the check is still running
+     would be reporting a verdict that does not exist yet. */
+  const matched=state.phase==="reviewed"||state.phase==="acknowledging"?state.verdict??undefined:undefined;
+  const right=matched?matched.timeMatches&&matched.spaceMatches:undefined;
   return <motion.section animate={{opacity:1,y:0}} className="composer-shell overflow-hidden" initial={{opacity:0,y:8}} transition={{duration:.24,ease:[.22,.61,.36,1]}}>
     <div className="flex items-start gap-3 border-b border-[var(--glass-hairline)] px-3.5 py-3">
-      <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-full bg-[var(--color-background-elevated-secondary)] text-ui-sm font-semibold">Ω</span>
-      <div className="min-w-0 flex-1"><h3 className="text-content font-medium">One last check</h3><p className="mt-0.5 text-ui leading-[1.5] text-muted-foreground">Your solution passed. State its worst-case bounds before Spar reviews the code.</p></div>
+      <div className="min-w-0 flex-1"><h3 className="text-content font-medium">Complexity check</h3><p className="mt-0.5 text-ui-sm text-muted-foreground">What are your solution’s time and auxiliary space bounds?</p></div>
     </div>
     <div className="space-y-3 p-3">
       <div className="grid grid-cols-2 gap-2.5">
-        <label className="space-y-1.5"><span className="text-ui font-medium text-foreground/80">Time complexity</span><Input autoFocus={!locked} disabled={locked} onChange={(event)=>onChange({time:event.target.value,space:state.space})} placeholder="O(n log n)" value={state.time}/></label>
-        <label className="space-y-1.5"><span className="text-ui font-medium text-foreground/80">Space complexity</span><Input disabled={locked} onChange={(event)=>onChange({time:state.time,space:event.target.value})} onKeyDown={(event)=>{if(event.key==="Enter"&&canReview&&!locked)onReview();}} placeholder="O(n)" value={state.space}/></label>
+        <label className="space-y-1.5"><Field label="Time complexity" matched={matched?.timeMatches} truth={state.verdict?.time}/><Input autoFocus={!locked} className={fieldTone(matched?.timeMatches)} disabled={locked} onChange={(event)=>onChange({time:event.target.value,space:state.space})} placeholder="O(n log n)" value={state.time}/></label>
+        <label className="space-y-1.5"><Field label="Space complexity" matched={matched?.spaceMatches} truth={state.verdict?.space}/><Input className={fieldTone(matched?.spaceMatches)} disabled={locked} onChange={(event)=>onChange({time:state.time,space:event.target.value})} onKeyDown={(event)=>{if(event.key==="Enter"&&canReview&&!locked)onReview();}} placeholder="O(n)" value={state.space}/></label>
       </div>
-      <div className="grid grid-cols-2 gap-2.5"><MiniGraph label="Time" value={state.time}/><MiniGraph label="Space" value={state.space}/></div>
+      {matched && <div className="grid grid-cols-2 gap-2.5 text-ui-sm">
+        <p className="text-muted-foreground">Reviewed time <span className="font-medium text-foreground"><Inline text={matched.time}/></span></p>
+        <p className="text-muted-foreground">Reviewed space <span className="font-medium text-foreground"><Inline text={matched.space}/></span></p>
+      </div>}
+      <div className="grid grid-cols-2 gap-2.5"><MiniGraph label="Time" value={matched?.time ?? state.time} claim={state.time} matched={matched?.timeMatches}/><MiniGraph label="Space" value={matched?.space ?? state.space} claim={state.space} matched={matched?.spaceMatches}/></div>
       <AnimatePresence initial={false}>
         {state.phase!=="answering"&&<motion.div animate={{height:"auto",opacity:1}} className="overflow-hidden" initial={{height:0,opacity:0}}>
           <div className="flex items-start gap-2 rounded-[var(--radius-lg)] border border-[var(--glass-hairline)] bg-[var(--color-background-elevated-secondary)] px-3 py-2.5 text-ui leading-[1.55]">
-            {state.phase==="reviewing"?<Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin"/>:<Check className="mt-0.5 size-3.5 shrink-0"/>}
-            <p className="text-foreground/85">{state.phase==="reviewing"?"Checking those bounds against your submitted code…":state.review}</p>
+            {state.phase==="reviewing"
+              ?<Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin"/>
+              /* The tick used to be unconditional, which is how a review saying
+                 the space bound was wrong arrived under a check mark. */
+              :right===false?<X className="mt-0.5 size-3.5 shrink-0 text-destructive"/>
+              :<Check className={cn("mt-0.5 size-3.5 shrink-0",right&&"text-[var(--success)]")}/>}
+            {/* The review is written by the model, in the language the model writes
+                prose in: backticks around an identifier, and TeX around a bound.
+                Rendered through the same inline renderer the transcript uses, so
+                `\(O(1)\)` arrives as O(1) rather than as its delimiters. */}
+            <p className="text-foreground/85">{state.phase==="reviewing"?"Checking your code…":<Inline text={matched?.why || state.review}/>}</p>
           </div>
         </motion.div>}
       </AnimatePresence>

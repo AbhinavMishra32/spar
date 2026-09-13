@@ -122,14 +122,22 @@ function Rows({ parts }: { parts: RunPart[] }) {
         /* No margin between two steps of the same run: that gap is padding
            inside the upper row, so the thread can run through it. Everything
            else is spaced from the outside as before. */
-        const gap = index === 0 || linked ? undefined : part.kind === "text" ? PROSE_GAP : STEP_GAP;
+        /* Prose claims its room from both sides. Reading only this row's kind
+           gave a paragraph air above it and left the next step tight underneath,
+           so a sentence looked attached to the work that came after it rather
+           than to the turn it belongs to. */
+        const prose = part.kind === "text" || previous?.kind === "text";
+        const gap = index === 0 || linked ? undefined : prose ? PROSE_GAP : STEP_GAP;
         const wrap = (node: React.ReactNode) => (
           <div key={part.id} className="min-w-0" {...(gap ? { style: { marginTop: gap } } : {})}>
             {node}
           </div>
         );
 
-        if (part.kind === "text") return wrap(<div className="pb-2 text-foreground"><Markdown source={part.body} /></div>);
+        /* No bottom padding: the gap under a paragraph is PROSE_GAP now, set by
+           the row beneath it, and a pad here on top of that was the part that
+           made the spacing around prose impossible to predict. */
+        if (part.kind === "text") return wrap(<div className="text-foreground"><Markdown source={part.body} /></div>);
         if (part.kind === "reasoning") return wrap(<Reasoning part={part} />);
         if (part.kind === "tool-row") {
           return wrap(<ToolRow continues={continues} part={part.part} />);
