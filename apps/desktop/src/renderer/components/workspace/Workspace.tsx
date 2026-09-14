@@ -563,7 +563,15 @@ export function Workspace({
         }
         nav={nav}
         onExpandSidebar={onExpandSidebar}
-        subtitle={context === "baseline" ? `Adaptive calibration · ${question.abilityTitle}` : detail.summary.title}
+        /* Baseline keeps a subtitle because "Adaptive calibration" is the only
+           thing on that toolbar saying what the run is for. A challenge does not:
+           the session's own name went here, and a session is named by the sentence
+           you typed to start it — "Wanna get better in sliding window python for
+           interview. start from basics an…" — which is a paragraph wearing a
+           label's clothes. It truncated to nothing useful, and everything it was
+           standing in for is already on screen: the stepper says which challenge,
+           the panel header says which problem. */
+        {...(context === "baseline" ? { subtitle: `Adaptive calibration · ${question.abilityTitle}` } : {})}
         /* The stepper stands in for the title once there is more than one
            challenge to step through: it says the same thing — which challenge of
            how many — and is the way back to the rest of them. */
@@ -577,7 +585,9 @@ export function Workspace({
       {/* The conversation is the surface; the working panes are sheets inset into
           it, the way a browser window insets content into its own chrome. The
           gutter is what says so — the panes carry no outer border of their own. */}
-      <PanelGroup autoSaveId="spar-problem" className="min-h-0 flex-1" direction="horizontal">
+      {/* Shared with the practice page, which is the same pane showing a challenge
+          you are no longer on. See the note there. */}
+      <PanelGroup autoSaveId="spar-challenge-pane" className="min-h-0 flex-1" direction="horizontal">
         <Panel defaultSize={44} minSize={32} order={1}>
           <AgentPanel
             answering={sending}

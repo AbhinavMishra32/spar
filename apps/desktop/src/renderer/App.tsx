@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
+import type { ChallengeDetail, Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
 import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
@@ -66,6 +66,7 @@ export function App() {
   /* Which challenge the standalone page is showing. Held here rather than inside
      the challenges list so navigating away and back does not silently keep a
      challenge mounted behind the list. */
+  const [challengeSeed, setChallengeSeed] = useState<ChallengeDetail | null>(null);
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   /* Every agent turn in flight, by the session it belongs to — not just the one
@@ -391,8 +392,18 @@ export function App() {
      else. Split so a back press cannot append the entry it is standing on. */
   const show = (next: Page) => {
     setPage(next);
-    if (next !== "workspace") setDetail(null);
-    if (next !== "challenge") setChallengeId(null);
+    /* The session and a past challenge are one pane, not two pages. Dropping the
+       one you are leaving is what made the crossing a teardown: `show("challenge")`
+       cleared the open session, so the workspace was gone from the tree before the
+       practice page had drawn a pixel, and stepping back cleared the challenge the
+       same way. They are both kept for as long as either is on screen, and both are
+       let go the moment the pane itself is left. */
+    const pane = next === "workspace" || next === "challenge";
+    if (!pane) {
+      setDetail(null);
+      setChallengeId(null);
+      setChallengeSeed(null);
+    }
     if (next !== "ability") setAbility(null);
   };
 
@@ -515,10 +526,20 @@ export function App() {
      lands is now the history's business rather than a guess recorded at the
      door. */
   const openChallenge = (id: string) => {
-    setChallengeId(id);
-    show("challenge");
-    setDetail(null);
-    setHistory((current) => visit(current, { page: "challenge", challengeId: id }));
+    const land = () => {
+      setChallengeId(id);
+      show("challenge");
+      setHistory((current) => visit(current, { page: "challenge", challengeId: id }));
+    };
+    /* Read first, then navigate. It is a local read of a few files, and doing it
+       before the page exists is the difference between arriving on the challenge
+       and arriving on a spinner that becomes the challenge. If it fails the page
+       still opens and reads for itself — this is a head start, not the load. */
+    if (!api) { setChallengeSeed(null); land(); return; }
+    void api
+      .readChallenge(id)
+      .then((next) => { setChallengeSeed(next ?? null); land(); })
+      .catch(() => { setChallengeSeed(null); land(); });
   };
 
   const openAbility = (id: string) => {
@@ -808,18 +829,6 @@ export function App() {
               onOpenConcept={setConcept}
             />
           )}
-          {page === "challenge" && challengeId && (
-            <ChallengePage
-              api={api}
-              challengeId={challengeId}
-              dark={dark}
-              nav={nav}
-              onError={setError}
-              onExpandSidebar={expandSidebar}
-              onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
-              trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
-            />
-          )}
           {page === "settings" && (
             <SettingsPage
               api={api}
@@ -832,64 +841,102 @@ export function App() {
               theme={data.theme}
             />
           )}
-          {page === "workspace" &&
-            (detail ? (
-              /* Session identity and workspace mode both define the mounted
-                 surface. Including both keeps the same blur cross-dissolve for
-                 challenge-to-challenge session navigation as well as mode changes. */
-              <AnimatePresence initial={false} mode="wait">
-                <motion.div
-                  key={`${detail.summary.id}:${sessionMode(detail)}`}
-                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                  className="h-full"
-                  exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
-                  initial={{ opacity: 0, scale: 1.01, filter: "blur(8px)" }}
-                  transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-                >
-                  {detail.question ? (
-                    <Workspace
-                      api={api}
-                      concepts={conceptContext}
-                      dark={dark}
-                      detail={detail}
-                      onAbandon={abandon}
-                      nav={nav}
-                      onError={setError}
-                      onExpandSidebar={expandSidebar}
-                      onOpenSettings={() => navigate("settings")}
-                      onRefresh={() => openSession(detail.summary.id)}
-                      question={detail.question}
-                      run={runs[detail.summary.id] ?? null}
-                      trail={trailFor(detail.summary.id)}
-                    />
-                  ) : sessionMode(detail) === "chat" ? (
-                    <ChatView
-                      api={api}
-                      detail={detail}
-                      nav={nav}
-                      onError={setError}
-                      onExpandSidebar={expandSidebar}
-                      onOpenSettings={() => navigate("settings")}
-                      onRefresh={() => openSession(detail.summary.id)}
-                      run={runs[detail.summary.id] ?? null}
-                    />
-                  ) : (
-                    <PlanningView
-                      api={api}
-                      detail={detail}
-                      nav={nav}
-                      onError={setError}
-                      onExpandSidebar={expandSidebar}
-                      onOpenSettings={() => navigate("settings")}
-                      onRefresh={() => openSession(detail.summary.id)}
-                      run={runs[detail.summary.id] ?? null}
-                    />
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            ) : (
-              <WorkspaceSkeleton />
-            ))}
+          {/* The session and a past challenge, stacked rather than routed.
+              They used to be two branches of this list, so stepping between them
+              was an unmount and a mount: Monaco torn down and rebuilt, the
+              practice page reading its challenge from disk behind a full-height
+              spinner, and the workspace arriving through a blurred, scaled
+              dissolve on the way back. That is what read as flicker, and no
+              transition inside either page could have covered it — there was
+              nothing on screen to transition from.
+
+              Both are mounted for as long as either is in use, and the crossing
+              is an opacity fade between two layers that are already painted. The
+              hidden one keeps its editors, its drafts and its scroll position, so
+              stepping back is instantaneous rather than another cold load. */}
+          {(page === "workspace" || page === "challenge") && (
+            <div className="relative h-full">
+              {detail && (
+                <Surface active={page === "workspace"}>
+                  {/* Session identity and workspace mode both define the mounted
+                      surface, so both are in the key: this covers
+                      challenge-to-challenge navigation within a session as well as
+                      mode changes. The blur cross-dissolve is deliberate here and
+                      is not the same crossing as stepping between a live challenge
+                      and a past one — that one is two surfaces of the same pane and
+                      fades plainly, this one is arriving somewhere else. */}
+                  <AnimatePresence initial={false} mode="wait">
+                    <motion.div
+                      key={`${detail.summary.id}:${sessionMode(detail)}`}
+                      animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                      className="h-full"
+                      exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
+                      initial={{ opacity: 0, scale: 1.01, filter: "blur(8px)" }}
+                      transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
+                    >
+                      {detail.question ? (
+                        <Workspace
+                          api={api}
+                          concepts={conceptContext}
+                          dark={dark}
+                          detail={detail}
+                          onAbandon={abandon}
+                          nav={nav}
+                          onError={setError}
+                          onExpandSidebar={expandSidebar}
+                          onOpenSettings={() => navigate("settings")}
+                          onRefresh={() => openSession(detail.summary.id)}
+                          question={detail.question}
+                          run={runs[detail.summary.id] ?? null}
+                          trail={trailFor(detail.summary.id)}
+                        />
+                      ) : sessionMode(detail) === "chat" ? (
+                        <ChatView
+                          api={api}
+                          detail={detail}
+                          nav={nav}
+                          onError={setError}
+                          onExpandSidebar={expandSidebar}
+                          onOpenSettings={() => navigate("settings")}
+                          onRefresh={() => openSession(detail.summary.id)}
+                          run={runs[detail.summary.id] ?? null}
+                        />
+                      ) : (
+                        <PlanningView
+                          api={api}
+                          detail={detail}
+                          nav={nav}
+                          onError={setError}
+                          onExpandSidebar={expandSidebar}
+                          onOpenSettings={() => navigate("settings")}
+                          onRefresh={() => openSession(detail.summary.id)}
+                          run={runs[detail.summary.id] ?? null}
+                        />
+                      )}
+                    </motion.div>
+                  </AnimatePresence>
+                </Surface>
+              )}
+
+              {challengeId && (
+                <Surface active={page === "challenge"}>
+                  <ChallengePage
+                    api={api}
+                    challengeId={challengeId}
+                    dark={dark}
+                    nav={nav}
+                    onError={setError}
+                    onExpandSidebar={expandSidebar}
+                    onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+                    seed={challengeSeed}
+                    trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
+                  />
+                </Surface>
+              )}
+
+              {page === "workspace" && !detail && <WorkspaceSkeleton />}
+            </div>
+          )}
         </div>
       </main>
 
@@ -987,6 +1034,30 @@ function RestoreFailed({ onRetry, busy }: { onRetry(): void; busy: boolean }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * One of the two challenge surfaces, holding its place while the other is shown.
+ *
+ * Both layers fill the pane and only their opacity moves, so the crossing is a
+ * dissolve between two things that are already laid out — nothing reflows, and
+ * neither page has to be rebuilt to come back. The hidden layer is taken out of
+ * the pointer and accessibility trees rather than hidden with `display`, which
+ * would throw away exactly the Monaco models and scroll offsets this exists to
+ * keep warm.
+ */
+function Surface({ active, children }: { active: boolean; children: React.ReactNode }) {
+  return (
+    <motion.div
+      animate={{ opacity: active ? 1 : 0 }}
+      aria-hidden={!active}
+      className={cn("absolute inset-0", active ? "z-10" : "pointer-events-none z-0")}
+      initial={{ opacity: 0 }}
+      transition={{ duration: 0.2, ease: [0.22, 0.61, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
   );
 }
 

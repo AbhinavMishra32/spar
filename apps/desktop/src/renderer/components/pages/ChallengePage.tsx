@@ -12,28 +12,23 @@ import {
   Play,
   RotateCcw,
   ShieldCheck,
-  Target,
-  TriangleAlert,
   XCircle,
   WrapText,
 } from "lucide-react";
 import type { ChallengeDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
-import { presentSourcedStatement } from "@/lib/sourcedStatement";
 import { fileName, message, relativeTime, shortTime } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
 import { useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
-import { FileGlyph, LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
-import { ChallengeEmblem } from "../workspace/ChallengeEmblem";
+import { FileGlyph } from "../common/LanguageGlyph";
+import { ChallengeBrief } from "../workspace/ChallengeBrief";
+import { ChallengeRoll } from "../workspace/ChallengeRoll";
 import { ChallengeStepper, type ChallengeTrail } from "../workspace/ChallengeStepper";
 import { DifficultyPill } from "../workspace/Difficulty";
 import { PaneHandle } from "../workspace/PaneHandle";
-import { ProblemStatement } from "../workspace/ProblemStatement";
-import { SourceHints } from "../workspace/SourceHints";
-import { SourceBadge } from "../common/SourceBadge";
 import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "../workspace/ResultPanel";
 import { SparDots } from "@/components/common/SparDots";
 
@@ -47,15 +42,6 @@ import { SparDots } from "@/components/common/SparDots";
  * to keep that clear, because a page that looks exactly like the workspace and
  * quietly counts for nothing would be worse than not having it.
  */
-
-const ACTION_PHRASE: Record<NonNullable<ChallengeDetail["action"]>, string> = {
-  diagnose: "to find out where you actually are",
-  teach: "to introduce something new",
-  practise: "to get reps on it",
-  transfer: "to see if it holds in a new shape",
-  advance: "to push past where you were",
-  retain: "to check it stuck",
-};
 
 /** What shape of work the challenge is, in the learner's words rather than the
  *  compiler's enum. */
@@ -103,49 +89,55 @@ function Brief({
   onOpenSession(): void;
 }) {
   const { summary } = detail;
-  const presented = useMemo(
-    () => presentSourcedStatement(detail.statement, detail.source),
-    [detail.source, detail.statement],
-  );
+  const scroller = useRef<HTMLDivElement>(null);
 
   return (
-    <div className="app-scroll h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-[62rem] px-8 pb-16 pt-8">
-        <div className="flex items-start gap-4">
-          <ChallengeEmblem question={summary} size={64} />
-          <div className="min-w-0 flex-1">
-            <p className="text-ui-sm font-medium tracking-[0.18em] text-muted-foreground/70">
-              CHALLENGE {summary.ordinal}
-            </p>
-            <h1 className="mt-1 text-[1.3rem] font-semibold leading-[1.2] tracking-[-0.03em]">{summary.title}</h1>
-            <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <DifficultyPill difficulty={summary.difficulty} />
-              <span
-                className="grid size-5 place-items-center rounded-md bg-[var(--color-background-elevated-secondary)] text-foreground/70"
-                title={LANGUAGE_LABEL[summary.language]}
-              >
-                <LanguageGlyph className="size-3" language={summary.language} />
-              </span>
-              <span className="text-ui-sm text-muted-foreground">{KIND_LABEL[detail.kind]}</span>
-              <span className="text-ui-sm text-muted-foreground/50">·</span>
-              <span className="text-ui-sm text-muted-foreground">{relativeTime(summary.createdAt)}</span>
-              {/* Where the problem is actually from. A real problem from a real
-                  site is a different thing to sit down to than one Spar wrote,
-                  and this page was the one surface that never said which it had
-                  — the workspace, the libraries and the palette all do. */}
-              {detail.source && (
-                <SourceBadge
-                  size="compact"
-                  source={detail.source}
-                  {...(onOpenExternal ? { onOpen: onOpenExternal } : {})}
-                />
-              )}
-            </div>
-          </div>
-        </div>
-
+    <div className="flex h-full min-h-0 flex-col">
+      {/* The workspace's identity bar, on this page too. It used to have none —
+          the ordinal and the difficulty were set into the body as a "CHALLENGE 4"
+          eyebrow and a pill in a meta row, so the two views began differently even
+          once their headers matched. There is no Problem/Chat switch here because
+          there is no agent to switch to; what the workspace spends on that, this
+          page spends on saying what shape of work it is and when it was set. */}
+      <div className="flex h-10 shrink-0 items-center gap-2 px-3">
+        <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/70">#{summary.ordinal}</span>
+        <span className="min-w-0 flex-1 truncate text-ui font-medium">{summary.title}</span>
+        <span className="shrink-0 text-ui-sm text-muted-foreground">{KIND_LABEL[detail.kind]}</span>
+        <span className="shrink-0 text-ui-sm text-muted-foreground/50">·</span>
+        <span className="shrink-0 text-ui-sm text-muted-foreground">{relativeTime(summary.createdAt)}</span>
+        <DifficultyPill difficulty={summary.difficulty} />
+      </div>
+      <div className="app-scroll min-h-0 flex-1 overflow-y-auto" ref={scroller}>
+      {/* The same column `ProblemView` sets, to the pixel. This page had
+          px-8/pt-8/pb-16 over a 62rem measure against that view's px-5/pt-5/pb-10
+          over 46rem — a third more gutter, a bottom margin half again as deep, and
+          a wider line — which is why stepping between a live challenge and a past
+          one read as landing in a different, roomier product. The wider measure was
+          justified as "this is a full window", but it never was: the brief lives in
+          a 44% panel with the editor beside it, exactly as it does in the
+          workspace. */}
+      <ChallengeRoll
+        className="mx-auto w-full max-w-[46rem] px-5 pb-10 pt-5"
+        ordinal={summary.ordinal}
+        scroller={scroller}
+        stopId={summary.id}
+      >
+        <ChallengeBrief
+          brief={{
+            ...summary,
+            abilityTitle: detail.abilityTitle,
+            statement: detail.statement,
+            source: detail.source,
+            specificGap: detail.specificGap,
+            desiredEvidence: detail.desiredEvidence,
+          }}
+          {...(onOpenExternal ? { onOpenExternal } : {})}
+        >
         {/* Where it came from. A challenge only makes sense as an answer to a
-            session's goal, so the session is a way back rather than a label. */}
+            session's goal, so the session is a way back rather than a label. It
+            sits after the statement, not before it: the workspace goes title →
+            concepts → problem with nothing in between, and a card wedged into that
+            run was the last thing making these two read as different pages. */}
         <button
           className="group mt-5 flex w-full items-start gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-[var(--border-strong)] hover:bg-accent/30"
           onClick={onOpenSession}
@@ -158,63 +150,6 @@ function Brief({
           <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground/70" />
         </button>
 
-        {detail.abilityTitle && (
-          <Section title="WHY THIS WAS SET">
-            <div className="rounded-xl border border-border bg-[var(--color-background-elevated-secondary)] px-3 py-2.5">
-              <p className="flex items-center gap-1.5 text-ui font-medium">
-                <Target className="size-3.5 text-muted-foreground" />
-                {detail.abilityTitle}
-                {detail.action && (
-                  <span className="font-normal text-muted-foreground">— {ACTION_PHRASE[detail.action]}</span>
-                )}
-              </p>
-              {detail.specificGap && (
-                <p className="mt-1.5 text-ui leading-[1.6] text-muted-foreground">{detail.specificGap}</p>
-              )}
-              {detail.desiredEvidence && (
-                <p className="mt-1.5 text-ui leading-[1.6] text-muted-foreground">
-                  <span className="text-muted-foreground/70">Looking for: </span>
-                  {detail.desiredEvidence}
-                </p>
-              )}
-            </div>
-          </Section>
-        )}
-
-        {summary.concepts.length > 0 && (
-          <Section title="CONCEPTS">
-            <div className="flex flex-wrap gap-1.5">
-              {summary.concepts.map((concept) => (
-                <span
-                  key={concept.slug}
-                  className={cn(
-                    "rounded-md px-1.5 py-0.5 text-ui-sm",
-                    concept.role === "primary"
-                      ? "bg-[var(--color-background-elevated-secondary)] text-foreground/80"
-                      : "border border-border text-muted-foreground",
-                  )}
-                  title={concept.parentTitle ? `${concept.parentTitle} › ${concept.title}` : concept.title}
-                >
-                  {concept.title}
-                </span>
-              ))}
-            </div>
-          </Section>
-        )}
-
-        <Section title="THE PROBLEM">
-          <ProblemStatement language={summary.language} source={presented.statement} />
-          {detail.source?.localRunNote && (
-            <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-lg)] border border-[color-mix(in_oklab,var(--warning)_30%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_6%,transparent)] px-3 py-2 text-ui leading-[1.55] text-muted-foreground">
-              <TriangleAlert className="mt-[0.15em] size-3.5 shrink-0 text-[var(--warning)]" />
-              <p><span className="font-medium text-foreground/80">Local run unavailable. </span>{detail.source.localRunNote}</p>
-            </div>
-          )}
-          {detail.source?.source === "leetcode" && (
-            <SourceHints className="mt-4" hints={presented.hints} language={summary.language} />
-          )}
-        </Section>
-
         {(summary.replacesQuestionTitle || summary.replacedByQuestionTitle) && (
           <Section title="LINEAGE">
             <div className="flex flex-col gap-1.5">
@@ -222,7 +157,7 @@ function Brief({
                 <p className="flex items-start gap-2 text-ui text-muted-foreground">
                   <CornerDownRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
                   <span>
-                    Set in place of <span className="font-medium text-foreground/80">{summary.replacesQuestionTitle}</span>
+                    Set in place of <span className="font-medium text-foreground">{summary.replacesQuestionTitle}</span>
                   </span>
                 </p>
               )}
@@ -230,7 +165,7 @@ function Brief({
                 <p className="flex items-start gap-2 text-ui text-muted-foreground">
                   <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
                   <span>
-                    Swapped out for <span className="font-medium text-foreground/80">{summary.replacedByQuestionTitle}</span>
+                    Swapped out for <span className="font-medium text-foreground">{summary.replacedByQuestionTitle}</span>
                   </span>
                 </p>
               )}
@@ -263,6 +198,8 @@ function Brief({
           This is a practice copy. Running and checking here proves nothing to Spar — no attempt is recorded, your
           abilities do not move, and the session this came from is untouched.
         </p>
+        </ChallengeBrief>
+      </ChallengeRoll>
       </div>
     </div>
   );
@@ -276,6 +213,7 @@ export function ChallengePage({
   onError,
   onExpandSidebar,
   onOpenSession,
+  seed,
   trail,
 }: {
   api: SparApi | undefined;
@@ -286,14 +224,28 @@ export function ChallengePage({
   onError(value: string): void;
   onExpandSidebar?: (() => void) | undefined;
   onOpenSession(sessionId: string): void;
+  /** The challenge, already read, when the caller had it before it navigated
+   *  here. Opening used to mean mounting this page empty and then reading from
+   *  disk, so every arrival began on "Opening challenge…" — a full-height spinner
+   *  where a layout was about to be. With the read done first there is nothing to
+   *  wait for and the page's first frame is the challenge. */
+  seed?: ChallengeDetail | null | undefined;
   /** The session this challenge came from, as a series to step through. Absent
    *  when its session produced only this one. */
   trail?: ChallengeTrail | undefined;
 }) {
-  const [detail, setDetail] = useState<ChallengeDetail | null>(null);
+  /* Only ever a first frame. Every later change of challenge goes through
+     `adopt`, and a seed for a different challenge than the one asked for is
+     ignored rather than shown. */
+  const planted = seed && seed.summary.id === challengeId ? seed : null;
+  const [detail, setDetail] = useState<ChallengeDetail | null>(planted);
   const [missing, setMissing] = useState(false);
-  const [activePath, setActivePath] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [activePath, setActivePath] = useState(
+    () => planted?.files.find((file) => !file.readOnly)?.path ?? planted?.files[0]?.path ?? "",
+  );
+  const [drafts, setDrafts] = useState<Record<string, string>>(
+    () => Object.fromEntries((planted?.files ?? []).map((file) => [file.path, file.content])),
+  );
   const [dirty, setDirty] = useState<Record<string, boolean>>({});
   const [terminal, setTerminal] = useState("");
   const [running, setRunning] = useState(false);
@@ -333,11 +285,25 @@ export function ChallengePage({
   useEffect(() => {
     if (!api) return;
     let cancelled = false;
-    setDetail(null);
+    /* The previous challenge stays on screen until the next one has arrived, and
+       this is what makes stepping a transition instead of a flash. Blanking it
+       here put the whole page through "Opening challenge…" between every step —
+       a full-height spinner in place of a layout that was about to look almost
+       identical — and it also defeated `ChallengeRoll`, which can only animate
+       between two challenges and never saw a pair because null came between them.
+
+       Nothing is shown stale: `adopt` replaces the detail in one go, so the page
+       is always a consistent view of one challenge. The spinner below is now what
+       it should always have been — the first-open state, when there is genuinely
+       nothing to show yet. */
     setMissing(false);
     setTerminal("");
     terminalRef.current = "";
     setOutcome(null);
+    if (seed && seed.summary.id === challengeId) {
+      adopt(seed);
+      return;
+    }
     void api
       .readChallenge(challengeId)
       .then((next) => {
@@ -354,7 +320,7 @@ export function ChallengePage({
     return () => {
       cancelled = true;
     };
-  }, [api, challengeId, adopt, onError]);
+  }, [api, challengeId, adopt, onError, seed]);
 
   const terminalFlush = useRef(0);
   const scheduleTerminalFlush = useCallback(() => {
@@ -595,14 +561,25 @@ export function ChallengePage({
         }
         nav={nav}
         onExpandSidebar={onExpandSidebar}
-        subtitle={detail.summary.sessionTitle}
+        /* No subtitle. The workspace dropped its grey session line from this row,
+           and the session is named in full on the card under the statement — a
+           second, quieter copy of it here is the kind of difference that makes two
+           views of one challenge read as two pages. */
         title={trail && trail.stops.length > 1
           ? <ChallengeStepper currentId={detail.summary.id} trail={trail} />
           : `Challenge ${detail.summary.ordinal}`}
       />
 
-      <PanelGroup autoSaveId="spar-challenge" className="min-h-0 flex-1" direction="horizontal">
-        <Panel defaultSize={44} minSize={30} order={1}>
+      {/* One saved layout with the workspace, and the workspace's constraints to
+          the number. These were a group of their own — "spar-challenge", minSize
+          30 against the workspace's 32 — so the two surfaces persisted two
+          different splits and the brief column changed width under you every time
+          a step crossed between them. It is one pane showing one challenge, so it
+          is one layout: drag the divider on either surface and the other is
+          already where you left it. The id is new on both sides so that neither
+          old entry decides the split; what they open at is the workspace's 44. */}
+      <PanelGroup autoSaveId="spar-challenge-pane" className="min-h-0 flex-1" direction="horizontal">
+        <Panel defaultSize={44} minSize={32} order={1}>
           <Brief
             detail={detail}
             onOpenExternal={(url) => void api?.openExternal(url)}
@@ -686,7 +663,16 @@ export function ChallengePage({
                       readOnly: Boolean(activeFile?.readOnly),
                       scrollbar: { verticalScrollbarSize: 9, horizontalScrollbarSize: 9 },
                     }}
-                    path={activePath}
+                    /* Namespaced, and never empty. `@monaco-editor/react` keys
+                       models by this path and disposes the one it is leaving when
+                       it changes — and the workspace's editor passes no path at
+                       all, which is the model at "". Before the detail lands here
+                       `activePath` is also "", so the two editors shared one model
+                       and this page threw the workspace's away the moment it read
+                       its first file: the live challenge was left with an empty
+                       editor. These are a throwaway practice copy's files, so they
+                       are addressed as such. */
+                    path={`practice/${challengeId}/${activePath}`}
                     theme={dark ? EDITOR_THEME_DARK : EDITOR_THEME_LIGHT}
                     value={scaffold?.body ?? drafts[activePath] ?? ""}
                   />
