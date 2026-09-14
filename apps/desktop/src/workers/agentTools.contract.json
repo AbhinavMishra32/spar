@@ -73,7 +73,7 @@
     }
   },
   "assign_practice_problem": {
-    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Prefer this over create_question whenever a real problem genuinely lands on the target you chose: it carries the provider's judge, calibrated difficulty, and the learner's history when that provider is connected. Read it first. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe its contents in your reply because the learner is about to read it.",
+    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Prefer this over create_question whenever a real problem genuinely lands on the target you chose: it carries the provider's judge, calibrated difficulty, and the learner's history when that provider is connected. Read it first, and check its rating against the context's learnerStanding.setProblemsRated — the host refuses a problem priced outside that range, and says what the range was. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe its contents in your reply because the learner is about to read it.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -543,7 +543,7 @@
           "type": "array"
         },
         "evidence": {
-          "description": "Nuanced interpretations of exact durable events. Describe the behavior observed, not a score.",
+          "description": "Nuanced interpretations of exact durable events, at least one. Describe the behavior observed, not a score: which step of the idea held and which did not, and whether it held again on the second occasion. \"Failed the window question\" is not an interpretation of anything.",
           "items": {
             "additionalProperties": false,
             "properties": {
@@ -588,6 +588,7 @@
             "type": "object"
           },
           "maxItems": 8,
+          "minItems": 1,
           "type": "array"
         },
         "evidenceEventIds": {
@@ -672,13 +673,14 @@
         "abilityId",
         "markdown",
         "evidenceEventIds",
+        "evidence",
         "actionTitle"
       ],
       "type": "object"
     }
   },
   "read_ability": {
-    "description": "Read one versioned ability document.",
+    "description": "Read one versioned ability document, with the mistake patterns filed under it and its most recent behavioural evidence. The markdown is the claim; the patterns are what is still open about it. Read both before proposing an update — an update written from the document alone can only restate it.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -1416,7 +1418,7 @@
     }
   },
   "search_learner_model": {
-    "description": "Search focused learner-model passages relevant to a query.",
+    "description": "Search this learner's memory at three resolutions at once: the ability documents (`passages`, the standing claims), the mistake patterns open under them, and the individual behavioural observations recorded from past attempts. The last two are your own earlier readings of this person — find the hypothesis you wrote before, and one matching observation now promotes it to a pattern instead of being written down a second time.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,

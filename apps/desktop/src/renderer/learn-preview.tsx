@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { BootstrapData, SparApi } from "../shared/api";
 import { HomePage } from "./components/pages/HomePage";
+import { ConceptMap } from "./components/problems/ConceptMap";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import "./theme.css";
 
@@ -20,13 +21,18 @@ const ability = (over: Partial<any>): any => ({
 });
 
 const progress: any = {
-  rating: { id: "r5", rating: 1284, provisional: true, reason: "Two unaided passes on medium graph problems moved this up; still provisional until five more attempts land.", occurredAt: ago(6) },
+  /* The rating as the store now writes it: Glicko-2 on the Codeforces scale,
+     with the deviation narrowing as results accumulate. The preview carries it so
+     the chart's confidence band has something true to draw. */
+  rating: { id: "r7", rating: 1476, deviation: 118, volatility: 0.059, provisional: true, reason: "Solved a 1500-rated Codeforces problem unaided.", occurredAt: ago(6) },
   ratingHistory: [
-    { id: "r1", rating: 1100, provisional: true, reason: "", occurredAt: ago(200) },
-    { id: "r2", rating: 1155, provisional: true, reason: "", occurredAt: ago(160) },
-    { id: "r3", rating: 1130, provisional: true, reason: "", occurredAt: ago(90) },
-    { id: "r4", rating: 1240, provisional: true, reason: "", occurredAt: ago(40) },
-    { id: "r5", rating: 1284, provisional: true, reason: "", occurredAt: ago(6) },
+    { id: "r1", rating: 1500, deviation: 350, volatility: 0.06, provisional: true, reason: "Initial provisional rating", occurredAt: ago(320) },
+    { id: "r2", rating: 1392, deviation: 271, volatility: 0.06, provisional: true, reason: "Gave up on Shrink until valid", occurredAt: ago(300) },
+    { id: "r3", rating: 1448, deviation: 224, volatility: 0.06, provisional: true, reason: "Solved Meet in the middle", occurredAt: ago(232) },
+    { id: "r4", rating: 1371, deviation: 189, volatility: 0.059, provisional: true, reason: "Gave up on Compact in place", occurredAt: ago(160) },
+    { id: "r5", rating: 1416, deviation: 161, volatility: 0.059, provisional: true, reason: "Solved Hidden transit map with one hint", occurredAt: ago(90) },
+    { id: "r6", rating: 1452, deviation: 137, volatility: 0.059, provisional: true, reason: "Solved Restore the window invariant", occurredAt: ago(40) },
+    { id: "r7", rating: 1476, deviation: 118, volatility: 0.059, provisional: true, reason: "Solved a 1500-rated Codeforces problem unaided.", occurredAt: ago(6) },
   ],
   abilities: [
     ability({ abilityId: "a1", title: "Two-pointer invariants", proficiency: 0.82, confidence: 0.71, trend: "improving" }),
@@ -61,11 +67,36 @@ const abilityLedger: any[] = [
     markdown: "", concepts: [{ slug: "dp", title: "Dynamic programming", kind: "dsa" }], practice: [], earnedAt: null, updatedAt: ago(70) },
 ];
 
+/* A small subject tree with the shape the real one has: areas with sub-concepts
+   under them, some carrying evidence and some never attempted. The slugs match
+   the ones `abilityLedger` claims over, which is what produces the cross-links. */
+const concept = (over: Partial<any>): any => ({
+  id: "00000000-0000-0000-0000-000000000000", slug: "x", title: "X", kind: "dsa", description: "",
+  parentSlug: null, parentTitle: null, childSlugs: [], challengeCount: 0, passedCount: 0, failedCount: 0,
+  abandonedCount: 0, openCount: 0, attemptCount: 0, testRunCount: 0, replacedCount: 0, abilityCount: 0,
+  firstSeenAt: null, lastSeenAt: null, ...over,
+});
+
+const conceptFixtures: any[] = [
+  concept({ slug: "arrays", title: "Arrays", childSlugs: ["two-pointers", "hash-maps", "sliding-window"], challengeCount: 9, passedCount: 6, failedCount: 2, abandonedCount: 1, abilityCount: 2 }),
+  concept({ slug: "two-pointers", title: "Two pointers", parentSlug: "arrays", parentTitle: "Arrays", challengeCount: 5, passedCount: 4, failedCount: 1, abilityCount: 1 }),
+  concept({ slug: "hash-maps", title: "Hash maps", parentSlug: "arrays", parentTitle: "Arrays", challengeCount: 4, passedCount: 4, abilityCount: 1 }),
+  concept({ slug: "sliding-window", title: "Sliding window", parentSlug: "arrays", parentTitle: "Arrays" }),
+  concept({ slug: "graph-area", title: "Graphs", childSlugs: ["graphs", "shortest-paths"], challengeCount: 3, passedCount: 1, failedCount: 2, abilityCount: 1 }),
+  concept({ slug: "graphs", title: "Traversal", parentSlug: "graph-area", parentTitle: "Graphs", challengeCount: 3, passedCount: 1, failedCount: 2, abilityCount: 1 }),
+  concept({ slug: "shortest-paths", title: "Shortest paths", parentSlug: "graph-area", parentTitle: "Graphs" }),
+  concept({ slug: "dp-area", title: "Dynamic programming", kind: "dsa", childSlugs: ["dp", "memoisation"], challengeCount: 1, failedCount: 1 }),
+  concept({ slug: "dp", title: "Bottom-up DP", parentSlug: "dp-area", parentTitle: "Dynamic programming", challengeCount: 1, failedCount: 1 }),
+  concept({ slug: "memoisation", title: "Memoisation", parentSlug: "dp-area", parentTitle: "Dynamic programming" }),
+  concept({ slug: "testing", title: "Testing", kind: "craft", childSlugs: ["unit-tests"], challengeCount: 2, passedCount: 2 }),
+  concept({ slug: "unit-tests", title: "Unit tests", kind: "craft", parentSlug: "testing", parentTitle: "Testing", challengeCount: 2, passedCount: 2 }),
+];
+
 const data: BootstrapData = {
   account: { id: "u1", displayName: "A", email: "a@example.com" },
   profile: { language: "python" } as any,
   sessions: [{ id: "s1", activeQuestion: null } as any],
-  challenges: [], abilities: [], concepts: [], tracks: [], activeTrack: null,
+  challenges: [], abilities: [], concepts: conceptFixtures, tracks: [], activeTrack: null,
   recommendation: {
     id: "rec1", trackId: "t1", trackTitle: "Graph fundamentals", sessionId: "s1", questionId: null,
     challengeTitle: "Number of Islands", abilityId: "a3", abilityTitle: "Graph traversal with visited sets",
@@ -92,6 +123,8 @@ const data: BootstrapData = {
 const api = {
   onProviderOAuthEvent: () => () => {},
   onUpdateState: () => () => {},
+  onPracticeSourceEvent: () => () => {},
+  async practiceSources() { return [{ source: "leetcode", state: "connected" }] as any; },
   async updateState() { return { status: "current", currentVersion: "0.4.0" } as any; },
   async listProviders() { return { providers: [{ id: "chatgpt", label: "ChatGPT", kind: "subscription", models: [{ id: "gpt-5.6", label: "GPT-5.6 Luna" }], model: "gpt-5.6", connected: true, isDefault: true }], defaultProvider: "chatgpt" } as any; },
   async providerUsage() { return [] as any; },
@@ -127,7 +160,7 @@ const api = {
 } as unknown as SparApi;
 
 function Harness() {
-  const [page, setPage] = useState<"home" | "settings">("home");
+  const [page, setPage] = useState<"home" | "map" | "settings">("home");
   const [dark, setDark] = useState(true);
   const [ability, setAbility] = useState<string | null>(null);
   return (
@@ -135,11 +168,13 @@ function Harness() {
       <div className="flex h-screen flex-col bg-[var(--app-window-fill)] text-foreground">
         <div className="flex shrink-0 gap-2 px-3 py-2">
           <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setPage("home")} type="button">Home</button>
+          <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setPage("map")} type="button">Map</button>
           <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setPage("settings")} type="button">Settings</button>
           <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setDark((value) => !value)} type="button">{dark ? "Light" : "Dark"}</button>
         </div>
         <div className="min-h-0 flex-1 bg-background">
           {page === "home" && <HomePage abilities={abilityLedger} ability={ability} api={api} busy={false} challenges={[]} concepts={[]} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onNavigate={() => {}} onOpen={() => {}} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} />}
+          {page === "map" && <div className="mx-auto w-full max-w-[72rem] px-8 pt-6"><ConceptMap abilities={abilityLedger} concepts={conceptFixtures} onOpenAbility={setAbility} onOpenConcept={() => {}} progress={progress} query="" /></div>}
           {page === "settings" && <SettingsPage api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
         </div>
       </div>

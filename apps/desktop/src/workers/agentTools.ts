@@ -50,8 +50,8 @@ const abilityClaimShape = {
 } as const;
 
 export const toolDefinitions = {
-  search_learner_model: ["Search focused learner-model passages relevant to a query.", z.object({ query: z.string(), limit: z.number().int().min(1).max(8).default(4) })],
-  read_ability: ["Read one versioned ability document.", z.object({ abilityId: z.string().uuid() })],
+  search_learner_model: ["Search this learner's memory at three resolutions at once: the ability documents (`passages`, the standing claims), the mistake patterns open under them, and the individual behavioural observations recorded from past attempts. The last two are your own earlier readings of this person — find the hypothesis you wrote before, and one matching observation now promotes it to a pattern instead of being written down a second time.", z.object({ query: z.string(), limit: z.number().int().min(1).max(8).default(4) })],
+  read_ability: ["Read one versioned ability document, with the mistake patterns filed under it and its most recent behavioural evidence. The markdown is the claim; the patterns are what is still open about it. Read both before proposing an update — an update written from the document alone can only restate it.", z.object({ abilityId: z.string().uuid() })],
   search_attempt_history: ["Search attempts by ability or failure signature.", z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) })],
   search_challenge_history: ["Search the learner's durable challenge library, including outcomes and replacement lineage.", z.object({ query:z.string(),limit:z.number().int().min(1).max(12).default(6) })],
   read_challenge: ["Read one stored challenge design, validation report, attempts, and test history.", z.object({ questionId:z.string().uuid() })],
@@ -104,7 +104,18 @@ export const toolDefinitions = {
     approach: z.string().min(10).max(300).describe("What they actually did, in one sentence, in their own terms."),
     reasons: z.array(z.string().min(8).max(220)).max(4).describe("For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner."),
   })],
-  propose_ability_update: ["Propose a versioned markdown ability change backed by evidence. Include summary, concepts and practice whenever the evidence now supports naming this as something the learner can do.", z.object({ abilityId: z.string().uuid(), markdown: z.string(), evidenceEventIds: z.array(z.string().uuid()), ...abilityClaimShape })],
+  /**
+   * `evidence` is required here and optional on `upsert_ability`, and the
+   * difference is the turn each one runs on.
+   *
+   * This is the attempt-complete write: there is a graded attempt behind it, so
+   * there is always something specific to say about what the learner actually
+   * did. Left optional, the host fell back to synthesising one row per linked
+   * event with the outcome as its polarity and a generic sentence as its
+   * statement — which is the whole finding flattened back to passed or failed,
+   * on the one turn that had the replay in hand to say better.
+   */
+  propose_ability_update: ["Propose a versioned markdown ability change backed by evidence. Include summary, concepts and practice whenever the evidence now supports naming this as something the learner can do.", z.object({ abilityId: z.string().uuid(), markdown: z.string(), evidenceEventIds: z.array(z.string().uuid()), ...abilityClaimShape, evidence: abilityClaimShape.evidence.unwrap().min(1).describe("Nuanced interpretations of exact durable events, at least one. Describe the behavior observed, not a score: which step of the idea held and which did not, and whether it held again on the second occasion. \"Failed the window question\" is not an interpretation of anything.") })],
   upsert_ability: ["Introduce an uncertain ability, or grant one: append an evidence-backed version and give it the summary, concepts and practice drills that make it something the learner can see and train.", z.object({title:z.string().min(2).max(120),markdown:z.string().min(20),evidenceEventIds:z.array(z.string().uuid()).default([]), ...abilityClaimShape})],
   commit_session_decision: ["Commit exactly one next pedagogical action.", z.object({ action: z.enum(["diagnose", "teach", "practise", "transfer", "advance", "retain"]), reason: z.string() })],
   /**
@@ -167,7 +178,7 @@ export const toolDefinitions = {
    * statement about why, and the ledger would gain a challenge nobody can explain.
    */
   assign_practice_problem: [
-    "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Prefer this over create_question whenever a real problem genuinely lands on the target you chose: it carries the provider's judge, calibrated difficulty, and the learner's history when that provider is connected. Read it first. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe its contents in your reply because the learner is about to read it.",
+    "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Prefer this over create_question whenever a real problem genuinely lands on the target you chose: it carries the provider's judge, calibrated difficulty, and the learner's history when that provider is connected. Read it first, and check its rating against the context's learnerStanding.setProblemsRated — the host refuses a problem priced outside that range, and says what the range was. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe its contents in your reply because the learner is about to read it.",
     z.object({
       source: z.enum(["leetcode", "codeforces"]).describe("The provider identity returned by search. A slug is only unique inside its provider."),
       slug: z.string().min(1).max(120).describe("The problem's URL slug, exactly as the source gave it."),

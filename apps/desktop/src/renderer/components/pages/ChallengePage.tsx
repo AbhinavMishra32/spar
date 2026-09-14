@@ -18,13 +18,14 @@ import {
 import type { ChallengeDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
-import { fileName, message, relativeTime, shortTime } from "@/lib/format";
+import { fileName, message, relativeTime } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
 import { useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
 import { FileGlyph } from "../common/LanguageGlyph";
 import { ChallengeBrief } from "../workspace/ChallengeBrief";
+import { ChallengeHistory } from "../workspace/ChallengeHistory";
 import { ChallengeRoll } from "../workspace/ChallengeRoll";
 import { ChallengeStepper, type ChallengeTrail } from "../workspace/ChallengeStepper";
 import { DifficultyPill } from "../workspace/Difficulty";
@@ -175,21 +176,7 @@ function Brief({
 
         {detail.timeline.length > 0 && (
           <Section title="WHAT HAPPENED">
-            <ol className="relative flex flex-col gap-2 pl-4">
-              {/* One rail behind the whole list rather than a connector per row:
-                  the rail is continuous, so the events read as one history even
-                  where they came from two different attempts. */}
-              <span className="absolute inset-y-1 left-[3px] w-px bg-border" />
-              {detail.timeline.map((entry) => (
-                <li key={entry.id} className="relative flex items-baseline gap-2">
-                  <span className="absolute -left-4 top-[0.4em] size-[7px] rounded-full border border-border bg-card" />
-                  <span className="min-w-0 flex-1 text-ui leading-[1.55] text-foreground/80">{entry.detail}</span>
-                  <span className="shrink-0 text-ui-sm tabular-nums text-muted-foreground/60">
-                    {shortTime(entry.occurredAt)}
-                  </span>
-                </li>
-              ))}
-            </ol>
+            <ChallengeHistory entries={detail.timeline} />
           </Section>
         )}
 

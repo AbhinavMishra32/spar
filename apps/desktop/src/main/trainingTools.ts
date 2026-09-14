@@ -83,7 +83,17 @@ export async function executeTrainingTool(
   if (visualizer?.handles(name)) return visualizer.execute(name, value, sessionId);
   if (VISUALIZER_TOOLS.includes(name)) return { error: "unavailable", note: "The execution visualiser is not available in this context." };
   if (name === "read_session") return local.readSession(String(value.sessionId));
-  if (name === "search_learner_model") return { passages: local.searchLearner(String(value.query ?? ""), Number(value.limit ?? 4), trackId) };
+  /* Three readings of the same memory at three resolutions. `passages` are the
+     standing claims; `patterns` are the mistake lifecycles open under them; and
+     `evidence` is what was actually observed, one behaviour per row. The last
+     two used to be written on every attempt-complete turn and read by nothing,
+     so a finding could never be confirmed across attempts — only rewritten. */
+  if (name === "search_learner_model") {
+    const query = String(value.query ?? "");
+    const limit = Number(value.limit ?? 4);
+    const memory = local.searchLearnerMemory(query, limit, trackId);
+    return { passages: local.searchLearner(query, limit, trackId), ...memory, note: memory.patterns.length || memory.evidence.length ? "`patterns` and `evidence` are your own earlier readings of this learner. A hypothesis here plus one new observation is what promotes it to a pattern; the host refuses a promotion whose evidence does not span two attempts." : "" };
+  }
   if (name === "search_attempt_history") return { attempts: local.searchAttempts(String(value.query ?? ""), Number(value.limit ?? 5), trackId) };
   if (name === "search_challenge_history") return { challenges: local.searchChallenges(String(value.query ?? ""), Number(value.limit ?? 6), trackId) };
   if (name === "read_challenge") return { challenge: local.readChallenge(String(value.questionId ?? "")) };
@@ -190,7 +200,14 @@ export async function executeTrainingTool(
     return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
   }
   if (name === "replay_attempt") return replayForAgent(local, value);
-  if (name === "read_ability") return { ability: local.readAbility(String(value.abilityId)) };
+  /* The document plus what is open under it. The markdown is the claim; the
+     patterns are the questions still outstanding about it and the evidence is
+     what each one rests on. This read sits immediately before the update is
+     proposed, so an update written without them could only restate the claim. */
+  if (name === "read_ability") {
+    const abilityId = String(value.abilityId);
+    return { ability: local.readAbility(abilityId), patterns: local.patternsForAbility(abilityId), evidence: local.evidenceForAbility(abilityId).slice(0, 12) };
+  }
   if (name === "propose_ability_update") {const updated=local.updateAbility({abilityId:String(value.abilityId),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)},trackId);local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
   throw new Error(`Unsupported Spar tool: ${name}`);
@@ -265,8 +282,8 @@ async function assignPracticeProblem(
 
   /* The model proposes; the host admits. Availability and a real judge say a
      problem can be assigned, not that it should be. Check the source's own
-     concept metadata against the persisted target, then bound difficulty using
-     the durable status of that exact ability. */
+     concept metadata against the persisted target, then check the problem's own
+     price against the rating window that exact ability's status calls for. */
   const target = local.latestTarget(sessionId);
   if (!target) return refuse("training target", "A persisted training target is required before assigning a provider problem.");
   const ability = local.readAbilityDetail(String(target.ability_id));
@@ -278,8 +295,9 @@ async function assignPracticeProblem(
       abilityStatus: ability?.ability.status ?? "uncertain",
       abilityConcepts: ability?.ability.concepts.map((concept) => concept.slug) ?? [],
       experience: local.getProfile()?.experience ?? "new",
+      rating: local.currentRating(),
     },
-    candidate: { difficulty: mounted.problem.difficulty, concepts: mounted.problem.concepts.map((concept) => concept.slug) },
+    candidate: { difficulty: mounted.problem.difficulty, concepts: mounted.problem.concepts.map((concept) => concept.slug), source: mounted.problem.source, sourceRating: mounted.problem.sourceRating },
     proposedConcepts: conceptTags(value.concepts),
     why: String(value.why ?? ""),
   });

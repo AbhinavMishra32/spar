@@ -46,6 +46,70 @@ describe("Training Agent learner suspension", () => {
   });
 });
 
+/* The agent's own earlier readings of the learner, handed back to it.
+   Both of these were written on every attempt-complete turn and read by nothing
+   but the learner's screens, so a finding could be recorded indefinitely and
+   never confirmed — only rewritten under a new id on the next attempt. */
+describe("reading back what the agent already worked out", () => {
+  const observed = (store: LocalStore, sessionId: string, attemptId: string, abilityId: string, statement: string, patternStatus: "observation" | "pattern", alsoLink: string[] = []) => {
+    const event = store.appendNextEvent({ id: randomUUID(), attemptId, type: "submission_evaluated", occurredAt: new Date().toISOString(), payload: { outcome: "failed" }, source: "system", schemaVersion: 1 });
+    store.updateAbility({
+      abilityId,
+      markdown: `# Variable-window restoration\n\n${statement}`,
+      evidenceEventIds: [event.id],
+      evidence: [{ eventId: event.id, statement, polarity: "contradictory", independence: "independent", strength: 0.7 }],
+      pattern: { title: "Stops after one shrink", description: "The window is restored once and the loop moves on.", status: patternStatus, evidenceEventIds: [...alsoLink, event.id] },
+    });
+    return event.id;
+  };
+
+  it("returns the open patterns and the behavioural evidence beside the ability document", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise variable windows");
+      const target = store.setTrainingTarget(sessionId, { ability: "Variable-window restoration", specificGap: "Repeated shrinking", desiredEvidence: "Restores across several shrinks", avoidTesting: [] });
+      const question = store.createQuestion(sessionId, design("Shrink until valid"), { valid: true });
+      const eventId = observed(store, sessionId, question.attemptId, target.abilityId, "Restored the invariant once and moved on, so the two cases needing a second shrink failed.", "observation");
+
+      const result = await executeTrainingTool("read_ability", { abilityId: target.abilityId }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { ability: unknown; patterns: Array<{ title: string; status: string }>; evidence: Array<{ eventId: string | null; statement: string }> };
+      expect(result.ability).toBeTruthy();
+      expect(result.patterns).toMatchObject([{ title: "Stops after one shrink", status: "observation" }]);
+      expect(result.evidence[0]).toMatchObject({ eventId, statement: expect.stringContaining("second shrink") });
+    } finally {
+      store.close();
+    }
+  });
+
+  it("finds an earlier hypothesis through the learner-model search, so a second sighting can promote it", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise variable windows");
+      const target = store.setTrainingTarget(sessionId, { ability: "Variable-window restoration", specificGap: "Repeated shrinking", desiredEvidence: "Restores across several shrinks", avoidTesting: [] });
+      const first = store.createQuestion(sessionId, design("Shrink until valid"), { valid: true });
+      const firstEvent = observed(store, sessionId, first.attemptId, target.abilityId, "Restored the invariant once and stopped shrinking.", "pattern");
+      store.completeAttempt(first.attemptId, "failed");
+      /* One attempt cannot make a pattern, by design — so this is exactly the
+         state the next turn has to be able to find and finish. */
+      expect(store.listPatterns()[0]?.status).toBe("hypothesis");
+
+      const found = await executeTrainingTool("search_learner_model", { query: "window invariant restoration shrinking" }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { passages: unknown[]; patterns: Array<{ title: string; status: string }>; evidence: Array<{ statement: string }> };
+      expect(found.passages).not.toHaveLength(0);
+      expect(found.patterns).toMatchObject([{ title: "Stops after one shrink", status: "hypothesis" }]);
+      expect(found.evidence[0]?.statement).toContain("stopped shrinking");
+
+      /* Promotion needs both events named in the same call, which is the whole
+         reason the first one has to be findable: an agent that cannot retrieve
+         its own earlier observation can only ever link the attempt in front of
+         it, and the host will refuse that for as long as it keeps happening. */
+      const second = store.createQuestion(sessionId, design("Shrink an event stream"), { valid: true });
+      observed(store, sessionId, second.attemptId, target.abilityId, "The same single-shrink restoration appeared in a different structure.", "pattern", [firstEvent]);
+      expect(store.listPatterns()[0]).toMatchObject({ status: "pattern", evidenceCount: 2 });
+    } finally {
+      store.close();
+    }
+  });
+});
+
 /* The learner-reported failure this covers: four unrelated goals in a row — a
    Google interview, TypeScript, C++, and "hii" — each opened with another
    off-by-one loop repair, because one ability in the ledger answered every

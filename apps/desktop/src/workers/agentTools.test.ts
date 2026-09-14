@@ -11,10 +11,18 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * is what it sent, captured from a live Mastra request while it was still the
  * runtime, and every tool now goes to the provider through a different path.
  *
- * So this is not a snapshot of the current code's own output — it is the older
- * implementation's output, kept as the reference. A diff here means the model
- * is being told something different from what it was told before the
- * migration, which is the one thing the migration promised not to do.
+ * So this started as the older implementation's output rather than a snapshot of
+ * this code's own, and it stays the reference. A failure here means the model is
+ * being told something different from what it was told before — which is either
+ * accidental drift, and the bug this file exists to catch, or a deliberate
+ * change to a tool, in which case that tool's entry is regenerated in the same
+ * commit as the schema and the diff is the review.
+ *
+ * Deliberate changes so far: `read_ability` and `search_learner_model` now
+ * return the learner's patterns and behavioural evidence beside the documents,
+ * `propose_ability_update` requires at least one interpreted evidence entry, and
+ * `assign_practice_problem` points at the rating window the host admits against
+ * rather than leaving the agent to discover it from a refusal.
  */
 describe("the tool contract, against what Mastra sent", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;

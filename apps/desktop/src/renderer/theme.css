@@ -214,6 +214,11 @@
 
   --surface-primary: oklch(100% 0 0);
   --surface-secondary: oklch(100% 0 0 / 85%);
+  /* The halo a small mark wears when it sits on top of another mark — a corner
+     badge on a logo. Near-opaque rather than the sidebar's own colour, because
+     the sidebar is glass: there is no ground colour to borrow, and what the badge
+     has to separate itself from is whatever it is standing on. */
+  --badge-halo: oklch(100% 0 0 / 88%);
   --surface-tertiary: oklch(100% 0 0 / 55%);
 
   --card: var(--surface-primary);
@@ -231,6 +236,10 @@
   --destructive: oklch(57.7% 0.245 27.325);
   --success: oklch(52% 0.11 158);
   --warning: oklch(62% 0.13 68);
+  /* The soft ring behind the rating curve's current point. Faint enough to be a
+     glow rather than a second dot, and a token because it has to be paler in the
+     dark theme than an opacity on the foreground would make it. */
+  --rating-halo: oklch(14.5% 0 0 / 12%);
   --border: oklch(14.5% 0 0 / 10%);
   --border-strong: oklch(14.5% 0 0 / 16%);
   --input: oklch(14.5% 0 0 / 10%);
@@ -260,6 +269,12 @@
   /* Only painted when the platform gives us no native material to sit on. */
   --app-sidebar-fill: oklch(95.5% 0 0);
   --app-vibrant-tint: oklch(100% 0 0 / 30%);
+  /* The same tint, stepped back for Acrylic. Vibrancy and Mica are close to
+     clear behind us, so the sidebar needs a wash of its own to read as the
+     lighter of the two surfaces. Acrylic already carries a luminosity layer, and
+     laying the full 30% over it stacks two washes: the hole stops looking like a
+     hole and reads as a milky panel. */
+  --app-vibrant-tint-acrylic: oklch(100% 0 0 / 14%);
   /* Opaque, for every page that is mostly text: the desktop moving behind a
      paragraph is the desktop competing with it, and the sidebar still shows the
      native material, so the two surfaces stay told apart by the one that is meant
@@ -268,7 +283,7 @@
      The challenge surfaces opt back out — see `.app-pane-glass`. Working on a
      problem is the one place the app is a tool rather than a document, and the
      glass is what keeps that surface feeling like part of the window. */
-  --app-glass-fill: 100%;
+  --app-glass-fill: 92%;
   --app-glass-fill-translucent: 88%;
   --app-user-message-background: oklch(14.5% 0 0 / 6%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 10%), 0 8px 10px -6px oklch(0% 0 0 / 10%);
@@ -379,6 +394,7 @@
 
   --surface-primary: oklch(98.5% 0 0 / 8%);
   --surface-secondary: oklch(98.5% 0 0 / 6%);
+  --badge-halo: oklch(14.5% 0 0 / 88%);
   --surface-tertiary: oklch(98.5% 0 0 / 4%);
 
   --card: color-mix(in oklab, var(--foreground) 6%, var(--background));
@@ -396,6 +412,7 @@
   --destructive: oklch(70.4% 0.191 22.216);
   --success: oklch(78% 0.14 158);
   --warning: oklch(82% 0.14 78);
+  --rating-halo: oklch(98.5% 0 0 / 14%);
   --border: oklch(98.5% 0 0 / 10%);
   --border-strong: oklch(98.5% 0 0 / 16%);
   --input: oklch(98.5% 0 0 / 12%);
@@ -431,7 +448,8 @@
      sits on, so it catches more light. Only painted with no native material. */
   --app-sidebar-fill: oklch(28.5% 0 0);
   --app-vibrant-tint: oklch(100% 0 0 / 6%);
-  --app-glass-fill: 100%;
+  --app-vibrant-tint-acrylic: oklch(100% 0 0 / 3%);
+  --app-glass-fill: 92%;
   --app-glass-fill-translucent: 86%;
   --app-user-message-background: oklch(98.5% 0 0 / 8%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 40%), 0 8px 10px -6px oklch(0% 0 0 / 40%);
@@ -605,22 +623,77 @@
   }
 }
 
+/* ---- Window chrome ------------------------------------------------------
+
+   These sit outside every @layer on purpose. An unlayered declaration beats a
+   layered one whatever its specificity, so the base :root above would win over
+   a copy of these inside @layer components — Windows would keep the macOS
+   leading inset and reserve nothing for its own caption buttons, which is
+   exactly the overlap this reservation exists to prevent. */
+
+/* Windows puts its caption buttons on the trailing edge, so the reservation
+   moves with them: nothing to clear on the left, the caption strip on the right.
+
+   Both numbers are read back from the OS rather than assumed. `env(titlebar-area-*)`
+   is the Window Controls Overlay's report of where our content actually starts and
+   stops, already in CSS pixels at the current scale — so a display at 125% or 150%,
+   where the same three buttons are no longer 138px wide, still gets an exact
+   reservation instead of a hand-measured one that is now short. The literals are
+   only the fallback for the frame or two before the overlay reports in: 138px of
+   buttons, 32px tall, which is what Windows draws at 100%.
+
+   The title row takes the caption height as its own, which is the whole point of
+   the pairing. A standard Windows title bar is exactly as tall as its buttons, so
+   matching it is what makes the toolbar sit on the same baseline as the minimise,
+   maximise and close glyphs instead of floating above or below them. macOS keeps
+   the taller row set in :root, where the traffic lights are centred against
+   `trafficLightPosition` instead. */
+:root[data-window-controls="right"] {
+  --titlebar-height: env(titlebar-area-height, 2rem);
+  --window-controls-leading: 0rem;
+  --window-controls-trailing: calc(100vw - env(titlebar-area-width, calc(100vw - 8.625rem)));
+}
+
+/* A native frame keeps its buttons outside our content: reserve nothing. */
+:root[data-window-controls="none"] {
+  --window-controls-leading: 0rem;
+  --window-controls-trailing: 0rem;
+}
+
+/* ---- Windows ------------------------------------------------------------
+
+   Unlayered for the same reason as the block above: these have to beat the base
+   tokens and the universal `corner-shape` rule in @layer base, both of which are
+   written for macOS.
+
+   Only the two things the platforms genuinely disagree about are changed here.
+   The colour, type and spacing scales are the app's own and stay put — a Windows
+   build that is a different product from the Mac one is not the goal; a Windows
+   build that is not visibly a Mac app in a Windows frame is. */
+:root[data-platform="win32"] {
+  /* A superellipse is the macOS curve — `superellipse(2)` is Apple's own
+     constant. Windows draws plain circular arcs at every scale, from the 8px
+     corner the compositor puts on the window itself down to the 4px on a button,
+     so the sheets drop the multiplier that exists to compensate for the
+     superellipse hugging its corner box more tightly than an arc does. */
+  --squircle-factor: 1;
+  /* There is no half pixel to land on. 0.5px is a Retina border: it resolves
+     because macOS windows are almost always at 2x. A Windows display at 100%
+     rounds it — to nothing on some edges and to a full pixel on others, which
+     shows up as separators that fade in and out along the same line. */
+  --hairline: 1px;
+}
+
+/* The arcs themselves. Matched on the element rather than folded into the
+   token above because `corner-shape` is a property, not a radius: the base layer
+   sets it on everything and only a rule of at least that reach can put it back. */
+:root[data-platform="win32"] *,
+:root[data-platform="win32"] *::before,
+:root[data-platform="win32"] *::after {
+  corner-shape: round;
+}
+
 @layer components {
-  /* ---- macOS window chrome ---------------------------------------------- */
-
-  /* Windows puts its caption buttons on the trailing edge, so the reservation
-     moves with them: nothing to clear on the left, 138px to clear on the right. */
-  :root[data-window-controls="right"] {
-    --window-controls-leading: 0rem;
-    --window-controls-trailing: 8.625rem;
-  }
-
-  /* A native frame keeps its buttons outside our content: reserve nothing. */
-  :root[data-window-controls="none"] {
-    --window-controls-leading: 0rem;
-    --window-controls-trailing: 0rem;
-  }
-
   .app-drag {
     -webkit-app-region: drag;
   }
@@ -662,11 +735,25 @@
     background: var(--app-sidebar-fill);
   }
 
+  /* Windows 11 22H2 and later, where the window material is real Acrylic rather
+     than Mica's still wallpaper sample. It carries its own tint, so ours steps
+     back out of its way. */
+  :root[data-native-surface="acrylic"] .app-vibrant {
+    background: var(--app-vibrant-tint-acrylic);
+  }
+
   /* Named for what it is rather than how it is built: this is the fill every
      page sits on. It is a heavy tint over the native material rather than a
      solid, so the window's glass carries through the whole app — kept close to
      opaque because text on it has to hold contrast against an arbitrary
-     desktop. `--app-glass-fill` is the dial. */
+     desktop. `--app-glass-fill` is the dial.
+
+     92% rather than a flat 100%: at full opacity the reading pages were the one
+     part of the window the material did not reach, so the shell was glass and
+     the thing inside it was a sheet of card. Eight percent lets the desktop move
+     behind the page without costing body text its contrast — the challenge
+     surfaces go further still, to `--app-glass-fill-translucent`, because they
+     are a tool rather than a document. */
   .app-pane {
     background: color-mix(in oklab, var(--app-window-fill) var(--app-glass-fill), transparent);
   }
@@ -1647,6 +1734,38 @@
 @media (prefers-reduced-motion: reduce) {
   [data-slot="collapsible-content"][data-state="open"],
   [data-slot="collapsible-content"][data-state="closed"] { animation-duration: 1ms; }
+}
+
+/* The rating curve, drawn. The line, its area and the uncertainty band behind it
+   are all clipped to one rect that widens from the left, so the curve is laid
+   down the way it was earned — oldest challenge first — rather than appearing
+   whole. The dots then land behind the sweep on their own short fade, each
+   delayed by how far along the curve it sits (the component sets --mark-delay per
+   point), which is what makes the marks read as consequences of the line rather
+   than as a second animation running next to it.
+
+   Clipped rather than dash-offset: the same sweep has to reveal a filled area
+   and a band, and stroke-dasharray can only draw a stroke. */
+@keyframes rating-curve-sweep {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes rating-mark-in {
+  from { opacity: 0; transform: scale(0.4); }
+  to { opacity: 1; transform: scale(1); }
+}
+.rating-curve-sweep {
+  transform-origin: 0 0;
+  animation: rating-curve-sweep var(--rating-draw, 900ms) cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+.rating-mark {
+  animation: rating-mark-in 260ms cubic-bezier(0.32, 0.72, 0, 1) var(--mark-delay, 0ms) both;
+}
+/* Reduced motion gets the finished chart, immediately. The animation says
+   "this was earned over time"; the chart says it too, in its shape. */
+@media (prefers-reduced-motion: reduce) {
+  .rating-curve-sweep,
+  .rating-mark { animation-duration: 1ms; animation-delay: 0ms; }
 }
 
 /* The app icon's dot grid, animated — see components/common/SparDots.tsx. Each

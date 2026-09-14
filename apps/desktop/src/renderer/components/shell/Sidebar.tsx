@@ -5,12 +5,14 @@ import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { formatDuration, initials, relativeTime } from "@/lib/format";
 import { challengeBands } from "@/lib/progress";
+import { challengeBand, type ProblemBand } from "@/lib/problems";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Meter } from "@/components/ui/meter";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NavButtons } from "./NavButtons";
 import { SparWordmark } from "../common/SparWordmark";
 import { LanguageGlyph } from "../common/LanguageGlyph";
@@ -217,6 +219,15 @@ export function Sidebar({
   const languages: Record<string, Language> = {};
   for (const challenge of challenges) languages[challenge.sessionId] ??= challenge.language;
 
+  /* And how hard it is. Same pass, same rule about newest-first, but keyed by
+     challenge as well: a row showing a question shows that question's level,
+     and only a session between challenges falls back to its latest. */
+  const bands: Record<string, ProblemBand> = {};
+  for (const challenge of challenges) {
+    bands[challenge.id] = challengeBand(challenge);
+    bands[challenge.sessionId] ??= challengeBand(challenge);
+  }
+
   const row = (session: SessionSummary) => (
     <SessionRow
       key={session.id}
@@ -230,6 +241,10 @@ export function Sidebar({
       working={runs[session.id]?.status === "streaming"}
       session={session}
       {...(languages[session.id] ? { language: languages[session.id]! } : {})}
+      {...(() => {
+        const band = (session.activeQuestion ? bands[session.activeQuestion.id] : undefined) ?? bands[session.id];
+        return band ? { band } : {};
+      })()}
       subject={(session.activeQuestion ? subjects[session.activeQuestion.id] : "") || session.currentFocus[0] || ""}
     />
   );
@@ -419,9 +434,74 @@ export function Sidebar({
   );
 }
 
+/** The three levels, twice over: the tone `BandPill` and `DifficultyPill` already
+ *  grade by, and a silhouette.
+ *
+ *  Solid rather than tinted — the badge is ten pixels wide, and a 12% fill at that
+ *  size is a smudge rather than a colour.
+ *
+ *  The shapes are deliberately *not* drawn from `ProblemEmblem`'s list, which this
+ *  badge sits on top of and where a silhouette means the problem's subject. That
+ *  list is convex regular polygons, all of one visual weight, because a mark that
+ *  identifies must not rank. These three do the opposite job and so take the
+ *  opposite form: a count. One notch, two, three — ascending, left to right, like
+ *  signal bars, which is read as a level by anyone who has ever looked at a phone
+ *  and cannot be mistaken for one of the emblem's twelve outlines. */
+const BAND_BADGE: Record<ProblemBand, { fill: string; bars: number }> = {
+  easy: { fill: "var(--success)", bars: 1 },
+  medium: { fill: "var(--warning)", bars: 2 },
+  hard: { fill: "var(--destructive)", bars: 3 },
+};
+
+/** The level a problem is, worn on the corner of its mark.
+ *
+ *  Drawn rather than built out of bordered boxes, because the halo has to follow
+ *  the whole cluster: a ring per bar would put four hairlines through the middle
+ *  of a ten-pixel badge. One path, stroked under its own fill via `paint-order`,
+ *  so the halo reads as a halo instead of eating pixels off the bars.
+ *
+ *  Near-opaque halo rather than the sidebar's own colour: the sidebar is glass, so
+ *  there is no ground to borrow, and what the badge has to separate itself from is
+ *  the logo underneath it anyway. */
+function BandBadge({ band }: { band: ProblemBand }) {
+  const { fill, bars } = BAND_BADGE[band];
+  /* Three columns on a 3.4px pitch, growing 3.4 / 6 / 8.6 tall off a common
+     baseline, the unlit ones simply absent — an empty slot says "not this far up"
+     more plainly at this size than a dimmed bar, which just looks like a bar. */
+  const path = Array.from({ length: bars }, (_, index) => {
+    const x = 0.9 + index * 3.4;
+    const height = 3.4 + index * 2.6;
+    return `M${x} ${9.1 - height}h2.2v${height}h-2.2Z`;
+  }).join("");
+  return (
+    <svg
+      aria-hidden
+      className="absolute -right-1 -bottom-1 size-[10px]"
+      focusable="false"
+      viewBox="0 0 10 10"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d={path}
+        fill={fill}
+        paintOrder="stroke"
+        stroke="var(--badge-halo)"
+        strokeLinejoin="round"
+        strokeWidth={2.2}
+      />
+    </svg>
+  );
+}
+
 /** The control cluster's buttons, in the order they sit in the row. */
+const CONTROL_ICON = "size-4 shrink-0";
+
 const ICON_BUTTON =
-  "grid size-6 shrink-0 place-items-center rounded-md text-foreground/70 hover:bg-[var(--sidebar-accent-active)] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none";
+  /* No fill of their own. A control inside a row that lights up on its own hover
+     draws a second selection inside the first, and the row underneath is already
+     saying which session you are pointing at — so these only darken their ink and
+     leave the background to the row. */
+  "grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none";
 
 /**
  * One session in the list, with everything you can do to it behind ⋮ or a
@@ -503,6 +583,7 @@ function TrackGroup({
 
 function SessionRow({
   session,
+  band,
   language,
   subject,
   active,
@@ -517,6 +598,7 @@ function SessionRow({
   session: SessionSummary;
   /** What the session is written in. Absent only before its first challenge
    *  exists, which is the one case with nothing to name. */
+  band?: ProblemBand | undefined;
   language?: Language | undefined;
   subject: string;
   active: boolean;
@@ -593,7 +675,11 @@ function SessionRow({
                  dimmed, because filed-away is a state of the session rather than a
                  rank in the list — but not so far down that reading it is work. */
               "text-foreground",
-              active ? "bg-[var(--sidebar-accent-active)]" : "hover:bg-[var(--sidebar-accent)]",
+              /* Hover keyed to the row, not to this button: the controls are the
+                 button's siblings, so pointing at the pin used to drop the fill
+                 out from under the very row you were reaching into. */
+              active ? "bg-[var(--sidebar-accent-active)]" : "group-hover/session:bg-[var(--sidebar-accent)]",
+              !active && open && "bg-[var(--sidebar-accent)]",
               archived && !active && "text-foreground/60",
             )}
             onClick={onOpen}
@@ -614,17 +700,26 @@ function SessionRow({
                 and a session with no challenge yet keeps the emblem rather than a
                 gap — alignment down the list matters more than which of the two
                 marks a not-yet-started session wears. */}
-            {language ? (
-              <LanguageGlyph className="size-[17px] shrink-0" language={language} />
-            ) : (
-              <ProblemEmblem
-                detail={false}
-                seed={`spar:${session.activeQuestion?.id ?? session.id}`}
-                size={17}
-                strong
-                subject={subject}
-              />
-            )}
+            <span className="relative grid size-[17px] shrink-0 place-items-center">
+              {language ? (
+                <LanguageGlyph className="size-[17px]" language={language} />
+              ) : (
+                <ProblemEmblem
+                  detail={false}
+                  seed={`spar:${session.activeQuestion?.id ?? session.id}`}
+                  size={17}
+                  strong
+                  subject={subject}
+                />
+              )}
+              {/* How hard the problem is. A word is out of the question at this
+                  size, so it is colour and a count of notches saying the same thing
+                  twice — see {@link BandBadge}. The halo is near-opaque rather than the
+                  sidebar's own colour: the sidebar is glass, so there is no
+                  ground to borrow, and what the badge has to separate itself from
+                  is the logo under it. */}
+              {band && <BandBadge band={band} />}
+            </span>
             <RowTitle>{label}</RowTitle>
             {working && (
               <Loader2
@@ -644,28 +739,42 @@ function SessionRow({
             data-row-controls
           >
             {quick.map((action) => (
-              <button
-                key={action.label}
-                aria-label={`${action.label}: ${session.title}`}
-                className={ICON_BUTTON}
-                onClick={action.run}
-                title={action.label}
-                type="button"
-              >
-                <action.icon className={ROW_ICON} />
-              </button>
+              /* The label rides above the icon rather than in a native `title`:
+                 the OS tooltip takes a second to arrive and lands wherever it
+                 likes, and these are three unlabelled shapes appearing under a
+                 pointer that is already moving. */
+              <Tooltip key={action.label}>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={`${action.label}: ${session.title}`}
+                    className={ICON_BUTTON}
+                    onClick={action.run}
+                    type="button"
+                  >
+                    <action.icon className={CONTROL_ICON} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{action.label}</TooltipContent>
+              </Tooltip>
             ))}
 
             <DropdownMenu modal={false} onOpenChange={openMenu} open={open}>
-              <DropdownMenuTrigger asChild>
-                <button
-                  aria-label={`Options for ${session.title}`}
-                  className={cn(ICON_BUTTON, open && "bg-[var(--sidebar-accent-active)] text-foreground")}
-                  type="button"
-                >
-                  <EllipsisVertical className={ROW_ICON} />
-                </button>
-              </DropdownMenuTrigger>
+              {/* No label once the menu is up: the menu says everything the
+                  tooltip would, and the two would stack on the same button. */}
+              <Tooltip {...(open ? { open: false } : {})}>
+                <TooltipTrigger asChild>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      aria-label={`Options for ${session.title}`}
+                      className={cn(ICON_BUTTON, open && "text-foreground")}
+                      type="button"
+                    >
+                      <EllipsisVertical className={CONTROL_ICON} />
+                    </button>
+                  </DropdownMenuTrigger>
+                </TooltipTrigger>
+                <TooltipContent>More</TooltipContent>
+              </Tooltip>
               {/* The letters are real: Radix would otherwise spend them on typeahead,
                   which moves the highlight and leaves the hint lying about what it does. */}
               <DropdownMenuContent

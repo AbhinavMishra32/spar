@@ -132,6 +132,12 @@ export const practiceProblemSchema = z.object({
   title: z.string().min(1),
   url: z.string().url(),
   difficulty: practiceDifficultySchema,
+  /** The source's own numeric difficulty, when it publishes one. Codeforces rates
+   *  most of its problemset on the same scale as its user ratings, which makes
+   *  this the one item difficulty in Spar that is measured rather than banded —
+   *  see `itemRating` in @spar/domain. LeetCode publishes nothing comparable, so
+   *  it is null there and the three-band fallback is used instead. */
+  sourceRating: z.number().int().positive().nullish(),
   paidOnly: z.boolean().default(false),
   statement: z.string(),
   hints: z.array(z.string()).default([]),
@@ -160,6 +166,7 @@ export const practiceProblemSummarySchema = z.object({
   displayId: z.string(),
   title: z.string().min(1),
   difficulty: practiceDifficultySchema,
+  sourceRating: z.number().int().positive().nullish(),
   paidOnly: z.boolean().default(false),
   acceptanceRate: z.number().nullable(),
   topicTags: z.array(z.string()).default([]),

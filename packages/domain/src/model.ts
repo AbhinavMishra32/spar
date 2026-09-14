@@ -138,6 +138,12 @@ export const challengeSourceSchema = z.object({
   displayId: z.string(),
   url: z.string(),
   difficulty: z.enum(["easy", "medium", "hard"]),
+  /** The source's own numeric difficulty, where it publishes one. This is what
+   *  the Spar Rating is played against: a Codeforces problem rating is on the
+   *  same scale as a Codeforces user rating, so it needs no translation to be
+   *  used as an opponent. Absent for LeetCode and for older Codeforces
+   *  challenges, which fall back to the band — see `itemRating`. */
+  sourceRating: z.number().int().positive().nullish(),
   /** The source's language slug, so a submission is posted with the exact string
    *  the source handed over rather than one Spar guessed. */
   languageSlug: z.string(),
@@ -275,6 +281,11 @@ export const challengeTimelineEntrySchema = z.object({
   occurredAt: isoDate,
   /** The one line worth reading out of the payload — an outcome, a path, a reason. */
   detail: z.string(),
+  /** Whether this event went well, badly, or neither. Read off the payload here
+   *  rather than sniffed back out of `detail` in the renderer: the same `type`
+   *  covers both a pass and a fail, and a UI that re-parses the sentence it was
+   *  handed breaks the moment the sentence is reworded. */
+  tone: z.enum(["neutral", "good", "bad"]).default("neutral"),
 });
 export type ChallengeTimelineEntry = z.infer<typeof challengeTimelineEntrySchema>;
 
@@ -447,9 +458,27 @@ export type BaselineState = z.infer<typeof baselineStateSchema>;
 export const sparNoticeSchema = z.object({ id, title: z.string(), body: z.string(), createdAt: isoDate });
 export type SparNotice = z.infer<typeof sparNoticeSchema>;
 
+/**
+ * One point on the rating curve.
+ *
+ * `deviation` and `volatility` are Glicko-2's own state, carried on the point
+ * rather than kept beside it: the rating is not a number you can resume from on
+ * its own, and a history that stored only the number could not be continued
+ * without re-deriving the whole curve. They are also what the learner is shown —
+ * the deviation is the ± on the figure, and it is what `provisional` means.
+ *
+ * `provisional` stays on the point as a stored boolean rather than being derived
+ * on read, so a point always says what it said when it was written.
+ */
 export const ratingPointSchema = z.object({
   id,
   rating: z.number().int().min(0),
+  /** Glicko-2's RD. Older points, written before the system had one, report the
+   *  initial deviation — which is the honest reading of a point whose
+   *  uncertainty was never measured. */
+  deviation: z.number().nonnegative().default(350),
+  /** Glicko-2's σ. */
+  volatility: z.number().positive().default(0.06),
   provisional: z.boolean(),
   reason: z.string(),
   occurredAt: isoDate,

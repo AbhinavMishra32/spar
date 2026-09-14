@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { LocalStore, validatedHiddenCaseCount } from "./store.js";
+import { ABILITY_STALE_AFTER_DAYS, LocalStore, validatedHiddenCaseCount } from "./store.js";
 import type { QuestionDesign } from "@spar/domain";
 
 const design=(title:string):QuestionDesign=>({title,language:"javascript",kind:"function",statement:"Implement the target behavior while preserving the declared invariant through every transition.",starterFiles:{"src/index.js":"export function solve(){ throw new Error(\"implement\") }"},referenceFiles:{"src/index.js":"export function solve(){ return true }"},visibleTests:{"tests/visible.test.js":"// visible"},hiddenTests:{"tests/hidden.test.js":"// hidden"},knownIncorrectFiles:[{"src/index.js":"export function solve(){ return false }"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["returns before restoring the invariant"]});
@@ -91,10 +91,14 @@ describe("target progress",()=>{
 });
 
 describe("local learning state",()=>{it("persists an evidence-bearing two-question adaptive chain",()=>{const store=new LocalStore(":memory:");try{const {sessionId}=store.createSession("Learn invariant-driven algorithms deeply");store.setObjective(sessionId,"Distinguish recognizing an invariant from restoring it repeatedly.");const first=store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Repeated restoration after one mutation",desiredEvidence:"Uses a loop until validity returns",avoidTesting:["parsing"]});const q1=store.createQuestion(sessionId,design("Restore the window"),{valid:true});const remark=randomUUID();store.appendEvent({id:remark,attemptId:q1.attemptId,sequence:1,type:"learner_remark",occurredAt:new Date().toISOString(),payload:{body:"I know the invariant but I only repaired it once."},source:"learner",schemaVersion:1});
-/* Cited, not merely written beside: confidence follows the number of linked
-   evidence events, so an update with nothing behind it correctly stays
-   uncertain. This chain claims to be evidence-bearing, so it cites the remark. */
-store.updateAbility({abilityId:first.abilityId,markdown:"# Invariant restoration\n\nRecognizes the invariant; repeated restoration remains uncertain.",evidenceEventIds:[remark]});store.completeAttempt(q1.attemptId,"passed");store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Transfer repeated restoration to an event stream",desiredEvidence:"Restores validity independently in a new representation",avoidTesting:["advanced syntax"]});store.createQuestion(sessionId,design("Repair the event stream"),{valid:true});const detail=store.readSession(sessionId);expect(detail?.summary.questionTitles).toHaveLength(2);expect(detail?.summary.completedQuestions).toBe(1);expect(detail?.question?.title).toBe("Repair the event stream");expect(store.readAbility(first.abilityId)).toMatchObject({version:1,status:"developing"});expect(store.readAttempt(q1.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({type:"learner_remark"})]));}finally{store.close();}});});
+/* Cited, not merely written beside: confidence follows the linked evidence, so
+   an update with nothing behind it has nothing to be confident about. This
+   chain claims to be evidence-bearing, so it cites the remark — and the remark
+   is a learner saying something, which grades nothing either way. The status
+   stays `uncertain` because that is exactly what one neutral observation
+   supports; under the old count-of-events rule it read as `developing`, which
+   was the ledger promoting a sentence about a feeling. */
+store.updateAbility({abilityId:first.abilityId,markdown:"# Invariant restoration\n\nRecognizes the invariant; repeated restoration remains uncertain.",evidenceEventIds:[remark]});store.completeAttempt(q1.attemptId,"passed");store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Transfer repeated restoration to an event stream",desiredEvidence:"Restores validity independently in a new representation",avoidTesting:["advanced syntax"]});store.createQuestion(sessionId,design("Repair the event stream"),{valid:true});const detail=store.readSession(sessionId);expect(detail?.summary.questionTitles).toHaveLength(2);expect(detail?.summary.completedQuestions).toBe(1);expect(detail?.question?.title).toBe("Repair the event stream");expect(store.readAbility(first.abilityId)).toMatchObject({version:1,status:"uncertain"});expect(store.readAttempt(q1.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({type:"learner_remark"})]));}finally{store.close();}});});
 
 /* One intake row per session, and the answered branch used to win for any later
    question — so the second thing a session ever asked was swallowed and the
@@ -445,10 +449,74 @@ describe("adaptive product state",()=>{
     const question=store.createQuestion(sessionId,design("Restore repeatedly"),{valid:true});
     const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
     store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nDirect execution worked once; transfer is untested.",summary:"Direct execution worked once; transfer is untested.",status:"developing",evidenceEventIds:[event.id]});
-    expect(store.abilityStates()[0]).toMatchObject({evidenceCount:1,trainingStatus:"training",proficiency:0.55});
+    /* `developing` is the agent's word and `proficiency` is no longer a lookup
+       on it — one clean pass reads well but reads thinly, and the confidence
+       beside it is what says so. Asserted as a band rather than a pinned float:
+       the claim is "one event is not mastery", not a particular decimal. */
+    expect(store.abilityStates()[0]).toMatchObject({evidenceCount:1,trainingStatus:"training"});
+    expect(store.abilityStates()[0]!.proficiency).toBeGreaterThan(0.6);
+    expect(store.abilityStates()[0]!.proficiency).toBeLessThan(0.75);
     expect(store.abilityStates()[0]!.confidence).toBeLessThan(0.5);
     expect(store.learnerProgress().rating.provisional).toBe(true);
   }finally{store.close();}});
+
+  /* The rating, as a rating: earned against challenges of known difficulty
+     rather than recomputed from what the ledger believes. These three properties
+     are the ones the previous scheme could not hold. */
+  describe("the rating a challenge moves",()=>{
+    const graded=(store:LocalStore,sessionId:string,title:string,outcome:"passed"|"abandoned")=>{
+      const question=store.createQuestion(sessionId,design(title),{valid:true});
+      if(outcome==="passed"){store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});store.completeAttempt(question.attemptId,"passed");}
+      else store.abandonAttempt(question.attemptId,"Out of ideas");
+      return question;
+    };
+    const rated=(store:LocalStore)=>{const {sessionId}=store.createSession("Get good at windows");store.setTrainingTarget(sessionId,{ability:"Windows",specificGap:"Shrinking until valid",desiredEvidence:"Shrinks repeatedly",avoidTesting:[]});return sessionId;};
+
+    it("rises on a solve and falls when the learner gives up",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      const start=store.learnerProgress().rating.rating;
+      graded(store,sessionId,"Shrink until valid","passed");
+      const afterSolve=store.learnerProgress().rating.rating;
+      expect(afterSolve).toBeGreaterThan(start);
+      graded(store,sessionId,"Shrink again","abandoned");
+      expect(store.learnerProgress().rating.rating).toBeLessThan(afterSolve);
+    }finally{store.close();}});
+
+    /* The number the user caught: fourteen solves of Spar's own drills read as a
+       2044, because the item was priced from the learner's rating and so rose
+       with it. A run of identical challenges has to converge. */
+    it("converges over a long run of identical challenges instead of climbing without bound",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      for(let solve=0;solve<25;solve+=1)graded(store,sessionId,`Shrink ${solve}`,"passed");
+      const history=store.learnerProgress().ratingHistory;
+      expect(store.learnerProgress().rating.rating).toBeLessThan(2000);
+      /* The tail of an unbroken run moves far less than its head: that is the
+         deviation narrowing, and it is what a bounded estimate looks like. */
+      const early=history[2]!.rating-history[1]!.rating;
+      const late=history[history.length-1]!.rating-history[history.length-2]!.rating;
+      expect(late).toBeLessThan(early/4);
+    }finally{store.close();}});
+
+    it("pays for a challenge once, however many times it is finished",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      const question=graded(store,sessionId,"Shrink until valid","passed");
+      const paid=store.learnerProgress().ratingHistory.length;
+      /* The review rejected the solve and sent it back. The pass that closed it
+         has already moved the rating; solving it again is the same challenge. */
+      store.reopenAttempt(question.attemptId,"Solved by scanning rather than by window");
+      store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+      store.completeAttempt(question.attemptId,"passed");
+      expect(store.learnerProgress().ratingHistory).toHaveLength(paid);
+    }finally{store.close();}});
+
+    it("does not rate a challenge the agent replaced",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      const question=store.createQuestion(sessionId,design("Shrink until valid"),{valid:true});
+      const before=store.learnerProgress().ratingHistory.length;
+      store.abandonAttempt(question.attemptId,"Mispitched","agent","replaced");
+      expect(store.learnerProgress().ratingHistory).toHaveLength(before);
+    }finally{store.close();}});
+  });
 
   it("persists baseline, training mode and an inspectable Today decision",()=>{const store=new LocalStore(":memory:");try{
     const created=store.createTrack("Climb Codeforces while keeping practice targeted","Codeforces Climb");
@@ -477,6 +545,86 @@ describe("adaptive product state",()=>{
     const secondEvidence=store.appendNextEvent({id:randomUUID(),attemptId:second.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
     store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nThe same assumption appeared in a different structure.",evidenceEventIds:[secondEvidence.id],evidence:[{eventId:secondEvidence.id,statement:"The empty stream repeated the non-empty initialization assumption.",polarity:"contradictory",independence:"independent",strength:0.8}],pattern:{title:"Boundary assumptions",description:"Initialization repeatedly assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id,secondEvidence.id]}});
     expect(store.listPatterns()[0]).toMatchObject({status:"pattern",evidenceCount:2});
+    /* The half of the loop that was missing: what was written down has to be
+       findable again, or the second attempt can never be joined to the first. */
+    expect(store.patternsForAbility(target.abilityId)).toMatchObject([{title:"Boundary assumptions",status:"pattern",evidenceCount:2}]);
+    const memory=store.searchLearnerMemory("boundary initialization assumptions",4);
+    expect(memory.patterns.map((item)=>item.title)).toEqual(["Boundary assumptions"]);
+    expect(memory.evidence.map((item)=>item.eventId)).toEqual([secondEvidence.id,firstEvidence.id]);
+    expect(memory.evidence[0]).toMatchObject({polarity:"contradictory",abilityTitle:"Boundary-case reasoning"});
+    /* A query about something else must not drag the ledger's only pattern in.
+       An almost-empty memory answers nearly any search if the search is loose. */
+    expect(store.searchLearnerMemory("graph traversal",4).patterns).toEqual([]);
+  }finally{store.close();}});
+
+  /* The rule this replaces counted linked events and promoted on three of them,
+     whichever way they had gone — so a learner could fail the same thing four
+     times and the ledger would call it independent, then a rating built on that
+     word would report it as a number somebody had measured. */
+  it("does not promote an ability on the volume of evidence against it",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores across several shrinks",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const failures=[0,1,2,3].map(()=>{const question=store.createQuestion(sessionId,design(`Shrink until valid ${randomUUID().slice(0,8)}`),{valid:true});const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});store.completeAttempt(question.attemptId,"failed");return event.id;});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nFour attempts, none of them restoring more than once.",evidenceEventIds:failures});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"developing"});
+    const state=store.abilityStates()[0]!;
+    expect(state.evidenceCount).toBe(4);
+    /* Plenty of observation, all of it pointing the other way: confident, and
+       confidently low. Those two numbers moving independently is the point. */
+    expect(state.confidence).toBeGreaterThan(0.6);
+    expect(state.proficiency).toBeLessThan(0.3);
+  }finally{store.close();}});
+
+  it("says so when the document claims more than the evidence under it supports",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores across several shrinks",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const graded=(outcome:"passed"|"failed")=>{const question=store.createQuestion(sessionId,design(`Shrink ${randomUUID().slice(0,8)}`),{valid:true});const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome},source:"system",schemaVersion:1});store.completeAttempt(question.attemptId,outcome);return event.id;};
+    /* The agent's word, and it is honoured: three clean passes and it says
+       independent, so independent is what the document says. */
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nRestores repeatedly and unaided.",status:"independent",evidenceEventIds:[graded("passed"),graded("passed"),graded("passed")]});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"independent"});
+    expect(store.abilityStates()[0]!.proficiency).toBeGreaterThan(0.6);
+    expect(store.listNotices().some((notice)=>notice.title.includes("stopped backing"))).toBe(false);
+
+    /* Now the evidence turns and the agent keeps its position. Spar does not
+       overrule it — the status still reads independent — it files the
+       disagreement, which is the thing that used to be unrepresentable. */
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nStill filed as reliable.",status:"independent",evidenceEventIds:[graded("failed"),graded("failed"),graded("failed"),graded("failed"),graded("failed")]});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"independent"});
+    expect(store.abilityStates()[0]!.proficiency).toBeLessThan(0.6);
+    expect(store.listNotices().map((notice)=>notice.title)).toContain("The evidence for Variable-window restoration has stopped backing it");
+    /* Filed on the crossing, not on every write, so it is a change of state
+       rather than a standing complaint. */
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nUnchanged.",status:"independent",evidenceEventIds:[]});
+    expect(store.listNotices().filter((notice)=>notice.title.includes("stopped backing"))).toHaveLength(1);
+  }finally{store.close();}});
+
+  it("lets an earned ability go stale when nothing has checked it for a long time",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores the invariant across several shrinks",avoidTesting:[]});
+    const question=store.createQuestion(sessionId,design("Shrink until valid"),{valid:true});
+    const events=[0,1,2].map(()=>store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1}));
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nShrinks until the property holds again.",evidenceEventIds:events.map((event)=>event.id)});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"independent"});
+    /* Today changes nothing; the cutoff is what changes something. Passing the
+       clock in beats waiting 45 days for the test to be meaningful. */
+    expect(store.decayAbilities()).toEqual([]);
+    const later=new Date(Date.now()+(ABILITY_STALE_AFTER_DAYS+1)*86_400_000);
+    const before=store.readAbility(target.abilityId) as {updated_at:string};
+    expect(store.decayAbilities(later)).toEqual([target.abilityId]);
+    const after=store.readAbility(target.abilityId) as {status:string;version:number;updated_at:string;earned_at:string|null};
+    expect(after.status).toBe("stale");
+    /* Nobody wrote anything, so nothing about the document moved. `updated_at`
+       especially: targetProgress counts challenges set since it last changed. */
+    expect(after.version).toBe(1);
+    expect(after.updated_at).toBe(before.updated_at);
+    expect(after.earned_at).not.toBeNull();
+    expect(store.listNotices().map((notice)=>notice.title)).toContain("Variable-window restoration has not been checked recently");
+    /* Idempotent: the ability is no longer independent, so a second pass finds
+       nothing and the learner is not told again on every launch. */
+    expect(store.decayAbilities(later)).toEqual([]);
   }finally{store.close();}});
 
   it("compacts and restores Track-owned adaptive projections",()=>{const source=new LocalStore(":memory:");const restored=new LocalStore(":memory:");try{

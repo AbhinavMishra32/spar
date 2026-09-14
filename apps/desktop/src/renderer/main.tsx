@@ -18,6 +18,7 @@ import { UpdateExperience } from "./components/updates/UpdateExperience";
 import { CrashBoundary } from "./components/common/CrashScreen";
 import { defineEditorThemes } from "./lib/monaco-theme";
 import { CodeThemeProvider } from "./hooks/use-code-theme";
+import { TooltipProvider } from "./components/ui/tooltip";
 import "./theme.css";
 
 window.MonacoEnvironment = {
@@ -36,6 +37,11 @@ document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-sch
 const chrome = window.spar?.chrome;
 document.documentElement.dataset.nativeSurface = chrome?.surface ?? "none";
 document.documentElement.dataset.windowControls = chrome?.controls ?? "left";
+/* The host OS, for the handful of places where the *shape* of a control differs
+   rather than its position: Windows draws plain rounded rectangles where macOS
+   draws superellipses, and hairlines there have no half-pixel to land on. See
+   the platform block in theme.css. */
+document.documentElement.dataset.platform = chrome?.platform ?? "darwin";
 window.spar?.onNativeSurface((surface) => {
   document.documentElement.dataset.nativeSurface = surface;
 });
@@ -51,8 +57,15 @@ createRoot(document.getElementById("root")!).render(
     <CrashBoundary>
       <MotionConfig reducedMotion="user">
         <CodeThemeProvider>
-          <App />
-          {window.spar && <UpdateExperience api={window.spar} />}
+          {/* App-wide, because Radix keeps the shared open/close timing here:
+              without it every tooltip in the tree throws, and with one per
+              tooltip each would run its own delay. The timings are the ChatGPT
+              app's: a short wait for the first, none for the next one the
+              pointer walks onto. */}
+          <TooltipProvider delayDuration={150} skipDelayDuration={300}>
+            <App />
+            {window.spar && <UpdateExperience api={window.spar} />}
+          </TooltipProvider>
         </CodeThemeProvider>
       </MotionConfig>
     </CrashBoundary>

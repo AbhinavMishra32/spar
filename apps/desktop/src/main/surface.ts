@@ -8,7 +8,7 @@ import type { BrowserWindow, BrowserWindowConstructorOptions } from "electron";
  * window so the material shows through, and a hole with nothing behind it shows
  * the desktop. So when the answer is "none" the renderer paints its own fill.
  */
-export type NativeSurface = "liquid-glass" | "vibrancy" | "mica" | "none";
+export type NativeSurface = "liquid-glass" | "vibrancy" | "acrylic" | "mica" | "none";
 
 /**
  * Which edge of our first row the OS draws its window buttons over, and so which
@@ -29,11 +29,45 @@ function macMajor(): number {
   return Number.parseInt(release().split(".")[0] ?? "0", 10);
 }
 
-/** Mica needs Windows 11, which is NT 10.0 build 22000 and up. */
-function isWindows11(): boolean {
-  const build = Number.parseInt(release().split(".")[2] ?? "0", 10);
-  return build >= 22_000;
+/** The Windows 11 build number, or 0 anywhere else. `os.release()` there is
+ *  "10.0.<build>", and the build is the only part that separates the materials:
+ *  Mica arrived with Windows 11 itself (22000), and window-level Acrylic with
+ *  22H2 (22621). */
+function windowsBuild(): number {
+  return Number.parseInt(release().split(".")[2] ?? "0", 10);
 }
+
+/**
+ * Which material Windows will paint behind the window.
+ *
+ * Acrylic where it exists, because the sidebar is the surface this is for and
+ * Mica is not really translucent: it is a wallpaper tint, sampled once and held
+ * still, so a sidebar over it reads as a flat grey panel rather than as a hole
+ * in the window. Acrylic actually blurs what is behind it, which is the effect
+ * macOS has had all along and the one the sidebar's tint was drawn against.
+ *
+ * Mica stays the answer for the first Windows 11 builds, where Acrylic is not
+ * available at window level, and Windows 10 gets no material at all — the
+ * renderer paints the sidebar itself there.
+ */
+function windowsSurface(): "acrylic" | "mica" | "none" {
+  const build = windowsBuild();
+  if (build >= 22_621) return "acrylic";
+  if (build >= 22_000) return "mica";
+  return "none";
+}
+
+/**
+ * The caption buttons Windows draws over our first row, at 100% scale.
+ *
+ * These are the shell's own metrics, not a taste of ours: 46x32 per button and
+ * three of them. Handing `setTitleBarOverlay` a taller height does not pad the
+ * row, it stretches the hit targets, and a close button half again as tall as
+ * every other Windows app's is the single loudest tell that a window is not
+ * native. The renderer reads the real, DPI-scaled numbers back out of
+ * `env(titlebar-area-*)` and sizes its own title row to match — see theme.css.
+ */
+const CAPTION_HEIGHT = 32;
 
 /**
  * Picks the best material the current OS can give us, and the window options
@@ -61,25 +95,25 @@ export function planSurface(): SurfacePlan {
     };
   }
 
-  if (process.platform === "win32" && isWindows11()) {
+  if (process.platform === "win32") {
+    const surface = windowsSurface();
     return {
-      surface: "mica",
+      surface,
       controls: "right",
       options: {
-        // `transparent` and `backgroundMaterial` are mutually exclusive on
-        // Windows, and transparent windows there lose snap and resize borders.
-        backgroundMaterial: "mica",
         titleBarStyle: "hidden",
-        titleBarOverlay: true,
-        backgroundColor: "#00000000",
+        // Given its metrics here as well as in `syncWindowControls`, so the very
+        // first frame is already the native size — an overlay that resizes after
+        // the theme is first synced is a visible twitch on launch.
+        titleBarOverlay: { color: "#00000000", symbolColor: "#1a1a1a", height: CAPTION_HEIGHT },
+        /* `transparent` and `backgroundMaterial` are mutually exclusive on
+           Windows, and transparent windows there lose snap and the resize
+           borders — so the material is asked for by name and the background is
+           cleared to let it through. Windows 10 has neither material and keeps
+           its opaque fill, which the renderer then paints the sidebar over. */
+        ...(surface === "none" ? {} : { backgroundMaterial: surface, backgroundColor: "#00000000" }),
       },
     };
-  }
-
-  // Windows 10 has no Mica, but still gets the custom title bar so the chrome
-  // matches; everywhere else keeps the native frame.
-  if (process.platform === "win32") {
-    return { surface: "none", controls: "right", options: { titleBarStyle: "hidden", titleBarOverlay: true } };
   }
 
   return { surface: "none", controls: "none", options: {} };
@@ -122,12 +156,19 @@ export async function applyNativeSurface(window: BrowserWindow, plan: SurfacePla
   }
 }
 
-/** Keeps the Windows caption buttons legible when the theme flips. */
+/** Keeps the Windows caption buttons legible when the theme flips.
+ *
+ *  Only the glyph colour moves. The height is the shell's own and is restated
+ *  rather than recomputed, because `setTitleBarOverlay` replaces the whole
+ *  overlay: omitting it here would drop the row back to Chromium's default on
+ *  the first theme change of the session. */
 export function syncWindowControls(window: BrowserWindow, dark: boolean) {
   if (process.platform !== "win32" || !window.setTitleBarOverlay) return;
   window.setTitleBarOverlay({
+    // Transparent, so the caption strip shows the same Acrylic or Mica as the
+    // title row it sits in rather than a band of flat colour across the top.
     color: "#00000000",
     symbolColor: dark ? "#fafafa" : "#1a1a1a",
-    height: 44,
+    height: CAPTION_HEIGHT,
   });
 }

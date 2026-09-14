@@ -1,4 +1,4 @@
-import type { ChallengeHistorySummary } from "@spar/domain";
+import { generatedItemRating, itemRating, solveProbability, type ChallengeHistorySummary, type Rating } from "@spar/domain";
 import type { PracticeSearchHit } from "../../shared/api";
 import { matchRank } from "./search";
 
@@ -48,6 +48,12 @@ export type ProblemFacets = {
   /** When the learner last touched it, in ms. Zero for a problem they never
    *  have, which is every remote hit. */
   touchedAt: number;
+  /** What it costs, in rating points, on the one scale everything here is priced
+   *  on. A published Codeforces rating where there is one, a band anchor where
+   *  there is not, and Spar's own difficulty anchor for a challenge it wrote —
+   *  all of it from `itemRating`, so the list ranks problems the same way the
+   *  rating scores them. */
+  price: number;
   /** Everything beyond the title that a query may match. */
   meta: string;
 };
@@ -96,6 +102,13 @@ function challengeStanding(challenge: ChallengeHistorySummary): ProblemStanding 
   return "todo";
 }
 
+/** What level a challenge is, on the one scale the app grades everything by. A
+ *  sourced challenge is banded by the source, which graded it, rather than by the
+ *  band Spar assigned when it mounted the problem. */
+export function challengeBand(challenge: Pick<ChallengeHistorySummary, "difficulty" | "source">): ProblemBand {
+  return challenge.source ? challenge.source.difficulty : SPAR_BAND[challenge.difficulty];
+}
+
 export function challengeItem(challenge: ChallengeHistorySummary): ProblemItem {
   const tags = challenge.concepts.map((concept) => concept.title);
   const origin: ProblemOrigin = challenge.source?.source ?? "spar";
@@ -105,13 +118,12 @@ export function challengeItem(challenge: ChallengeHistorySummary): ProblemItem {
     key: problemKey({ origin, id: challenge.id, slug: challenge.source?.slug ?? null }),
     title: challenge.title,
     origin,
-    /* A sourced challenge is banded by the source, which graded it, rather than
-       by the band Spar assigned when it mounted the problem. */
-    band: challenge.source ? challenge.source.difficulty : SPAR_BAND[challenge.difficulty],
+    band: challengeBand(challenge),
     standing: challengeStanding(challenge),
     tags,
     displayId: challenge.source?.displayId ?? null,
     touchedAt: Date.parse(challenge.updatedAt) || 0,
+    price: challenge.source ? itemRating(challenge.source) : generatedItemRating(challenge.difficulty),
     meta: [challenge.sessionTitle, challenge.language, challenge.difficulty, tags.join(" "), challenge.source?.displayId ?? ""].join(" "),
   };
 }
@@ -128,6 +140,7 @@ export function sourceItem(hit: PracticeSearchHit): ProblemItem {
     tags: hit.concepts,
     displayId: hit.displayId,
     touchedAt: 0,
+    price: itemRating({ source: hit.source, difficulty: hit.difficulty, sourceRating: hit.sourceRating }),
     meta: [hit.sourceName, hit.displayId, hit.slug, hit.concepts.join(" ")].join(" "),
   };
 }
@@ -193,6 +206,28 @@ export function filterProblems(items: ProblemItem[], filter: ProblemFilter): Pro
 }
 
 /**
+ * Where a problem sits against the learner, as a distance from the one they
+ * would find worth solving.
+ *
+ * `LIBRARY_TARGET` is what the page is picking for: something they would get
+ * about three times in five. Not even money, because this is the browsing list
+ * rather than a diagnostic — somebody opening the library wants the next problem
+ * they can finish, and Spar's own assessment of what it still needs to find out
+ * is the agent's job on the training path.
+ *
+ * Distance rather than difficulty, so the scale is symmetric: a problem far too
+ * easy is as badly suggested as one far too hard, which a difficulty sort cannot
+ * say. It is a probability gap and not a rating gap for the same reason the gate
+ * uses one — 300 points above a beginner and 300 points above a specialist are
+ * not the same problem.
+ */
+const LIBRARY_TARGET = 0.6;
+
+function misfit(item: ProblemItem, rating: Rating): number {
+  return Math.abs(solveProbability(rating, item.price) - LIBRARY_TARGET);
+}
+
+/**
  * The order the list is read in.
  *
  * `suggested` is the only one with an opinion, and while a query is being typed
@@ -201,11 +236,22 @@ export function filterProblems(items: ProblemItem[], filter: ProblemFilter): Pro
  * back to what the page is for: pick up what you left unfinished, then what you
  * have not tried, and put what you have already solved last.
  *
+ * Inside each of those three groups, the learner's rating orders what is left.
+ * The grouping stays on top of it deliberately: a problem they walked away from
+ * on Tuesday is the thing they came back for, and no fit score should push it
+ * under a stranger. What the rating decides is the question the grouping cannot
+ * answer — which of two hundred problems they have never tried to offer first —
+ * and until it did, that was "whichever source answered first", drawn as a
+ * recommendation.
+ *
+ * Without a rating it is the old order exactly, which is what the preview
+ * harness and any caller that has no learner in hand get.
+ *
  * Every comparison ends without a tie-break on purpose. `Array.prototype.sort` is
  * stable, so equal items keep the order `mergeProblems` gave them: history before
  * remote hits, and each source in the order it answered.
  */
-export function sortProblems(items: ProblemItem[], sort: ProblemSort, query = ""): ProblemItem[] {
+export function sortProblems(items: ProblemItem[], sort: ProblemSort, query = "", rating?: Rating | null): ProblemItem[] {
   const rows = [...items];
   if (sort === "easiest") return rows.sort((a, b) => BAND_ORDER[a.band] - BAND_ORDER[b.band]);
   if (sort === "hardest") return rows.sort((a, b) => BAND_ORDER[b.band] - BAND_ORDER[a.band]);
@@ -213,5 +259,6 @@ export function sortProblems(items: ProblemItem[], sort: ProblemSort, query = ""
   if (query.trim()) {
     return rows.sort((a, b) => (matchRank(query, a.title, a.meta) ?? 9) - (matchRank(query, b.title, b.meta) ?? 9));
   }
-  return rows.sort((a, b) => STANDING_ORDER[a.standing] - STANDING_ORDER[b.standing] || b.touchedAt - a.touchedAt);
+  if (!rating) return rows.sort((a, b) => STANDING_ORDER[a.standing] - STANDING_ORDER[b.standing] || b.touchedAt - a.touchedAt);
+  return rows.sort((a, b) => STANDING_ORDER[a.standing] - STANDING_ORDER[b.standing] || misfit(a, rating) - misfit(b, rating) || b.touchedAt - a.touchedAt);
 }

@@ -789,10 +789,15 @@ export function App() {
           {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
           {page === "problems" && (
             <ProblemsPage
+              abilities={data.abilities}
               api={api}
               challenges={data.challenges}
+              concepts={data.concepts}
+              onOpenAbility={openAbility}
               onOpenChallenge={openChallenge}
+              onOpenConcept={setConcept}
               onStartProblem={startProblem}
+              progress={data.progress}
             />
           )}
           {/* Mounted only while it is the page. The visualiser holds a trace,

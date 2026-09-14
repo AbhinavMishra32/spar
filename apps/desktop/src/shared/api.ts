@@ -161,7 +161,7 @@ export const themePreferenceSchema = z.enum(["system", "light", "dark"]);
 export const reasoningEffortSchema = z.enum(["off", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 /** The translucent material the OS paints behind the window, if any. */
-export type NativeSurface = "liquid-glass" | "vibrancy" | "mica" | "none";
+export type NativeSurface = "liquid-glass" | "vibrancy" | "acrylic" | "mica" | "none";
 /** Which edge must reserve room for the OS window buttons; "none" = native frame. */
 export type WindowControls = "left" | "right" | "none";
 /** `process.platform`, narrowed to what the renderer branches on. */
@@ -279,6 +279,11 @@ export type PracticeSearchHit = {
   displayId: string;
   title: string;
   difficulty: "easy" | "medium" | "hard";
+  /** The source's own numeric difficulty, where it publishes one. Carried into
+   *  the renderer because the library ranks by how a problem is priced against
+   *  the learner's rating, and two problems a source calls "medium" are not the
+   *  same problem — see `itemRating`. */
+  sourceRating?: number | null;
   paidOnly: boolean;
   acceptanceRate: number | null;
   concepts: string[];

@@ -3,7 +3,7 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { baselineStateSchema, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, baselineStateSchema, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
@@ -12,6 +12,7 @@ import { sourceSubmissionOutput } from "../shared/sourceOutput.js";
 import { canonicalWorkspacePath } from "../shared/workspacePath.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
 import { openChosenProblem } from "./practiceChoice.js";
+import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import { judgeCaseBlock } from "./judgeCases.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
@@ -52,7 +53,15 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      seen the state and asked for it, so this is no longer a loop the app is
      driving by itself. */
   const clearAutoResume = (sessionId: string) => autoResumedPlanning.delete(sessionId);
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() }));
+  /* Before anything is read, not on a timer. The only moment an ability's age
+     matters is the moment somebody looks at the ledger, and every look starts
+     here — so a learner returning after two months away sees the decay in the
+     same frame as everything else rather than watching a status change under
+     them a second later. */
+  ipcMain.handle(ipc.bootstrap, async () => {
+    deps.store.decayAbilities();
+    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
+  });
   ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
@@ -171,13 +180,48 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       /* Bound once, because it now answers two questions: what the Track is, and
          which language its challenges are written in. */
       const track=session.summary.trackId?deps.store.listTracks().find((item)=>item.id===session.summary.trackId)??null:null;
+      /* Bound to the ability the session is actually training, because the window
+         is not one range per learner: a settled ability wants a stretch and an
+         untested one wants something readable, off the same rating. */
+      const standing=()=>{
+        const rating=deps.store.currentRating();
+        const ability=target?deps.store.readAbilityDetail(String(target.ability_id)):null;
+        const status=ability?.ability.status??"uncertain";
+        return {
+          rating:Math.round(rating.rating),
+          provisional:rating.deviation>ESTABLISHED_DEVIATION,
+          abilityStatus:status,
+          setProblemsRated:trainingWindow({rating,abilityStatus:status,experience:profile?.experience??"new"}),
+        };
+      };
       const payload={sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,targetProgress:deps.store.targetProgress(sessionId),checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),track,relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4,session.summary.trackId),
         /* Carried unconditionally, unlike `relevantAbilitySummary`, which is
            scoped to the goal and so cannot show a topic the goal never mentions.
            Repetition across sessions is exactly the thing a goal-scoped view
            hides: the agent needs to see the last dozen challenges to know it has
            asked about the same concept twelve times. */
-        recentChallenges:deps.store.recentChallengeCoverage(12,session.summary.trackId),practiceSource:practiceSummary,accountId:account.id,preferredLanguage:track?.language??profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
+        recentChallenges:deps.store.recentChallengeCoverage(12,session.summary.trackId),
+        /* Carried for the same reason and read the other way round. A pattern is
+           the agent's own standing suspicion about how this learner goes wrong,
+           and until it was in the turn's context nothing put one in front of the
+           agent unprompted — so a hypothesis written three attempts ago only
+           came back if somebody happened to search the words it was filed under.
+           Open ones only: a resolved pattern is history, and history is what
+           `search_learner_model` is for. */
+        openPatterns:deps.store.listPatterns(session.summary.trackId).filter((pattern)=>pattern.status!=="resolved").slice(0,8),
+        /* Where the learner is rated, and the range of problem difficulty that
+           follows from it. The host has always enforced a level rule on what the
+           agent may assign and never told the agent what the rule was, so the
+           agent chose against a difficulty word and found out it had guessed
+           wrong from a refusal. This is the same window `assessPracticeAssignment`
+           checks against, computed the same way, so searching inside it and being
+           admitted are the same condition rather than two that happen to agree.
+
+           Stated in item-rating points because that is what the sources publish:
+           a Codeforces problem carries its own number, and the three-band prices
+           in `itemRating` put LeetCode on the same scale. */
+        learnerStanding:standing(),
+        practiceSource:practiceSummary,accountId:account.id,preferredLanguage:track?.language??profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
       /* A run is claimed by its session for as long as it is in flight, in two
          places: `activeAgentRuns` guards against a second turn, and
          `agentRunSessions` is what lets the main process stamp a session id onto
@@ -404,7 +448,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sourceSearch, async (_event, value) => {
     const input = sourceSearchInput.parse(value);
     const found = await deps.practice.search(input);
-    return { total: found.total, failed: found.failed, problems: found.problems.map((problem) => ({ source: problem.source, sourceName: problem.source === "leetcode" ? "LeetCode" : "Codeforces", slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
+    return { total: found.total, failed: found.failed, problems: found.problems.map((problem) => ({ source: problem.source, sourceName: problem.source === "leetcode" ? "LeetCode" : "Codeforces", slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, sourceRating: problem.sourceRating ?? null, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
   });
   ipcMain.handle(ipc.sourceProblem, async (_event, value) => { const input = sourceSlugInput.parse(value); return (await deps.practice.problem(input.source, input.slug)).problem; });
 

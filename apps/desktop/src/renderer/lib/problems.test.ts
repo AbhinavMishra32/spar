@@ -204,4 +204,38 @@ describe("sortProblems", () => {
     sortProblems(items, "hardest");
     expect(items.map((item) => item.title)).toEqual(before);
   });
+
+  describe("with a rating in hand", () => {
+    const untried = mergeProblems([], [
+      hit({ slug: "1/A", title: "Way below them", difficulty: "easy", sourceRating: 800 }),
+      hit({ slug: "2/A", title: "About right", difficulty: "medium", sourceRating: 1400 }),
+      hit({ slug: "3/A", title: "Way above them", difficulty: "hard", sourceRating: 2600 }),
+    ]);
+    const learner = { rating: 1500, deviation: 80, volatility: 0.06 };
+
+    it("leads with the problem they would find worth solving", () => {
+      expect(sortProblems(untried, "suggested", "", learner).map((item) => item.title)[0]).toBe("About right");
+    });
+
+    /* Symmetry is the point of ranking on the odds rather than on difficulty: a
+       problem far too easy is as badly suggested as one far too hard, and a
+       difficulty sort can only say one of those. */
+    it("ranks something far too easy no better than something far too hard", () => {
+      const order = sortProblems(untried, "suggested", "", learner).map((item) => item.title);
+      expect(order[0]).toBe("About right");
+      expect(order.slice(1).sort()).toEqual(["Way above them", "Way below them"]);
+    });
+
+    it("still leads with unfinished work rather than a better-fitting stranger", () => {
+      const withOpen = mergeProblems(
+        [challenge({ id: "open", title: "Half done", lastOutcome: "failed", difficulty: "advanced", updatedAt: "2026-08-02T00:00:00.000Z" })],
+        [hit({ slug: "2/A", title: "About right", difficulty: "medium", sourceRating: 1400 })],
+      );
+      expect(sortProblems(withOpen, "suggested", "", learner).map((item) => item.title)[0]).toBe("Half done");
+    });
+
+    it("falls back to the plain order when nobody has a rating", () => {
+      expect(sortProblems(items, "suggested", "", null).map((item) => item.title)).toEqual(["Half done", "Watermelon", "Long solved"]);
+    });
+  });
 });

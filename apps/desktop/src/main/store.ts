@@ -2,6 +2,8 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { challengeFileEntries, codePreview } from "./challengeFiles.js";
+import { decay as decayRating, updateRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, INITIAL_RATING, INITIAL_VOLATILITY, type Rating } from "@spar/domain";
+import { challengeResult, elapsedDays } from "./rating.js";
 import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
 
 type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null };
@@ -66,6 +68,21 @@ export type ConceptTagInput = { slug:string; title?:string; kind?:string; parent
 /** Every graded challenge under a concept, before it is grouped. One row per
  *  (concept, challenge) pair, which is what makes the rollups countable. */
 type TaggedChallengeRow = { concept_id:string; role:string; question_id:string; session_id:string; session_title:string; title:string; language:string; difficulty:string; outcome:ConceptEvidence["outcome"]; attempt_count:number; test_run_count:number; replaced:number; created_at:string; occurred_at:string };
+
+/** How long an earned ability stands without new evidence before it is only a
+ *  claim about the past. Long enough that a fortnight away from Spar does not
+ *  unpick the ledger, short enough that "you can do this" still means now. */
+export const ABILITY_STALE_AFTER_DAYS = 45;
+
+/** How long a piece of evidence keeps its full weight. The same span, so that
+ *  at the moment an ability is called stale its evidence counts for half — the
+ *  two halves of "this was true a while ago" moving together rather than one
+ *  number contradicting the other. */
+export const ABILITY_EVIDENCE_HALF_LIFE_DAYS = ABILITY_STALE_AFTER_DAYS;
+
+/** Below this, the evidence is not backing the claim the document makes. Used
+ *  only to notice the disagreement, never to overrule it. */
+const ABILITY_DIVERGENCE_FLOOR = 0.6;
 
 /* The outcome of a challenge, resolved once. `attempt_completed` carries it for
    anything that ended; everything else is still open, including a challenge that
@@ -178,6 +195,20 @@ export class LocalStore {
     this.ensureColumn("tracks", "language", "TEXT");
     this.ensureColumn("learner_notices", "track_id", "TEXT");
     this.ensureColumn("rating_points", "track_id", "TEXT");
+    /* Glicko-2's own state, on the point rather than beside it. A rating is not
+       something you can resume from on its own: the deviation decides how far the
+       next result moves it, and the volatility decides how fast the deviation
+       itself may move. Points written before the rating was a rating carry the
+       defaults, which say "this number's uncertainty was never measured" — which
+       is true of every one of them. */
+    this.ensureColumn("rating_points", "deviation", `REAL NOT NULL DEFAULT ${INITIAL_DEVIATION}`);
+    this.ensureColumn("rating_points", "volatility", `REAL NOT NULL DEFAULT ${INITIAL_VOLATILITY}`);
+    /* Which challenge moved it. Recorded so a challenge can only ever be rated
+       once: a solve that the agent's review then reopened was rated on the pass,
+       and rating the second pass too would pay the learner twice for one
+       problem. It also makes the replay idempotent, which a migration that
+       deletes and rebuilds the curve had better be. */
+    this.ensureColumn("rating_points", "question_id", "TEXT");
     this.seedConcepts();
     // Filing, not activity: a timestamp rather than a flag so the sidebar can
     // order the shelf it produces without a second column to keep in step.
@@ -201,7 +232,9 @@ export class LocalStore {
     this.backfillTracks();
     this.migrateLegacyTrackWorkspaces();
     this.backfillLearningTracks();
+    this.migrateAbilityProficiency();
     this.ensureRating();
+    this.migrateRatingHistory();
   }
 
   /** Pinned first, then last touched. Archived rows stay in the list — they are
@@ -382,6 +415,41 @@ export class LocalStore {
   }
   commitDecision(sessionId:string,input:{action:string;reason:string}){const value={id:randomUUID(),...input,createdAt:new Date().toISOString()};this.db.prepare("INSERT INTO session_decisions VALUES (?,?,?,?,?)").run(value.id,sessionId,value.action,value.reason,value.createdAt);return value;}
   searchLearner(query:string,limit:number,trackId?:string|null){const terms=searchTerms(query);const scope=this.learningTrackId(trackId);if(!terms.length||!scope)return[];const rows=this.db.prepare("SELECT id,title,markdown,version,status,updated_at FROM ability_documents WHERE track_id=? ORDER BY updated_at DESC LIMIT 200").all(scope) as Array<{id:string;title:string;markdown:string;version:number;status:string;updated_at:string}>;return rows.map(row=>({row,score:relevance(`${row.title}\n${row.markdown}`,terms)})).filter(item=>item.score>0).sort((a,b)=>b.score-a.score||b.row.updated_at.localeCompare(a.row.updated_at)).slice(0,limit).map(item=>item.row);}
+  /**
+   * The rest of the learner's memory, searched the way the ability documents are.
+   *
+   * An ability document is the standing claim. These are the observations under
+   * it: one behaviour per row, with the polarity, the independence and the
+   * attempt it came from, and the mistake lifecycles assembled out of them.
+   *
+   * They are written on every attempt-complete turn and, until this, nothing but
+   * the learner's own screens could read them back. So the agent would record
+   * "inconsistent once restoring the invariant takes more than one shrink" as a
+   * hypothesis, find no way to retrieve it on the next attempt, re-derive the
+   * finding from the replay, and write it down again — a pattern can only be
+   * promoted by evidence spanning two attempts, and nothing could ever reach the
+   * first attempt's half of it.
+   */
+  searchLearnerMemory(query:string,limit:number,trackId?:string|null){
+    const terms=searchTerms(query);const scope=this.learningTrackId(trackId);
+    if(!terms.length||!scope)return{patterns:[],evidence:[]};
+    const patternRows=this.db.prepare(`SELECT p.id,p.title,p.description,p.status,p.ability_id,a.title ability_title,p.last_observed_at,p.updated_at,COUNT(pe.evidence_id) evidence_count
+      FROM learner_patterns p JOIN ability_documents a ON a.id=p.ability_id LEFT JOIN pattern_evidence pe ON pe.pattern_id=p.id
+      WHERE a.track_id=? GROUP BY p.id ORDER BY p.updated_at DESC LIMIT 200`).all(scope) as Array<Record<string,unknown>>;
+    const evidenceRows=this.db.prepare(`SELECT e.event_id,e.statement,e.polarity,e.independence,e.strength,e.occurred_at,e.attempt_id,e.ability_id,a.title ability_title
+      FROM learner_evidence e JOIN ability_documents a ON a.id=e.ability_id
+      WHERE a.track_id=? ORDER BY e.occurred_at DESC LIMIT 300`).all(scope) as Array<Record<string,unknown>>;
+    const rank=<T extends Record<string,unknown>>(rows:T[],text:(row:T)=>string,recency:(row:T)=>string)=>rows
+      .map((row)=>({row,score:relevance(text(row),terms)}))
+      .filter((item)=>item.score>0)
+      .sort((a,b)=>b.score-a.score||recency(b.row).localeCompare(recency(a.row)))
+      .slice(0,limit)
+      .map((item)=>item.row);
+    return {
+      patterns:rank(patternRows,(row)=>`${row.title}\n${row.description}\n${row.ability_title}`,(row)=>String(row.updated_at)).map((row)=>({id:String(row.id),title:String(row.title),description:String(row.description),status:String(row.status),abilityId:row.ability_id?String(row.ability_id):null,abilityTitle:String(row.ability_title),evidenceCount:Number(row.evidence_count),lastObservedAt:row.last_observed_at?String(row.last_observed_at):null})),
+      evidence:rank(evidenceRows,(row)=>`${row.statement}\n${row.ability_title}`,(row)=>String(row.occurred_at)).map((row)=>({abilityId:String(row.ability_id),abilityTitle:String(row.ability_title),attemptId:row.attempt_id?String(row.attempt_id):null,eventId:row.event_id?String(row.event_id):null,statement:String(row.statement),polarity:String(row.polarity),independence:String(row.independence),strength:Number(row.strength),occurredAt:String(row.occurred_at)})),
+    };
+  }
   readAbility(id:string){return this.db.prepare("SELECT * FROM ability_documents WHERE id=?").get(id)??null;}
   searchAttempts(query:string,limit:number,trackId?:string|null){const terms=searchTerms(query);const scope=this.learningTrackId(trackId);if(!terms.length||!scope)return[];const rows=this.db.prepare(`SELECT e.attempt_id,e.type,e.occurred_at,e.payload,q.title FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id JOIN sessions s ON s.id=a.session_id
     WHERE e.sequence>=(SELECT MAX(start.sequence) FROM attempt_events start WHERE start.attempt_id=e.attempt_id AND start.type='attempt_started')
@@ -396,7 +464,14 @@ export class LocalStore {
    *  attempt at it — far more than a replay header needs. */
   attemptSubject(attemptId:string){const row=this.db.prepare("SELECT q.id question_id,q.title,q.language,q.statement,q.ordinal,a.status,a.started_at,a.completed_at,s.id session_id FROM attempts a JOIN questions q ON q.id=a.question_id JOIN sessions s ON s.id=a.session_id WHERE a.id=?").get(attemptId) as {question_id:string;title:string;language:string;statement:string;ordinal:number;status:string;started_at:string;completed_at:string|null;session_id:string}|undefined;return row??null;}
   submissionBundle(attemptId:string){const row=this.db.prepare("SELECT a.id attempt_id,a.session_id,a.latest_event_sequence,q.id question_id,q.language,q.design FROM attempts a JOIN questions q ON q.id=a.question_id WHERE a.id=? AND a.status='active'").get(attemptId) as {attempt_id:string;session_id:string;latest_event_sequence:number;question_id:string;language:Language;design:string}|undefined;return row?{...row,design:JSON.parse(row.design) as QuestionDesign}:null;}
-  completeAttempt(attemptId:string,_outcome:"passed"|"failed"){const now=new Date().toISOString();this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id FROM attempts WHERE id=?").get(attemptId) as {question_id:string;session_id:string}|undefined;if(!attempt)throw new Error("Attempt not found");this.db.prepare("UPDATE attempts SET status='completed',completed_at=? WHERE id=?").run(now,attemptId);this.db.prepare("UPDATE questions SET status='completed' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(now,attempt.session_id);})();}
+  completeAttempt(attemptId:string,_outcome:"passed"|"failed"){const now=new Date().toISOString();this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id FROM attempts WHERE id=?").get(attemptId) as {question_id:string;session_id:string}|undefined;if(!attempt)throw new Error("Attempt not found");this.db.prepare("UPDATE attempts SET status='completed',completed_at=? WHERE id=?").run(now,attemptId);this.db.prepare("UPDATE questions SET status='completed' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(now,attempt.session_id);
+    /* Inside the same transaction as the completion. A solve that was recorded
+       but not rated would be invisible to the rating for ever: nothing re-reads
+       finished challenges looking for ones it missed. */
+    this.rateFinishedChallenge(attempt.question_id,`Solved ${this.questionTitle(attempt.question_id)}`,this.trackForSession(attempt.session_id));})();}
+
+  private questionTitle(questionId:string){return (this.db.prepare("SELECT title FROM questions WHERE id=?").get(questionId) as {title:string}|undefined)?.title??"a challenge";}
+  private trackForSession(sessionId:string){return (this.db.prepare("SELECT track_id FROM sessions WHERE id=?").get(sessionId) as {track_id:string|null}|undefined)?.track_id??null;}
   /**
    * A completed attempt, put back.
    *
@@ -409,7 +484,12 @@ export class LocalStore {
   reopenAttempt(attemptId:string,reason:string){const now=new Date().toISOString();return this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id,latest_event_sequence FROM attempts WHERE id=?").get(attemptId) as {question_id:string;session_id:string;latest_event_sequence:number}|undefined;if(!attempt)throw new Error("Attempt not found");const event={id:randomUUID(),attemptId,sequence:attempt.latest_event_sequence+1,type:"attempt_started",occurredAt:now,payload:{questionId:attempt.question_id,reopened:true,reason},source:"agent",schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);this.db.prepare("UPDATE attempts SET status='active',completed_at=NULL,latest_event_sequence=? WHERE id=?").run(event.sequence,attemptId);this.db.prepare("UPDATE questions SET status='active' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET status='active',updated_at=? WHERE id=?").run(now,attempt.session_id);this.enqueue("attempt-event",event);return{sessionId:attempt.session_id,questionId:attempt.question_id};})();}
   resetAttempt(sessionId:string,attemptId:string){const attempt=this.db.prepare("SELECT question_id FROM attempts WHERE id=? AND session_id=? AND status='active'").get(attemptId,sessionId) as {question_id:string}|undefined;if(!attempt)throw new Error("No active attempt to reset in this session");return this.appendNextEvent({id:randomUUID(),attemptId,type:"attempt_started",occurredAt:new Date().toISOString(),payload:{questionId:attempt.question_id,reset:true},source:"learner",schemaVersion:1});}
   /** The learner gave up. Records why, then leaves the session in chat mode. */
-  abandonAttempt(attemptId:string,reason:string,source:"learner"|"agent"="learner",outcome:"abandoned"|"replaced"="abandoned"){const now=new Date().toISOString();return this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id,latest_event_sequence FROM attempts WHERE id=? AND status='active'").get(attemptId) as {question_id:string;session_id:string;latest_event_sequence:number}|undefined;if(!attempt)throw new Error("No active attempt to abandon");const event={id:randomUUID(),attemptId,sequence:attempt.latest_event_sequence+1,type:"attempt_completed",occurredAt:now,payload:{outcome,reason},source,schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);this.db.prepare("UPDATE attempts SET status='completed',completed_at=?,latest_event_sequence=? WHERE id=?").run(now,event.sequence,attemptId);this.db.prepare("UPDATE questions SET status='abandoned' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET status='paused',updated_at=? WHERE id=?").run(now,attempt.session_id);this.enqueue("attempt-event",event);return{sessionId:attempt.session_id,questionId:attempt.question_id};})();}
+  abandonAttempt(attemptId:string,reason:string,source:"learner"|"agent"="learner",outcome:"abandoned"|"replaced"="abandoned"){const now=new Date().toISOString();return this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id,latest_event_sequence FROM attempts WHERE id=? AND status='active'").get(attemptId) as {question_id:string;session_id:string;latest_event_sequence:number}|undefined;if(!attempt)throw new Error("No active attempt to abandon");const event={id:randomUUID(),attemptId,sequence:attempt.latest_event_sequence+1,type:"attempt_completed",occurredAt:now,payload:{outcome,reason},source,schemaVersion:1} satisfies AttemptEvent;this.insertEvent(event);this.db.prepare("UPDATE attempts SET status='completed',completed_at=?,latest_event_sequence=? WHERE id=?").run(now,event.sequence,attemptId);this.db.prepare("UPDATE questions SET status='abandoned' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET status='paused',updated_at=? WHERE id=?").run(now,attempt.session_id);this.enqueue("attempt-event",event);
+    /* Only the learner conceding is a result. A challenge the agent replaced is
+       scored by nothing — `outcomeScore` returns null for it — so this call is
+       made on both paths and does nothing on that one. */
+    this.rateFinishedChallenge(attempt.question_id,outcome==="abandoned"?`Gave up on ${this.questionTitle(attempt.question_id)}`:"",this.trackForSession(attempt.session_id));
+    return{sessionId:attempt.session_id,questionId:attempt.question_id};})();}
   setSessionStatus(sessionId:string,status:"planning"|"active"|"paused"|"completed"){this.db.prepare("UPDATE sessions SET status=?,updated_at=? WHERE id=?").run(status,new Date().toISOString(),sessionId);}
   /* Renaming, pinning and archiving deliberately leave `updated_at` alone. It is
      the last-touched time the sidebar and the home page order by, and tidying a
@@ -439,18 +519,16 @@ export class LocalStore {
     const now=this.stamp();
     const evidenceIds=[...new Set([...(existing?JSON.parse(existing.evidence_ids) as string[]:[]),...input.evidenceEventIds])];
     const version=(existing?.version??0)+1;
-    const status=input.status??abilityStatusFor(evidenceIds.length);
-    /* Stamped once, and never restamped. An ability written before this column
-       existed has no date to recover, so it inherits its last edit rather than
-       claiming to have been earned just now — a wrong-but-close date is a
-       rounding error, and "earned 2 minutes ago" on a month-old ability is a
-       lie the card would tell every time it was opened. */
-    const earnedAt=existing?.earned_at??(status==="uncertain"?null:existing&&existing.status!=="uncertain"?existing.updated_at:now);
+    /* The document is written in two passes, because the status now follows the
+       evidence and the evidence rows cannot exist until the document they hang
+       off does. This pass carries the old status forward untouched; the status
+       is settled below, once the rows this write brings have landed. */
+    const provisional=input.status??existing?.status??"uncertain";
     const summary=input.summary?.trim()||existing?.summary||"";
     const practice=input.practice?.length?input.practice.map((item)=>item.trim()).filter(Boolean).slice(0,4):(existing?JSON.parse(existing.practice) as string[]:[]);
     this.db.transaction(()=>{
       const owner=input.trackId!==undefined?input.trackId:(existing?.track_id??this.learningTrackId());
-      this.db.prepare("INSERT INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at,track_id) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,markdown=excluded.markdown,version=excluded.version,status=excluded.status,updated_at=excluded.updated_at,evidence_ids=excluded.evidence_ids,summary=excluded.summary,practice=excluded.practice,earned_at=excluded.earned_at,track_id=excluded.track_id").run(input.id,input.title,input.markdown,version,status,now,JSON.stringify(evidenceIds),summary,JSON.stringify(practice),earnedAt,owner);
+      this.db.prepare("INSERT INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at,track_id) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,markdown=excluded.markdown,version=excluded.version,status=excluded.status,updated_at=excluded.updated_at,evidence_ids=excluded.evidence_ids,summary=excluded.summary,practice=excluded.practice,earned_at=excluded.earned_at,track_id=excluded.track_id").run(input.id,input.title,input.markdown,version,provisional,now,JSON.stringify(evidenceIds),summary,JSON.stringify(practice),existing?.earned_at??null,owner);
       // Concepts are replaced rather than merged: the set is the agent's current
       // claim about what this ability covers, and a stale concept left attached
       // would keep pulling unrelated challenges into its evidence.
@@ -460,8 +538,20 @@ export class LocalStore {
         for(const tag of input.concepts.slice(0,8))link.run(input.id,this.ensureConcept(tag).id);
       }
     })();
-    this.recordAbilityEvidence(input.id,input.evidenceEventIds,summary,status);
+    this.recordAbilityEvidence(input.id,input.evidenceEventIds,summary);
     if(input.evidence?.length)this.recordInterpretedEvidence(input.id,input.evidence);
+    /* The agent's word when it gave one, and otherwise what the rows support.
+       Never the other way round: an explicit status is not second-guessed here,
+       however the arithmetic reads — that disagreement is surfaced as a notice
+       in `reconcileAbilityState` rather than settled behind the agent's back. */
+    const status=input.status??this.abilityStatusFromEvidence(input.id);
+    /* Stamped once, and never restamped. An ability written before this column
+       existed has no date to recover, so it inherits its last edit rather than
+       claiming to have been earned just now — a wrong-but-close date is a
+       rounding error, and "earned 2 minutes ago" on a month-old ability is a
+       lie the card would tell every time it was opened. */
+    const earnedAt=existing?.earned_at??(status==="uncertain"?null:existing&&existing.status!=="uncertain"?existing.updated_at:now);
+    this.db.prepare("UPDATE ability_documents SET status=?,earned_at=? WHERE id=?").run(status,earnedAt,input.id);
     if(input.pattern)this.upsertPattern(input.id,input.pattern);
     this.reconcileAbilityState(input.id);
     this.queueLearningState();
@@ -476,6 +566,61 @@ export class LocalStore {
   private toAbilityState(row:Record<string,unknown>):LearnerAbilityState{return{abilityId:String(row.ability_id),title:String(row.title),proficiency:Number(row.proficiency),confidence:Number(row.confidence),evidenceCount:Number(row.evidence_count),lastEvidenceAt:row.last_evidence_at?String(row.last_evidence_at):null,trainingStatus:String(row.training_status) as LearnerAbilityState["trainingStatus"],trend:String(row.trend) as LearnerAbilityState["trend"],currentBelief:String(row.current_belief),nextVerification:String(row.next_verification),updatedAt:String(row.updated_at)};}
   evidenceForAbility(abilityId:string):LearnerEvidence[]{return (this.db.prepare("SELECT * FROM learner_evidence WHERE ability_id=? ORDER BY occurred_at DESC").all(abilityId) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),abilityId:String(row.ability_id),attemptId:row.attempt_id?String(row.attempt_id):null,eventId:row.event_id?String(row.event_id):null,statement:String(row.statement),polarity:String(row.polarity) as LearnerEvidence["polarity"],independence:String(row.independence) as LearnerEvidence["independence"],strength:Number(row.strength),occurredAt:String(row.occurred_at)}));}
   listPatterns(trackId?:string|null):LearnerPattern[]{const scope=this.learningTrackId(trackId);if(!scope)return[];return (this.db.prepare("SELECT p.*,COUNT(pe.evidence_id) evidence_count FROM learner_patterns p JOIN ability_documents a ON a.id=p.ability_id LEFT JOIN pattern_evidence pe ON pe.pattern_id=p.id WHERE a.track_id=? GROUP BY p.id ORDER BY CASE p.status WHEN 'pattern' THEN 0 WHEN 'hypothesis' THEN 1 WHEN 'monitoring' THEN 2 WHEN 'observation' THEN 3 ELSE 4 END,p.updated_at DESC").all(scope) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),title:String(row.title),description:String(row.description),abilityId:row.ability_id?String(row.ability_id):null,status:String(row.status) as LearnerPattern["status"],evidenceCount:Number(row.evidence_count),lastObservedAt:row.last_observed_at?String(row.last_observed_at):null,updatedAt:String(row.updated_at)}));}
+  /** The mistake lifecycles filed under one ability. Read beside the document
+   *  itself, because the document is the claim and these are the open questions
+   *  about it — an update proposed without them can only restate the claim. */
+  patternsForAbility(abilityId:string):LearnerPattern[]{return (this.db.prepare("SELECT p.*,COUNT(pe.evidence_id) evidence_count FROM learner_patterns p LEFT JOIN pattern_evidence pe ON pe.pattern_id=p.id WHERE p.ability_id=? GROUP BY p.id ORDER BY CASE p.status WHEN 'pattern' THEN 0 WHEN 'hypothesis' THEN 1 WHEN 'monitoring' THEN 2 WHEN 'observation' THEN 3 ELSE 4 END,p.updated_at DESC").all(abilityId) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),title:String(row.title),description:String(row.description),abilityId:row.ability_id?String(row.ability_id):null,status:String(row.status) as LearnerPattern["status"],evidenceCount:Number(row.evidence_count),lastObservedAt:row.last_observed_at?String(row.last_observed_at):null,updatedAt:String(row.updated_at)}));}
+
+  /**
+   * Abilities nobody has checked in a long time stop claiming to be current.
+   *
+   * `stale` has been a status since the ledger existed and nothing ever set it,
+   * so the one state that means "this was reliable and nothing since has looked"
+   * was reachable only by the agent remembering to ask for it. An earned ability
+   * is a claim about the present tense, and a claim about the present tense
+   * decays: past the cutoff with no new evidence it goes back to being worth
+   * re-checking, which is what the `retain` action already exists for.
+   *
+   * Only `independent` decays. `developing` and `uncertain` are already claims
+   * Spar is unsure of, and nothing is gained by making them vaguer.
+   *
+   * Neither `updated_at` nor the version moves. Decay is not a new version of
+   * the document — nobody wrote anything — and `updated_at` is what
+   * `targetProgress` measures "challenges since this ability last changed"
+   * against, so touching it here would report a session as making progress on
+   * the strength of a clock.
+   */
+  decayAbilities(now=new Date()):string[]{
+    const cutoff=new Date(now.getTime()-ABILITY_STALE_AFTER_DAYS*86_400_000).toISOString();
+    const rows=this.db.prepare(`SELECT a.id,a.title,a.track_id FROM ability_documents a LEFT JOIN learner_ability_state s ON s.ability_id=a.id
+      WHERE a.status='independent' AND COALESCE(s.last_evidence_at,a.updated_at)<?`).all(cutoff) as Array<{id:string;title:string;track_id:string|null}>;
+    for(const row of rows){
+      this.db.prepare("UPDATE ability_documents SET status='stale' WHERE id=?").run(row.id);
+      this.addNotice(`${row.title} has not been checked recently`,`Spar last saw evidence for this over ${ABILITY_STALE_AFTER_DAYS} days ago, so it is no longer counted as current. A retain challenge would settle whether it still holds.`,row.track_id);
+    }
+    /* Every ability, not only the ones that crossed the line. Evidence loses
+       weight by the day and the reading is only recomputed when something is
+       written, so without this a learner who stopped for two months would come
+       back to numbers dated to their last session — confident, current-looking,
+       and about somebody who has not written code since. */
+    this.reconcileEveryAbility();
+    if(rows.length)this.queueLearningState();
+    return rows.map((row)=>row.id);
+  }
+
+  private reconcileEveryAbility(){for(const row of this.db.prepare("SELECT id FROM ability_documents").all() as Array<{id:string}>)this.reconcileAbilityState(row.id);}
+
+  /**
+   * Ability states written when `proficiency` was a lookup on the status word.
+   *
+   * Those rows hold one of four constants apiece and say nothing about the
+   * evidence underneath them, so they are recomputed once rather than left to
+   * drift into the first write that happens to touch each ability. Rows arriving
+   * later from another device through `restoreLearningState` carry the same
+   * stale shape, which is why that path recomputes too.
+   */
+  private migrateAbilityProficiency(){if(this.getSetting<boolean>("ability-proficiency-v2",false))return;this.reconcileEveryAbility();this.setSetting("ability-proficiency-v2",true);}
+
   listNotices(limit=6,trackId?:string|null):SparNotice[]{const scope=this.learningTrackId(trackId);if(!scope)return[];return (this.db.prepare("SELECT id,title,body,created_at FROM learner_notices WHERE dismissed_at IS NULL AND track_id=? ORDER BY created_at DESC LIMIT ?").all(scope,limit) as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),title:String(row.title),body:String(row.body),createdAt:String(row.created_at)}));}
   /**
    * The learner's rating, across everything they have done.
@@ -491,7 +636,24 @@ export class LocalStore {
    * it says which line of practice produced the point; it just no longer divides
    * the series.
    */
-  ratingHistory():RatingPoint[]{return (this.db.prepare("SELECT * FROM rating_points ORDER BY occurred_at").all() as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),rating:Number(row.rating),provisional:Boolean(row.provisional),reason:String(row.reason),occurredAt:String(row.occurred_at)}));}
+  ratingHistory():RatingPoint[]{return (this.db.prepare("SELECT * FROM rating_points ORDER BY occurred_at").all() as Array<Record<string,unknown>>).map((row)=>({id:String(row.id),rating:Number(row.rating),deviation:Number(row.deviation??INITIAL_DEVIATION),volatility:Number(row.volatility??INITIAL_VOLATILITY),provisional:Boolean(row.provisional),reason:String(row.reason),occurredAt:String(row.occurred_at)}));}
+  /**
+   * Where the learner stands right now, for the things that have to decide
+   * something rather than draw it.
+   *
+   * Decayed for the time since the last point, which is the whole reason this is
+   * not just `ratingHistory().at(-1)`. The stored point is what was true when it
+   * was written; a learner who has been away for two months is less precisely
+   * placed than that point claims, and problem selection has to widen for them
+   * rather than keep choosing against a precision nobody has re-earned. The same
+   * decay runs inside `rateFinishedChallenge`, so the window a problem was
+   * chosen against and the rating that scores it are the same reading.
+   *
+   * Not written back: decay is a fact about elapsed time, and recording it as a
+   * point would put a mark on the learner's curve on a day they did nothing.
+   */
+  currentRating(at?:string):Rating{const prior=this.ratingHistory().at(-1)??this.ensureRating();const now=at??new Date().toISOString();
+    return decayRating({rating:prior.rating,deviation:prior.deviation,volatility:prior.volatility},elapsedDays(prior.occurredAt,now));}
   /**
    * A picture the agent made, kept for as long as the message that shows it.
    *
@@ -1055,10 +1217,21 @@ export class LocalStore {
       const pattern=this.db.prepare("INSERT OR IGNORE INTO learner_patterns VALUES (?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.patterns)?state.patterns:[]){const row=item as Record<string,unknown>;try{pattern.run(row.id,row.title,row.description,row.ability_id,row.status,row.created_at,row.updated_at,row.last_observed_at);}catch{/* Defensive restore. */}}
       const patternLink=this.db.prepare("INSERT OR IGNORE INTO pattern_evidence VALUES (?,?)");for(const item of Array.isArray(state.patternEvidence)?state.patternEvidence:[]){const row=item as Record<string,unknown>;try{patternLink.run(row.pattern_id,row.evidence_id);}catch{/* Defensive restore. */}}
       const notice=this.db.prepare("INSERT OR IGNORE INTO learner_notices (id,title,body,created_at,dismissed_at,track_id) VALUES (?,?,?,?,?,?)");for(const item of Array.isArray(state.notices)?state.notices:[]){const row=item as Record<string,unknown>;notice.run(row.id,row.title,row.body,row.created_at,row.dismissed_at,row.track_id??null);}
-      const rating=this.db.prepare("INSERT OR IGNORE INTO rating_points (id,rating,provisional,reason,occurred_at,track_id) VALUES (?,?,?,?,?,?)");for(const item of Array.isArray(state.rating)?state.rating:[]){const row=item as Record<string,unknown>;rating.run(row.id,row.rating,row.provisional,row.reason,row.occurred_at,row.track_id??null);}
+      /* The deviation and the volatility travel with the point. Without them a
+         restore onto a new device rebuilt every point at the defaults — which
+         say "this rating's uncertainty has never been measured" — so an
+         established learner came back provisional and their next result moved
+         the number like a beginner's. Older snapshots have neither field, and
+         those genuinely were never measured, so the defaults are right for them. */
+      const rating=this.db.prepare("INSERT OR IGNORE INTO rating_points (id,rating,deviation,volatility,provisional,reason,occurred_at,track_id,question_id) VALUES (?,?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.rating)?state.rating:[]){const row=item as Record<string,unknown>;rating.run(row.id,row.rating,row.deviation??INITIAL_DEVIATION,row.volatility??INITIAL_VOLATILITY,row.provisional,row.reason,row.occurred_at,row.track_id??null,row.question_id??null);}
       const decision=this.db.prepare("INSERT OR IGNORE INTO training_decisions VALUES (?,?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.decisions)?state.decisions:[]){const row=item as Record<string,unknown>;try{decision.run(row.id,row.track_id,row.session_id,row.ability_id,row.intent,row.reason,row.mode,row.candidate_snapshot,row.created_at);}catch{/* Defensive restore. */}}
       if(state.baseline){const baseline=baselineStateSchema.safeParse(state.baseline);if(baseline.success){this.setSetting("baseline-state",baseline.data);if(baseline.data.sessionId)this.db.prepare("UPDATE sessions SET context='baseline',track_id=NULL WHERE id=?").run(baseline.data.sessionId);}}if(state.trainingMode)this.setSetting("training-mode",state.trainingMode);if(typeof state.activeTrackId==="string")this.setSetting("active-track-id",state.activeTrackId);
-    });this.backfillTracks();this.backfillLearningTracks();this.ensureRating();}
+    /* The restored ability states were computed on the device that sent them,
+       from evidence this device has now imported and can read for itself. Doing
+       so is not a courtesy: a snapshot written before proficiency followed the
+       evidence carries the old lookup constants, and restoring it verbatim would
+       reintroduce them one machine at a time. */
+    });this.backfillTracks();this.backfillLearningTracks();this.reconcileEveryAbility();this.ensureRating();}
 
   clearAccountData(){this.db.transaction(()=>{for(const table of ["sync_outbox","pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","learner_ability_state","tracks","ability_documents","learner_profile","practice_problems","practice_problem_links"])this.db.prepare(`DELETE FROM ${table}`).run();
     /* Seeded concepts are shipped vocabulary and stay. A concept the agent
@@ -1089,22 +1262,180 @@ export class LocalStore {
   }
   private learningTrackId(trackId?:string|null){return trackId===undefined?this.activeTrack()?.id??null:trackId;}
   private trackIdForAbilityTarget(abilityId:string){const row=this.db.prepare("SELECT s.track_id FROM training_targets t JOIN sessions s ON s.id=t.session_id WHERE t.ability_id=? AND s.track_id IS NOT NULL ORDER BY t.created_at DESC LIMIT 1").get(abilityId) as {track_id:string}|undefined;return row?.track_id??null;}
-  private recordAbilityEvidence(abilityId:string,eventIds:string[],summary:string,status:AbilityStatus){const insert=this.db.prepare("INSERT OR IGNORE INTO learner_evidence (id,ability_id,attempt_id,event_id,statement,polarity,independence,strength,occurred_at) VALUES (?,?,?,?,?,?,?,?,?)");for(const eventId of eventIds){const row=this.db.prepare("SELECT e.id,e.attempt_id,e.occurred_at,e.type,e.payload FROM attempt_events e WHERE e.id=?").get(eventId) as {id:string;attempt_id:string;occurred_at:string;type:string;payload:string}|undefined;const payload=row?JSON.parse(row.payload) as Record<string,unknown>:{};const outcome=String(payload.outcome??"");const polarity=outcome==="failed"||status==="uncertain"?"contradictory":outcome==="passed"||status==="independent"?"supporting":"neutral";const independence=payload.assisted===true?"assisted":"unknown";insert.run(randomUUID(),abilityId,row?.attempt_id??null,eventId,summary||`Evidence from ${row?.type??"an attempt"}.`,polarity,independence,polarity==="neutral"?0.45:0.7,row?.occurred_at??new Date().toISOString());}}
+  /**
+   * An event linked to an ability with nothing said about it.
+   *
+   * The polarity comes off the event's own payload and from nowhere else. It
+   * used to read the ability's status too — an event on an `uncertain` ability
+   * counted against it and one on an `independent` ability counted for it —
+   * which was harmless while the status was a count of these rows and circular
+   * the moment the status started being derived from their polarity. An event
+   * that does not say how it went is now neutral, which is what it is: linked,
+   * recorded, and evidence for nothing in particular until somebody interprets
+   * it. `propose_ability_update` requires that interpretation, and it upserts
+   * over whatever this wrote.
+   */
+  private recordAbilityEvidence(abilityId:string,eventIds:string[],summary:string){const insert=this.db.prepare("INSERT OR IGNORE INTO learner_evidence (id,ability_id,attempt_id,event_id,statement,polarity,independence,strength,occurred_at) VALUES (?,?,?,?,?,?,?,?,?)");for(const eventId of eventIds){const row=this.db.prepare("SELECT e.id,e.attempt_id,e.occurred_at,e.type,e.payload FROM attempt_events e WHERE e.id=?").get(eventId) as {id:string;attempt_id:string;occurred_at:string;type:string;payload:string}|undefined;const payload=row?JSON.parse(row.payload) as Record<string,unknown>:{};const outcome=String(payload.outcome??"");const polarity=outcome==="failed"?"contradictory":outcome==="passed"?"supporting":"neutral";const independence=payload.assisted===true?"assisted":"unknown";insert.run(randomUUID(),abilityId,row?.attempt_id??null,eventId,summary||`Evidence from ${row?.type??"an attempt"}.`,polarity,independence,polarity==="neutral"?0.45:0.7,row?.occurred_at??new Date().toISOString());}}
   private recordInterpretedEvidence(abilityId:string,items:EvidenceInterpretation[]){const upsert=this.db.prepare("INSERT INTO learner_evidence (id,ability_id,attempt_id,event_id,statement,polarity,independence,strength,occurred_at) VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(ability_id,event_id) DO UPDATE SET statement=excluded.statement,polarity=excluded.polarity,independence=excluded.independence,strength=excluded.strength");for(const item of items){const event=this.db.prepare("SELECT attempt_id,occurred_at FROM attempt_events WHERE id=?").get(item.eventId) as {attempt_id:string;occurred_at:string}|undefined;if(!event)continue;upsert.run(randomUUID(),abilityId,event.attempt_id,item.eventId,item.statement,item.polarity,item.independence,Math.max(0,Math.min(1,item.strength)),event.occurred_at);}}
   private upsertPattern(abilityId:string,input:PatternInterpretation){const eventIds=[...new Set(input.evidenceEventIds)];const evidence=this.db.prepare(`SELECT le.id,le.attempt_id FROM learner_evidence le WHERE le.ability_id=? AND le.event_id IN (${eventIds.map(()=>"?").join(",")||"NULL"})`).all(abilityId,...eventIds) as Array<{id:string;attempt_id:string|null}>;const independentAttempts=new Set(evidence.map((item)=>item.attempt_id).filter(Boolean)).size;let status=input.status;if((status==="pattern"||status==="monitoring"||status==="resolved")&&independentAttempts<2)status=independentAttempts?"hypothesis":"observation";const existing=this.db.prepare("SELECT id,status FROM learner_patterns WHERE lower(title)=lower(?) AND ability_id=?").get(input.title,abilityId) as {id:string;status:string}|undefined;const id=existing?.id??randomUUID();const now=new Date().toISOString();this.db.prepare("INSERT INTO learner_patterns (id,title,description,ability_id,status,created_at,updated_at,last_observed_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET description=excluded.description,status=excluded.status,updated_at=excluded.updated_at,last_observed_at=excluded.last_observed_at").run(id,input.title,input.description,abilityId,status,now,now,evidence.length?now:null);const link=this.db.prepare("INSERT OR IGNORE INTO pattern_evidence (pattern_id,evidence_id) VALUES (?,?)");for(const item of evidence)link.run(id,item.id);if(existing&&existing.status!==status)this.addNotice(`${input.title} is now ${status}`,input.description,this.trackIdForAbilityTarget(abilityId)??this.abilityRow(abilityId)?.track_id);}
-  private reconcileAbilityState(abilityId:string){const ability=this.abilityRow(abilityId);if(!ability)return;const evidence=this.evidenceForAbility(abilityId);const linkedCount=(JSON.parse(ability.evidence_ids) as string[]).length;const count=Math.max(linkedCount,evidence.length);const confidence=Math.min(0.96,1-Math.exp(-count/3));const base:Record<AbilityStatus,number>={uncertain:0.35,developing:0.55,independent:0.82,stale:0.72};const proficiency=base[ability.status];const previous=this.db.prepare("SELECT proficiency,training_status FROM learner_ability_state WHERE ability_id=?").get(abilityId) as {proficiency:number;training_status:string}|undefined;const trainingStatus=ability.status==="independent"?"monitoring":ability.status==="uncertain"?count?"diagnosing":"unknown":"training";const trend=!previous?"unknown":proficiency>previous.proficiency+0.04?"improving":proficiency<previous.proficiency-0.04?"declining":"stable";const now=new Date().toISOString();const practice=JSON.parse(ability.practice) as string[];this.db.prepare("INSERT INTO learner_ability_state (ability_id,proficiency,confidence,evidence_count,last_evidence_at,training_status,trend,current_belief,next_verification,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ability_id) DO UPDATE SET proficiency=excluded.proficiency,confidence=excluded.confidence,evidence_count=excluded.evidence_count,last_evidence_at=excluded.last_evidence_at,training_status=excluded.training_status,trend=excluded.trend,current_belief=excluded.current_belief,next_verification=excluded.next_verification,updated_at=excluded.updated_at").run(abilityId,proficiency,confidence,count,evidence[0]?.occurredAt??(count?ability.updated_at:null),trainingStatus,trend,ability.summary||firstNarrativeLine(ability.markdown),practice[0]??"Spar wants independent evidence in a different problem structure.",now);if(previous&&previous.training_status!==trainingStatus)this.addNotice(trainingStatus==="monitoring"?`Monitoring ${ability.title}`:`Training focus changed`,trainingStatus==="monitoring"?`Spar is moving ${ability.title} out of deliberate practice. Newer evidence is strong enough to monitor it instead.`:`${ability.title} is now ${trainingStatus}. The change is backed by linked attempt evidence.`,ability.track_id);this.recalculateRating(`${ability.title} moved to ${trainingStatus}.`,ability.track_id);}
+  /**
+   * What the evidence says on its own, before anybody's judgement is applied.
+   *
+   * `status` on the document is the agent's call and stays the agent's call —
+   * it is the pedagogical statement, and the agent has the replay, the code and
+   * the conversation to make it with. This is the second opinion: the same rows
+   * read arithmetically, so the two can be compared rather than conflated.
+   *
+   * They used to be one channel. `status` was the agent's word, `proficiency`
+   * was a four-entry lookup on that word, and the rating was a mean of those
+   * constants — so a judgement went in one end and came out the other looking
+   * like a measurement. Worse, the status the agent did not set defaulted to a
+   * count of linked events, three of which earned `independent` whether they
+   * were passes or failures. The number that was supposed to check the
+   * intuition was the intuition, rounded.
+   *
+   * Weighting, in one place:
+   *
+   * - `strength` is the interpreter's own confidence in the reading.
+   * - Recency halves every `ABILITY_EVIDENCE_HALF_LIFE_DAYS`, so a claim about
+   *   the present tense rests on evidence about the present tense.
+   * - Independence discounts what an ability *claims* and never what
+   *   contradicts it: solving it with help proves less about solving it alone,
+   *   and failing it with help is not less of a failure.
+   *
+   * Smoothed as `(supporting + 0.5) / (graded + 1)` — the same formula the
+   * concept bars use, so "steady" on a concept and a proficiency on an ability
+   * cannot come to mean two different things. One pass is encouraging rather
+   * than conclusive, and the scale cannot reach 1.
+   */
+  private abilityReading(abilityId:string,now=Date.now()){
+    const rows=this.evidenceForAbility(abilityId);
+    let supporting=0,contradicting=0,observed=0;
+    for(const row of rows){
+      const age=(now-Date.parse(row.occurredAt))/86_400_000;
+      const recency=Number.isFinite(age)?Math.pow(0.5,Math.max(0,age)/ABILITY_EVIDENCE_HALF_LIFE_DAYS):1;
+      /* Volume is volume: an assisted solve is still something Spar watched, so
+         it builds confidence even where it is discounted as proof. */
+      const seen=row.strength*recency;
+      observed+=seen;
+      if(row.polarity==="supporting")supporting+=seen*(row.independence==="independent"?1:row.independence==="assisted"?0.5:0.8);
+      else if(row.polarity==="contradictory")contradicting+=seen;
+    }
+    const graded=supporting+contradicting;
+    return {
+      proficiency:graded>0?(supporting+0.5)/(graded+1):0.5,
+      confidence:Math.min(0.96,1-Math.exp(-observed/2)),
+      graded,supporting,contradicting,observations:rows.length,
+    };
+  }
+
+  /**
+   * The status the evidence alone would give, for when the agent does not say.
+   *
+   * A floor rather than a verdict: the agent may set any status it likes and
+   * this never runs. It exists so that the *absence* of a judgement resolves to
+   * something the rows actually support instead of to how many of them there
+   * are. `uncertain` when nothing has graded this at all, `independent` only
+   * when the evidence both leans that way and there is enough of it.
+   */
+  private abilityStatusFromEvidence(abilityId:string):AbilityStatus{
+    const reading=this.abilityReading(abilityId);
+    if(reading.graded<=0)return "uncertain";
+    return reading.proficiency>=0.7&&reading.confidence>=0.6?"independent":"developing";
+  }
+
+  private reconcileAbilityState(abilityId:string){const ability=this.abilityRow(abilityId);if(!ability)return;const evidence=this.evidenceForAbility(abilityId);const linkedCount=(JSON.parse(ability.evidence_ids) as string[]).length;const count=Math.max(linkedCount,evidence.length);const reading=this.abilityReading(abilityId);const{proficiency,confidence}=reading;const previous=this.db.prepare("SELECT proficiency,training_status FROM learner_ability_state WHERE ability_id=?").get(abilityId) as {proficiency:number;training_status:string}|undefined;const trainingStatus=ability.status==="independent"?"monitoring":ability.status==="uncertain"?count?"diagnosing":"unknown":"training";const trend=!previous?"unknown":proficiency>previous.proficiency+0.04?"improving":proficiency<previous.proficiency-0.04?"declining":"stable";const now=new Date().toISOString();const practice=JSON.parse(ability.practice) as string[];this.db.prepare("INSERT INTO learner_ability_state (ability_id,proficiency,confidence,evidence_count,last_evidence_at,training_status,trend,current_belief,next_verification,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(ability_id) DO UPDATE SET proficiency=excluded.proficiency,confidence=excluded.confidence,evidence_count=excluded.evidence_count,last_evidence_at=excluded.last_evidence_at,training_status=excluded.training_status,trend=excluded.trend,current_belief=excluded.current_belief,next_verification=excluded.next_verification,updated_at=excluded.updated_at").run(abilityId,proficiency,confidence,count,evidence[0]?.occurredAt??(count?ability.updated_at:null),trainingStatus,trend,ability.summary||firstNarrativeLine(ability.markdown),practice[0]??"Spar wants independent evidence in a different problem structure.",now);if(previous&&previous.training_status!==trainingStatus)this.addNotice(trainingStatus==="monitoring"?`Monitoring ${ability.title}`:`Training focus changed`,trainingStatus==="monitoring"?`Spar is moving ${ability.title} out of deliberate practice. Newer evidence is strong enough to monitor it instead.`:`${ability.title} is now ${trainingStatus}. The change is backed by linked attempt evidence.`,ability.track_id);
+    /* Where the two channels disagree, which is the most interesting row in the
+       ledger and used to be unrepresentable. Spar is not overruling the agent —
+       the status stands — it is saying out loud that the document claims more
+       than the rows under it support, which is either a generous reading or
+       evidence that has gone stale, and both are worth a look. Filed on the
+       crossing only, so it is a change of state and not a standing complaint. */
+    if(ability.status==="independent"&&previous&&(previous.proficiency>=ABILITY_DIVERGENCE_FLOOR)!==(proficiency>=ABILITY_DIVERGENCE_FLOOR))this.addNotice(proficiency<ABILITY_DIVERGENCE_FLOOR?`The evidence for ${ability.title} has stopped backing it`:`The evidence for ${ability.title} has caught up`,proficiency<ABILITY_DIVERGENCE_FLOOR?`Spar still has this filed as something you can do, but the attempts behind it no longer read that way. A diagnostic would settle which is right.`:`The attempts behind this now support what the ledger already said about it.`,ability.track_id);
+    /* No rating move here. Ability state is what Spar believes about the learner;
+       the rating is what they have shown against problems of known difficulty.
+       Driving one from the other made the rating a second view of the belief —
+       it moved when the agent rewrote a document and nobody had solved
+       anything. The rating moves in `rateFinishedChallenge` and nowhere else. */}
   private addNotice(title:string,body:string,trackId?:string|null){const scope=this.learningTrackId(trackId);if(!scope)return;this.db.prepare("INSERT INTO learner_notices (id,title,body,created_at,dismissed_at,track_id) VALUES (?,?,?,?,NULL,?)").run(randomUUID(),title,body,new Date().toISOString(),scope);}
   /* Written once for the account, with no Track on it: the opening rating is the
      learner's, and a Track that happens to be open when the app first starts is
      not what it is about. */
-  private ensureRating():RatingPoint{const current=this.ratingHistory().at(-1);if(current)return current;const point={id:randomUUID(),rating:1200,provisional:true,reason:"Initial provisional rating",occurredAt:new Date().toISOString()} satisfies RatingPoint;this.db.prepare("INSERT INTO rating_points (id,rating,provisional,reason,occurred_at,track_id) VALUES (?,?,?,?,?,?)").run(point.id,point.rating,1,point.reason,point.occurredAt,null);return point;}
-  /* Recomputed from every ability the learner has, in every Track. Weighting one
-     Track's abilities alone is what made the number local: finishing a hard
-     Track and starting an easy one read as getting worse, because the evidence
-     behind the old number had been dropped rather than added to. The point still
-     records the Track whose change triggered it, so the history can say where a
-     move came from. */
-  private recalculateRating(reason:string,trackId?:string|null){const states=this.allAbilityStates();const prior=this.ratingHistory().at(-1)??this.ensureRating();if(!states.length)return prior;const weight=states.reduce((sum,item)=>sum+Math.max(0.15,item.confidence),0);const performance=states.reduce((sum,item)=>sum+item.proficiency*Math.max(0.15,item.confidence),0)/weight;const rating=Math.round(700+performance*1100);const evidence=states.reduce((sum,item)=>sum+item.evidenceCount,0);if(Math.abs(rating-prior.rating)<10&&prior.provisional===(evidence<8))return prior;const point={id:randomUUID(),rating,provisional:evidence<8,reason,occurredAt:new Date().toISOString()} satisfies RatingPoint;this.db.prepare("INSERT INTO rating_points (id,rating,provisional,reason,occurred_at,track_id) VALUES (?,?,?,?,?,?)").run(point.id,point.rating,point.provisional?1:0,point.reason,point.occurredAt,this.learningTrackId(trackId));return point;}
+  private ensureRating(at?:string):RatingPoint{const current=this.ratingHistory().at(-1);if(current)return current;
+    return this.writeRatingPoint({rating:INITIAL_RATING,deviation:INITIAL_DEVIATION,volatility:INITIAL_VOLATILITY},"Initial provisional rating",null,at??new Date().toISOString());}
+
+  /** One point, written. The rating is stored as the integer the learner is rated
+   *  at; the deviation and volatility keep their precision, because they are
+   *  arithmetic rather than display and rounding them compounds. */
+  private writeRatingPoint(rating:Rating,reason:string,trackId:string|null,occurredAt:string,questionId:string|null=null):RatingPoint{
+    const point={id:randomUUID(),rating:Math.round(rating.rating),deviation:rating.deviation,volatility:rating.volatility,provisional:rating.deviation>ESTABLISHED_DEVIATION,reason,occurredAt} satisfies RatingPoint;
+    this.db.prepare("INSERT INTO rating_points (id,rating,deviation,volatility,provisional,reason,occurred_at,track_id,question_id) VALUES (?,?,?,?,?,?,?,?,?)").run(point.id,point.rating,point.deviation,point.volatility,point.provisional?1:0,point.reason,point.occurredAt,trackId,questionId);
+    return point;
+  }
+  /**
+   * The rating, moved by a challenge the learner finished.
+   *
+   * This replaced `recalculateRating`, which took the confidence-weighted mean of
+   * every ability's proficiency and stretched it onto a span. That number could
+   * not fall on a failure, did not care how hard the challenge was, and was
+   * recomputed from ability state rather than earned — three things a rating has
+   * to do. What runs now is Glicko-2 against the challenge as an opponent: see
+   * `@spar/domain/rating` for the system and `./rating` for how a finished
+   * challenge becomes one result.
+   *
+   * The deviation is decayed for the time since the last point before the result
+   * is applied, so a learner returning after three months is rated as somebody
+   * whose standing is genuinely less certain than it was — which is what makes
+   * their first few challenges back move the number properly instead of being
+   * damped by a precision nobody has re-earned.
+   */
+  private rateFinishedChallenge(questionId:string,reason:string,trackId?:string|null,at?:string):RatingPoint{
+    const prior=this.ratingHistory().at(-1)??this.ensureRating();
+    /* Already paid for. `reopenAttempt` sends a solved challenge back when the
+       review finds it was not solved the way the challenge asked, and the pass
+       that closed it has already moved the rating; the learner solving it a
+       second time is the same challenge, not a second one. */
+    if(this.db.prepare("SELECT 1 FROM rating_points WHERE question_id=? LIMIT 1").get(questionId))return prior;
+    const row=this.db.prepare(`SELECT q.difficulty,q.source_ref,
+      (SELECT COUNT(*) FROM attempt_events he JOIN attempts ha ON ha.id=he.attempt_id WHERE ha.question_id=q.id AND he.type='hint_requested') hint_count,
+      (SELECT json_extract(te.payload,'$.outcome') FROM attempt_events te JOIN attempts ta ON ta.id=te.attempt_id WHERE ta.question_id=q.id AND te.type='attempt_completed' ORDER BY te.occurred_at DESC LIMIT 1) outcome
+      FROM questions q WHERE q.id=?`).get(questionId) as {difficulty:string;source_ref:string|null;hint_count:number;outcome:string|null}|undefined;
+    if(!row)return prior;
+    /* `at` is the replay's: a point stamped with the moment the migration ran
+       would make fifty challenges spread over months read as fifty in one
+       second, and the deviation decay between them — which is the whole reason a
+       returning learner's next result counts properly — would be zero. */
+    const now=at??new Date().toISOString();
+    const decayed=decayRating({rating:prior.rating,deviation:prior.deviation,volatility:prior.volatility},elapsedDays(prior.occurredAt,now));
+    const result=challengeResult({outcome:row.outcome,assisted:row.hint_count>0,difficulty:row.difficulty as "foundation"|"developing"|"proficient"|"advanced",source:parseSourceRef(row.source_ref)});
+    if(!result)return prior;
+    return this.writeRatingPoint(updateRating(decayed,[result]),reason,this.learningTrackId(trackId),now,questionId);
+  }
+
+  /**
+   * Every graded challenge, replayed in order, as one rating curve.
+   *
+   * Run once when the database still holds points from the old scheme. The
+   * alternative was to map the last old rating onto the new scale and carry on,
+   * which would have left a curve whose shape was drawn by one system and whose
+   * end was drawn by another — and the old points were never earned against
+   * anything, so there is nothing in them worth preserving. The attempts are
+   * real, they are all still here, and replaying them produces the curve the
+   * learner would have had if Spar had rated properly from the start.
+   */
+  private migrateRatingHistory(){
+    if(this.getSetting<boolean>(RATING_MIGRATION,false))return;
+    const finished=this.db.prepare(`SELECT q.id,MAX(a.completed_at) completed_at FROM questions q JOIN attempts a ON a.question_id=q.id
+      WHERE a.status='completed' AND a.completed_at IS NOT NULL GROUP BY q.id ORDER BY completed_at`).all() as Array<{id:string;completed_at:string}>;
+    this.db.transaction(()=>{
+      this.db.prepare("DELETE FROM rating_points").run();
+      /* Stamped before the first challenge it precedes, so the curve starts
+         where the learner started rather than where the migration ran. */
+      this.ensureRating(finished[0]?.completed_at);
+      for(const row of finished)this.rateFinishedChallenge(row.id,"Replayed from recorded attempt history",null,row.completed_at);
+    })();
+    this.setSetting(RATING_MIGRATION,true);
+  }
   private insertEvent(event:AttemptEvent){this.db.prepare("INSERT INTO attempt_events VALUES (?,?,?,?,?,?,?,?)").run(event.id,event.attemptId,event.sequence,event.type,event.occurredAt,JSON.stringify(event.payload),event.source,event.schemaVersion);}
   private ensureColumn(table:string,column:string,declaration:string){const columns=this.db.pragma(`table_info(${table})`) as Array<{name:string}>;if(!columns.some((item)=>item.name===column))this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${declaration}`);}
   /* Writes made while restoring are not news. Every insert path in this class
@@ -1123,13 +1454,17 @@ export class LocalStore {
 function conceptKind(value:unknown):ConceptKind{return value==="dsa"||value==="craft"||value==="engineering"?value:"engineering";}
 /** The band, said in one word, from counts the caller already has. */
 function conceptStandingOf(summary:ConceptSummary){return CONCEPT_STANDING_LABEL[conceptStanding(conceptStrength(summary))].toLowerCase();}
-/** Evidence count to confidence. One graded attempt is a signal, three is a
- *  pattern; the ledger says "independent" only once it has the latter. */
-function abilityStatusFor(evidenceCount:number):AbilityStatus{return evidenceCount===0?"uncertain":evidenceCount<3?"developing":"independent";}
 function trackTitle(goal:string){const clean=goal.replace(/^(i want to|i'd like to|help me)\s+/i,"").trim();return clean.length>52?`${clean.slice(0,49).trimEnd()}…`:clean.replace(/^./,(letter)=>letter.toUpperCase());}
 function firstNarrativeLine(markdown:string){return markdown.split("\n").map((line)=>line.replace(/^#+\s*/,"").trim()).find((line)=>line.length>8)??"Spar is still forming a reliable belief.";}
 function intentCopy(intent:TrainingTarget["action"]){return({diagnose:"Spar needs cleaner evidence before treating this as a weakness.",teach:"A prerequisite needs a short, explicit intervention.",practise:"Repeated evidence makes deliberate practice worthwhile.",transfer:"Direct execution looks reliable; the next question tests transfer.",advance:"The current level is supported strongly enough to raise the constraint.",retain:"This was previously reliable but has not been observed recently."} as const)[intent];}
 type AbilityRow={id:string;track_id:string|null;title:string;markdown:string;version:number;status:AbilityStatus;updated_at:string;evidence_ids:string;summary:string;practice:string;earned_at:string|null};
+
+/* Versioned, and bumped whenever the arithmetic behind the curve changes. The
+   first cut priced a Spar-authored challenge relative to the learner's own
+   rating, which ratcheted upward with every solve; a database that replayed
+   under that rule holds a curve nobody earned, so the fix has to replay again
+   rather than carry on from its last point. */
+const RATING_MIGRATION="rating-glicko2-migration-2";
 
 const SEARCH_STOP_WORDS=new Set(["a","an","and","day","days","for","from","have","i","in","interview","learn","me","my","of","on","prepare","the","to","want","with"]);
 const EVIDENCE_STOP_WORDS=new Set([
