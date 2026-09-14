@@ -73,43 +73,49 @@ export function ProblemTile({
 
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
             <OriginChip origin={item.origin} />
-            <span className="min-w-0 truncate text-ui-sm tabular-nums text-muted-foreground/70">
+            <span className="min-w-0 truncate text-ui-sm tabular-nums text-muted-foreground">
               {item.displayId ?? (item.kind === "challenge" ? item.challenge.sessionTitle : "")}
             </span>
           </span>
         </div>
       </div>
 
-      {/* Tags are ink, not controls — see the note above. Capped at three because
-          a fourth wraps the row, and a wrapped tag row is what makes a fixed-height
-          card start clipping its own footer. */}
-      <div className="relative mt-2.5 flex min-w-0 flex-wrap gap-1 overflow-hidden">
-        {item.tags.slice(0, 3).map((tag) => (
+      {/* Tags are ink, not controls — see the note above.
+
+          One row that never wraps, rather than three tags that might need two.
+          The card's height is fixed, so a wrapped tag row had nowhere to go: it
+          pushed itself under the `mt-auto` footer and was sliced in half by the
+          footer's rule — a tag reading "Variable window" cut through the middle of
+          the word. Capping the count was the old defence and it did not hold,
+          because two long tags wrap as readily as three short ones. Now the row is
+          a fixed line and anything past it is counted. */}
+      <div className="relative mt-2.5 flex h-[1.375rem] min-w-0 shrink-0 items-center gap-1 overflow-hidden">
+        {item.tags.slice(0, 2).map((tag) => (
           <span
             key={tag}
-            className="max-w-[9rem] truncate rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground transition-colors duration-300 group-hover:bg-background/70"
+            className="max-w-[9rem] shrink-0 truncate rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground transition-colors duration-300 group-hover:bg-background/70"
           >
             {tag}
           </span>
         ))}
-        {item.tags.length > 3 && (
-          <span className="px-0.5 py-0.5 text-ui-sm text-muted-foreground/70" title={item.tags.slice(3).join(", ")}>
-            +{item.tags.length - 3}
+        {item.tags.length > 2 && (
+          <span className="shrink-0 px-0.5 text-ui-sm text-muted-foreground" title={item.tags.slice(2).join(", ")}>
+            +{item.tags.length - 2}
           </span>
         )}
       </div>
 
       <div className="relative mt-auto flex min-w-0 items-center gap-2 border-t border-border/70 pt-2.5">
         <StandingMark standing={item.standing} />
-        <span className="shrink-0 text-ui-sm text-muted-foreground/80">{STANDING_WORD[item.standing]}</span>
+        <span className="shrink-0 text-ui-sm text-muted-foreground">{STANDING_WORD[item.standing]}</span>
 
         {/* At rest the card reports the standing fact it has; under the pointer it
             says what clicking will do. The two never show at once, so the footer
             stays one line however long the note is — and while the click is being
             honoured only the third thing shows, hover or not. */}
-        <span className="min-w-0 flex-1 truncate text-right text-ui-sm text-muted-foreground/70">
+        <span className="min-w-0 flex-1 truncate text-right text-ui-sm text-muted-foreground">
           {pending ? (
-            <span className="inline-flex items-center justify-end gap-1 font-medium text-foreground/80">
+            <span className="inline-flex items-center justify-end gap-1 font-medium text-foreground">
               <Loader2 className="size-3 animate-spin" />
               Opening…
             </span>

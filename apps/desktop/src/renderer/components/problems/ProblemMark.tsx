@@ -1,7 +1,8 @@
-import { CheckCircle2, CircleDashed, Sparkles, TimerReset } from "lucide-react";
+import { CheckCircle2, CircleDashed, TimerReset } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BAND_LABEL, ORIGIN_LABEL, type ProblemBand, type ProblemItem, type ProblemOrigin, type ProblemStanding } from "@/lib/problems";
 import { SourceGlyph } from "../common/SourceGlyph";
+import { SparWordmark } from "../common/SparWordmark";
 import { ProblemEmblem } from "./ProblemEmblem";
 
 /**
@@ -26,7 +27,11 @@ const BAND_TONE: Record<ProblemBand, string> = {
 const STANDING: Record<ProblemStanding, { icon: React.ComponentType<{ className?: string }>; tone: string; label: string }> = {
   solved: { icon: CheckCircle2, tone: "text-[var(--success)]", label: "Solved" },
   attempted: { icon: TimerReset, tone: "text-[var(--warning)]", label: "Attempted" },
-  todo: { icon: CircleDashed, tone: "text-muted-foreground/50", label: "Not started" },
+  /* Solid, like its two neighbours. At 50% this was a hairline circle on glass —
+     the one standing that means "you have not been here yet" was the one you
+     could not see, so a list of untouched problems read as a list with no marks
+     in it at all. Rank is the tone, not the alpha. */
+  todo: { icon: CircleDashed, tone: "text-muted-foreground", label: "Not started" },
 };
 
 export function BandPill({ band, className }: { band: ProblemBand; className?: string }) {
@@ -40,21 +45,49 @@ export function BandPill({ band, className }: { band: ProblemBand; className?: s
 /** Which of the two kinds of problem this is: one the world already asks, or one
  *  Spar wrote for this learner. Worth a mark on every row — the difference decides
  *  who grades it and whether anyone else has ever solved it. */
-export function OriginChip({ origin, className }: { origin: ProblemOrigin; className?: string }) {
+export function OriginChip({ origin, className, bare = false }: { origin: ProblemOrigin; className?: string; bare?: boolean }) {
   return (
     <span
       className={cn(
-        "inline-flex h-5 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] border border-border bg-background/60 px-1.5 text-ui-sm text-muted-foreground",
+        "inline-flex h-5 shrink-0 items-center gap-1.5 text-ui-sm text-muted-foreground",
+        /* A box only where the chip has to hold its own against a card. In a ruled
+           list it does not: every row carries the same border and fill, so eighty
+           of them read as a column of empty boxes with a word inside. */
+        bare ? "" : "rounded-[var(--radius-md)] border border-border bg-background/60 px-1.5",
         className,
       )}
     >
-      {origin === "spar"
-        ? <Sparkles className="size-3 shrink-0 text-foreground/70" />
-        : <SourceGlyph className="size-3 shrink-0 text-foreground/80" source={origin} />}
-      <span className="font-medium text-foreground/90">{ORIGIN_LABEL[origin]}</span>
+      {/* Spar signs its own work with its name, not with a sparkle. The wordmark
+          is the one mark in this column that is a brand rather than a vendor's
+          logo beside a label, so it stands alone: LeetCode's mark is followed by
+          "LeetCode" because the mark alone is a logo-memory test, and "Spar" set
+          in Poppins is already the word. The sparkle it replaces also said the
+          wrong thing — it is the app's icon for generated-by-a-model, which is
+          what wrote the problem, not whose problem it is. */}
+      {origin === "spar" ? (
+        <SparWordmark className="text-foreground" />
+      ) : (
+        <>
+          <SourceGlyph className="size-3 shrink-0 text-foreground" source={origin} />
+          <span className="font-medium text-foreground">{ORIGIN_LABEL[origin]}</span>
+        </>
+      )}
     </span>
   );
 }
+
+/** Where the learner stands on this problem, as the row's first mark.
+ *
+ *  Titled as well as labelled: three small glyphs in a column is a legend the
+ *  reader has to build for themselves, and the one place it can be handed to them
+ *  without spending a column on words is the pointer. The status filter above the
+ *  list says the same three words, which is where someone goes once they know
+ *  what they are looking at. */
+export const STANDING_LABEL: Record<ProblemStanding, string> = {
+  solved: "Solved",
+  attempted: "Attempted — opened, not passed yet",
+  todo: "Not started",
+};
 
 export function StandingMark({ className, standing }: { className?: string; standing: ProblemStanding }) {
   const { icon: Icon, tone, label } = STANDING[standing];
