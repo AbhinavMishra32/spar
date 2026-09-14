@@ -1,6 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Archive, ArchiveRestore, ArrowRight, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Loader2, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
-import type { ChallengeHistorySummary, SessionSummary, Track } from "@spar/domain";
+import type { ChallengeHistorySummary, Language, SessionSummary, Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { formatDuration, initials, relativeTime } from "@/lib/format";
@@ -13,6 +13,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Meter } from "@/components/ui/meter";
 import { NavButtons } from "./NavButtons";
 import { SparWordmark } from "../common/SparWordmark";
+import { LanguageGlyph } from "../common/LanguageGlyph";
 import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { SidebarGlyph } from "./NavIcons";
 import type { AgentRun } from "../agent/agentRun";
@@ -69,23 +70,36 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
    against the desktop twice and arrives grey and soft however dark the token
    behind it was. That, not the transparency, was why the list read as washed out.
 
-   Regular, because the fix for washed-out text is not weight. A source list sets
-   every row the same and separates them by fill and by colour. Reaching for medium
-   here would buy back the contrast the alpha lost while saying, wrongly, that the
-   fixed rows outrank the session titles — and a sidebar of semibold rows is the
-   thing that makes an app look like it is shouting its own navigation at you. */
+   450, which is a real cut of the system face and not a synthesised one — worth
+   saying because `font-synthesis: none` is set globally, so a weight without a cut
+   would silently render as Regular. This used to be 400, and the note against
+   raising it was half right: it argued that medium would say, wrongly, that the
+   fixed rows outrank the session titles, and that a sidebar of semibold rows reads
+   as an app shouting its own navigation. Both still hold — of 400/450/500/600
+   rendered side by side, 600 is exactly that shout, and 500 collides with the
+   `font-medium` the session titles carry below.
+
+   450 is the step that does not. It is visibly heavier than the surrounding chrome
+   while still sitting under the session titles, so the ranking the old note was
+   protecting survives; it just no longer costs the rows their presence. The part of
+   that argument that was simply correct stays correct: the labels are solid
+   foreground, never an alpha fraction, because this sidebar is glass and alpha text
+   composites against the desktop twice and arrives grey however dark the token was. */
 const ROW =
-  "flex h-[1.875rem] w-full items-center gap-2 rounded-lg px-2.5 text-source font-normal text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+  "flex h-[1.875rem] w-full items-center gap-2 rounded-lg px-2.5 text-source font-[450] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
 /** Nav and row glyphs. Set against the label rather than chosen for its own sake:
  *  a source list wants the icon a little larger than the cap height it sits
  *  beside, or the label starts to look like it is dragging the icon along.
  *
- *  A shade off the label rather than the muted grey they used to be: at 55% on
- *  glass a 16px line drawing has no stroke left to read, and the row turned into
- *  a label with a smudge in front of it. */
+ *  Solid foreground, for the reason the label above is solid too: this sidebar is
+ *  glass, so an alpha fraction composites against the desktop twice and arrives
+ *  grey however dark the token behind it was. That was already the argument for
+ *  moving these off 55%, and 70% was just a smaller dose of the same problem — a
+ *  16px line drawing has less stroke to spare than a glyph does, so it lost more.
+ *  Rank rows by fill and colour, never by thinning the ink. */
 const ROW_ICON = "size-4 shrink-0";
-const ROW_ICON_TONE = "text-foreground/70";
+const ROW_ICON_TONE = "text-foreground";
 
 const STATUS_COPY: Record<SessionSummary["status"], string> = {
   planning: "Planning",
@@ -195,6 +209,14 @@ export function Sidebar({
      challenge was aimed at. */
   const subjects: Record<string, string> = Object.fromEntries(challenges.map((challenge) => [challenge.id, challenge.concepts[0]?.title ?? ""]));
 
+  /* What each session is being written in. Keyed by session rather than by
+     challenge, and taken from the session's latest challenge, so a session
+     between challenges keeps its mark instead of losing it for as long as Spar is
+     setting the next one. History arrives newest first; the first hit for a
+     session is therefore the one to keep. */
+  const languages: Record<string, Language> = {};
+  for (const challenge of challenges) languages[challenge.sessionId] ??= challenge.language;
+
   const row = (session: SessionSummary) => (
     <SessionRow
       key={session.id}
@@ -207,6 +229,7 @@ export function Sidebar({
       renaming={renaming === session.id}
       working={runs[session.id]?.status === "streaming"}
       session={session}
+      {...(languages[session.id] ? { language: languages[session.id]! } : {})}
       subject={(session.activeQuestion ? subjects[session.activeQuestion.id] : "") || session.currentFocus[0] || ""}
     />
   );
@@ -480,6 +503,7 @@ function TrackGroup({
 
 function SessionRow({
   session,
+  language,
   subject,
   active,
   renaming,
@@ -491,6 +515,9 @@ function SessionRow({
   onRequestDelete,
 }: {
   session: SessionSummary;
+  /** What the session is written in. Absent only before its first challenge
+   *  exists, which is the one case with nothing to name. */
+  language?: Language | undefined;
   subject: string;
   active: boolean;
   renaming: boolean;
@@ -573,18 +600,31 @@ function SessionRow({
             title={session.activeQuestion ? `${session.activeQuestion.title} — ${session.title}` : session.title}
             type="button"
           >
-            {/* The same mark the challenge wears everywhere else, seeded the same
-                way, so the row you click in the sidebar and the tile you find in
-                Problems are recognisably one problem. A session between
-                challenges falls back to its own id, which keeps the text column
-                aligned rather than leaving one row starting further left. */}
-            <ProblemEmblem
-              detail={false}
-              seed={`spar:${session.activeQuestion?.id ?? session.id}`}
-              size={17}
-              strong
-              subject={subject}
-            />
+            {/* The language's own mark, in its own colour. The generated emblem
+                that was here is a good identity for a problem — it is what the
+                challenge wears in Problems and in its own header — but a source
+                list is read down a column, and a column of procedurally different
+                shapes is a column with no shared vocabulary in it: nothing about
+                the ring beside one session tells you anything about the next.
+                Which language you are in is the one fact that does, and it is the
+                only colour in this sidebar, so it reads as information rather than
+                as decoration.
+
+                Sized to the emblem it replaces so the text column does not move,
+                and a session with no challenge yet keeps the emblem rather than a
+                gap — alignment down the list matters more than which of the two
+                marks a not-yet-started session wears. */}
+            {language ? (
+              <LanguageGlyph className="size-[17px] shrink-0" language={language} />
+            ) : (
+              <ProblemEmblem
+                detail={false}
+                seed={`spar:${session.activeQuestion?.id ?? session.id}`}
+                size={17}
+                strong
+                subject={subject}
+              />
+            )}
             <RowTitle>{label}</RowTitle>
             {working && (
               <Loader2

@@ -205,7 +205,7 @@ export function HomePage({
           type="button"
         >
           <span className="min-w-0 flex-1 truncate text-ui">Baseline not set</span>
-          <span className="shrink-0 text-ui font-medium text-foreground/80">
+          <span className="shrink-0 text-ui font-medium text-foreground">
             {data.baseline.status === "in-progress" ? "Continue" : "Begin"}
           </span>
           <ArrowRight className="size-3.5 shrink-0 text-muted-foreground/70" />
@@ -362,7 +362,7 @@ function NextCard({ busy, continuing, onOpenAbility, onStart, recommendation }: 
               <SourceChip source={recommendation.source} />
             </span>
             <span className="mt-0.5 flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-              <span className="shrink-0 font-medium text-foreground/70">{intentLabel(recommendation.intent)}</span>
+              <span className="shrink-0 font-medium text-foreground">{intentLabel(recommendation.intent)}</span>
               <span aria-hidden>·</span>
               <span className="truncate">{recommendation.trackTitle}</span>
             </span>
@@ -417,7 +417,7 @@ function NextCard({ busy, continuing, onOpenAbility, onStart, recommendation }: 
  *  has ever been asked this" is a fact about the problem, not an absence. */
 function SourceChip({ source }: { source: "leetcode" | "codeforces" | "spar" }) {
   return (
-    <span className="inline-flex h-[1.1rem] shrink-0 items-center gap-1 rounded-[var(--radius-md)] border-[length:var(--hairline)] border-[var(--border-surface-strong)] bg-[var(--surface-tertiary)] px-1.5 text-ui-sm font-medium text-foreground/80">
+    <span className="inline-flex h-[1.1rem] shrink-0 items-center gap-1 rounded-[var(--radius-md)] border-[length:var(--hairline)] border-[var(--border-surface-strong)] bg-[var(--surface-tertiary)] px-1.5 text-ui-sm font-medium text-foreground">
       {source === "spar"
         ? <Sparkles className="size-3 shrink-0 text-foreground/70" />
         : <SourceGlyph className="size-3 shrink-0" source={source} />}

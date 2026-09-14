@@ -220,7 +220,7 @@ function ConnectedSource({
         </div>
         <div className="w-[13.5rem] shrink-0">
           <div className="mb-1.5 flex items-baseline justify-between gap-3 text-ui-sm tabular-nums text-muted-foreground">
-            <span><span className="font-medium text-foreground/85">{account.solved.total.toLocaleString()}</span> solved</span>
+            <span><span className="font-medium text-foreground">{account.solved.total.toLocaleString()}</span> solved</span>
             {account.available.total > 0 && <span>of {account.available.total.toLocaleString()}</span>}
           </div>
           <Meter bands={bands} height="0.3125rem" total={account.available.total} />

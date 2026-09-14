@@ -103,7 +103,7 @@ function Equivalent({ label, source, value }: { label: string; source: "leetcode
   return (
     <span className="flex items-center gap-1.5 text-ui" title={`Approximate ${label} rating`}>
       <SourceGlyph className="size-4" source={source} />
-      <span className="tabular-nums font-medium text-foreground/85">~{value}</span>
+      <span className="tabular-nums font-medium text-foreground">~{value}</span>
     </span>
   );
 }

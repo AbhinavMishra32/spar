@@ -51,7 +51,7 @@ function MiniGraph({value,label,claim,matched}: {value:string;label:string;claim
   const reducedMotion=useReducedMotion();
   const transition={duration:reducedMotion ? 0 : 0.6,ease:[0.22,0.61,0.36,1] as const};
   return <div className="rounded-[var(--radius-lg)] border border-[var(--glass-hairline)] bg-[var(--color-background-surface-under)] px-2.5 pb-2 pt-2">
-    <div className="mb-1 flex items-center justify-between text-ui-sm"><span className="font-medium text-foreground/80">{label}</span><span className="text-muted-foreground">{LABEL[growth]}</span></div>
+    <div className="mb-1 flex items-center justify-between text-ui-sm"><span className="font-medium text-foreground">{label}</span><span className="text-muted-foreground">{LABEL[growth]}</span></div>
     <svg aria-label={comparing ? `${label}: your answer ${claim}; reviewed bound ${value}. Illustrative growth curves.` : `${label} ${LABEL[growth]} growth preview`} className="h-12 w-full overflow-visible" role="img" viewBox="0 0 120 56">
       <path d="M 8 48 H 114 M 8 48 V 8" fill="none" stroke="currentColor" className="text-border" strokeWidth="1" />
       <motion.path initial={false} animate={{d:curve(growth),opacity:growth==="unknown"?0.25:1}} transition={transition} fill="none" stroke="currentColor" className={cn("transition-colors duration-500 motion-reduce:transition-none",matched===undefined ? "text-foreground" : "text-[var(--success)]")} strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" />
@@ -72,7 +72,7 @@ function MiniGraph({value,label,claim,matched}: {value:string;label:string;claim
  *  bound, not a cross. */
 function Field({label,matched}:{label:string;matched?:boolean|undefined;truth?:string|undefined}){
   return <span className="flex items-baseline gap-1.5">
-    <span className="text-ui font-medium text-foreground/80">{label}</span>
+    <span className="text-ui font-medium text-foreground">{label}</span>
     {matched===true&&<Check className="size-3 shrink-0 self-center text-[var(--success)]"/>}
     {matched===false&&<X className="size-3 shrink-0 self-center text-destructive"/>}
   </span>;

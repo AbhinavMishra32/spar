@@ -100,10 +100,30 @@
      Chromium cannot use subpixel antialiasing anywhere in it — every glyph in the
      app is rendered grayscale against a backdrop we do not own. SF Pro and Segoe UI
      Variable are hinted and optically sized for exactly that job at chrome sizes; a
-     webfont is not. Geist's stems came out soft and grey beside a native source
-     list, which is the whole reason this stack turned around. It stays last as the
-     fallback for platforms that ship no UI face worth having. */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "Geist Variable", sans-serif;
+     webfont is not.
+
+     The generics are ChatGPT's, whose sidebar this was measured against: it resolves
+     `"OpenAI Sans", var(--font-sans-default)`, where the default is
+     `-apple-system-body, ui-sans-serif, -apple-system, system-ui, "Segoe UI", …`.
+     Only the fallback half is copied here. OpenAI Sans is a licensed face bundled
+     inside their app, so it is not ours to ship, and naming a font nobody here has
+     installed would buy nothing.
+
+     Measured in this Electron rather than assumed: `-apple-system`,
+     `-apple-system-body`, `ui-sans-serif` and `"SF Pro Text"` all fail to resolve —
+     alone, each falls through to the default serif. `system-ui` and
+     `BlinkMacSystemFont` are what actually deliver the macOS UI face, and always
+     were, so this reorder is a no-op on macOS and is here for the platforms and
+     Chromium versions where those entries do resolve.
+
+     `"Segoe UI Variable Text"` stays ahead of the generics on purpose. It is the
+     better Windows face and it is more specific than `ui-sans-serif`/`system-ui`,
+     which resolve on Windows too and would otherwise win and hand us plain Segoe UI.
+
+     Geist is gone from the tail: its stems came out soft and grey beside a native
+     source list, and `sans-serif` is a better last resort than a webfont we rejected
+     on looks. It is still the transcript's face — see `--thread-font`. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", -apple-system-body, ui-sans-serif, system-ui, "Segoe UI", "Helvetica", "Arial", sans-serif;
   --font-spar: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "SF Mono", "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -139,15 +159,30 @@
      dense size that suits a row of controls. Every sidebar text size comes from
      this pair; nothing in there is set in `--text-ui`.
 
-     13px is that size literally: it is NSFont.systemFontSize, what AppKit sets a
-     source list in, and the size SF Pro switches from its Display cut to its Text
-     cut for. The 14px this used to be was a webfont's compensation for looking
-     light — with the system face leading the stack the compensation is a liability,
-     because the platform only hints the face at the size it designed it for. */
-  --text-source: 0.8125rem;
-  --text-source--line-height: 1.25rem;
-  --text-source-sm: 0.75rem;
-  --text-source-sm--line-height: 1.125rem;
+     15px, in the platform's own face. The 13px this replaces was argued from
+     NSFont.systemFontSize — the size AppKit sets a source list in — and that number
+     is real, but it is a convention rather than a constraint: SF Pro Text is the cut
+     the platform hints below 20px, so 15px is still inside the range the face was
+     drawn and hinted for. This is now two steps above the platform's own source-list
+     size, which is a deliberate break with it rather than an oversight.
+
+     What settled the face was looking at the candidates side by side against Codex's
+     sidebar, which is set in OpenAI Sans — a licensed face bundled in their app, so
+     never one we could have shipped. Seven open alternatives were rendered against
+     the system face at this size, Inter and Onest among them, and the system face
+     won each time: it holds its colour beside native chrome where a webfont goes
+     soft and grey. That is the same objection the `--font-sans` comment records
+     against Geist, and it has now survived two more attempts, so treat it as settled
+     rather than untried. The size was always the problem here, not the typeface.
+
+     Line height stays at 1.375rem rather than scaling with the size. Sidebar rows
+     are a fixed 1.875rem, so this number sets how much room the label has inside
+     that pill, not the space between rows; letting it grow with the text is what
+     would make the hover fill look stuffed. */
+  --text-source: 0.9375rem;
+  --text-source--line-height: 1.375rem;
+  --text-source-sm: 0.875rem;
+  --text-source-sm--line-height: 1.25rem;
 }
 
 :root {
@@ -537,12 +572,16 @@
     /* Transparent so the native macOS vibrancy layer shows through the sidebar. */
     background: transparent;
     color: var(--foreground);
-    /* No `-webkit-font-smoothing: antialiased` here, and that is the point. On a
-       transparent window macOS is already rendering every glyph grayscale — it has
-       no opaque background to run subpixel against — so the property buys no
-       crispness it was not getting anyway, and costs stem weight: `antialiased`
-       skips the stem darkening `auto` applies, which on glass is the difference
-       between a label and a smudge. Left to the platform on purpose. */
+    /* The window is transparent, so macOS renders every glyph grayscale regardless —
+       there is no opaque backdrop to run subpixel against. What is left to choose is
+       stem darkening, which `auto` applies and `antialiased` skips. We skip it: on
+       glass it thickens stems without the subpixel detail that is supposed to pay for
+       it, and the app's chrome sits at 12-13px where that shows as weight rather than
+       crispness. This is a legibility preference, not a fix for anything — the
+       cramped-looking challenge title it was first reached for turned out to be the
+       negative tracking on that element, which is corrected where it is set. */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     font-size: var(--text-ui);
   }
 

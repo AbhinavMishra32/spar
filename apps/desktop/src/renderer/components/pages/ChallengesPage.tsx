@@ -147,14 +147,14 @@ function ChallengeCard({
             <p className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted-foreground">
               <CornerDownRight className="size-3 shrink-0 text-muted-foreground/50" />
               Replaced
-              <span className="min-w-0 truncate font-medium text-foreground/75">{item.replacesQuestionTitle}</span>
+              <span className="min-w-0 truncate font-medium text-foreground">{item.replacesQuestionTitle}</span>
             </p>
           )}
           {item.replacedByQuestionTitle && (
             <p className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted-foreground">
               <ArrowRight className="size-3 shrink-0 text-muted-foreground/50" />
               Became
-              <span className="min-w-0 truncate font-medium text-foreground/75">{item.replacedByQuestionTitle}</span>
+              <span className="min-w-0 truncate font-medium text-foreground">{item.replacedByQuestionTitle}</span>
             </p>
           )}
 
