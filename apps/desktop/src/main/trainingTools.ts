@@ -380,10 +380,11 @@ function openChallenge(local: LocalStore, sessionId: string) {
  * allowed to form an opinion of its own about.
  *
  * The order of the keys is load-bearing. The transcript stores a 16k slice of
- * this payload and draws the card and the attempt view out of it, so the small
- * things it needs — the numbers, the file — are serialised ahead of the two that
- * can run to thousands of lines. The agent itself always receives the whole
- * thing; this ordering decides only what survives into the UI.
+ * this payload and draws the card and the attempt panel out of it, so the things
+ * it needs — the numbers, the head of their file, then the log itself — are
+ * serialised ahead of the two that exist for the model alone and can each fill
+ * the cap by themselves. The agent always receives the whole thing; this
+ * ordering decides only what survives into the UI.
  */
 async function readAttemptForAgent(local: LocalStore, value: Record<string, unknown>, sessionId: string, workspaces: WorkspaceService) {
   /* Omitting the id means the attempt in front of the learner, which is what it
@@ -392,8 +393,14 @@ async function readAttemptForAgent(local: LocalStore, value: Record<string, unkn
   const attemptId = String(value.attemptId ?? "") || activeAttemptId(local, sessionId);
   const events = local.readAttempt(attemptId);
   /* The workspace is the live one, so it answers for the open attempt and not
-     for an older one being read out of history. Never fails the read. */
-  const files = await attemptFiles(sessionId, workspaces).catch(() => []);
+     for an older one being read out of history. Never fails the read.
+
+     Narrowed to the files this attempt actually touched, because a session's
+     workspace outlives its challenges: the third problem of a session is solved
+     next to the first two, and listing the directory handed the agent whichever
+     of them the filesystem named first. The learner then watched their tutor
+     open their solve and read a function from two challenges ago. */
+  const files = await attemptFiles(sessionId, workspaces, edited(events)).catch(() => []);
   if (!events.length) {
     return { stats: null, filters: null, solve: null, files, events: [], report: `No events are recorded for attempt ${attemptId || "(none given)"}, so there is no log to read. Do not infer anything about the learner from this.` };
   }
@@ -410,7 +417,13 @@ async function readAttemptForAgent(local: LocalStore, value: Record<string, unkn
     ...(subject?.title ? { title: subject.title } : {}),
     ...(subject?.language ? { language: subject.language } : {}),
   });
-  return { stats: replay.stats, filters, solve: solveHead(files), files, events, report: formatSolveLog(replay, filters) };
+  /* Key order is what the transcript keeps. The model receives this object
+     whole; the renderer only ever sees the first 16k of it serialised, and it
+     draws the attempt panel out of the report. So the report goes ahead of the
+     two fields that exist for the model alone — the learner's whole files, and
+     the raw events an ability update cites by id — either of which could fill
+     the cap on their own and leave the panel with nothing to draw but JSON. */
+  return { stats: replay.stats, filters, solve: solveHead(files), report: formatSolveLog(replay, filters), files, events };
 }
 
 /** The attempt the learner has open right now, for a call that named none. */
@@ -566,6 +579,22 @@ const MAX_FILE = 6_000;
 const SOLVE_HEAD_LINES = 28;
 const SOLVE_HEAD = 1_200;
 
+/** Every file this attempt saved, most recently saved first. The order is what
+ *  decides which file the transcript draws as "your solve", so it is the one
+ *  they were last working in rather than whichever the directory listed. */
+function edited(events: Array<{ type: string; payload: Record<string, unknown> }>): string[] {
+  const seen: string[] = [];
+  for (const event of events) {
+    if (event.type !== "file_changed") continue;
+    const path = typeof event.payload.path === "string" ? event.payload.path : "";
+    if (!path) continue;
+    const at = seen.indexOf(path);
+    if (at >= 0) seen.splice(at, 1);
+    seen.unshift(path);
+  }
+  return seen;
+}
+
 /**
  * What the learner has written, right now.
  *
@@ -574,8 +603,11 @@ const SOLVE_HEAD = 1_200;
  * something the agent already knows. Failures come with their own case detail
  * from the run, so nothing is lost by leaving them out.
  */
-async function attemptFiles(sessionId: string, workspaces: WorkspaceService): Promise<Array<{ path: string; text: string }>> {
-  const paths = await workspaces.list(sessionId).catch(() => [] as string[]);
+async function attemptFiles(sessionId: string, workspaces: WorkspaceService, edited: string[] = []): Promise<Array<{ path: string; text: string }>> {
+  /* What they saved during this attempt, newest first, and only the rest of the
+     workspace when they saved nothing — an attempt opened a minute ago has no
+     edits yet and its starter file is still the right answer. */
+  const paths = edited.length ? edited : await workspaces.list(sessionId).catch(() => [] as string[]);
   const mine = paths.filter((file) => {
     const name = file.split("/").pop() ?? file;
     return !name.startsWith("test_") && !name.endsWith("_test.py") && !name.includes(".test.") && !name.endsWith(".md") && !name.endsWith(".json");

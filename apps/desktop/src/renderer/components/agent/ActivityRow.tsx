@@ -18,7 +18,7 @@ import { SaveProblem } from "../common/SaveProblem";
 import { readPublishedChallenge } from "./publishedChallenge";
 import { useRevealOnExpand } from "./useRevealOnExpand";
 import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
-import { solveHead, solveStats, spentOn, type SolveStats } from "./solveStats";
+import { solveStats, spentOn, type SolveStats } from "./solveStats";
 import type { ChallengeTrail } from "../workspace/ChallengeStepper";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
@@ -916,9 +916,10 @@ function Thought({ title, body, settling }: { title: string; body: string; settl
  * Two lines, deliberately. It is the account of a step the agent took, not a
  * dashboard tile dropped into the middle of one — so it carries no shadow, no
  * chart and no row it does not need, and the case split is a ring in the corner
- * of the header rather than anything with a row of its own. Behind all of it, at
- * the opacity of a watermark, is the head of the file they wrote: the step says
- * it read their solve, and this is the solve it read.
+ * of the header rather than anything with a row of its own. Their code was
+ * behind it for a while, at the opacity of a watermark; it is gone, because a
+ * card whose background is illegible text is a card with a texture rather than
+ * a fact, and the code is one click away in the panel that opens under it.
  *
  * The numbers come from the call's own result rather than from the sentence the
  * worker wrote about it — see `solveStats`. A replay still running, and one with
@@ -957,7 +958,6 @@ export function SolveRead({ part }: { part: ToolPart }) {
     );
   }
 
-  const solve = solveHead(part.output);
   const verdict = stats.outcome ? VERDICT[stats.outcome] : null;
   /* Every case that went green at least once. The replay reports the complement,
      because a case that never passed is the durable fact — one that passed and
@@ -975,25 +975,6 @@ export function SolveRead({ part }: { part: ToolPart }) {
           itself getting taller. */}
       <motion.div {...arrival} className={cn("relative isolate min-w-0 overflow-hidden", BLOCK_SURFACE)} ref={block}>
         <CollapsibleTrigger className={cn("relative block w-full min-w-0", TRIGGER)}>
-          {/* Their own file, behind their own numbers.
-              The row claims to have read their solve, and until this it made that
-              claim over an empty panel. Set at the size of a minimap and at the
-              opacity of a watermark, and masked away from the top-left so it never
-              runs under the words — it is texture that happens to be true, not a
-              code block, and nothing in it is meant to be read line by line. */}
-          {solve && (
-            <pre
-              aria-hidden
-              className="pointer-events-none absolute inset-0 -z-10 overflow-hidden px-2.5 py-1 font-mono text-[8px] leading-[1.45] whitespace-pre text-foreground opacity-[0.07] select-none dark:opacity-[0.11]"
-              style={{
-                maskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
-                WebkitMaskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
-              }}
-            >
-              {solve.text}
-            </pre>
-          )}
-
           <div className="flex min-w-0 items-center gap-2 px-2.5 pt-1.5">
             <IconHistory className="size-4 shrink-0 text-[var(--transcript-step-mark)]" />
             <span className="min-w-0 truncate text-thread font-medium text-foreground">Read your attempt</span>

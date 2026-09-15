@@ -269,6 +269,7 @@ describe("read_attempt", () => {
         events: Array<{ id: string }>;
         solve: { path: string } | null;
         stats: { outcome: string };
+        report: string;
       };
 
       expect(result.files).toEqual([{ path: "src/count.js", text: "export function count(values, threshold) {\n  return 0;\n}\n" }]);
@@ -276,6 +277,59 @@ describe("read_attempt", () => {
       expect(result.events.every((event) => typeof event.id === "string" && event.id.length > 0)).toBe(true);
       expect(result.solve?.path).toBe("src/count.js");
       expect(result.stats.outcome).toBe("in-progress");
+      /* The transcript keeps only the first 16k of this serialised, and draws
+         the attempt panel out of the report — so the report must be written
+         before the two fields that exist for the model alone. */
+      const order = Object.keys(result as object);
+      expect(order.indexOf("report")).toBeLessThan(order.indexOf("files"));
+      expect(order.indexOf("report")).toBeLessThan(order.indexOf("events"));
+    } finally {
+      store.close();
+    }
+  });
+
+  /**
+   * The workspace outlives the challenge; the attempt does not.
+   *
+   * A session's third problem is solved in the same directory as its first two,
+   * so listing that directory handed the agent whichever file the filesystem
+   * named first — and the learner watched their tutor open "your attempt" and
+   * read a function from two challenges ago. What this attempt saved is the only
+   * thing this attempt is about.
+   */
+  it("reads only the files this attempt touched, most recently saved first", async () => {
+    const store = new LocalStore(":memory:");
+    const bodies: Record<string, string> = {
+      "src/min_subarray.js": "export function minSubarray() {\n  return 0;\n}\n",
+      "src/count.js": "export function count() {\n  return 0;\n}\n",
+      "src/helpers.js": "export const noop = () => {};\n",
+    };
+    const workspaces = {
+      list: async () => Object.keys(bodies),
+      read: async (_session: string, path: string) => bodies[path] ?? "",
+    } as unknown as WorkspaceService;
+    try {
+      const { sessionId } = store.createSession("Practise arrays");
+      store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
+      const question = store.createQuestion(sessionId, design("Count values above a threshold"), { valid: true });
+      const attemptId = question.attemptId;
+      const opened = Date.parse(store.readAttempt(attemptId)[0]!.occurredAt);
+      const save = (path: string, seconds: number) =>
+        store.appendNextEvent({ id: randomUUID(), attemptId, type: "file_changed" as never, occurredAt: new Date(opened + seconds * 1_000).toISOString(), payload: { path }, source: "learner", schemaVersion: 1 });
+
+      save("src/count.js", 30);
+      save("src/helpers.js", 60);
+      save("src/count.js", 90);
+
+      const result = await executeTrainingTool("read_attempt", { attemptId }, sessionId, store, workspaces, {} as UtilityClient) as {
+        files: Array<{ path: string }>;
+        solve: { path: string } | null;
+      };
+
+      // The file from the earlier challenge is not part of this attempt.
+      expect(result.files.map((file) => file.path)).toEqual(["src/count.js", "src/helpers.js"]);
+      // And the one they were last in is the solve the transcript draws.
+      expect(result.solve?.path).toBe("src/count.js");
     } finally {
       store.close();
     }
