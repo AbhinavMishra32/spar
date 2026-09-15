@@ -72,6 +72,7 @@ const api: SparApi = {
   setDefaultProvider: (provider, model) => ipcRenderer.invoke(ipc.settingsProviderDefault, { provider, model }),
   providerUsage: (provider) => ipcRenderer.invoke(ipc.settingsProviderUsage, provider),
   setReasoningEffort: (effort) => ipcRenderer.invoke(ipc.settingsReasoningEffort, effort),
+  setFastMode: (enabled) => ipcRenderer.invoke(ipc.settingsFastMode, enabled),
   webSearchStatus: () => ipcRenderer.invoke(ipc.settingsWebSearch),
   saveWebSearchKey: (key) => ipcRenderer.invoke(ipc.settingsWebSearchSave, key),
   clearWebSearchKey: () => ipcRenderer.invoke(ipc.settingsWebSearchClear),

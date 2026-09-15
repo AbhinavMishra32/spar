@@ -886,6 +886,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   });
   ipcMain.handle(ipc.settingsProviderUsage, (_event, value) => deps.providers.subscriptionUsage(providerId(value)));
   ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
+  ipcMain.handle(ipc.settingsFastMode, (_event, value) => deps.providers.setFastMode(z.boolean().parse(value)));
   /* The key goes in and never comes back out. Settings needs to know whether one
      is set and where it came from, which is not the same as needing to read it —
      and a renderer that can read it is one XSS away from exfiltrating it. */

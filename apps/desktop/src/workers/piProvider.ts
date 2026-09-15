@@ -22,6 +22,7 @@ export type PiProviderInput = {
   apiKey: string;
   headers?: Record<string, string>;
   reasoningEffort?: ReasoningEffort;
+  fastMode?: boolean;
 };
 
 /** What the phase controller can ask for. Kept in the AI SDK's spelling because
@@ -110,3 +111,23 @@ export function piUsage(value: Usage): SparUsage {
 
 /** pi's stop reason, in the words the turn result already uses. */
 export function piFinishReason(reason: string): string { return reason === "toolUse" ? "tool-calls" : reason === "length" ? "length" : reason === "error" ? "error" : reason === "stop" ? "stop" : "other"; }
+
+/* OpenAI's priority service tier — what ChatGPT calls fast mode — reaches the
+   wire through `onPayload` rather than through an option.
+ *
+ * pi's per-API `stream` takes a `serviceTier`, but Spar goes through
+ * `streamSimple`, and the simple wrapper rebuilds its options from a fixed list
+ * that does not carry it. `onPayload` *is* on that list: it is handed the
+ * request body just before it is sent and may return a replacement. So the tier
+ * goes on the body directly, on the two request shapes that have a field for it
+ * — both Responses APIs — and nowhere else, because a body key an endpoint does
+ * not know is a rejected request, not an ignored preference. */
+const RESPONSES_APIS = new Set(["openai-responses", "openai-codex-responses", "azure-openai-responses"]);
+
+export function piFastModeOptions(input: PiProviderInput) {
+  if (!input.fastMode || !RESPONSES_APIS.has(input.api)) return {};
+  return {
+    onPayload: (payload: unknown) =>
+      payload && typeof payload === "object" ? { ...(payload as Record<string, unknown>), service_tier: "priority" } : payload,
+  };
+}

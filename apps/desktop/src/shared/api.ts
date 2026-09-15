@@ -17,7 +17,7 @@ export const ipc = {
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
-  settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
+  settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort", settingsFastMode: "settings:fast-mode",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
   settingsWebSearchEnabled: "settings:web-search-enabled",
   settingsComplexityCheck: "settings:complexity-check", settingsComplexityCheckEnabled: "settings:complexity-check-enabled",
@@ -196,7 +196,7 @@ export type ProviderInventory = {
    *  it resolves credentials, so the composer never has to infer runnability
    *  from `defaultModel` — which names a provider even before one is connected. */
   ready: boolean;
-  defaultModel: { provider: ProviderId; model: string; reasoningEffort: ReasoningEffort };
+  defaultModel: { provider: ProviderId; model: string; reasoningEffort: ReasoningEffort; fastMode: boolean };
 };
 /** One rate-limit window of a subscription. `usedPercent` is how much of the
  *  window has been spent (0–100) — the same direction both upstreams report it
@@ -575,6 +575,9 @@ export interface SparApi {
    *  the provider has none to report or nothing has reported one yet. */
   providerUsage(provider: ProviderId): Promise<SubscriptionUsage | null>;
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
+  /** OpenAI's priority service tier, which is what ChatGPT calls fast mode. Set
+   *  for every model; only the Responses providers can act on it. */
+  setFastMode(enabled: boolean): Promise<void>;
   /** Whether the agent can reach the web, and where its key came from. The key
    *  itself is never read back — Settings shows the state, not the secret. */
   webSearchStatus(): Promise<{ source: "keychain" | "env" | "none"; enabled: boolean }>;

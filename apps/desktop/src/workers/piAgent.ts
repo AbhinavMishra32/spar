@@ -3,7 +3,7 @@ import { completeSimple, streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, AssistantMessageEvent, Message, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { agentToolSchemas } from "./agentTools.js";
-import { piModelFor, piTransportForApi, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
+import { piFastModeOptions, piModelFor, piTransportForApi, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
 import type { NormalizedAgentStreamPart } from "./agentStream.js";
 
 /**
@@ -84,6 +84,7 @@ export function createTrainingAgent(input: PiProviderInput, systemPrompt: string
       ...(transport ? { transport } : {}),
       ...(input.headers ? { headers: input.headers } : {}),
       ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
+      ...piFastModeOptions(input),
       ...(toolChoice.current !== undefined ? { toolChoice: toolChoice.current as never } : {}),
     } as SimpleStreamOptions),
     /* One phase's tools run one at a time. The controller's own de-duplication
@@ -175,6 +176,7 @@ export async function piCompleteText(input: PiProviderInput, systemPrompt: strin
     ...(transport ? { transport } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
     ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
+    ...piFastModeOptions(input),
   } as SimpleStreamOptions);
   /* pi reports a failed or cancelled request in the message rather than by
      throwing, so the caller's own timeout wording has to be raised here — the

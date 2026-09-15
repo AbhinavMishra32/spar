@@ -25,6 +25,7 @@ export type ResolvedProvider = {
   headers?: Record<string, string>;
   source: "spar-keychain" | "spar-oauth" | "gateway";
   reasoningEffort: ReasoningEffort;
+  fastMode: boolean;
 };
 
 type Descriptor = {
@@ -148,7 +149,7 @@ export class ProviderService {
         models: catalog.map((model) => ({ id: model.id, name: model.name, reasoning: model.reasoning })),
       };
     }));
-    return { providers, ready: await this.available(), defaultModel: { provider: selectedProvider, model: selectedModel, reasoningEffort: this.reasoningEffort() } };
+    return { providers, ready: await this.available(), defaultModel: { provider: selectedProvider, model: selectedModel, reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode() } };
   }
 
   /** Whether a turn can run right now. Decided from credential presence only —
@@ -214,6 +215,18 @@ export class ProviderService {
 
   setReasoningEffort(effort: ReasoningEffort) {
     this.store.setSetting("reasoning-effort", effort);
+  }
+
+  /* Fast mode is one preference, not one per provider: it says how the learner
+     wants their turns served, and a setting that silently reverted every time
+     they switched model would be a worse answer than a setting the model
+     happens not to honour. */
+  fastMode(): boolean {
+    return this.store.getSetting<boolean>("fast-mode", false);
+  }
+
+  setFastMode(enabled: boolean) {
+    this.store.setSetting("fast-mode", enabled);
   }
 
   async saveCredential(input: { provider: ProviderId; model: string; baseUrl?: string; secret?: string }) {
@@ -375,7 +388,7 @@ export class ProviderService {
             const headers = Object.fromEntries(
               Object.entries({ ...model?.headers, ...resolved.auth.headers }).filter((entry): entry is [string, string] => entry[1] !== null),
             );
-            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: resolved.auth.baseUrl ?? model.baseUrl, apiKey: resolved.auth.apiKey, ...(Object.keys(headers).length ? { headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort() });
+            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: resolved.auth.baseUrl ?? model.baseUrl, apiKey: resolved.auth.apiKey, ...(Object.keys(headers).length ? { headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode() });
           } else {
             this.store.setSetting(`provider-auth-expired:${selected}`, true);
           }
@@ -390,7 +403,7 @@ export class ProviderService {
         const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
         const model = this.catalog(selectedDescriptor.runtimeId).find((item) => item.id === modelId);
         const baseUrl = this.store.getSetting(`provider-base-url:${selected}`, selectedDescriptor.defaultBaseUrl ?? model?.baseUrl ?? "");
-        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain", reasoningEffort: this.reasoningEffort() });
+        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain", reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode() });
       }
     }
 
@@ -403,7 +416,7 @@ export class ProviderService {
     // credential is Spar's own gateway, and it is off unless the build turns it
     // on — an unconnected Spar resolves to nothing at all, and says so, rather
     // than reaching for a key it found lying around on the machine.
-    if (accessToken && gatewayEnabled()) values.push({ provider: "spar-gateway", model: "spar-training", api: "openai-completions", baseUrl: `${apiOrigin()}/v1/ai`, apiKey: accessToken, source: "gateway", reasoningEffort: this.reasoningEffort() });
+    if (accessToken && gatewayEnabled()) values.push({ provider: "spar-gateway", model: "spar-training", api: "openai-completions", baseUrl: `${apiOrigin()}/v1/ai`, apiKey: accessToken, source: "gateway", reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode() });
     return dedupe(values);
   }
 

@@ -97,6 +97,7 @@ describe("provider service", () => {
         apiKey: "cline-secret",
         source: "spar-keychain",
         reasoningEffort: "off",
+        fastMode: false,
       }]);
     } finally { store.close(); }
   });
