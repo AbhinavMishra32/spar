@@ -16,6 +16,7 @@ import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutio
 import { SETTLE_MS, useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
 import { ChallengeStepper, type ChallengeTrail } from "./ChallengeStepper";
+import { FileTab } from "../common/FileTab";
 import { FileGlyph } from "../common/LanguageGlyph";
 import { SourceGlyph } from "../common/SourceGlyph";
 import type { AgentRun } from "../agent/agentRun";
@@ -687,20 +688,13 @@ export function Workspace({
                     )}
                     {multiFile && !showTree ? (
                       solutionFiles.map((file) => (
-                        <button
+                        <FileTab
                           key={file.path}
-                          className={cn(
-                            "inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui transition-colors",
-                            activeFile === file.path ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
-                          )}
+                          path={file.path}
+                          active={activeFile === file.path}
+                          dirty={dirty}
                           onClick={() => void load(file.path)}
-                          title={file.path}
-                          type="button"
-                        >
-                          <FileGlyph className="shrink-0 opacity-80" fallback={FileCode2} path={file.path} />
-                          {fileName(file.path)}
-                          {activeFile === file.path && dirty && <span className="size-1.5 rounded-full bg-foreground/50" />}
-                        </button>
+                        />
                       ))
                     ) : (
                       <span className="inline-flex h-6 items-center gap-1.5 rounded-md bg-accent px-2 text-ui">

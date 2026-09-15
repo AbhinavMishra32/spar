@@ -3,8 +3,8 @@ import { Tooltip as TooltipPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
-/* Aside's tooltip, transcribed from its own bundle rather than measured off a
-   screenshot: `rounded-md`, `px-2.5 py-1`, 12px, `shadow-md`, and a hairline —
+/* The shared tooltip used by the shell and composer controls: an 8px corner,
+   `px-2.5 py-1`, 12px type, a soft lifted shadow, and a hairline —
    `font-medium` in light, `font-normal` in dark, because the dark chip is
    already the brighter thing on screen and medium there reads as shouting. The
    edge is their `border-glass`, which lives in `.tooltip-surface`.
@@ -56,10 +56,10 @@ function TooltipContent({
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
         className={cn(
-          /* 6px, not `rounded-md`: their `--radius-md` is 0.375rem where
-             Spar's is 0.5rem, so the shared name is a different corner. */
-          "tooltip-surface z-50 inline-flex w-fit max-w-xs origin-(--radix-tooltip-content-transform-origin) items-center gap-1.5 rounded-[0.375rem] bg-popover px-2.5 py-1 text-xs font-medium text-popover-foreground select-none dark:font-normal",
-          /* The chip carries its own padding, so the edge beside it closes up. */
+          "tooltip-surface z-50 inline-flex w-fit max-w-xs origin-(--radix-tooltip-content-transform-origin) items-center gap-1.5 rounded-[0.5rem] bg-[#fdfdfd] px-2.5 py-1 text-xs font-medium text-[#3c3c3c] select-none dark:bg-popover dark:text-popover-foreground dark:font-normal",
+          /* The key chip supplies the visual weight at the trailing edge. The
+             reference closes that edge to 6px while retaining the tooltip's
+             10px leading inset. */
           "has-data-[slot=kbd]:pr-1.5",
           "data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95",
           "data-[state=instant-open]:animate-in data-[state=instant-open]:fade-in-0 data-[state=instant-open]:zoom-in-95",

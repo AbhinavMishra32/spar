@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { CornerDownRight, Folder, Search as SearchMark } from "lucide-react";
+import { Clock3, CornerDownRight, Folder, Search as SearchMark } from "lucide-react";
+
+import { Tabs } from "radix-ui";
 
 import { languageForPath } from "@spar/domain";
 import { useCodeTheme } from "@/hooks/use-code-theme";
 import { highlight, type Span } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
+import { FileTab } from "../common/FileTab";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 import { Inline } from "./Markdown";
 import { useMarkdownLinks } from "./MarkdownLinks";
@@ -221,7 +224,7 @@ function useObject(body: string): Record<string, unknown> | null {
 /** The label above a field. One idiom for all of them, so a detail panel reads
  *  as one thing rather than as several. */
 function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pt-2 pb-1 text-thread font-medium tracking-wide text-muted-foreground uppercase">{children}</p>;
+  return <p className="px-2.5 pt-2 pb-1 text-[length:inherit] font-medium tracking-wide text-muted-foreground uppercase">{children}</p>;
 }
 
 /**
@@ -254,7 +257,7 @@ function Snippet({ body, language }: { body: string; language: string }) {
     <>
       <pre
         className={cn(
-          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-thread leading-[1.55]",
+          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-[length:inherit] leading-[1.55]",
           !full && lines > 14 && "max-h-[15.5rem] overflow-y-hidden",
         )}
         style={{ color: theme.slots.foreground }}
@@ -273,7 +276,7 @@ function Snippet({ body, language }: { body: string; language: string }) {
       </pre>
       {lines > 14 && (
         <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-thread text-muted-foreground transition-colors hover:text-foreground"
+          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-[length:inherit] text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => setFull((value) => !value)}
           type="button"
         >
@@ -295,7 +298,7 @@ function Lines({ body }: { body: string }) {
     <>
       <pre
         className={cn(
-          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-thread leading-[1.55] whitespace-pre text-muted-foreground/90",
+          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-[length:inherit] leading-[1.55] whitespace-pre text-muted-foreground/90",
           !full && lines > 14 && "max-h-[15.5rem] overflow-y-hidden",
         )}
       >
@@ -303,7 +306,7 @@ function Lines({ body }: { body: string }) {
       </pre>
       {lines > 14 && (
         <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-thread text-muted-foreground transition-colors hover:text-foreground"
+          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-[length:inherit] text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => setFull((value) => !value)}
           type="button"
         >
@@ -335,14 +338,14 @@ function FileView({ body, path, wrote = false }: { body: string; path: string; w
           <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
         )}
         <button
-          className="min-w-0 truncate font-mono text-thread text-foreground/85 transition-colors hover:text-foreground hover:underline"
+          className="min-w-0 truncate font-mono text-[length:inherit] text-foreground/85 transition-colors hover:text-foreground hover:underline"
           onClick={() => onOpenFile?.(path)}
           title={`Open ${path}`}
           type="button"
         >
           {path}
         </button>
-        {wrote && <span className="shrink-0 text-thread text-muted-foreground">written</span>}
+        {wrote && <span className="shrink-0 text-[length:inherit] text-muted-foreground">written</span>}
       </div>
       <Snippet body={body} language={language ?? "text"} />
     </div>
@@ -353,7 +356,7 @@ function FileView({ body, path, wrote = false }: { body: string; path: string; w
  *  sort first — the service already returns them that way. */
 function Listing({ entries, where }: { entries: Entry[]; where: string }) {
   const { onOpenFile } = useMarkdownLinks();
-  if (entries.length === 0) return <p className="px-2.5 py-2 text-thread text-muted-foreground">Nothing in there.</p>;
+  if (entries.length === 0) return <p className="px-2.5 py-2 text-[length:inherit] text-muted-foreground">Nothing in there.</p>;
 
   return (
     <div className="min-w-0">
@@ -379,7 +382,7 @@ function Listing({ entries, where }: { entries: Entry[]; where: string }) {
                 ) : (
                   <span className="size-3.5 shrink-0" />
                 )}
-                <span className={cn("min-w-0 truncate font-mono text-thread", directory ? "text-foreground/70" : "text-muted-foreground")}>
+                <span className={cn("min-w-0 truncate font-mono text-[length:inherit]", directory ? "text-foreground/70" : "text-muted-foreground")}>
                   {name}
                   {directory && "/"}
                 </span>
@@ -405,12 +408,12 @@ function Command({ command, exitCode, output }: { command: string; exitCode: num
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-start gap-1.5 px-2.5 pt-2 pb-1.5">
-        <span aria-hidden className="mt-px shrink-0 font-mono text-thread text-muted-foreground">
+        <span aria-hidden className="mt-px shrink-0 font-mono text-[length:inherit] text-muted-foreground">
           $
         </span>
-        <code className="min-w-0 flex-1 font-mono text-thread break-all text-foreground/85">{command}</code>
+        <code className="min-w-0 flex-1 font-mono text-[length:inherit] break-all text-foreground/85">{command}</code>
         {failed && (
-          <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--destructive)_16%,transparent)] px-1.5 py-px text-thread font-medium text-destructive">
+          <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--destructive)_16%,transparent)] px-1.5 py-px text-[length:inherit] font-medium text-destructive">
             exit {exitCode}
           </span>
         )}
@@ -418,7 +421,7 @@ function Command({ command, exitCode, output }: { command: string; exitCode: num
       {output.trim() ? (
         <Lines body={output} />
       ) : (
-        <p className="px-2.5 pb-2 text-thread text-muted-foreground">No output.</p>
+        <p className="px-2.5 pb-2 text-[length:inherit] text-muted-foreground">No output.</p>
       )}
     </div>
   );
@@ -449,10 +452,10 @@ function WebSearch({ query, result }: { query: string; result: unknown }) {
       <div className="flex min-w-0 items-center gap-2 px-2.5 pt-2.5 pb-1.5">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-[var(--accent)] px-2.5 py-1">
           <SearchMark className="size-3.5 shrink-0 text-muted-foreground/85 [&_*]:[stroke-width:1.8]" />
-          <span className="min-w-0 truncate text-thread text-foreground/90">{query}</span>
+          <span className="min-w-0 truncate text-[length:inherit] text-foreground/90">{query}</span>
         </span>
         {rows.length > 0 && (
-          <span className="shrink-0 text-thread tabular-nums text-muted-foreground">
+          <span className="shrink-0 text-[length:inherit] tabular-nums text-muted-foreground">
             {rows.length === 1 ? "1 result" : `${rows.length} results`}
           </span>
         )}
@@ -491,7 +494,7 @@ function WebPages({ result, urls }: { result: unknown; urls: string[] }) {
         </div>
       ))}
       {missing.map((url) => (
-        <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-thread text-muted-foreground" key={url}>
+        <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[length:inherit] text-muted-foreground" key={url}>
           <Favicon host={host(url)} />
           <span className="min-w-0 truncate">{host(url)} returned nothing to read.</span>
         </div>
@@ -520,14 +523,14 @@ function Result({ row }: { row: Record<string, unknown> }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-baseline gap-1.5">
-          <span className="min-w-0 truncate text-thread text-foreground/90 group-hover/result:text-foreground">{title}</span>
+          <span className="min-w-0 truncate text-[length:inherit] text-foreground/90 group-hover/result:text-foreground">{title}</span>
         </span>
-        <span className="flex min-w-0 items-baseline gap-1.5 text-thread text-muted-foreground">
+        <span className="flex min-w-0 items-baseline gap-1.5 text-[length:inherit] text-muted-foreground">
           <span className="min-w-0 truncate">{host(url)}</span>
           {when && <span className="shrink-0">· {when}</span>}
         </span>
         {extract && (
-          <span className="mt-0.5 line-clamp-2 text-thread leading-[1.5] text-muted-foreground/80">{extract}</span>
+          <span className="mt-0.5 line-clamp-2 text-[length:inherit] leading-[1.5] text-muted-foreground/80">{extract}</span>
         )}
       </span>
     </button>
@@ -537,7 +540,7 @@ function Result({ row }: { row: Record<string, unknown> }) {
 /** A short aside in the detail panel: an Exa error, an unset key, an empty
  *  result. Said in a sentence, where the raw payload used to be. */
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pb-2 text-thread leading-[1.5] text-muted-foreground/85">{children}</p>;
+  return <p className="px-2.5 pb-2 text-[length:inherit] leading-[1.5] text-muted-foreground/85">{children}</p>;
 }
 
 /** The results out of a `WebSearchResult`, whichever shape the turn stored —
@@ -647,7 +650,7 @@ function TracedRun({ result }: { result: Record<string, unknown> }) {
           <Snippet body={text(result.setup)} language="python" />
         </>
       ) : null}
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-2.5 pt-2 pb-2 text-thread text-muted-foreground">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-2.5 pt-2 pb-2 text-[length:inherit] text-muted-foreground">
         {steps !== null && <span className="tabular-nums">{steps} steps</span>}
         {text(digest.returned) ? (
           <span>
@@ -662,15 +665,15 @@ function TracedRun({ result }: { result: Record<string, unknown> }) {
           <Eyebrow>What moved</Eyebrow>
           <div className="px-2.5 pb-2">
             {variables.slice(0, 8).map((variable, index) => (
-              <div className="flex min-w-0 items-baseline gap-2 py-px" key={index}>
-                <code className="shrink-0 font-mono text-thread text-foreground/85">{text(variable.name)}</code>
-                <span className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">
+              <div className="relative flex min-w-0 items-baseline gap-2 border-l border-border/70 py-1.5 pl-3 ml-1" key={index}>
+                <code className="shrink-0 font-mono text-[length:inherit] text-foreground/85">{text(variable.name)}</code>
+                <span className="min-w-0 flex-1 truncate font-mono text-[length:inherit] text-muted-foreground">
                   {text(variable.first)}
                   <span className="mx-1 text-muted-foreground/50">→</span>
                   {text(variable.last)}
                 </span>
                 {typeof variable.changes === "number" && variable.changes > 0 && (
-                  <span className="shrink-0 tabular-nums text-thread text-muted-foreground/60">
+                  <span className="shrink-0 tabular-nums text-[length:inherit] text-muted-foreground/60">
                     {variable.changes}×
                   </span>
                 )}
@@ -703,7 +706,7 @@ function FoundMoments({ args, result }: { args: Record<string, unknown>; result:
   return (
     <div className="min-w-0">
       {looked.length > 0 && (
-        <p className="px-2.5 pt-2 pb-1 text-thread text-muted-foreground">Looked for {looked.join(", ")}</p>
+        <p className="px-2.5 pt-2 pb-1 text-[length:inherit] text-muted-foreground">Looked for {looked.join(", ")}</p>
       )}
       {moments.length === 0 ? (
         <Note>{text(result.note) || "Nothing in the run matched."}</Note>
@@ -711,19 +714,19 @@ function FoundMoments({ args, result }: { args: Record<string, unknown>; result:
         <div className="px-2.5 pt-1 pb-2">
           {moments.slice(0, 12).map((moment, index) => (
             <div className="flex min-w-0 items-baseline gap-2 py-0.5" key={index}>
-              <span className="shrink-0 tabular-nums text-thread text-muted-foreground/60">
+              <span className="shrink-0 tabular-nums text-[length:inherit] text-muted-foreground/60">
                 {typeof moment.step === "number" ? moment.step : "—"}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="text-thread text-foreground/85">{text(moment.why)}</span>
+                <span className="text-[length:inherit] text-foreground/85">{text(moment.why)}</span>
                 {text(moment.source) ? (
-                  <code className="ml-2 font-mono text-thread text-muted-foreground/70">{text(moment.source)}</code>
+                  <code className="ml-2 font-mono text-[length:inherit] text-muted-foreground/70">{text(moment.source)}</code>
                 ) : null}
               </span>
             </div>
           ))}
           {moments.length > 12 && (
-            <p className="pt-1 text-thread text-muted-foreground/60">
+            <p className="pt-1 text-[length:inherit] text-muted-foreground/60">
               {moments.length - 12} more
             </p>
           )}
@@ -746,7 +749,7 @@ function ReadStep({ result }: { result: Record<string, unknown> }) {
 
   return (
     <div className="min-w-0">
-      <p className="px-2.5 pt-2 pb-1 text-thread text-muted-foreground">
+      <p className="px-2.5 pt-2 pb-1 text-[length:inherit] text-muted-foreground">
         <span className="tabular-nums">
           Step {result.step}
           {typeof result.of === "number" ? ` of ${result.of}` : ""}
@@ -759,7 +762,7 @@ function ReadStep({ result }: { result: Record<string, unknown> }) {
           <Eyebrow>Changed here</Eyebrow>
           <div className="px-2.5 pb-2">
             {changed.map((entry, index) => (
-              <p className="font-mono text-thread text-foreground/85" key={index}>{entry}</p>
+              <p className="font-mono text-[length:inherit] text-foreground/85" key={index}>{entry}</p>
             ))}
           </div>
         </>
@@ -769,9 +772,9 @@ function ReadStep({ result }: { result: Record<string, unknown> }) {
           <Eyebrow>In scope</Eyebrow>
           <div className="px-2.5 pb-2">
             {names.slice(0, 12).map((name) => (
-              <div className="flex min-w-0 items-baseline gap-2 py-px" key={name}>
-                <code className="shrink-0 font-mono text-thread text-foreground/85">{name}</code>
-                <code className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">{text(locals[name])}</code>
+              <div className="relative flex min-w-0 items-baseline gap-2 border-l border-border/70 py-1.5 pl-3 ml-1" key={name}>
+                <code className="shrink-0 font-mono text-[length:inherit] text-foreground/85">{name}</code>
+                <code className="min-w-0 flex-1 truncate font-mono text-[length:inherit] text-muted-foreground">{text(locals[name])}</code>
               </div>
             ))}
           </div>
@@ -799,16 +802,15 @@ function Attempt({ result }: { result: Record<string, unknown> }) {
 
   return (
     <div className="min-w-0">
-      {files.map((file, index) => (
-        <div className="min-w-0" key={text(file.path) || index}>
-          {index > 0 && <div className="mx-2.5 border-t border-border/60" />}
-          <FileView body={text(file.text)} path={text(file.path)} />
-        </div>
-      ))}
+      {files.length > 0 && <AttemptFiles files={files} />}
       {events.length > 0 && (
         <>
           {files.length > 0 && <div className="mx-2.5 border-t border-border/60" />}
-          <Eyebrow>{events.length === 1 ? "1 event" : `${events.length} events`}</Eyebrow>
+          <div className="flex items-center gap-1.5 px-2.5 pt-2.5 pb-1.5 text-muted-foreground">
+            <Clock3 aria-hidden className="size-3.5" />
+            <span className="font-medium">Activity</span>
+            <span className="ml-auto tabular-nums">{events.length} {events.length === 1 ? "event" : "events"}</span>
+          </div>
           {/* Held to a height. A long attempt is ninety events, and a panel that
               tall is one row pushing the rest of the turn off the screen — the
               same reason the thinking block inside a step is capped. */}
@@ -825,6 +827,33 @@ function Attempt({ result }: { result: Record<string, unknown> }) {
   );
 }
 
+function AttemptFiles({ files }: { files: Array<Record<string, unknown>> }) {
+  const [selected, setSelected] = useState("");
+  const value = files.some((file, index) => `${text(file.path)}:${index}` === selected)
+    ? selected : `${text(files[0]?.path)}:0`;
+
+  return (
+    <Tabs.Root value={value} onValueChange={setSelected}>
+      <Tabs.List aria-label="Solution files" className="app-scroll flex items-center gap-1 overflow-x-auto border-b border-border/60 p-1.5">
+        {files.map((file, index) => {
+          const path = text(file.path);
+          const tabValue = `${path}:${index}`;
+          return (
+            <Tabs.Trigger key={tabValue} value={tabValue} asChild>
+              <FileTab path={path} active={value === tabValue} className="text-[length:inherit]" />
+            </Tabs.Trigger>
+          );
+        })}
+      </Tabs.List>
+      {files.map((file, index) => (
+        <Tabs.Content key={`${text(file.path)}:${index}`} value={`${text(file.path)}:${index}`} className="min-w-0 pt-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          <Snippet body={text(file.text)} language={languageForPath(text(file.path)) ?? "text"} />
+        </Tabs.Content>
+      ))}
+    </Tabs.Root>
+  );
+}
+
 /** One recorded event: when it happened, what kind it was, and the one thing
  *  about it worth reading. The offset rather than the clock time — an attempt is
  *  read as a stretch of work, and 4:12 into it says something 14:06:22 does not. */
@@ -833,16 +862,17 @@ function Moment({ event, since }: { event: Record<string, unknown>; since: numbe
   const kind = text(event.type);
 
   return (
-    <div className="flex min-w-0 items-baseline gap-2 py-px">
-      <span className="w-12 shrink-0 text-right font-mono text-thread whitespace-nowrap tabular-nums text-muted-foreground/70">{offset(text(event.occurredAt), since)}</span>
-      <span className={cn("shrink-0 text-thread", kind === "test_run" && !payload.passed ? "text-[var(--warning)]" : "text-foreground/85")}>{MOMENT[kind] ?? kind.replace(/_/g, " ")}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">{momentDetail(kind, payload)}</span>
+    <div className="relative flex min-w-0 items-baseline gap-2 border-l border-border/70 py-1.5 pl-3 ml-1">
+      <span aria-hidden className="absolute -left-[3px] top-[0.9em] size-[5px] rounded-full bg-muted-foreground/50" />
+      <span className={cn("shrink-0 text-[length:inherit]", kind === "test_run" && !payload.passed ? "text-[var(--warning)]" : "text-foreground/85")}>{MOMENT[kind] ?? kind.replace(/_/g, " ")}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[length:inherit] text-muted-foreground">{momentDetail(kind, payload)}</span>
+      <span className="shrink-0 font-mono tabular-nums text-muted-foreground/70">{offset(text(event.occurredAt), since)}</span>
     </div>
   );
 }
 
 const MOMENT: Record<string, string> = {
-  attempt_started: "opened",
+  attempt_started: "Attempt opened",
   file_changed: "edited",
   command_executed: "ran",
   test_run: "tested",
@@ -920,9 +950,9 @@ function Patches({ patches }: { patches: unknown }) {
         <div className="min-w-0" key={index}>
           {index > 0 && <div className="mx-2.5 border-t border-border/60" />}
           <div className="flex min-w-0 items-baseline gap-1.5 px-2.5 pt-2 pb-1">
-            <span className="shrink-0 text-thread text-foreground/85">{memoryLabel(text(row.file)) || "Memory"}</span>
-            <span className="shrink-0 text-thread text-muted-foreground">{PATCH_MODE[text(row.mode)] ?? PATCH_MODE.append}</span>
-            {text(row.reason) && <span className="min-w-0 truncate text-thread text-muted-foreground">· {text(row.reason)}</span>}
+            <span className="shrink-0 text-[length:inherit] text-foreground/85">{memoryLabel(text(row.file)) || "Memory"}</span>
+            <span className="shrink-0 text-[length:inherit] text-muted-foreground">{PATCH_MODE[text(row.mode)] ?? PATCH_MODE.append}</span>
+            {text(row.reason) && <span className="min-w-0 truncate text-[length:inherit] text-muted-foreground">· {text(row.reason)}</span>}
           </div>
           <Lines body={text(row.content)} />
         </div>
@@ -951,7 +981,7 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
 
   return (
     <div className="min-w-0 px-2.5 py-2">
-      <p className="text-thread leading-[1.55] text-foreground/90">
+      <p className="text-[length:inherit] leading-[1.55] text-foreground/90">
         <Inline text={question} />
       </p>
 
@@ -960,7 +990,7 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
           {spare.map((choice, index) => (
             <li
               key={`${choice}-${index}`}
-              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-thread text-muted-foreground/80"
+              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-[length:inherit] text-muted-foreground/80"
             >
               <Inline text={choice} />
             </li>
@@ -969,12 +999,12 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
       )}
 
       {answer ? (
-        <p className="mt-2 border-l border-border/70 pl-2.5 text-thread leading-[1.55] whitespace-pre-wrap text-foreground">
+        <p className="mt-2 border-l border-border/70 pl-2.5 text-[length:inherit] leading-[1.55] whitespace-pre-wrap text-foreground">
           <Inline text={answer} />
         </p>
       ) : (
         /* The row is open while the card below it is still waiting. */
-        <p className="mt-2 text-thread text-muted-foreground/85">Waiting for your answer.</p>
+        <p className="mt-2 text-[length:inherit] text-muted-foreground/85">Waiting for your answer.</p>
       )}
     </div>
   );
