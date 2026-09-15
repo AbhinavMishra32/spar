@@ -7,9 +7,10 @@ import { createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentToo
 import { fitEvidence, nextEvidenceBudget, stableJson } from "./evidence.js";
 import { clampSteer, steeringSection } from "./steering.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
-import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, turnExecutionKey, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 import { normalizeAgentStreamPart } from "./agentStream.js";
 import { syntheticChallengeAuthoringDoctrine } from "./challengeAuthoring.js";
+import { mergeQuestionChanges, objectRecord, parseRepairChanges } from "./challengeRepair.js";
 import { splitActionTitle, toolPayload } from "./toolPayload.js";
 import { sourceToolDefinitions, toolDefinitions, withActionTitle } from "./agentTools.js";
 
@@ -33,7 +34,15 @@ const IDENTICAL_TOOL_CALL_LIMIT = 15;
  */
 const REPEATED_CALL_LIMIT = 2;
 const AGENT_PHASE_TIMEOUT_MS = 180_000;
-const CHALLENGE_COMPILATION_LIMIT = 15;
+/* One public authoring call. Its compiler failures get four private, incremental
+ * repairs below; repeating the public call would restart the rebuild loop. */
+const CHALLENGE_COMPILATION_LIMIT = 1;
+/** Repairs happen inside the original challenge tool call. Four targeted edits
+ *  are enough to fix an ordinary compiler/test mismatch without turning the
+ *  validator into an unbounded second agent loop. */
+const CHALLENGE_REPAIR_LIMIT = 4;
+const PUBLIC_CHALLENGE_RETRY_INSTRUCTION = "When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run.";
+const PRIVATE_CHALLENGE_REPAIR_INSTRUCTION = "Propose exactly one challenge candidate per turn. If it is invalid, the host retains that candidate and applies bounded compiler-directed field and file tweaks inside the same tool call. Never call create_question or replace_current_question again in that turn; the host either publishes the repaired candidate or selects its validated fallback.";
 /**
  * How many times one stage may fail to produce a valid call before the loop
  * stops asking it the same way.
@@ -261,9 +270,9 @@ async function callHostTool(
   name: string,
   input: unknown,
   record?: (name: string, input: unknown, value: unknown) => void,
+  repair?: { provider: PiProviderInput; signal: AbortSignal },
 ) {
   const id = randomUUID();
-  const result = new Promise((resolve, reject) => pendingTools.set(id, { resolve, reject }));
   /* Split before anything else happens to it. The title is for the transcript and
      the rest is the call: passing the title through to the host would hand a tool
      an argument it never declared, and `create_question` forwards its whole input
@@ -275,15 +284,21 @@ async function callHostTool(
   const payload = { input: toolPayload(name, args) };
   const titled = { ...summary, ...(actionTitle ? { actionTitle } : {}) };
   parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "start", callId: id, ...titled, ...payload } });
-  parentPort.postMessage({ kind: "tool-call", id, requestId: runId, sessionId, name, input: args });
   try {
-    const value = await result;
-    record?.(name, args, value);
+    let finalInput = args;
+    let value = await requestHostTool(id, runId, sessionId, name, finalInput);
+    if (repair && (name === "create_question" || name === "replace_current_question") && !isPlayableQuestion(value)) {
+      const repaired = await repairRejectedChallenge(runId, sessionId, name, finalInput, value, repair);
+      finalInput = repaired.input;
+      value = repaired.value;
+    }
+    record?.(name, finalInput, value);
     // Compilation rejection is an expected tool result rather than an IPC
     // error, but it must never be rendered as a successfully created
     // challenge. Only a playable result reaches durable question storage.
     const published = !["create_question", "replace_current_question", "create_fallback_question", "assign_practice_problem"].includes(name) || isPlayableQuestion(value);
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...titled, ...payload, output: toolPayload(name, value) } });
+    const finalPayload = { input: toolPayload(name, finalInput) };
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...titled, ...finalPayload, output: toolPayload(name, value) } });
     return value;
   } catch (error) {
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...titled, ...payload, output: toolPayload(name, { error: error instanceof Error ? error.message : String(error) }) } });
@@ -291,6 +306,63 @@ async function callHostTool(
   }
 }
 
+/** Send a host call without creating another transcript row. Challenge repair
+ *  uses this under the one create/replace row the learner already sees. */
+function requestHostTool(id: string, runId: string, sessionId: string, name: string, input: unknown): Promise<unknown> {
+  const result = new Promise<unknown>((resolve, reject) => pendingTools.set(id, { resolve, reject }));
+  parentPort.postMessage({ kind: "tool-call", id, requestId: runId, sessionId, name, input });
+  return result;
+}
+
+/**
+ * Repair a rejected design in place.
+ *
+ * The compiler owns the error and the rejected input is the closest thing to a
+ * source tree, so both stay inside this tool call. The repair model returns only
+ * changed top-level fields; file maps are merged by path so fixing one test does
+ * not regenerate the statement, reference, starter, and every other test.
+ */
+async function repairRejectedChallenge(
+  runId: string,
+  sessionId: string,
+  name: "create_question" | "replace_current_question",
+  initialInput: unknown,
+  initialResult: unknown,
+  repair: { provider: PiProviderInput; signal: AbortSignal },
+): Promise<{ input: unknown; value: unknown }> {
+  let candidate = objectRecord(initialInput);
+  let value = initialResult;
+  let attempts = 0;
+  for (; attempts < CHALLENGE_REPAIR_LIMIT && !isPlayableQuestion(value); attempts += 1) {
+    const failures = failedChecks(value);
+    if (!failures.length || failures.some((failure) => failure.startsWith("session lifecycle:"))) break;
+    const timeout = AbortSignal.timeout(AGENT_PHASE_TIMEOUT_MS);
+    const signal = AbortSignal.any([repair.signal, timeout]);
+    try {
+      const answer = await piCompleteText(
+        repair.provider,
+        "You repair one rejected coding challenge. Return one JSON object containing only the top-level fields that must change. Preserve every omitted field exactly. For starterFiles, referenceFiles, visibleTests, and hiddenTests, include only changed paths; the host merges them into the retained candidate. Never return markdown fences, commentary, actionTitle, or a whole rebuilt candidate unless every field is genuinely implicated by the diagnostic.",
+        `Compiler failures:\n${failures.map((failure, index) => `${index + 1}. ${failure}`).join("\n")}\n\nRetained candidate:\n${stableJson(candidate)}`,
+        signal,
+        "Challenge repair timed out.",
+      );
+      const changes = parseRepairChanges(answer);
+      if (!changes || !Object.keys(changes).length) break;
+      candidate = mergeQuestionChanges(candidate, changes);
+      value = await requestHostTool(randomUUID(), runId, sessionId, name, candidate);
+    } catch (error) {
+      /* Stopping belongs to the learner and must end the turn. A failed private
+         repair, however, leaves the compiler's original rejection intact so the
+         outer bounded controller can still choose its existing fallback. */
+      if (repair.signal.aborted) throw error;
+      break;
+    }
+  }
+  if (value && typeof value === "object") {
+    value = { ...(value as Record<string, unknown>), repairAttempts: attempts };
+  }
+  return { input: candidate, value };
+}
 
 /** Files a tool writes, counted so the renderer can show real `+N -N` stats. */
 function summarizeToolInput(name: string, input: unknown): { label?: string; files?: Array<{ path: string; added: number; removed: number }> } {
@@ -459,6 +531,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
      already answered can be taken off the table — see `REPEATED_CALL_LIMIT`. */
   const callCounts = new Map<string, number>();
   const phaseExecutions = new Map<string, { phase: number; promise: Promise<unknown> }>();
+  const turnExecutions = new Map<string, Promise<unknown>>();
   let currentPhase = -1;
   let controlPhaseTimeout: ((waiting: boolean) => void) | null = null;
   const protocolFailures = new Map<string, { count: number; detail: string }>();
@@ -475,6 +548,11 @@ async function runTurn(request: Request, stopped: AbortSignal) {
      described differently look like two different pieces of work — which is
      exactly what this cache exists to collapse. */
   const invoke = (name: string, input: unknown) => {
+    const turnKey = turnExecutionKey(name);
+    if (turnKey) {
+      const prior = turnExecutions.get(turnKey);
+      if (prior) return prior;
+    }
     const signature = phaseExecutionKey(name, stableJson(splitActionTitle(input).arguments));
     const cached = phaseExecutions.get(signature);
     if (cached?.phase === currentPhase) return cached.promise;
@@ -484,13 +562,29 @@ async function runTurn(request: Request, stopped: AbortSignal) {
           try { return await callHostTool(request.id, request.payload.sessionId, name, input, record); }
           finally { controlPhaseTimeout?.(false); }
         })()
-      : callHostTool(request.id, request.payload.sessionId, name, input, record);
+      : callHostTool(
+          request.id,
+          request.payload.sessionId,
+          name,
+          input,
+          record,
+          name === "create_question" || name === "replace_current_question"
+            ? { provider: request.payload.provider, signal: stopped }
+            : undefined,
+        );
+    if (turnKey) turnExecutions.set(turnKey, promise);
     phaseExecutions.set(signature, { phase: currentPhase, promise });
     return promise;
   };
   const tools = piAgentTools((name) => allowed.has(name), invoke);
   const toolChoice: ToolChoiceRef = { current: undefined };
-  const agent = createTrainingAgent(request.payload.provider, instructions().replaceAll("Training Agent","Spar"), toolChoice);
+  const agent = createTrainingAgent(
+    request.payload.provider,
+    instructions()
+      .replace(PUBLIC_CHALLENGE_RETRY_INSTRUCTION, PRIVATE_CHALLENGE_REPAIR_INSTRUCTION)
+      .replaceAll("Training Agent", "Spar"),
+    toolChoice,
+  );
   try {
     const usage: unknown[] = [];
     let finalText = "";
@@ -695,6 +789,11 @@ async function runTurn(request: Request, stopped: AbortSignal) {
  * fallback presented as bespoke would misrepresent the evidence it produces.
  */
 async function publishFallbackChallenge(request: Request, outcomes: Map<string, unknown[]>, exhausted: { attempts: number; failure: string }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  /* A rejected replacement leaves a valid current challenge in place. Do not
+     overwrite learner work with the generic creation fallback. */
+  if ((outcomes.get("replace_current_question")?.length ?? 0) > 0) {
+    return { ok: true, text: `I could not get that revision through validation after repairing the retained candidate, so I left your current challenge unchanged.${exhausted.failure ? ` The remaining validation issue was: ${exhausted.failure}` : ""}` };
+  }
   const language = requestedLanguage(outcomes);
   try {
     const value = await callHostTool(request.id, request.payload.sessionId, "create_fallback_question", { language });
@@ -930,7 +1029,7 @@ Then aim the next question at what the behaviour exposes rather than at the scor
  * do something, so the bar has to be evidence rather than encouragement.
  */
 function conceptDoctrine() {
-  return `Concepts are Spar's shared vocabulary for what a challenge is about, and they are how the learner and every later turn find their own history. Every create_question and replace_current_question call must carry concepts. Tag at the resolution a decision could be made from: window-invariant-restoration rather than sliding-window, aliasing rather than references-and-mutation, state-definition rather than dynamic-programming. Exactly one tag has role primary and it must name what the challenge is actually aimed at — the same thing the Training Target's specificGap describes — with the rest supporting. Call read_concept_graph before tagging a topic you have not tagged before, and reuse the slugs it returns rather than inventing a near-duplicate; introduce a new slug only when nothing returned covers what you are really testing, and give it a title, kind and parentSlug when you do. Concept evidence is the sharpest instrument you have for aiming the next question: before choosing a target on a session-start or attempt-complete turn, call search_concept_evidence for the area in question and read its subConcepts before its totals, because an area that averages out fine routinely hides one sub-concept the learner has never once passed. A concept with several failures and no passes is where to teach; one with a single pass is not yet learned; one the learner has never met is not a weakness. Note replacedUnderThisConcept as evidence about your own aim rather than about them.
+  return `Concepts are Spar's shared vocabulary for what a challenge is about, and they are how the learner and every later turn find their own history. Every create_question and replace_current_question call must carry concepts. Tag at the resolution a decision could be made from: window-invariant-restoration rather than sliding-window, aliasing rather than references-and-mutation, state-definition rather than dynamic-programming. Exactly one tag has role primary and it must name what the challenge is actually aimed at — the same thing the Training Target's specificGap describes — with the rest supporting. Call read_concept_graph before tagging a topic you have not tagged before, and reuse the slugs it returns rather than inventing a near-duplicate; introduce a new slug only when nothing returned covers what you are really testing, and give it a title, kind and parentSlug when you do. Concept evidence is the sharpest instrument you have for aiming the next question: before choosing a target on a session-start or attempt-complete turn, call search_concept_evidence for the area in question and read its subConcepts before its totals, because an area that averages out fine routinely hides one sub-concept the learner has never once passed. A concept with several failures and no passes is where to teach; one with a single pass is not yet learned; one the learner has never met is not a weakness. Note replacedUnderThisConcept as evidence about your own aim rather than about them. Every authored challenge must also classify requiresComplexityAnalysis explicitly: true only when asymptotic time and auxiliary-space reasoning is useful evidence for this task, not merely because it contains code or uses a function.
 
 An Ability is what the learner is told they can now do, so treat it as something granted on evidence rather than as a document you keep. Introduce one with upsert_ability when you set a target — that is the hypothesis, and it is correctly uncertain with no evidence behind it. Then, once deterministic outcomes actually support it, call it again with the evidence event ids and give it the three things that make it an ability rather than notes: a summary of one sentence, addressed to the learner, naming what they can do and under what conditions; the concepts it covers, using slugs you have tagged challenges with, so they can reach the evidence themselves; and up to four practice drills, each phrased as the learner's own first-person goal because each one starts a session. Make the drills genuinely different from each other — a new transfer context, a harsher constraint, a larger scale, a repair instead of a build — and never merely "the same thing but harder". Do not grant an ability from one passing attempt, do not grant one from a challenge the learner walked away from, and never write a summary that claims more than the recorded outcomes support.`;
 }

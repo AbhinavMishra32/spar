@@ -132,10 +132,19 @@ export function phaseExecutionKey(name: string, inputSignature: string): string 
 }
 
 /**
+ * Challenge authoring is one public mutation for the whole turn, even if the
+ * provider advances to another phase or switches from create to replace. The
+ * host repairs a rejected candidate privately inside that original call.
+ */
+export function turnExecutionKey(name: string): string | null {
+  return name === "create_question" || name === "replace_current_question" ? "challenge-authoring" : null;
+}
+
+/**
  * Deterministic controller policy. The model supplies arguments for the one
  * action exposed by a stage; it never chooses the stage sequence itself.
  */
-export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unknown[]>, challengeCompilationLimit = 15, context: { hasActiveQuestion?: boolean; webSearch?: boolean; practiceSource?: boolean } = {}): ToolStage {
+export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unknown[]>, challengeCompilationLimit = 1, context: { hasActiveQuestion?: boolean; webSearch?: boolean; practiceSource?: boolean } = {}): ToolStage {
   const completed = (name: string) => (outcomes.get(name)?.length ?? 0) > 0;
   /* An assignment counts as an attempt at setting the challenge, exactly like a
      compilation. Without this a source that keeps refusing — every candidate
@@ -216,7 +225,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   /* A challenge the learner has not finished is the session's current state, and
      the host refuses to publish a second one over it. Forcing create_question
      here spent the whole compilation budget on candidates that were rejected for
-     lifecycle before they were ever compiled — fifteen times, then a fallback
+     lifecycle before they were ever compiled — repeatedly, then a fallback
      that was refused for the same reason. There is nothing for this turn to do. */
   if (context.hasActiveQuestion) return { activeTools: [], toolChoice: "none" };
   if (turnKind === "session-start") {
@@ -244,7 +253,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
        model that has not seen the existing slugs invents a near-duplicate for a
        concept the learner already has evidence under — which splits that
        evidence in two and hides both halves. Gated on the target still being
-       open so a rejected candidate retries the compiler, not the vocabulary. */
+       open so challenge authoring stays focused on the compiler, not the vocabulary. */
     if (!completed("set_training_target")) {
       if (!completed("read_concept_graph")) return { activeTools: ["read_concept_graph"], toolChoice: "required" };
       return { activeTools: ["set_training_target"], toolChoice: "required" };

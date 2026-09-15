@@ -5,8 +5,8 @@ type Language = QuestionDesign["language"];
 /**
  * The last resort when every model-authored candidate has been rejected.
  *
- * A session that ends with "challenge generation stopped after 15 rejected
- * attempts" has taught the learner nothing and left them nowhere to go. These
+ * A session whose authored candidate still fails after private repair has
+ * taught the learner nothing and left them nowhere to go. These
  * designs are held to the same bar as any other candidate — they are compiled
  * and validated by the host like everything else, never trusted — but they are
  * written against the build contract rather than guessed at, so validation

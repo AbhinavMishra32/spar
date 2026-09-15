@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, turnExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 
 const TURN_KINDS: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message", "challenge-revision"];
 
@@ -285,7 +285,7 @@ describe("Training Agent controller policy", () => {
     expect(nextToolStage("attempt-complete", outcomes)).toEqual({ activeTools: ["set_training_target"], toolChoice: "required" });
   });
 
-  it("retries rejected challenge compilations within the bounded budget", () => {
+  it("exhausts challenge authoring after the first rejected public candidate", () => {
     const outcomes = new Map<string, unknown[]>([
       ["search_learner_model", [{ result: { passages: [] } }]],
       ["search_attempt_history", [{ result: { attempts: [] } }]],
@@ -294,16 +294,18 @@ describe("Training Agent controller policy", () => {
       ["set_training_target", [{ result: { committed: true } }]],
       ["create_question", [{ result: { status: "invalid" } }]],
     ]);
-    expect(nextToolStage("session-start", outcomes).activeTools).toEqual(["create_question"]);
+    const stage = nextToolStage("session-start", outcomes);
+    expect(stage.activeTools).toEqual([]);
+    expect(stage.exhausted?.attempts).toBe(1);
   });
 
-  it("reports exhaustion after fifteen rejected candidates instead of ending the turn", () => {
+  it("reports compiler failure details when an explicit authoring budget is exhausted", () => {
     const rejected = { result: { status: "invalid", report: { checks: [{ name: "reference solution", passed: false, detail: "exit 1" }] } } };
-    const outcomes = new Map<string, unknown[]>([["create_question", Array.from({ length: 15 }, () => rejected)]]);
-    const stage = nextToolStage("session-start", outcomes);
+    const outcomes = new Map<string, unknown[]>([["create_question", Array.from({ length: 3 }, () => rejected)]]);
+    const stage = nextToolStage("session-start", outcomes, 3);
     // The controller falls back to a host-authored challenge from here, so the
     // budget running out must be reportable state rather than a thrown error.
-    expect(stage.exhausted).toMatchObject({ attempts: 15 });
+    expect(stage.exhausted).toMatchObject({ attempts: 3 });
     expect(stage.exhausted?.failure).toContain("reference solution: exit 1");
     expect(stage.activeTools).toEqual([]);
   });
@@ -312,6 +314,12 @@ describe("Training Agent controller policy", () => {
     expect(phaseExecutionKey("create_question", '{"title":"Count positives"}')).toBe("create_question");
     expect(phaseExecutionKey("create_question", '{"title":"Count values above a threshold"}')).toBe("create_question");
     expect(phaseExecutionKey("search_learner_model", '{"query":"arrays"}')).not.toBe(phaseExecutionKey("search_learner_model", '{"query":"loops"}'));
+  });
+
+  it("collapses create and replace into one challenge-authoring mutation per turn", () => {
+    expect(turnExecutionKey("create_question")).toBe("challenge-authoring");
+    expect(turnExecutionKey("replace_current_question")).toBe("challenge-authoring");
+    expect(turnExecutionKey("read_ability")).toBeNull();
   });
 });
 
