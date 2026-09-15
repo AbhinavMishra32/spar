@@ -137,15 +137,20 @@ export function ModelPicker({
       open={open}
     >
       {/* At rest this is a label that happens to be clickable: no fill, no
-          chevron, just the mark and the name at full strength, because the model
-          in force is worth reading and nothing else here is. The pill and the
-          chevron are what the pointer brings — the affordance arrives when
-          something is there to use it. */}
+          chevron, no padding either — just the mark and the name at full
+          strength, because the model in force is worth reading and nothing else
+          here is. The pill and the chevron are what the pointer brings.
+
+          The padding going too is what makes the pair read as one line rather
+          than as two controls. Held at rest it is invisible but not absent: it
+          still stands 8px off the effort beside it, and with the row's own gap
+          that is 20px of nothing between two words that belong together. The
+          pill needs the room only when there is a pill. */}
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger
             aria-label="Model"
-            className="group inline-flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full py-0 pr-2 pl-1.5 text-thread text-foreground/90 transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
+            className="group inline-flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full py-0 pr-0 pl-0 text-thread text-foreground/90 transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:pr-2 hover:pl-1.5 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:pr-2 aria-expanded:pl-1.5 aria-expanded:text-foreground"
             ref={trigger}
           >
             <ProviderGlyph className="size-4 shrink-0" provider={active.id} />
@@ -277,12 +282,13 @@ export function ReasoningPicker({
     <DropdownMenu onOpenChange={setOpen} open={open}>
       {/* The quieter of the pair: muted at rest against the model's full
           strength, and it keeps its chevron there — the effort is a setting you
-          change, where the model is a fact you read. Same pill on hover. */}
+          change, where the model is a fact you read. Same pill on hover, and the
+          same bare rest: see the note on the model trigger. */}
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger
             aria-label="Reasoning effort"
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-2 text-thread text-muted-foreground transition-colors outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:text-foreground"
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-0 text-thread text-muted-foreground transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:px-2 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:px-2 aria-expanded:text-foreground"
             ref={trigger}
           >
             <span className="truncate">{current.label}</span>

@@ -1,5 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { ChevronDown } from "lucide-react";
 import { MotionConfig } from "motion/react";
 import {
   DropdownMenu,
@@ -27,6 +28,28 @@ function Harness() {
   return (
     <TooltipProvider>
       <div className="flex min-h-screen items-center justify-center gap-4 bg-background p-10">
+        {/* The composer pair, so the rest-to-hover spacing can be measured
+            rather than eyeballed. */}
+        <div className="flex items-center gap-1 px-0.5" id="composer-pair">
+          <button
+            className="group inline-flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full py-0 pr-0 pl-0 text-thread text-foreground/90 transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:pr-2 hover:pl-1.5 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:pr-2 aria-expanded:pl-1.5 aria-expanded:text-foreground"
+            id="pair-model"
+            type="button"
+          >
+            <span className="size-4 shrink-0 rounded-full bg-foreground/20" />
+            <span className="truncate">GPT-5.6 Luna</span>
+            <ChevronDown className="size-3.5 w-0 shrink-0 opacity-0 transition-[width,opacity] duration-150 group-hover:w-3.5 group-hover:opacity-50 group-aria-expanded:w-3.5 group-aria-expanded:opacity-50" />
+          </button>
+          <button
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-0 text-thread text-muted-foreground transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:px-2 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:px-2 aria-expanded:text-foreground"
+            id="pair-effort"
+            type="button"
+          >
+            <span className="truncate">High</span>
+            <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+          </button>
+        </div>
+
         <DropdownMenu>
           <DropdownMenuTrigger id="effort-trigger" className="rounded-md border px-3 py-1.5 text-sm">
             {effort}
