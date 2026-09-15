@@ -111,7 +111,7 @@ export function RunFold({
     <div className="min-w-0">
       <button
         aria-expanded={open}
-        className="group/fold -mx-1 flex min-h-6 items-center gap-1 px-1 pb-2 text-thread text-muted-foreground transition-colors select-none hover:text-foreground"
+        className="group/fold -mx-1 flex min-h-6 w-[calc(100%+0.5rem)] items-center gap-1 border-b border-border/40 px-1 pb-2 text-thread text-muted-foreground transition-colors select-none hover:text-foreground"
         onClick={() => { if (!open) void load(); setOverride(!open); }}
         type="button"
       >
