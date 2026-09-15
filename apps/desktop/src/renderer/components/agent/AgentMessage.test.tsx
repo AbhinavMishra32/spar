@@ -5,7 +5,7 @@ import type { AgentActivityStep } from "@spar/domain";
 vi.mock("./RunFold", () => ({ RunFold: () => <div>Worked for</div> }));
 vi.mock("./Markdown", () => ({ Markdown: ({ source }: { source: string }) => <p>{source}</p> }));
 vi.mock("./ActivityRow", () => ({
-  PROSE_GAP: 16, STEP_GAP: 8, ROW_GLYPH: "",
+  FINAL_GAP: 16, PROSE_GAP: 16, STEP_GAP: 8, ROW_GLYPH: "",
   ChallengePublished: () => <div>Published problem card</div>,
   RunFailure: () => null, SolveRead: () => null, ToolRow: () => null,
 }));
