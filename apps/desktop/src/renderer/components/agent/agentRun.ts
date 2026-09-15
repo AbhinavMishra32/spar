@@ -49,6 +49,11 @@ export type AgentRun = {
   steersConsumed: number;
 };
 
+/** Provider reasoning is visible only as a transient loader at the live edge. */
+export function reasoningAtLiveEdge(parts: readonly RunPart[], streaming: boolean, finalStartedAt?: number): boolean {
+  return streaming && finalStartedAt === undefined && parts.at(-1)?.kind === "reasoning";
+}
+
 /**
  * Folds the raw utility-process stream into the shape the transcript renders.
  * Consecutive text deltas append to the trailing text part so streaming reads as

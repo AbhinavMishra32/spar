@@ -1017,10 +1017,15 @@
     }
   }
 
-  /* The thread's prose face. Sizing is left exactly where the app sets it —
-     `--md-*` still derives the whole markdown scale from `.md-prose` above. */
+  /* Thread prose inherits the shared thread size. */
   .agent-transcript .md-prose {
     font-family: var(--thread-font);
+    color: var(--foreground);
+  }
+
+  .agent-transcript .learner-bubble {
+    line-height: 1.5;
+    background: color-mix(in oklab, var(--foreground) 5%, var(--background));
   }
 
   /* A panel that opens does not appear — it grows, at the reference's own
@@ -1654,11 +1659,78 @@
   }
 
   .code-block {
-    border-radius: var(--radius-lg);
-    border: 1px solid var(--code-border);
-    background: var(--code-background);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    margin-block: 16px;
+    border-radius: calc(0.75rem * 1.4);
+    corner-shape: superellipse(1.4);
+    border: 0.5px solid var(--code-border);
+    background: color-mix(in oklab, var(--code-background) 80%, transparent);
     font-family: var(--font-mono);
   }
+
+  .code-block-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    padding: 8px;
+    gap: 8px;
+    color: var(--muted-foreground);
+  }
+
+  .code-block-language {
+    margin-left: 4px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .code-block-actions {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .code-block-actions button {
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 150ms ease;
+  }
+
+  .code-block-actions button:hover { color: var(--foreground); }
+  .code-block-actions button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .code-block-body {
+    max-height: 400px;
+    overflow: auto;
+    margin: 0;
+    padding: 8px 8px 12px;
+    border-radius: inherit;
+    line-height: 1.55;
+    counter-reset: code-line;
+    tab-size: 4;
+  }
+
+  .code-block-line { display: block; min-height: 1.55em; }
+  .code-block-line::before {
+    content: counter(code-line);
+    counter-increment: code-line;
+    display: inline-block;
+    width: 24px;
+    margin-right: 16px;
+    text-align: right;
+    color: color-mix(in oklab, var(--muted-foreground) 50%, transparent);
+    user-select: none;
+  }
+
 }
 
 /* The dwell at each end is 10% of the run, so a name that has been walked into

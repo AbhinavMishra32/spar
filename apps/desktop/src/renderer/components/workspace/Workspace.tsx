@@ -95,6 +95,7 @@ export function Workspace({
      see its `hiddenRun` prop. */
   const [suite, setSuite] = useState<RunSuite>("visible");
   const [sending, setSending] = useState(false);
+  const [optimisticMessages, setOptimisticMessages] = useState<Array<{id:string;body:string;createdAt:number}>>([]);
   const [outcome, setOutcome] = useState<RunOutcome>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("testcase");
   const [draft, setDraft] = useState("");
@@ -348,6 +349,8 @@ export function Workspace({
        that remains is against two sends racing each other, not against the
        agent being busy — being busy is exactly when a correction matters. */
     if (!body || !api || sendingRef.current) return;
+    const optimistic={id:crypto.randomUUID(),body,createdAt:Date.now()};
+    setOptimisticMessages((current)=>[...current,optimistic]);
     sendingRef.current=true;
     setSending(true);
     setDraft("");
@@ -355,8 +358,10 @@ export function Workspace({
       await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
       await onRefresh();
     } catch (error) {
+      setDraft((current)=>current||body);
       onError(message(error));
     } finally {
+      setOptimisticMessages((current)=>current.filter((item)=>item.id!==optimistic.id));
       sendingRef.current=false;
       setSending(false);
     }
@@ -365,6 +370,8 @@ export function Workspace({
   const answerQuestion = async (answer: string) => {
     const body = answer.trim();
     if (!body || !api || sendingRef.current) return;
+    const optimistic={id:crypto.randomUUID(),body,createdAt:Date.now()};
+    setOptimisticMessages((current)=>[...current,optimistic]);
     sendingRef.current = true;
     setSending(true);
     try {
@@ -373,6 +380,7 @@ export function Workspace({
     } catch (error) {
       onError(message(error));
     } finally {
+      setOptimisticMessages((current)=>current.filter((item)=>item.id!==optimistic.id));
       sendingRef.current = false;
       setSending(false);
     }
@@ -601,6 +609,7 @@ export function Workspace({
             onComplexityReview={()=>void reviewComplexity()}
             onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSettings={onOpenSettings}
+            optimisticMessages={optimisticMessages}
             onSend={() => void send()}
             onAnswer={(answer) => void answerQuestion(answer)}
             onEditMessage={edit}

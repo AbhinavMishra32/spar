@@ -3,7 +3,7 @@ import { MessageSquare, SquareCode } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { ViewSwitch } from "@/components/ui/view-switch";
-import { AgentThread } from "../agent/AgentThread";
+import { AgentThread, type OptimisticLearnerMessage } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
 import { ComposerModelPicker } from "../agent/ModelPicker";
@@ -43,6 +43,7 @@ export function AgentPanel({
   onComplexityChange,
   onComplexityReview,
   onComplexityAcknowledge,
+  optimisticMessages,
 }: {
   answering: boolean;
   concepts?: ConceptContext | undefined;
@@ -66,6 +67,7 @@ export function AgentPanel({
   onComplexityChange(next: Pick<ComplexityCheckpointState, "time" | "space">): void;
   onComplexityReview(): void;
   onComplexityAcknowledge(): void;
+  optimisticMessages: OptimisticLearnerMessage[];
 }) {
   const [view, setView] = useState<View>("problem");
   const busy = run?.status === "streaming";
@@ -154,7 +156,7 @@ export function AgentPanel({
             {view === "problem" ? (
               <ProblemView concepts={concepts} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
             ) : (
-              <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} onEditMessage={onEditMessage} run={run} undoable={undoable} />
+              <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} onEditMessage={onEditMessage} optimisticMessages={optimisticMessages} run={run} undoable={undoable} />
             )}
           </motion.div>
         </AnimatePresence>

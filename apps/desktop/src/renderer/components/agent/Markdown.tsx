@@ -1,12 +1,12 @@
-import { Fragment, memo, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
 import { useCodeTheme } from "@/hooks/use-code-theme";
 import { highlight, type Span } from "@/lib/highlight";
 import { plainMath } from "@/lib/tex";
-import { Check, Copy } from "lucide-react";
+import { Check, Code2, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 import { parseReference, Reference, useMarkdownLinks } from "./MarkdownLinks";
 import { parse, type Block } from "./markdownBlocks";
-import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 
 /** Inline spans: `code`, **bold**, *italic*, and real links.
  *
@@ -192,51 +192,67 @@ function Colorized({ body, language }: { body: string; language: string }) {
     return () => { alive = false; };
   }, [body, language]);
 
+  const lines = useMemo(() => {
+    const result: Span[][] = [[]];
+    for (const span of spans ?? [{ text: body, slot: null }]) {
+      span.text.split("\n").forEach((text, index) => {
+        if (index > 0) result.push([]);
+        result[result.length - 1]!.push({ ...span, text });
+      });
+    }
+    // The closing fence's newline is not an extra source line.
+    if (body.endsWith("\n") && result.length > 1) result.pop();
+    return result;
+  }, [body, spans]);
+
   return (
-    <pre className="app-scroll overflow-x-auto px-2.5 py-2 text-thread leading-[1.55] text-[var(--code-foreground)]">
-      {/* Plain until the grammar resolves, so a block that is still streaming is
-          readable rather than blank. Rendered as elements rather than as HTML —
-          there is no markup to inject, only text and a colour. */}
+    <pre className="code-block-body app-scroll text-thread text-[var(--code-foreground)]" tabIndex={0} aria-label={`${language || "Plain text"} code`}>
       <code>
-        {spans
-          ? spans.map((span, index) => (
-              <span key={index} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>
-                {span.text}
-              </span>
-            ))
-          : body}
+        {lines.map((line, index) => (
+          <span className="code-block-line" key={index}>
+            {line.map((span, token) => (
+              <span key={token} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>{span.text}</span>
+            ))}
+            {index < lines.length - 1 ? "\n" : null}
+          </span>
+        ))}
       </code>
     </pre>
   );
 }
 
 function CodeBlock({ language, body }: { language: string; body: string }) {
-  const [copied, setCopied] = useState(false);
-  // A fence can say anything — `bash`, `json`, `text`. Only the three Construct trains
-  // in have a mark; the rest keep the tag they were written with.
   const marked = languageOf(language);
-  const copy = () => {
-    void navigator.clipboard.writeText(body).then(() => {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const reset = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (reset.current) clearTimeout(reset.current); }, []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(body);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    });
+      setCopyError(false);
+      if (reset.current) clearTimeout(reset.current);
+      reset.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopyError(true);
+    }
   };
 
+
   return (
-    <div className="code-block group/code my-2 overflow-hidden">
-      <div className="flex h-7 items-center justify-between border-b border-border/70 px-2.5">
-        {marked
-          ? <LanguageGlyph className="size-3 text-muted-foreground" language={marked} />
-          : <span className="font-mono text-thread text-muted-foreground">{language}</span>}
-        <button
-          className="grid size-5 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover/code:opacity-100 hover:bg-accent hover:text-foreground"
-          onClick={copy}
-          title="Copy"
-          type="button"
-        >
-          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-        </button>
+    <div className="code-block">
+      <div className="code-block-header">
+        <span className="code-block-language" title={language || "Plain text"}>
+          {marked ? <LanguageGlyph className="size-3.5" language={marked} /> : <Code2 className="size-3.5" role="img" aria-label={language || "Plain text"} />}
+        </span>
+        <div className="code-block-actions">
+          <button aria-label={copied ? "Copied" : "Copy code"} title={copyError ? "Copy failed — try again" : copied ? "Copied" : "Copy code"} onClick={() => void copy()} type="button">
+            {copied ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
+          </button>
+        </div>
       </div>
+      <span className="sr-only" role="status">{copyError ? "Could not copy code. Try again." : copied ? "Code copied" : ""}</span>
       <Colorized body={body} language={language} />
     </div>
   );

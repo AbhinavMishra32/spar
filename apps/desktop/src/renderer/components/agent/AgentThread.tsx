@@ -4,11 +4,14 @@ import { ThinkingOrb } from "thinking-orbs";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { ChallengePublished, PROSE_GAP, Reasoning, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
+import { ChallengePublished, PROSE_GAP, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
 import { ExplainedTrace } from "./ExplainedTrace";
 import { SystemEvent } from "./SystemEvent";
-import { groupParts, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, reasoningAtLiveEdge, type AgentRun, type RunPart } from "./agentRun";
 import { RunFold } from "./RunFold";
+import { unreconciledOptimisticMessages, type OptimisticLearnerMessage } from "./optimisticMessages";
+
+export type { OptimisticLearnerMessage } from "./optimisticMessages";
 
 /** Construct stores the same shape Spar streamed, so the thread needs no
  *  adapter — only the name of the type it reads. */
@@ -84,11 +87,13 @@ function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefi
   const boundary = run.finalFrom ?? run.parts.length;
   const work = run.parts.slice(0, boundary);
   const reply = run.parts.slice(boundary);
+  const thinkingAtEdge = reasoningAtLiveEdge(work, streaming, run.finalStartedAt);
   return (
     <div className="min-w-0">
       <PhaseLine live={streaming} phase={phase} />
       <RunFold finalStartedAt={run.finalStartedAt} live={streaming} startedAt={run.startedAt}>
         <Rows parts={work} />
+        {thinkingAtEdge && <div style={{ marginTop: STEP_GAP }}><ThinkingLine /></div>}
         {streaming && run.finalStartedAt === undefined && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={work} /></div>}
       </RunFold>
       {reply.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={reply} /></div>}
@@ -154,9 +159,17 @@ function Rows({ parts }: { parts: RunPart[] }) {
            the row beneath it, and a pad here on top of that was the part that
            made the spacing around prose impossible to predict. */
         if (part.kind === "text") return wrap(<div className="text-foreground"><Markdown source={part.body} /></div>);
-        if (part.kind === "reasoning") return wrap(<Reasoning part={part} />);
+        if (part.kind === "reasoning") {
+          /* Provider reasoning is runtime state, not transcript content. Its
+             position in this chronological array used to leave old "Thinking"
+             rows above later prose and tools. The live edge draws one transient
+             loader in `LiveRun`; settled reasoning draws nothing. */
+          return null;
+        }
         if (part.kind === "tool-row") {
-          return wrap(<ToolRow after={part.after} continues={continues} part={part.part} thinking={part.thinking} />);
+          /* Tool input and output remain inspectable. Provider reasoning bound to
+             the tool is intentionally not rendered as another content surface. */
+          return wrap(<ToolRow continues={continues} part={part.part} />);
         }
         if (part.kind === "challenge") return wrap(<ChallengePublished part={part.part} />);
         if (part.kind === "solve-read") return wrap(<SolveRead part={part.part} />);
@@ -165,6 +178,18 @@ function Rows({ parts }: { parts: RunPart[] }) {
         return wrap(<div className="truncate text-thread text-[var(--transcript-step)]">{part.body}</div>);
       })}
     </>
+  );
+}
+
+/** One transient state, always after everything that has already happened. */
+function ThinkingLine() {
+  return (
+    <div className="-mx-1 flex items-center gap-1.5 py-0.5">
+      <span className={cn(ROW_GLYPH, "relative")}>
+        <ThinkingOrb aria-label="Thinking" size={20} state="working" style={{ width: 16, height: 16 }} />
+      </span>
+      <span className="thinking-shimmer min-w-0 truncate text-thread font-medium">Thinking</span>
+    </div>
   );
 }
 
@@ -345,7 +370,7 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
       {editable && onEdit && (
         <button
           aria-label="Edit and run again from here"
-          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/0 transition-colors group-hover/said:text-muted-foreground hover:!text-foreground"
+          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/0 transition-colors group-hover/said:text-muted-foreground focus-visible:text-foreground hover:!text-foreground"
           onClick={() => {
             setDraft(body);
             setEditing(true);
@@ -361,7 +386,7 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
           whether the agent has them yet. */}
       <div
         className={cn(
-          "max-w-[min(fit-content,85%)] min-w-0 break-words rounded-xl bg-secondary px-3 py-1.5 text-thread leading-[1.55] whitespace-pre-wrap transition-opacity",
+          "max-w-[min(fit-content,80%)] min-w-0 break-words learner-bubble rounded-xl bg-secondary px-3 py-2 text-thread leading-[1.55] whitespace-pre-wrap transition-opacity",
           queued && "opacity-60",
         )}
         {...(queued ? { title: "Waiting for the agent to finish this step" } : {})}
@@ -381,6 +406,7 @@ export function AgentThread({
   footer,
   onEditMessage,
   undoable,
+  optimisticMessages = [],
   className,
 }: {
   messages: Message[];
@@ -399,6 +425,8 @@ export function AgentThread({
    *  is running. Editing under a live turn would cut the transcript beneath the
    *  turn still writing into it. */
   undoable?: ReadonlySet<string> | undefined;
+  /** Learner bubbles inserted before IPC persistence/agent startup completes. */
+  optimisticMessages?: OptimisticLearnerMessage[] | undefined;
   className?: string;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -418,7 +446,7 @@ export function AgentThread({
     if (!pinned) return;
     const node = viewport.current;
     if (node) node.scrollTop = node.scrollHeight;
-  }, [messages, run, pinned]);
+  }, [messages, optimisticMessages, run, pinned]);
 
   useEffect(() => {
     const node = viewport.current;
@@ -435,7 +463,8 @@ export function AgentThread({
      stands in its place, and showing the project's empty state over a running
      kickoff is how a project that was working came to look like one that had
      never started. */
-  const isEmpty = messages.length === 0 && !visibleRun && !phase;
+  const visibleOptimistic = unreconciledOptimisticMessages(messages, optimisticMessages);
+  const isEmpty = messages.length === 0 && visibleOptimistic.length === 0 && !visibleRun && !phase;
 
   /* Which of the learner's messages the running turn has not picked up yet.
      Anything they said after the turn started was queued, and the turn drains
@@ -456,8 +485,8 @@ export function AgentThread({
       <div ref={viewport} className="app-scroll h-full overflow-y-auto overflow-x-hidden px-5 pt-4 pb-6">
         <div
           className={cn(
-            "transcript-column flex min-h-full min-w-0 flex-col gap-2.5",
-            isEmpty ? "justify-center" : "justify-end",
+            "transcript-column flex min-h-full min-w-0 flex-col gap-6",
+            isEmpty ? "justify-center" : "justify-start",
           )}
         >
           {header}
@@ -480,6 +509,9 @@ export function AgentThread({
                     <AgentMessage activity={item.activity} activityCount={item.activityCount ?? 0} body={item.body} key={item.id} messageId={item.id} workedMs={item.workedMs ?? 0} />
                   ),
                 )}
+                {visibleOptimistic.map((item) => (
+                  <LearnerMessage body={item.body} editable={false} key={item.id} queued={run?.status === "streaming"} />
+                ))}
                 {visibleRun ? <LiveRun phase={phase} run={visibleRun} /> : <PhaseWait phase={phase} />}
                 {footer}
               </>

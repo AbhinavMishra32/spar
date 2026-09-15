@@ -4,7 +4,7 @@ import type { SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { message } from "@/lib/format";
 import { Toolbar } from "../shell/Toolbar";
-import { AgentThread } from "../agent/AgentThread";
+import { AgentThread, type OptimisticLearnerMessage } from "../agent/AgentThread";
 import { useStopTurn } from "@/hooks/use-stop-turn";
 import { useEditMessage } from "@/hooks/use-edit-message";
 import { Composer } from "../agent/Composer";
@@ -39,6 +39,7 @@ export function ChatView({
 }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [optimisticMessages, setOptimisticMessages] = useState<OptimisticLearnerMessage[]>([]);
   const pending = detail.pendingLearnerQuestion;
   const streaming = run?.status === "streaming";
   const stop = useStopTurn(detail.summary.id, onError);
@@ -47,6 +48,8 @@ export function ChatView({
   const send = async (answer?: string) => {
     const body = (answer ?? draft).trim();
     if (!api || !body) return;
+    const optimistic={id:crypto.randomUUID(),body,createdAt:Date.now()};
+    setOptimisticMessages((current)=>[...current,optimistic]);
     setBusy(true);
     setDraft("");
     try {
@@ -54,8 +57,10 @@ export function ChatView({
       else await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
       await onRefresh();
     } catch (error) {
+      if(answer===undefined)setDraft((current)=>current||body);
       onError(message(error));
     } finally {
+      setOptimisticMessages((current)=>current.filter((item)=>item.id!==optimistic.id));
       setBusy(false);
     }
   };
@@ -133,6 +138,7 @@ export function ChatView({
           </div>
         }
         messages={detail.messages}
+        optimisticMessages={optimisticMessages}
         run={run}
       />
 

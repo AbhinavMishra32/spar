@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupParts, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, reasoningAtLiveEdge, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
 
 const tool = (name: string): Extract<RunPart, { kind: "tool" }> => ({
   kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", startedAt: 0,
@@ -88,6 +88,21 @@ describe("transcript rows", () => {
     const published = { ...tool("create_question"), phase: "done" as const };
     const rows = groupParts([tool("search_learner_model"), tool("replay_attempt"), published]);
     expect(rows.map((row) => row.kind)).toEqual(["tool-row", "solve-read", "challenge"]);
+  });
+});
+
+describe("live thinking placement", () => {
+  const thought: RunPart = { kind: "reasoning", id: "thought", body: "working", open: true, startedAt: 0 };
+  const reply: RunPart = { kind: "text", id: "reply", body: "Here is what I found." };
+
+  it("shows thinking only when reasoning is the current live edge", () => {
+    expect(reasoningAtLiveEdge([tool("read_attempt"), thought], true)).toBe(true);
+    expect(reasoningAtLiveEdge([thought, reply], true)).toBe(false);
+  });
+
+  it("never keeps the loading state after the reply phase or completion", () => {
+    expect(reasoningAtLiveEdge([thought], true, 10)).toBe(false);
+    expect(reasoningAtLiveEdge([thought], false)).toBe(false);
   });
 });
 

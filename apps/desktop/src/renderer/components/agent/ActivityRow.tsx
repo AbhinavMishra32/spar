@@ -544,9 +544,24 @@ function StepDetail({ detail }: { detail: string }) {
  * standing in for anything: the reasoning deltas were arriving all along and
  * being dropped as protocol noise before they reached the transcript.
  */
-export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning" }> }) {
+export function Reasoning({ part, loadingOnly = false }: { part: Extract<RunPart, { kind: "reasoning" }>; loadingOnly?: boolean }) {
   const sections = thoughts(part.body);
   const seconds = Math.max(1, Math.round(((part.endedAt ?? Date.now()) - part.startedAt) / 1_000));
+
+  /* Live reasoning is state, not transcript copy. The provider's headings are
+     useful after the turn when somebody deliberately opens its work, but while
+     it runs they read like unexplained status messages and may stack up every
+     time the provider starts a fresh reasoning block. */
+  if (loadingOnly) {
+    return (
+      <div className={cn(ROW, "text-[var(--transcript-step)]")} role="status">
+        <span className={ROW_GLYPH}>
+          <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
+        </span>
+        <span className="thinking-shimmer min-w-0 truncate">Thinking</span>
+      </div>
+    );
+  }
 
   /* Live, and folded like everything else.
      
@@ -572,19 +587,17 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
   }
 
   if (!sections.length) return null;
-  /* Settled: one row per heading the model gave its own thinking, which is what
-     makes a long turn readable — "Resolving the language conflict" says something,
-     and seven rows of "Thought for 9s" say nothing.
+  /* Settled: one row per heading the model gave its own thinking, however many
+     there are.
 
-     Up to a point. Reasoning summaries are not all written the same way: some
-     models narrate a turn in two or three headings, and some head every
-     paragraph, which turned a single block of thinking into a column of ten grey
-     lines that pushed the actual work off the screen. Past that point the block
-     folds back into one row — the first heading still says what it was about, and
-     the rest is one click away. */
-  if (sections.length > THOUGHT_ROWS) {
-    return <ThoughtCluster sections={sections} settling={part.startedAt > 0} />;
-  }
+     There used to be a cap here — past three headings the block collapsed into a
+     single row with a "+11" chip and a scrolling list of every heading behind
+     it. That row was a third kind of thing in a thread that only has two: a
+     step is either thinking or a tool, and the learner reads the column by that
+     distinction. A summary row that is neither, holding a list of rows that are,
+     breaks the one rule the transcript has. The work already folds as a whole —
+     see `RunFold` — so the wall the cap was defending against is behind a
+     disclosure either way. */
   return (
     <div className="min-w-0">
       {sections.map((section, index) => (
@@ -602,66 +615,6 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
         </div>
       ))}
     </div>
-  );
-}
-
-/** How many headings one settled block of thinking may spend on its own rows
- *  before it folds into a single one. Three is the most a reader takes in as a
- *  list of steps rather than as a wall. */
-const THOUGHT_ROWS = 3;
-
-/**
- * A long block of thinking, folded.
- *
- * The first heading is the title, because it is the one the model wrote before
- * it knew where the thinking would end up and is the closest thing to a subject.
- * Opening it shows every section with its own heading, so nothing is lost — the
- * rows are just not all on screen at once.
- */
-function ThoughtCluster({ sections, settling }: { sections: Array<{ title?: string; body: string }>; settling: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [home, setHome] = useState(!settling);
-  useEffect(() => {
-    if (home) return;
-    const frame = requestAnimationFrame(() => setHome(true));
-    return () => cancelAnimationFrame(frame);
-  }, [home]);
-
-  const travel = {
-    paddingLeft: home ? ROW_INSET : UNDER_LABEL,
-    transition: "padding-left 260ms cubic-bezier(0.32, 0.72, 0, 1)",
-  };
-  const lead = sections.find((section) => section.title)?.title ?? sections[0]?.body ?? "Thinking";
-
-  return (
-    <Collapsible onOpenChange={setOpen} open={open}>
-      <CollapsibleTrigger className={cn(ROW, TRIGGER, "motion-reduce:transition-none")} style={travel}>
-        <span className="min-w-0 truncate">{lead}</span>
-        {/* What is behind the row, counted. "+11" beside a heading is the only
-            thing telling the learner that eleven more thoughts exist, so it is
-            drawn as a standing chip rather than as dimmed trailing text. */}
-        <span className="shrink-0 rounded-full bg-[var(--transcript-step-mark)]/12 px-1.5 py-px text-thread tabular-nums text-[var(--transcript-step)]">
-          +{sections.length - 1}
-        </span>
-        <Caret open={open} standing />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <FadedScroll className="mx-1.5 mb-1">
-          <div className="border-l border-border/70 pl-2.5">
-            {sections.map((section, index) => (
-              <div key={index} className={index > 0 ? "mt-2" : undefined}>
-                {section.title ? (
-                  <p className="text-thread leading-[1.6] font-medium text-[var(--transcript-step-strong)]">{section.title}</p>
-                ) : null}
-                {section.body ? (
-                  <p className="text-thread leading-[1.6] text-[var(--transcript-step)]">{section.body}</p>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </FadedScroll>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
 
