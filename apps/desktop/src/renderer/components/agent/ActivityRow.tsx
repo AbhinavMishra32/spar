@@ -128,11 +128,12 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "create_fallback_question":
     case "assign_practice_problem":
       return <IconPuzzle className={MARK} />;
-    /* Reading what they wrote. It comes back with their file in it now, so the
-       mark is their code rather than the neutral page every `read_` fell to. */
+    /* Reading what they wrote is a file operation. Use the same file mark as
+       the other read rows; the angle-bracket code mark looked like a broken
+       control beside these labels. */
     case "inspect_current_attempt":
     case "read_attempt":
-      return <IconCode className={MARK} />;
+      return <IconFile className={MARK} />;
     case "replay_attempt":
       return <IconHistory className={MARK} />;
     case "evaluate_attempt":
@@ -456,7 +457,7 @@ export const UNDER_LABEL = "1.625rem";
 /** The thread, as one absolutely positioned line per row: it hangs from the
  *  bottom of this row's mark (`top-6`) to 16px short of the block's foot, and
  *  the block's foot moves when the panel opens. */
-const RAIL = "bg-border absolute top-6 left-1/2 h-[calc(100%-16px)] min-h-2 w-px -translate-x-1/2";
+const RAIL = "bg-[var(--transcript-rail)] absolute top-6 left-1/2 h-[calc(100%-16px)] min-h-2 w-px -translate-x-1/2";
 /** The last step of a run draws no line — there is nothing under it to reach.
  *  Except when its own panel is open, where the line is what ties the panel to
  *  the row that opened it. */

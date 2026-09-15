@@ -474,6 +474,7 @@
   --transcript-step: oklch(14.5% 0 0 / 60%);
   --transcript-step-strong: oklch(14.5% 0 0 / 80%);
   --transcript-step-mark: oklch(14.5% 0 0 / 50%);
+  --transcript-rail: oklch(14.5% 0 0 / 22%);
   --border-surface-strong: oklch(14.5% 0 0 / 15%);
   --brand: oklch(14.5% 0 0);
   --code-foreground: #33363b;
@@ -619,6 +620,7 @@
   --transcript-step: oklch(98.5% 0 0 / 50%);
   --transcript-step-strong: oklch(98.5% 0 0 / 78%);
   --transcript-step-mark: oklch(98.5% 0 0 / 40%);
+  --transcript-rail: oklch(98.5% 0 0 / 34%);
   --border-surface-strong: oklch(98.5% 0 0 / 20%);
   --brand: oklch(98.5% 0 0);
   --code-foreground: #c9d1d9;
