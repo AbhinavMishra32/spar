@@ -4,7 +4,7 @@ import { ThinkingOrb } from "thinking-orbs";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { ChallengePublished, PROSE_GAP, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
+import { ChallengePublished, FINAL_GAP, PROSE_GAP, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
 import { ExplainedTrace } from "./ExplainedTrace";
 import { SystemEvent } from "./SystemEvent";
 import { groupParts, isChallengePublished, publishedRunArtifacts, reasoningAtLiveEdge, type AgentRun, type RunPart } from "./agentRun";
@@ -99,7 +99,7 @@ function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefi
         {streaming && run.finalStartedAt === undefined && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={work} /></div>}
       </RunFold>
       {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={published} /></div>}
-      {reply.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={reply} /></div>}
+      {reply.length > 0 && <div style={{ marginTop: FINAL_GAP }}><Rows parts={reply} /></div>}
     </div>
   );
 }
@@ -268,7 +268,7 @@ export function AgentMessage({ body, activity, activityCount, messageId, workedM
       )}
       {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={published} /></div>}
       {body.trim() && (
-        <div className="min-w-0 pb-2" style={{ marginTop: steps.length || deferred ? PROSE_GAP : undefined }}>
+        <div className="min-w-0 pb-2" style={{ marginTop: steps.length || deferred ? FINAL_GAP : undefined }}>
           <Markdown source={body} />
         </div>
       )}
