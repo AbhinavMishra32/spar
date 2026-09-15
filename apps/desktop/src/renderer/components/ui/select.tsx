@@ -69,7 +69,7 @@ function SelectContent({
       <SelectPrimitive.Content
         align={align}
         className={cn(
-          "menu-surface-opaque app-scroll relative z-50 max-h-(--radix-select-content-available-height) min-w-[11rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          "menu-surface-opaque app-scroll relative z-50 max-h-(--radix-select-content-available-height) min-w-[11rem] origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           position === "popper" && "w-(--radix-select-trigger-width)",
           className
         )}
@@ -118,7 +118,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex min-h-[1.625rem] w-full cursor-default items-center gap-2 rounded-[var(--radius-item)] py-1 pr-7 pl-2.5 text-content leading-none outline-none transition-colors duration-75 select-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-45 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-3.5",
+        "relative flex min-h-8 w-full cursor-default items-center gap-2 rounded-[var(--radius-item)] py-1 pr-8 pl-2.5 text-content leading-none outline-none transition-colors duration-75 select-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       data-slot="select-item"

@@ -9,7 +9,7 @@ import { challengeBand, type ProblemBand } from "@/lib/problems";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Meter } from "@/components/ui/meter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -796,7 +796,7 @@ function SessionRow({
                     <DropdownMenuItem onSelect={item.run} variant={item.destructive ? "destructive" : "default"}>
                       <item.icon />
                       <span className="flex-1">{item.label}</span>
-                      <kbd className="font-sans text-ui-sm text-muted-foreground/60 uppercase">{item.key}</kbd>
+                      <DropdownMenuShortcut className="uppercase">{item.key}</DropdownMenuShortcut>
                     </DropdownMenuItem>
                   </Fragment>
                 ))}

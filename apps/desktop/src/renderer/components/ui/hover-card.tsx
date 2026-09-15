@@ -74,7 +74,7 @@ function HoverCardContent({
               animate="visible"
               className={cn(
                 "floating-surface z-50 w-[19rem] origin-(--radix-hover-card-content-transform-origin) p-3 text-popover-foreground outline-none",
-                "data-closed:pointer-events-none",
+                "data-[state=closed]:pointer-events-none",
                 className,
               )}
               data-slot="hover-card-content"

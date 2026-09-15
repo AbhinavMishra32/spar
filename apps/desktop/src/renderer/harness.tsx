@@ -15,15 +15,42 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipKeys, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import "./theme.css";
 
 function Harness() {
   const [checked, setChecked] = React.useState("Item 3");
+  const [effort, setEffort] = React.useState("High");
+  const [fast, setFast] = React.useState(false);
 
   return (
     <TooltipProvider>
       <div className="flex min-h-screen items-center justify-center gap-4 bg-background p-10">
+        <DropdownMenu>
+          <DropdownMenuTrigger id="effort-trigger" className="rounded-md border px-3 py-1.5 text-sm">
+            {effort}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent className="min-w-[9rem]">
+            <DropdownMenuLabel>Effort</DropdownMenuLabel>
+            {["Off", "Low", "Medium", "High", "Extra High"].map((label) => (
+              <DropdownMenuCheckItem checked={effort === label} key={label} onSelect={() => setEffort(label)}>
+                <span className="flex-1 truncate">{label}</span>
+              </DropdownMenuCheckItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Options</DropdownMenuLabel>
+            <DropdownMenuItem
+              aria-checked={fast}
+              onSelect={(event) => { event.preventDefault(); setFast((value) => !value); }}
+              role="menuitemcheckbox"
+            >
+              <span className="flex-1 truncate">Fast mode</span>
+              <Switch checked={fast} className="pointer-events-none ml-auto" onCheckedChange={setFast} size="sm" tabIndex={-1} />
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
         <DropdownMenu>
           <DropdownMenuTrigger id="menu-trigger" className="rounded-md border px-3 py-1.5 text-sm">
             Open menu
@@ -36,13 +63,20 @@ function Harness() {
               </DropdownMenuCheckItem>
             ))}
             <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger id="sub-trigger">More</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                <DropdownMenuItem>Nested one</DropdownMenuItem>
-                <DropdownMenuItem>Nested two</DropdownMenuItem>
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+            {/* Three of them, because the thing worth testing is moving between
+                sub triggers — one submenu can never show the stall. */}
+            {["More", "Providers", "Elsewhere"].map((label, index) => (
+              <DropdownMenuSub key={label}>
+                <DropdownMenuSubTrigger id={index === 0 ? "sub-trigger" : `sub-trigger-${index}`}>
+                  {label}
+                </DropdownMenuSubTrigger>
+                <DropdownMenuSubContent>
+                  {Array.from({ length: 6 }, (_, row) => (
+                    <DropdownMenuItem key={row}>{label} {row}</DropdownMenuItem>
+                  ))}
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+            ))}
             <DropdownMenuItem variant="destructive">Delete</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -63,7 +97,10 @@ function Harness() {
           <TooltipTrigger id="tooltip-trigger" className="rounded-md border px-3 py-1.5 text-sm">
             Hover me
           </TooltipTrigger>
-          <TooltipContent>A tooltip</TooltipContent>
+          <TooltipContent>
+            Model
+            <TooltipKeys>⇧⌘M</TooltipKeys>
+          </TooltipContent>
         </Tooltip>
 
         <HoverCard>
