@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
+import { FileSearch } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -128,11 +129,11 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "create_fallback_question":
     case "assign_practice_problem":
       return <IconPuzzle className={MARK} />;
-    /* “Reading…” is an inspection action. The search mark reads cleanly at this
-       size and avoids the heavier file and code silhouettes in this gutter. */
+    /* Lucide already ships the combined document-lines + search glyph. It says
+       both what is being read and that this row is inspecting it. */
     case "inspect_current_attempt":
     case "read_attempt":
-      return <IconSearch className={MARK} />;
+      return <FileSearch className={MARK} strokeWidth={1.75} />;
     case "replay_attempt":
       return <IconHistory className={MARK} />;
     case "evaluate_attempt":
