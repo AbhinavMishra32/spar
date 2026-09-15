@@ -69,7 +69,7 @@ export function BeliefSurface({
 
   const group = (label: string, tone: string, entries: LearnerAbilityState[], measure: "proficiency" | "confidence") =>
     entries.length > 0 && (
-      <Group label={label} tone={tone}>
+      <Group count={entries.length} label={label} tone={tone}>
         {[...entries]
           .sort((left, right) => right[measure] - left[measure])
           .map((ability) => (
@@ -79,6 +79,7 @@ export function BeliefSurface({
               measure={measure}
               onOpen={() => onOpenAbility(ability.abilityId)}
               patterns={attached.get(ability.abilityId) ?? []}
+              tone={tone}
             />
           ))}
       </Group>
@@ -87,16 +88,20 @@ export function BeliefSurface({
   return (
     <Band className={className} title={`What Spar believes · ${progress.abilities.length}`}>
       <Panel className="divide-y-[length:var(--hairline)] divide-[var(--border-surface-strong)] overflow-hidden">
-        {group("In training", "text-[var(--warning)]", training, "proficiency")}
-        {group("Needs evidence", "text-muted-foreground", unsure, "confidence")}
-        {/* Neutral ink rather than green. "Settled" is a fact about Spar's
-            attention, not a grade — it holds a 55% ability it has stopped asking
-            about as readily as an 85% one — and a green label over a half-full
-            meter reads as praise the measure beside it does not support. */}
-        {group("Settled", "text-foreground", settled, "proficiency")}
+        {/* A colour per stance, and the stance is the only thing it says.
+            Not a grade: "Settled" holds a 55% ability Spar has stopped asking
+            about as readily as an 85% one, so the hues are chosen to be
+            unrankable against each other — amber is attention, violet is not
+            knowing, slate-blue is at rest. Green was tried for Settled and it
+            was wrong for exactly the reason the meters are hairlines: a green
+            label over a half-full bar reads as praise the measure beside it does
+            not support. */}
+        {group("In training", "var(--stance-training)", training, "proficiency")}
+        {group("Needs evidence", "var(--stance-unsure)", unsure, "confidence")}
+        {group("Settled", "var(--stance-settled)", settled, "proficiency")}
 
         {loose.length > 0 && (
-          <Group label="Also watching" tone="text-muted-foreground">
+          <Group label="Also watching" tone="var(--stance-training)">
             {loose.map((pattern) => (
               <div className="flex items-center px-1.5 py-[0.3rem]" key={pattern.id} title={pattern.description || undefined}>
                 <PatternLine pattern={pattern} />
@@ -105,8 +110,11 @@ export function BeliefSurface({
           </Group>
         )}
 
+        {/* No colour and no dot: "Recently" is not a stance Spar holds, it is
+            when things changed. Giving it one made it the fourth stance on a
+            surface that has three. */}
         {notices.length > 0 && (
-          <Group label="Recently" tone="text-muted-foreground">
+          <Group label="Recently">
             {notices.slice(0, 4).map((notice) => <Notice key={notice.id} notice={notice} />)}
           </Group>
         )}
@@ -119,10 +127,14 @@ export function BeliefSurface({
  *  siblings: a grid gives every group the height of the tallest, so short groups
  *  are padded with air and long ones are cut off at five with "and 4 more" — a
  *  layout whose worst case is its common one. */
-function Group({ children, label, tone }: { children: React.ReactNode; label: string; tone: string }) {
+function Group({ children, count, label, tone }: { children: React.ReactNode; count?: number; label: string; tone?: string }) {
   return (
-    <div className="px-2 py-1.5">
-      <p className={cn("px-1.5 py-1 text-ui font-medium", tone)}>{label}</p>
+    <div className="px-2 py-1.5" style={tone ? { ["--stance" as string]: tone } : undefined}>
+      <p className={cn("flex items-center gap-1.5 px-1.5 py-1 text-ui font-medium", tone ? "text-[var(--stance)]" : "text-muted-foreground")}>
+        {tone && <span aria-hidden className="size-1.5 rounded-full bg-current" />}
+        {label}
+        {count !== undefined && count > 1 && <span className="tabular-nums font-normal opacity-65">{count}</span>}
+      </p>
       {children}
     </div>
   );
@@ -139,11 +151,12 @@ function Group({ children, label, tone }: { children: React.ReactNode; label: st
  * its evidence count are in the tooltip — on the row they were three more
  * figures on a surface already made of figures.
  */
-function Belief({ ability, measure, onOpen, patterns }: {
+function Belief({ ability, measure, onOpen, patterns, tone }: {
   ability: LearnerAbilityState;
   measure: "proficiency" | "confidence";
   onOpen(): void;
   patterns: LearnerPattern[];
+  tone: string;
 }) {
   return (
     <button
@@ -154,7 +167,7 @@ function Belief({ ability, measure, onOpen, patterns }: {
       <span className="flex w-full items-center gap-3">
         <span className="min-w-0 flex-1 truncate text-ui text-foreground">{ability.title}</span>
         <Trend trend={ability.trend} />
-        <Meter className="w-14 shrink-0" value={ability[measure]} />
+        <Meter className="w-14 shrink-0" tone={tone} value={ability[measure]} />
         <span className="w-8 shrink-0 text-right tabular-nums text-ui-sm text-muted-foreground">{Math.round(ability[measure] * 100)}%</span>
         <ChevronRight className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </span>

@@ -109,11 +109,15 @@ export function Panel({ className, tone = "card", ...props }: React.ComponentPro
  * progress meter — a promise that there is an end to get to, which is the one
  * thing a model of somebody's ability must not imply.
  */
-export function Meter({ className, title, value }: { className?: string | undefined; title?: string | undefined; value: number }) {
+export function Meter({ className, title, tone, value }: { className?: string | undefined; title?: string | undefined; tone?: string | undefined; value: number }) {
   const filled = Math.max(0, Math.min(1, value));
   return (
     <span aria-hidden className={cn("block h-[3px] w-full overflow-hidden rounded-full bg-[var(--color-background-elevated-secondary)]", className)} title={title}>
-      <span className="block h-full rounded-full bg-foreground/45" style={{ width: `${filled * 100}%` }} />
+      {/* `tone` colours the fill by what the group of rows *is*, never by how
+          full the bar is. A meter that turns green as it fills is a grade, and
+          the one thing a model of somebody's ability must not do is grade them —
+          the same reason it is a hairline and not a progress bar. */}
+      <span className={cn("block h-full rounded-full", !tone && "bg-foreground/45")} style={{ width: `${filled * 100}%`, ...(tone ? { background: `color-mix(in oklab, ${tone} 72%, transparent)` } : {}) }} />
     </span>
   );
 }

@@ -310,6 +310,46 @@
      glow rather than a second dot, and a token because it has to be paler in the
      dark theme than an opacity on the foreground would make it. */
   --rating-halo: oklch(14.5% 0 0 / 12%);
+
+  /* Work, by kind.
+     ----------------------------------------------------------------------
+     The rest of this palette is deliberately achromatic — neutral ink on
+     neutral glass, with colour reserved for the three things that carry a
+     verdict. That is right for chrome and it left the one screen that is
+     nothing but categories with no way to show them: six kinds of work, three
+     stances Spar can take on an ability, and every one of them rendered in the
+     same grey as the last.
+
+     So these six are the kinds of work, and they are the only saturated colour
+     on Today. Cut at the same lightness and chroma as --success and --warning
+     above, which is what keeps them inside the system: they read as ink that
+     happens to be coloured rather than as tags stuck onto it. Each is used at
+     full strength for a word and mixed down to a wash for a surface, so one
+     token covers both and there is no second set to keep in step.
+
+     The hues are the work, not decoration. Amber investigates, because amber is
+     already what Spar watches with. Violet is a prerequisite: the thing
+     underneath. Blue is ordinary practice and gets the most familiar hue,
+     because it is the most common assignment. Teal carries a skill somewhere
+     new. Green raises the ceiling — the same hue as success, because advancing
+     is what success is for. Slate is a re-check of something old, and is the
+     quietest on purpose: it is the one kind of work that is not new. */
+  --work-diagnose: oklch(58% 0.13 68);
+  --work-teach: oklch(52% 0.15 292);
+  --work-practise: oklch(52% 0.14 252);
+  --work-transfer: oklch(52% 0.1 205);
+  --work-advance: oklch(52% 0.11 158);
+  --work-retain: oklch(52% 0.035 255);
+
+  /* Spar's stance on an ability, for the belief surface.
+     Aliases rather than new hues: attention, not-knowing and at-rest are the
+     same three ideas the work colours carry, and two scales that mean the same
+     thing should not be two shades apart. Named separately all the same, so a
+     row on Today's ledger is not quietly claiming to be a kind of work — and so
+     the two can part company later without a rename. */
+  --stance-training: var(--work-diagnose);
+  --stance-unsure: var(--work-teach);
+  --stance-settled: var(--work-retain);
   --border: oklch(14.5% 0 0 / 10%);
   --border-strong: oklch(14.5% 0 0 / 16%);
   --input: oklch(14.5% 0 0 / 10%);
@@ -483,6 +523,20 @@
   --success: oklch(78% 0.14 158);
   --warning: oklch(82% 0.14 78);
   --rating-halo: oklch(98.5% 0 0 / 14%);
+
+  /* The same six, lifted for a dark ground the way --success and --warning are:
+     the hue is held and the lightness goes up, so a coloured word stays legible
+     against glass without the chroma turning it into neon. */
+  --work-diagnose: oklch(80% 0.14 72);
+  --work-teach: oklch(76% 0.15 292);
+  --work-practise: oklch(76% 0.14 252);
+  --work-transfer: oklch(78% 0.11 205);
+  --work-advance: oklch(78% 0.14 158);
+  --work-retain: oklch(74% 0.04 255);
+
+  --stance-training: var(--work-diagnose);
+  --stance-unsure: var(--work-teach);
+  --stance-settled: var(--work-retain);
   --border: oklch(98.5% 0 0 / 10%);
   --border-strong: oklch(98.5% 0 0 / 16%);
   --input: oklch(98.5% 0 0 / 12%);

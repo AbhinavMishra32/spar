@@ -45,6 +45,13 @@ export function RatingHero({ api, eyebrow, footer, progress }: { api?: SparApi |
   const delta = previous ? rating - sparRating(previous.rating) : null;
 
   return (
+    /* Monochrome, and no `--tone` set anywhere on it. The figure was drawn in a
+       band colour for a while, on the argument that a contest rating is read by
+       its colour first. That is true of a site that ranks you against other
+       people; here there is nobody else, so all the colour did was make the one
+       number on the page look like a logo and move under the reader for reasons
+       they had no legend for. The curve reads `var(--tone, currentColor)` and so
+       falls back to the foreground on its own. */
     <Panel className="overflow-hidden">
       {eyebrow && <p className="px-5 pt-3 text-ui text-muted-foreground">{eyebrow}</p>}
 
@@ -76,7 +83,7 @@ export function RatingHero({ api, eyebrow, footer, progress }: { api?: SparApi |
                 opens the panel, where it is printed rather than hinted. */}
             {progress.rating.provisional && (
               <span
-                className="rounded-[var(--radius-md)] bg-[var(--surface-tertiary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground"
+                className="rounded-[var(--radius-md)] border-[length:var(--hairline)] border-[var(--border-surface-strong)] bg-[var(--surface-tertiary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground"
                 title={`Spar puts you between ${sparRating(progress.rating.rating - progress.rating.deviation)} and ${sparRating(progress.rating.rating + progress.rating.deviation)}. The figure settles as more challenges are graded.`}
               >
                 Provisional
@@ -299,7 +306,7 @@ export function RatingChart({ className, points, showInterval = false, showPoint
       <svg aria-label="Spar Rating over time" className="size-full overflow-visible" preserveAspectRatio="none" role="img" viewBox="0 0 100 40">
         <defs>
           <linearGradient id={`${id}-fill`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="currentColor" stopOpacity="0.16" />
+            <stop offset="0%" stopColor="currentColor" stopOpacity="0.2" />
             <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
           </linearGradient>
           {/* Clipped in the box's own units, which `preserveAspectRatio="none"`
@@ -315,7 +322,12 @@ export function RatingChart({ className, points, showInterval = false, showPoint
 
         <path className="text-border" d="M0 39.5H100" stroke="currentColor" strokeWidth="1" vectorEffect="non-scaling-stroke" />
 
-        <g clipPath={`url(#${id}-sweep)`}>
+        {/* Everything inside takes its colour from --tone, which the masthead
+            sets from the learner's band. `currentColor` rather than the variable
+            at each use, so the gradient, the bracket and the line cannot drift
+            apart — and a caller that sets no tone gets the foreground, which is
+            exactly the old monochrome chart. */}
+        <g clipPath={`url(#${id}-sweep)`} style={{ color: "var(--tone, currentColor)" }}>
           {/* The rating deviation, drawn once, at the end of the line — which is
               the only place it is a live fact rather than history. Glicko-2
               carries this interval and every other rating UI throws it away and
@@ -325,7 +337,7 @@ export function RatingChart({ className, points, showInterval = false, showPoint
               is wider than the range the rating moves through, so it read as a
               grey slab behind everything and the estimate was lost in it. */}
           {showInterval && (
-          <g className="text-foreground" clipPath={`url(#${id}-box)`}>
+          <g clipPath={`url(#${id}-box)`}>
             <rect fill="currentColor" fillOpacity="0.1" height={Math.max(shape.interval.bottom - shape.interval.top, 0.5)} width="1.8" x="98.2" y={shape.interval.top} />
             <path
               d={`M97 ${shape.interval.top}H100M97 ${shape.interval.bottom}H100`}
@@ -337,9 +349,8 @@ export function RatingChart({ className, points, showInterval = false, showPoint
             />
           </g>
           )}
-          <path className="text-foreground" d={shape.area} fill={`url(#${id}-fill)`} />
+          <path d={shape.area} fill={`url(#${id}-fill)`} />
           <path
-            className="text-foreground/70"
             d={shape.line}
             fill="none"
             stroke="currentColor"
@@ -369,8 +380,10 @@ export function RatingChart({ className, points, showInterval = false, showPoint
               aria-hidden
               className={cn(
                 "block rounded-full transition-[transform,background-color]",
-                last ? "size-[6px] bg-foreground shadow-[0_0_0_3px_var(--rating-halo)]" : "size-[4px] bg-foreground/45",
-                hovered === index && "scale-150 bg-foreground",
+                last
+                  ? "size-[6px] bg-[var(--tone,var(--color-foreground))] shadow-[0_0_0_3px_color-mix(in_oklab,var(--tone,var(--color-foreground))_20%,transparent)]"
+                  : "size-[4px] bg-[color-mix(in_oklab,var(--tone,var(--color-foreground))_45%,transparent)]",
+                hovered === index && "scale-150 bg-[var(--tone,var(--color-foreground))]",
               )}
             />
             {/* A hit target the size of a finger around a 4px dot, so a series

@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Band, Page, Panel } from "../common/Page";
 import { SourceGlyph } from "../common/SourceGlyph";
-import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { RatingHero } from "../progress/Rating";
 import { BeliefSurface } from "../progress/Standing";
 import { AbilityDetail } from "./AbilityPage";
@@ -214,6 +213,7 @@ export function HomePage({
           label={data.baseline.status === "in-progress" ? "Continue" : "Begin"}
           onAct={onBaseline}
           title="Set your baseline"
+          tone="--work-diagnose"
         />
       ) : recommendation ? (
         <Assignment
@@ -233,6 +233,7 @@ export function HomePage({
           label="Create track"
           onAct={onCreateTrack}
           title="No track yet"
+          tone="--work-teach"
         />
       )}
 
@@ -307,10 +308,10 @@ export function HomePage({
  * as the title for anyone who reads buttons rather than headlines, and the mode
  * select overrules the whole decision.
  *
- * The mark is the problem's own, stamped from its subject the same way every
- * other problem in the app is stamped — the same shape here, in the problems
- * grid, and in history, which is what makes it recognition rather than
- * decoration. See `ProblemEmblem`.
+ * There is no emblem on it. The problem's mark is recognition work — it earns
+ * its place in the problems grid and in history, where one chip among fifty is
+ * how you find the thing again — and this card holds exactly one problem, named
+ * at display size. See the note in the body for what it cost to keep.
  */
 function Assignment({ busy, continuing, mode, onOpenAbility, onStart, recommendation }: {
   busy: boolean;
@@ -324,29 +325,42 @@ function Assignment({ busy, continuing, mode, onOpenAbility, onStart, recommenda
   const working = recommendation.reasoning.filter((line) => line.trim().length > 0);
   const reason = recommendation.reason.trim();
 
+  const work = workKind(recommendation.intent);
+
   return (
-    <Panel className="mt-3 p-5">
-      <div className="flex gap-4">
-        <ProblemEmblem className="mt-0.5 shrink-0" seed={recommendation.id} size={40} strong subject={recommendation.abilityTitle} />
+    /* The kind of work is set on the panel as a custom property and everything
+       inside reads it, so the card is tinted by one value rather than by six
+       copies of a conditional.
+       Where that colour is allowed to land took three attempts. A wash of the
+       hue at 11% over the whole panel read as a stain rather than as amber. A
+       2px bar down the leading edge was the crudest device in the box. Then a
+       full header strip with the label, the source and a tinted rule under it —
+       which gave the card a chrome bar it does not need, at the top of the one
+       page the app opens on. Colour arrives as ink, in small amounts, and the
+       card has no furniture: a label, a title, the sentence, the button. */
+    <Panel className="mt-3 p-5" style={{ ["--work" as string]: `var(${work.tone})` }}>
+      {/* What kind of work this is and where the problem came from, on one
+          quiet line above the title. Both are facts about the assignment rather
+          than part of it, which is why they are small and set in a row — and
+          not why they were a bar. */}
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="flex min-w-0 items-center gap-1.5 text-ui-sm font-medium text-[var(--work)]" title={work.gloss}>
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" />
+          {work.label}
+        </p>
+        <SourceChip source={recommendation.source} />
+      </div>
 
-        <div className="min-w-0 flex-1">
-          {/* The intent, not the word "next". What kind of work this is — a
-              diagnosis, a prerequisite, a transfer — is a real thing to know
-              before starting, and "NEXT UP" is a thing the position already
-              says. */}
-          <p className="text-ui-sm font-medium uppercase tracking-[0.06em] text-muted-foreground">{intentLabel(recommendation.intent)}</p>
-
-          <div className="mt-1 flex items-center gap-2.5">
-            <button
-              className="min-w-0 truncate rounded-[var(--radius-md)] text-left text-[1.3rem] font-semibold leading-[1.25] tracking-[-0.02em] outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              disabled={busy}
-              onClick={onStart}
-              type="button"
-            >
-              {recommendation.challengeTitle}
-            </button>
-            <SourceChip source={recommendation.source} />
-          </div>
+      <div className="mt-1.5">
+        <div className="min-w-0">
+          <button
+            className="block min-w-0 max-w-full truncate rounded-[var(--radius-md)] text-left text-[1.3rem] font-semibold leading-[1.25] tracking-[-0.02em] outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            disabled={busy}
+            onClick={onStart}
+            type="button"
+          >
+            {recommendation.challengeTitle}
+          </button>
 
           <p className="mt-1 flex min-w-0 items-center gap-1.5 text-ui text-muted-foreground">
             {recommendation.abilityId ? (
@@ -385,15 +399,25 @@ function Assignment({ busy, continuing, mode, onOpenAbility, onStart, recommenda
           )}
 
           {why && working.length > 0 && (
-            <ul className="mt-2.5 flex max-w-[46rem] list-disc flex-col gap-1.5 border-l-2 border-[var(--border-surface-strong)] py-0.5 pl-3">
+            <ul className="mt-2.5 flex max-w-[46rem] list-disc flex-col gap-1.5 border-l-[length:var(--hairline)] border-[color-mix(in_oklab,var(--work)_55%,transparent)] py-0.5 pl-3">
               {working.slice(0, 5).map((line) => (
                 <li className="list-none text-ui leading-[1.55] text-muted-foreground" key={line}>{line}</li>
               ))}
             </ul>
           )}
 
-          <div className="mt-5 flex flex-wrap items-center gap-2">
-            <Button disabled={busy} onClick={onStart}>
+          {/* The one place in the app where a button is not ink: this is the
+              single primary action on the page the app opens on, and the colour
+              it wears says what sort of session pressing it starts. `--background`
+              for the label works in both themes without a branch — the dark
+              theme's hue is light and its ground is dark, and the light theme's
+              is the other way round. */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <Button
+              className="bg-[var(--work)] text-[var(--background)] hover:bg-[var(--work)] hover:opacity-90"
+              disabled={busy}
+              onClick={onStart}
+            >
               {continuing ? "Continue" : "Start"}<ArrowRight data-icon="inline-end" />
             </Button>
             {mode}
@@ -413,7 +437,7 @@ function Assignment({ busy, continuing, mode, onOpenAbility, onStart, recommenda
  * the baseline prompt used to be — it gave the page two calls to action and no
  * ranking between them.
  */
-function Call({ body, busy, eyebrow, icon: Icon, label, onAct, title }: {
+function Call({ body, busy, eyebrow, icon: Icon, label, onAct, title, tone }: {
   body: string;
   busy: boolean;
   eyebrow: string;
@@ -421,18 +445,32 @@ function Call({ body, busy, eyebrow, icon: Icon, label, onAct, title }: {
   label: string;
   onAct(): void;
   title: string;
+  /** The same work colour the assignment uses, because this is the same slot and
+   *  what it holds is still a kind of work: placing the learner is a diagnosis,
+   *  and naming a goal is the thing everything else is built on. */
+  tone: string;
 }) {
   return (
-    <Panel className="mt-3 p-5">
-      <div className="flex gap-4">
-        <span className="mt-0.5 grid size-10 shrink-0 place-items-center rounded-[var(--radius-lg)] bg-[var(--surface-tertiary)] text-muted-foreground">
-          <Icon className="size-4" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-ui-sm font-medium uppercase tracking-[0.06em] text-muted-foreground">{eyebrow}</p>
-          <h2 className="mt-1 text-[1.3rem] font-semibold leading-[1.25] tracking-[-0.02em]">{title}</h2>
-          <p className="mt-3 max-w-[46rem] text-content leading-[1.6] text-muted-foreground">{body}</p>
-          <Button className="mt-4" disabled={busy} onClick={onAct}>{label}<ArrowRight data-icon="inline-end" /></Button>
+    <Panel className="mt-3 p-5" style={{ ["--work" as string]: `var(${tone})` }}>
+      <p className="flex items-center gap-1.5 text-ui-sm font-medium text-[var(--work)]">
+        <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-current" />
+        {eyebrow}
+      </p>
+
+      <div className="mt-1.5">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-[1.3rem] font-semibold leading-[1.25] tracking-[-0.02em]">
+            <Icon className="size-[1.1rem] shrink-0 text-[var(--work)]" />
+            {title}
+          </h2>
+          <p className="mt-2 max-w-[46rem] text-content leading-[1.6] text-muted-foreground">{body}</p>
+          <Button
+            className="mt-4 bg-[var(--work)] text-[var(--background)] hover:bg-[var(--work)] hover:opacity-90"
+            disabled={busy}
+            onClick={onAct}
+          >
+            {label}<ArrowRight data-icon="inline-end" />
+          </Button>
         </div>
       </div>
     </Panel>
@@ -494,5 +532,30 @@ function Jump({ label, onClick }: { label: string; onClick(): void }) {
 const SOURCE_LABEL: Record<"leetcode" | "codeforces" | "spar", string> = { leetcode: "LeetCode", codeforces: "Codeforces", spar: "Spar" };
 
 function modeValue(mode: TrainingMode) { return mode.kind === "source" ? mode.source : mode.kind === "focus" ? "focus" : mode.kind; }
-function intentLabel(intent: string) { return ({ diagnose: "Diagnose", teach: "Prerequisite", practise: "Practice", transfer: "Transfer", retain: "Retention", advance: "Advance" } as Record<string, string>)[intent] ?? intent; }
+/**
+ * The six kinds of work, each with the colour it is drawn in.
+ *
+ * The intent is the most useful thing on the assignment and it used to be the
+ * least visible: one grey uppercase word above a grey title on a grey panel.
+ * "Diagnose" and "Advance" are opposite instructions about how to spend the next
+ * half hour — whether Spar is trying to find something out or trying to raise
+ * the ceiling — and nothing on the page distinguished them.
+ *
+ * Colour rather than a second sentence, because the distinction is categorical
+ * and there are only six categories. The tokens are in `theme.css` under "Work,
+ * by kind"; the sentence each one carries is the tooltip, so the chip stays one
+ * word and the word stays explainable.
+ */
+const WORK: Record<string, { label: string; tone: string; gloss: string }> = {
+  diagnose: { label: "Diagnose", tone: "--work-diagnose", gloss: "Spar is trying to find out where the gap actually is, so this is pitched near even money." },
+  teach: { label: "Prerequisite", tone: "--work-teach", gloss: "Something underneath this has to be in place first, so the problem is aimed below where you are." },
+  practise: { label: "Practice", tone: "--work-practise", gloss: "Spar has the diagnosis and this is the repetition, pitched slightly against you." },
+  transfer: { label: "Transfer", tone: "--work-transfer", gloss: "You can do this in the form you learned it; this asks for it somewhere new." },
+  advance: { label: "Advance", tone: "--work-advance", gloss: "The current level is well enough supported to raise the constraint." },
+  retain: { label: "Retention", tone: "--work-retain", gloss: "This was reliable once and has not been seen in a while. A re-check, not new ground." },
+};
+
+function workKind(intent: string) {
+  return WORK[intent] ?? { label: intent, tone: "--work-retain", gloss: "" };
+}
 function today() { return new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }); }
