@@ -448,7 +448,7 @@ export const STEP_GAP = "0.25rem";
    above it and below it. It was equal to STEP_GAP, which meant a sentence sat as
    close to the tool row under it as two tool calls sit to each other — the
    contrast the comment above describes was written down and then not spent. */
-export const PROSE_GAP = "0.875rem";
+export const PROSE_GAP = "0.75rem";
 /** Exactly where a row's label starts: the inset, plus the icon, plus the gap
  *  after it. A note under a row uses this so it lines up with the words it belongs
  *  to rather than nearly lining up with them. */
@@ -971,7 +971,7 @@ function Stat({ value, label, tone }: { value: string | number; label: string; t
  * mounted says which judge decides it, and nothing about cases, because Spar
  * never compiled it and has no number of its own to give.
  */
-export function ChallengePublished({ part }: { part: ToolPart }) {
+export function ChallengePublished({ part, compact = false }: { part: ToolPart; compact?: boolean }) {
   const challenge = readPublishedChallenge(part);
   const sourced = challenge.source !== null;
   /* Falls back to the sniffer for a row stored before the result carried the
@@ -979,6 +979,26 @@ export function ChallengePublished({ part }: { part: ToolPart }) {
      two logos to draw is a different order of claim from guessing a fact. */
   const source = challenge.source ?? sourceFor(part);
   const sourceName = source === "codeforces" ? "Codeforces" : "LeetCode";
+
+  if (compact) {
+    return (
+      <div className="flex min-w-0 items-center gap-2 px-1 py-1 text-thread text-muted-foreground">
+        <span className="grid size-5 shrink-0 place-items-center text-[var(--transcript-step-mark)]">
+          {sourced
+            ? <SourceGlyph className="size-3.5" source={source} />
+            : challenge.language
+              ? <LanguageGlyph className="size-3.5" language={challenge.language} />
+              : <IconPuzzle className="size-3.5" />}
+        </span>
+        <span className="min-w-0 truncate text-thread text-foreground/80">{challenge.title}</span>
+        <span className="shrink-0 truncate text-thread text-muted-foreground/70">
+          {challenge.difficulty ? DIFFICULTY_WORD[challenge.difficulty] : ""}
+          {challenge.concepts[0] ? ` · ${challenge.concepts[0]}` : ""}
+          {sourced ? ` · ${sourceName}` : ""}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <motion.div

@@ -94,7 +94,7 @@ function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefi
     <div className="min-w-0">
       <PhaseLine live={streaming} phase={phase} />
       <RunFold finalStartedAt={run.finalStartedAt} live={streaming} startedAt={run.startedAt}>
-        <Rows parts={work} />
+        <Rows compactChallenges parts={work} />
         {thinkingAtEdge && <div style={{ marginTop: STEP_GAP }}><ThinkingLine /></div>}
         {streaming && run.finalStartedAt === undefined && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={work} /></div>}
       </RunFold>
@@ -126,7 +126,7 @@ function hasGutter(row: ReturnType<typeof groupParts>[number] | undefined): bool
   return row?.kind === "tool-row";
 }
 
-function Rows({ parts }: { parts: RunPart[] }) {
+function Rows({ parts, compactChallenges = false }: { parts: RunPart[]; compactChallenges?: boolean }) {
   const rows = groupParts(parts);
   return (
     <>
@@ -174,7 +174,7 @@ function Rows({ parts }: { parts: RunPart[] }) {
              the tool is intentionally not rendered as another content surface. */
           return wrap(<ToolRow continues={continues} part={part.part} />);
         }
-        if (part.kind === "challenge") return wrap(<ChallengePublished part={part.part} />);
+        if (part.kind === "challenge") return wrap(<ChallengePublished compact={compactChallenges} part={part.part} />);
         if (part.kind === "solve-read") return wrap(<SolveRead part={part.part} />);
         if (part.kind === "explained-trace") return wrap(<ExplainedTrace part={part.part} />);
         if (part.kind === "error") return wrap(<RunFailure body={part.body} />);
@@ -263,7 +263,7 @@ export function AgentMessage({ body, activity, activityCount, messageId, workedM
     <div className="min-w-0">
       {(steps.length > 0 || deferred) && (
         <RunFold bodyLoaded={!deferred} live={false} onOpen={open} workedMs={workedMs}>
-          <Rows parts={parts} />
+          <Rows compactChallenges parts={parts} />
         </RunFold>
       )}
       {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={published} /></div>}
