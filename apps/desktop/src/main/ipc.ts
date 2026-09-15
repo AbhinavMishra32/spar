@@ -3,7 +3,7 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ESTABLISHED_DEVIATION, baselineStateSchema, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
@@ -653,6 +653,11 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
    */
   const noteBaselineEvidence=(sessionId:string)=>{const baseline=deps.store.getBaseline();if(baseline.status!=="in-progress"||baseline.sessionId!==sessionId)return{baseline:false,complete:false};const directEvidenceCount=baseline.directEvidenceCount+1;const required=baseline.importedEvidenceCount>=4?2:3;const complete=directEvidenceCount>=required;const importedContribution=Math.min(0.15,baseline.importedEvidenceCount*0.03);deps.store.setBaseline({directEvidenceCount,confidence:Math.min(0.85,directEvidenceCount/required*0.7+importedContribution),...(complete?{status:"complete" as const,completedAt:new Date().toISOString()}:{})});return{baseline:true,complete};};
   const complexityCheckEnabled=()=>deps.store.getSetting<boolean>("complexity-check-enabled",true);
+  /* Two gates, with separate owners: the authoring agent decides whether Big-O
+     is useful evidence for this particular challenge, while the learner's
+     Settings switch decides whether Spar may interrupt any solve for it. Legacy
+     challenges have no capability stamp and therefore do not get guessed at. */
+  const requiresComplexityCheckpoint=(design:{requiresComplexityAnalysis?:boolean|undefined})=>challengeRequiresComplexityCheckpoint(design,complexityCheckEnabled());
   /* Attempt events are JSON on disk and are read back from rows written by older
      versions of this handler, so the verdict is parsed rather than cast: a review
      recorded before it existed has none, and that is a valid answer. */
@@ -700,7 +705,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (verdict.outcome === "failed") {
       return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output, summary: `${name} says ${verdict.status}${verdict.totalCases ? ` — ${verdict.passedCases} of ${verdict.totalCases} cases passed` : ""}. Keep going and submit again, or give up to move on.`, requiresComplexity:false } satisfies SubmissionResult;
     }
-    const requiresComplexity=complexityCheckEnabled();
+    const requiresComplexity=requiresComplexityCheckpoint(bundle.design);
     if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle,source});
     return { outcome: "passed" as const, exitCode: 0, durationMs: 0, output, summary: `${name} accepted it${verdict.runtime ? ` — ${verdict.runtime}` : ""}. Every hidden case passed.`, requiresComplexity } satisfies SubmissionResult;
   };
@@ -715,10 +720,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        brief restore window before the renderer has redrawn the checkpoint. */
     const latestEvaluation=[...deps.store.readAttempt(attemptId)].reverse().find((event)=>event.type==="submission_evaluated");
     if(latestEvaluation?.payload.outcome==="passed"){
-      const requiresComplexity=complexityCheckEnabled();
+      const requiresComplexity=requiresComplexityCheckpoint(bundle.design);
       const source=deps.store.readSession(sessionId)?.question?.source;
       if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle,...(source?{source}:{})});
-      return{outcome:"passed" as const,exitCode:0,durationMs:0,output:"",summary:"All tests already passed. Finish the complexity check to finalize this solve.",requiresComplexity} satisfies SubmissionResult;
+      return{outcome:"passed" as const,exitCode:0,durationMs:0,output:"",summary:requiresComplexity?"All tests already passed. Finish the complexity check to finalize this solve.":"All tests already passed.",requiresComplexity} satisfies SubmissionResult;
     }
     /* A challenge from a source with a judge behind it is graded there, by the
        people who wrote the hidden cases. Everything after the verdict is the same
@@ -734,7 +739,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        and Spar is not asked to judge a challenge that is still being solved.
        Giving up is the other way out, and it is the learner's decision. */
     if(outcome==="failed")return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"Some tests still fail. Keep going and submit again, or give up to move on.",requiresComplexity:false} satisfies SubmissionResult;
-    const requiresComplexity=complexityCheckEnabled();
+    const requiresComplexity=requiresComplexityCheckpoint(bundle.design);
     if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle});
     return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"All visible and hidden tests passed.",requiresComplexity} satisfies SubmissionResult;});
 
@@ -744,6 +749,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if(!bundle||bundle.session_id!==input.sessionId)return null;
     const events=deps.store.readAttempt(input.attemptId);
     if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")return null;
+    /* A setting can be disabled while a passed attempt is paused here. Resolving
+       that durable pass during restore prevents a now-hidden checkpoint from
+       leaving the attempt permanently open. */
+    if(!requiresComplexityCheckpoint(bundle.design)){
+      const source=deps.store.readSession(input.sessionId)?.question?.source;
+      finishPassedAttempt({sessionId:input.sessionId,attemptId:input.attemptId,bundle,...(source?{source}:{})});
+      return null;
+    }
     const claim=[...events].reverse().find((event)=>event.type==="learner_remark"&&event.payload.kind==="complexity-claim");
     const review=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
     return{time:String(claim?.payload.timeComplexity??""),space:String(claim?.payload.spaceComplexity??""),review:String(review?.payload.body??""),verdict:readVerdict(review?.payload.verdict)};
@@ -753,6 +766,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const input=complexityReviewInput.parse(value);
     const bundle=deps.store.submissionBundle(input.attemptId);
     if(!bundle||bundle.session_id!==input.sessionId)throw new Error("This complexity checkpoint is no longer active.");
+    if(!requiresComplexityCheckpoint(bundle.design))throw new Error("This challenge does not require a complexity check, or the check is disabled in Settings.");
     const events=deps.store.readAttempt(input.attemptId);
     if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")throw new Error("Pass every test before reviewing complexity.");
     const priorReview=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
@@ -779,6 +793,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const input=complexityAcknowledgeInput.parse(value);
     const bundle=deps.store.submissionBundle(input.attemptId);
     if(!bundle||bundle.session_id!==input.sessionId)throw new Error("This complexity checkpoint is no longer active.");
+    if(!requiresComplexityCheckpoint(bundle.design))throw new Error("This challenge does not require a complexity check, or the check is disabled in Settings.");
     const reviewed=deps.store.readAttempt(input.attemptId).some((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
     if(!reviewed)throw new Error("Wait for Spar's complexity review before continuing.");
     const source=deps.store.readSession(input.sessionId)?.question?.source;

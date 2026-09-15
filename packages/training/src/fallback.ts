@@ -33,6 +33,7 @@ const javascript: QuestionDesign = {
   language: "javascript",
   kind: "function",
   difficulty: "foundation",
+  requiresComplexityAnalysis: true,
   statement: STATEMENT,
   starterFiles: { "src/prefix.js": "export function prefixLength(weights, threshold) {\n  throw new Error(\"implement prefixLength\");\n}\n" },
   referenceFiles: { "src/prefix.js": "export function prefixLength(weights, threshold) {\n  let total = 0;\n  for (let index = 0; index < weights.length; index += 1) {\n    total += weights[index];\n    if (total >= threshold) return index + 1;\n  }\n  return 0;\n}\n" },

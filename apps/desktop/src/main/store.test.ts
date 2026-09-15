@@ -33,6 +33,17 @@ describe("validated hidden case count",()=>{
   });
 });
 
+it("persists the authored complexity capability with the challenge",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const{sessionId}=store.createSession("Practise array traversal");
+    store.setTrainingTarget(sessionId,{ability:"Array traversal",specificGap:"Bound the scan",desiredEvidence:"Uses one bounded pass",avoidTesting:[]});
+    const question=store.createQuestion(sessionId,{...design("Bound the scan"),requiresComplexityAnalysis:true},{valid:true});
+    expect(store.submissionBundle(question.attemptId)?.design.requiresComplexityAnalysis).toBe(true);
+    expect(store.readChallenge(question.id)?.design.requiresComplexityAnalysis).toBe(true);
+  }finally{store.close();}
+});
+
 it("persists the device theme across store reloads",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-theme-"));const database=path.join(directory,"state.sqlite3");try{const first=new LocalStore(database);first.setSetting("theme","dark");first.close();const reopened=new LocalStore(database);try{expect(reopened.getSetting("theme","system")).toBe("dark");}finally{reopened.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
 
 it("migrates legacy sessions into one living Track instead of one Track each",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-track-migration-"));const database=path.join(directory,"state.sqlite3");try{const before=new LocalStore(database);before.createSession("Practise arrays");before.createSession("Trace the JavaScript runtime");before.close();const legacy=new Database(database);legacy.prepare("UPDATE sessions SET track_id=NULL").run();legacy.prepare("DELETE FROM tracks").run();legacy.prepare("DELETE FROM settings WHERE key='active-track-id'").run();legacy.close();const migrated=new LocalStore(database);try{expect(migrated.listTracks()).toEqual([expect.objectContaining({title:"General practice"})]);const trackIds=new Set(migrated.listSessions().map((session)=>session.trackId));expect(trackIds.size).toBe(1);expect(trackIds.has(migrated.activeTrack()?.id??"")).toBe(true);}finally{migrated.close();}}finally{rmSync(directory,{recursive:true,force:true});}});

@@ -47,4 +47,12 @@ describe("the tool contract, against what Mastra sent", () => {
     expect((search?.inputSchema as { properties: { limit: { default: number } } }).properties.limit.default).toBe(4);
     expect(search?.parse({ query: "arrays", actionTitle: "Checking arrays" })).toMatchObject({ query: "arrays", limit: 4 });
   });
+
+  it("makes the author classify whether complexity is useful evidence", () => {
+    const create = current.create_question?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
+    const replace = current.replace_current_question?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
+    expect(create.required).toContain("requiresComplexityAnalysis");
+    expect(replace.required).toContain("requiresComplexityAnalysis");
+    expect(create.properties).toHaveProperty("requiresComplexityAnalysis");
+  });
 });

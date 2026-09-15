@@ -6,6 +6,16 @@ export const questionDesignSchema = z.object({
   language: languageSchema,
   kind: z.enum(["function", "module", "repair", "extension", "repository"]),
   difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]).optional(),
+  /**
+   * Whether explaining asymptotic time and auxiliary space is part of this
+   * challenge's learning contract.
+   *
+   * This is authored explicitly instead of inferred from `kind`: a function can
+   * be an algorithm exercise or an API exercise, and a repository task can still
+   * be about scaling behaviour. Optional keeps challenges saved before this
+   * capability existed readable; only an explicit `true` opens the checkpoint.
+   */
+  requiresComplexityAnalysis: z.boolean().optional(),
   statement: z.string().min(30),
   /**
    * How the solution has to be written, when the agent has a reason to insist.
@@ -33,6 +43,16 @@ export const questionDesignSchema = z.object({
   expectedFailureSignatures: z.array(z.string())
 });
 export type QuestionDesign = z.infer<typeof questionDesignSchema>;
+
+/** The checkpoint exists only at the intersection of challenge intent and the
+ * learner's global preference. Kept as one policy function so submit, restore,
+ * review, and acknowledgement cannot quietly acquire different rules. */
+export function challengeRequiresComplexityCheckpoint(
+  design: Pick<QuestionDesign, "requiresComplexityAnalysis">,
+  settingEnabled: boolean,
+): boolean {
+  return settingEnabled && design.requiresComplexityAnalysis === true;
+}
 
 export const attemptEvaluationSchema = z.object({
   outcome: z.enum(["passed", "partial", "failed", "abandoned"]),

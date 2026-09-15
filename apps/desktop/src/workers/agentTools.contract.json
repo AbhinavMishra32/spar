@@ -353,6 +353,10 @@
           },
           "type": "object"
         },
+        "requiresComplexityAnalysis": {
+          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence.",
+          "type": "boolean"
+        },
         "runCommand": {
           "minLength": 1,
           "type": "string"
@@ -397,6 +401,7 @@
         "language",
         "kind",
         "difficulty",
+        "requiresComplexityAnalysis",
         "statement",
         "starterFiles",
         "referenceFiles",
@@ -1130,6 +1135,10 @@
           },
           "type": "object"
         },
+        "requiresComplexityAnalysis": {
+          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence.",
+          "type": "boolean"
+        },
         "runCommand": {
           "minLength": 1,
           "type": "string"
@@ -1174,6 +1183,7 @@
         "language",
         "kind",
         "difficulty",
+        "requiresComplexityAnalysis",
         "statement",
         "starterFiles",
         "referenceFiles",

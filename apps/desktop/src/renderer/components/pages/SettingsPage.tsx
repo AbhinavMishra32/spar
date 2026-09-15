@@ -228,7 +228,7 @@ function ComplexityCheckRow({api}:{api:SparApi|undefined}){
   return <Row className="items-center gap-4 py-3">
     <div className="min-w-0 flex-1">
       <p className="text-content font-medium">Complexity check after a solve</p>
-      <p className="mt-0.5 max-w-[28rem] text-ui leading-[1.55] text-muted-foreground">Before the full post-solve review, ask for time and space complexity and compare both with the submitted code.</p>
+      <p className="mt-0.5 max-w-[28rem] text-ui leading-[1.55] text-muted-foreground">For challenges that explicitly train algorithmic efficiency, ask for time and space complexity before the full post-solve review.</p>
       {failure&&<p className="mt-1 text-ui text-destructive">{failure}</p>}
     </div>
     <Switch aria-label="Complexity check after a solve" checked={enabled} disabled={busy||!api} onCheckedChange={change}/>
