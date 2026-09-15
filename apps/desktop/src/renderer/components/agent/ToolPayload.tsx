@@ -118,12 +118,42 @@ function Payload({ title, body }: { title: string; body: string }) {
 }
 
 /**
- * The call, opened up: its arguments and its result.
+ * A payload that was cut off, made readable up to the cut.
  *
- * The transcript used to name each call and stop there — deliberately, on the
- * grounds that arguments are raw internals. But a tutor that says "searched your
- * history" and will not say what for is asking to be taken on faith, and the
- * learner is the one whose record it searched. Everything is shown except the
- * parts of a challenge design that are its answer, which the worker has already
- * replaced with a note saying so before this ever sees them.
+ * The worker caps what it stores at 16k, so the long results — an attempt's
+ * whole event log above all — reach the renderer as valid JSON with the end
+ * sawn off. Parsing that fails, and a view handed nothing has no way to tell
+ * "the tool returned nothing" from "I could not read this", which is how a
+ * panel ends up stating the first when the second is true.
+ *
+ * So the half that did arrive is closed: cut back to the last value that
+ * finished, then shut the brackets that were open at that point. Ten of twelve
+ * events is the honest reading of a payload with ten complete events in it.
  */
+export function closeOff(body: string): string {
+  const stack: string[] = [];
+  let shut: string[] = [];
+  let end = -1;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = 0; index < body.length; index += 1) {
+    const character = body[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === "\"") inString = false;
+      continue;
+    }
+    if (character === "\"") inString = true;
+    else if (character === "{" || character === "[") stack.push(character === "{" ? "}" : "]");
+    else if (character === "}" || character === "]") {
+      stack.pop();
+      /* A value just finished, and everything still open at this point is what
+         has to be closed to make the prefix whole. */
+      end = index;
+      shut = [...stack].reverse();
+    }
+  }
+  return end < 0 ? body : body.slice(0, end + 1) + shut.join("");
+}

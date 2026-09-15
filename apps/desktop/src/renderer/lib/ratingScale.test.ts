@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { INITIAL_RATING, RATING_FLOOR } from "@spar/domain";
-import { approximateRating, sparRating, SPAR_INITIAL_RATING } from "./ratingScale";
+import { ESTABLISHED_DEVIATION, INITIAL_RATING, RATING_FLOOR } from "@spar/domain";
+import { approximateRating, describeChance, leetcodeBand, sparRating, SPAR_INITIAL_RATING } from "./ratingScale";
 
 describe("the Spar Rating as a presentation of the underlying one", () => {
   it("keeps the order and the sign of every change, because it is affine", () => {
@@ -56,5 +56,44 @@ describe("the two contest scales", () => {
   it("rounds, so neither number can be read as a measurement", () => {
     expect(approximateRating(1447, "leetcode") % 10).toBe(0);
     expect(approximateRating(1447, "codeforces") % 10).toBe(0);
+  });
+});
+
+describe("the LeetCode band a rating sits in", () => {
+  it("names the band its own translated number falls under", () => {
+    /* The word and the figure beside it come from one translation, so a problem
+       quoted near LeetCode's easy anchor cannot be labelled anything else. */
+    expect(leetcodeBand(800)).toBe("Easy");
+    expect(leetcodeBand(1600)).toBe("Medium");
+    expect(leetcodeBand(2200)).toBe("Hard");
+  });
+
+  it("never goes backwards as the rating climbs", () => {
+    const order = { Easy: 0, Medium: 1, Hard: 2 } as const;
+    let previous = -1;
+    for (let rating = 700; rating <= 2600; rating += 25) {
+      const band = order[leetcodeBand(rating)];
+      expect(band).toBeGreaterThanOrEqual(previous);
+      previous = band;
+    }
+  });
+});
+
+describe("a solve probability, said out loud", () => {
+  it("quotes whole tenths, the resolution the estimate actually supports", () => {
+    expect(describeChance(0.62, 80)).toBe("about 6 in 10 at your rating");
+    expect(describeChance(0.5, 80)).toBe("about 5 in 10 at your rating");
+  });
+
+  it("never quotes a certainty it cannot have, at either end", () => {
+    expect(describeChance(0.99, 80)).toBe("about 9 in 10 at your rating");
+    expect(describeChance(0.01, 80)).toBe("about 1 in 10 at your rating");
+  });
+
+  it("declines to quote a figure at all while the rating is provisional", () => {
+    /* A number off a deviation this wide is not a hedge away from being right,
+       it is a number there is no evidence for. */
+    expect(describeChance(0.62, ESTABLISHED_DEVIATION + 1)).not.toMatch(/in 10/);
+    expect(describeChance(0.62, ESTABLISHED_DEVIATION)).toMatch(/in 10/);
   });
 });

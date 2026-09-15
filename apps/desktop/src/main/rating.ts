@@ -1,20 +1,13 @@
-import { ITEM_DEVIATION, generatedItemRating, itemDeviation, itemRating, outcomeScore, type ChallengeSource, type RatingResult } from "@spar/domain";
+import { challengeItemRating, outcomeScore, type ChallengeSource, type RatingResult } from "@spar/domain";
 
 /**
  * A finished challenge as one Glicko-2 result.
  *
  * Kept out of the store so the judgement it encodes can be tested without a
- * database. There are only two judgements in it, and both are about what Spar
- * actually knows rather than about what would be convenient to score:
- *
- * How hard the challenge was. A Codeforces problem with a published rating is
- * taken at that rating, because it is already the scale the learner is rated on.
- * Anything else is banded, and says so by carrying a wider deviation, which is
- * how Glicko discounts a result against an opponent whose own rating is a guess.
- * A challenge Spar wrote has no public difficulty at all, so it is priced by its
- * own difficulty word against an absolute anchor — see `generatedItemRating`, and
- * note that pricing it against the learner instead is what made the first cut of
- * this a ratchet rather than a rating.
+ * database. How hard the challenge was is `challengeItemRating`'s judgement now
+ * rather than this one's, because the learner is shown that number before they
+ * start and two places deciding it is two answers. What is left here is the half
+ * that only exists once an attempt is over:
  *
  * How the learner did. Spar only ends an attempt two ways: they solved it, or
  * they gave up on it. A failed submission leaves the attempt open, so "failed"
@@ -33,10 +26,8 @@ export type FinishedChallenge = {
 export function challengeResult(challenge: FinishedChallenge): RatingResult | null {
   const score = outcomeScore(challenge.outcome, { assisted: challenge.assisted });
   if (score === null) return null;
-  const source = challenge.source;
-  return source
-    ? { rating: itemRating({ source: source.source, difficulty: source.difficulty, sourceRating: source.sourceRating }), deviation: itemDeviation({ source: source.source, sourceRating: source.sourceRating }), score }
-    : { rating: generatedItemRating(challenge.difficulty), deviation: ITEM_DEVIATION.generated, score };
+  const { rating, deviation } = challengeItemRating(challenge);
+  return { rating, deviation, score };
 }
 
 /** Days between two ISO timestamps, for the deviation decay. Never negative: a

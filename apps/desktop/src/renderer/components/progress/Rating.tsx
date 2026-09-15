@@ -5,7 +5,7 @@ import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { relativeTime, shortTime } from "@/lib/format";
 import { Panel } from "../common/Page";
-import { approximateRating, sparRating, type ContestSite } from "./ratingScale";
+import { approximateRating, sparRating, type ContestSite } from "@/lib/ratingScale";
 import { SourceGlyph } from "../common/SourceGlyph";
 
 /**

@@ -505,7 +505,25 @@ export function App() {
    */
   const trailFor = (sessionId: string | undefined): ChallengeTrail | undefined => {
     if (!sessionId) return undefined;
-    const liveId = data.sessions.find((session) => session.id === sessionId)?.activeQuestion?.id ?? null;
+    /* The challenge the session is *on*, which is not the same as the challenge
+       whose row still says `status = active`.
+     *
+     * Solving one does not immediately produce the next: the question goes to
+     * `completed` and the workspace keeps showing it — your code, your attempt,
+     * the conversation — until the agent sets another. `activeQuestion` is null
+     * for that whole stretch, and reading the trail from it meant the stepper
+     * called the challenge you were sitting in "Practice · not recorded", and
+     * stepping away and back opened the practice sandbox for it instead of
+     * returning to the workspace: scaffold code, no chat, no Problem/Chat switch.
+     *
+     * `detail.question` is the store's own answer to "which challenge is this
+     * session on" — the last one that was not abandoned, completed or not — so
+     * the trail asks that whenever the session in question is the one open.
+     * `activeQuestion` stays as the fallback for the other sessions in the list,
+     * where a live challenge is the only thing we can see from here anyway. */
+    const liveId = (detail?.summary.id === sessionId ? detail.question?.id : undefined)
+      ?? data.sessions.find((session) => session.id === sessionId)?.activeQuestion?.id
+      ?? null;
     const stops = data.challenges
       .filter((challenge) => challenge.sessionId === sessionId)
       .sort((a, b) => a.ordinal - b.ordinal)
@@ -515,10 +533,18 @@ export function App() {
         title: challenge.title,
         live: challenge.id === liveId,
         replaced: Boolean(challenge.replacedByQuestionId),
+        elapsedMs: challenge.elapsedMs,
+        passedCases: challenge.passedCases,
+        totalCases: challenge.totalCases,
+        testRunCount: challenge.testRunCount,
+        assistance: challenge.assistance,
+        outcome: challenge.lastOutcome,
       }));
-    if (stops.length < 2) return undefined;
+    if (!stops.length) return undefined;
     return {
       stops,
+      onOpenQuestion: (stop) => openChallenge(stop.id),
+      onOpenSession: () => { void openSession(sessionId).catch((cause) => setError(message(cause))); },
       onGo: (stop) => {
         if (stop.live) void openSession(sessionId).catch((cause) => setError(message(cause)));
         else openChallenge(stop.id);
@@ -542,20 +568,18 @@ export function App() {
      lands is now the history's business rather than a guess recorded at the
      door. */
   const openChallenge = (id: string) => {
-    const land = () => {
-      setChallengeId(id);
-      show("challenge");
-      setHistory((current) => visit(current, { page: "challenge", challengeId: id }));
-    };
-    /* Read first, then navigate. It is a local read of a few files, and doing it
-       before the page exists is the difference between arriving on the challenge
-       and arriving on a spinner that becomes the challenge. If it fails the page
-       still opens and reads for itself — this is a head start, not the load. */
-    if (!api) { setChallengeSeed(null); land(); return; }
-    void api
-      .readChallenge(id)
-      .then((next) => { setChallengeSeed(next ?? null); land(); })
-      .catch(() => { setChallengeSeed(null); land(); });
+    /* The destination is known before the local detail read starts, so move to
+       the standalone page immediately. Waiting here left the session on screen
+       after "Open question" and made a successful click look inert. The page
+       owns its read; a seed that arrives shortly afterwards only lets it adopt
+       the same detail without another visible transition. */
+    setChallengeSeed(null);
+    setChallengeId(id);
+    show("challenge");
+    setHistory((current) => visit(current, { page: "challenge", challengeId: id }));
+    if (api) void api.readChallenge(id).then((next) => {
+      if (next?.summary.id === id) setChallengeSeed(next);
+    }).catch(() => undefined);
   };
 
   const openAbility = (id: string) => {
@@ -748,6 +772,7 @@ export function App() {
             onNewTrack={() => navigate("tracks")}
             onOpenSession={open}
             onOpenTrack={(track) => void openTrack(track)}
+            onDeleteTrack={(track) => void deleteTrack(track)}
             nav={nav}
             onPage={navigate}
             page={page}
@@ -919,6 +944,7 @@ export function App() {
                           api={api}
                           concepts={conceptContext}
                           dark={dark}
+                          learnerRating={data.progress.rating}
                           detail={detail}
                           onAbandon={abandon}
                           nav={nav}
@@ -963,7 +989,9 @@ export function App() {
                   <ChallengePage
                     api={api}
                     challengeId={challengeId}
+                    concepts={conceptContext}
                     dark={dark}
+                    learnerRating={data.progress.rating}
                     nav={nav}
                     onError={setError}
                     onExpandSidebar={expandSidebar}

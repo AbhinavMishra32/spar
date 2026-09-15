@@ -285,6 +285,9 @@ export const challengeHistorySummarySchema = z.object({
   replacedByQuestionTitle: z.string().nullable(),
   attemptCount: z.number().int().nonnegative(),
   testRunCount: z.number().int().nonnegative(),
+  elapsedMs: z.number().int().nonnegative().nullable().optional(),
+  passedCases: z.number().int().nonnegative().nullable().optional(),
+  totalCases: z.number().int().nonnegative().nullable().optional(),
   lastOutcome: z.enum(["passed", "failed", "abandoned", "replaced"]).nullable(),
   assistance: z.enum(["independent", "assisted", "unknown"]).optional(),
   /** What this challenge was about. Ordered primary first, so a row that only has

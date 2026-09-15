@@ -7,6 +7,9 @@ import { useControlledState } from "@/hooks/use-controlled-state"
 import { useScrollFade } from "@/hooks/use-scroll-fade"
 import { cn } from "@/lib/utils"
 
+const DropdownMenuGroup = DropdownMenuPrimitive.Group
+export { DropdownMenuGroup }
+
 /* Only one submenu in a menu is open at a time, so the menu owns that fact
    rather than each Sub keeping its own. That is what lets one sub trigger hand
    the submenu over to the next directly — see `useMenuHover`. */

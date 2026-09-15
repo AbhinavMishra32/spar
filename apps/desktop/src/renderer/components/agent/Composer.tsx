@@ -28,6 +28,8 @@ export function Composer({
   minLength = 1,
   placeholder = "Ask Spar anything…",
   autoFocus = false,
+  focusRequest = 0,
+  context,
   hint,
   leading,
   trailing,
@@ -51,12 +53,17 @@ export function Composer({
   minLength?: number;
   placeholder?: string;
   autoFocus?: boolean;
+  focusRequest?: number;
+  context?: React.ReactNode;
   hint?: React.ReactNode;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
   className?: string;
 }) {
   const field = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (focusRequest) field.current?.focus();
+  }, [focusRequest]);
   const [focused, setFocused] = useState(false);
   /* Counts sends rather than flagging one, so holding Return down animates each
      message instead of the first. */
@@ -131,6 +138,7 @@ export function Composer({
             )}
           </div>
         )}
+        {context}
         <div className="flex items-start gap-1.5 p-2" onClick={() => field.current?.focus()}>
         {onAttach && (
           <button

@@ -15,7 +15,7 @@ import {
   XCircle,
   WrapText,
 } from "lucide-react";
-import type { ChallengeDetail } from "@spar/domain";
+import type { ChallengeDetail, RatingPoint } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { fileName, message, relativeTime } from "@/lib/format";
@@ -28,7 +28,8 @@ import { ChallengeBrief } from "../workspace/ChallengeBrief";
 import { ChallengeHistory } from "../workspace/ChallengeHistory";
 import { ChallengeRoll } from "../workspace/ChallengeRoll";
 import { ChallengeStepper, type ChallengeTrail } from "../workspace/ChallengeStepper";
-import { DifficultyPill } from "../workspace/Difficulty";
+import type { ConceptContext } from "../concepts/ConceptChip";
+import { ChallengeRatingBadge } from "../workspace/ChallengeCalibration";
 import { PaneHandle } from "../workspace/PaneHandle";
 import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "../workspace/ResultPanel";
 import { SparDots } from "@/components/common/SparDots";
@@ -80,11 +81,17 @@ function Verdict({ outcome }: { outcome: NonNullable<RunOutcome> }) {
 }
 
 function Brief({
+  concepts,
   detail,
+  learnerRating,
   onOpenExternal,
   onOpenSession,
 }: {
+  /** What the concept chips need to preview and open. */
+  concepts?: ConceptContext | undefined;
   detail: ChallengeDetail;
+  /** The learner's rating, for pitching this problem against them. */
+  learnerRating?: RatingPoint | null | undefined;
   /** Opens the problem at its source in the real browser. */
   onOpenExternal?: ((url: string) => void) | undefined;
   onOpenSession(): void;
@@ -106,7 +113,13 @@ function Brief({
         <span className="shrink-0 text-ui-sm text-muted-foreground">{KIND_LABEL[detail.kind]}</span>
         <span className="shrink-0 text-ui-sm text-muted-foreground/50">·</span>
         <span className="shrink-0 text-ui-sm text-muted-foreground">{relativeTime(summary.createdAt)}</span>
-        <DifficultyPill difficulty={summary.difficulty} />
+        <ChallengeRatingBadge
+          conceptContext={concepts}
+          concepts={summary.concepts}
+          difficulty={summary.difficulty}
+          learnerRating={learnerRating}
+          source={detail.source}
+        />
       </div>
       <div className="app-scroll min-h-0 flex-1 overflow-y-auto" ref={scroller}>
       {/* The same column `ProblemView` sets, to the pixel. This page had
@@ -130,6 +143,7 @@ function Brief({
             statement: detail.statement,
             source: detail.source,
           }}
+          conceptContext={concepts}
           {...(onOpenExternal ? { onOpenExternal } : {})}
         >
         {/* Where it came from. A challenge only makes sense as an answer to a
@@ -193,7 +207,9 @@ function Brief({
 export function ChallengePage({
   api,
   challengeId,
+  concepts,
   dark,
+  learnerRating,
   nav,
   onError,
   onExpandSidebar,
@@ -203,7 +219,11 @@ export function ChallengePage({
 }: {
   api: SparApi | undefined;
   challengeId: string;
+  /** What the concept chips need to preview and open. */
+  concepts?: ConceptContext | undefined;
   dark: boolean;
+  /** The learner's rating, for pitching this problem against them. */
+  learnerRating?: RatingPoint | null | undefined;
   /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
   nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
   onError(value: string): void;
@@ -440,8 +460,10 @@ export function ChallengePage({
     return () => removeEventListener("keydown", listener);
   });
 
+  const mountedEditor = useRef<Parameters<OnMount>[0] | null>(null);
   const mount: OnMount = (editor, monaco) => {
     editor.updateOptions({ fontLigatures: true });
+    mountedEditor.current = editor;
     editors.current = monaco;
   };
   const editors = useRef<Parameters<OnMount>[1] | null>(null);
@@ -460,13 +482,20 @@ export function ChallengePage({
    */
   useEffect(() => {
     const monaco = editors.current;
-    if (!monaco) return;
-    const live = new Set((detail?.files ?? []).map((file) => file.path.replace(/^\/+/, "")));
+    if (!monaco || !detail) return;
+    const namespace = `practice/${challengeId}/`;
+    const live = new Set(detail.files.map((file) => `${namespace}${file.path.replace(/^\/+/, "")}`));
+    const attached = mountedEditor.current?.getModel();
     for (const model of monaco.editor.getModels()) {
       const path = model.uri.path.replace(/^\/+/, "");
-      if (!live.has(path)) model.dispose();
+      /* Only this page's practice models belong to this cleanup. The workspace
+         and other Monaco surfaces keep their own models, and the editor's
+         currently attached model must survive until @monaco-editor/react has
+         switched it — its controlled-value effect reads that model immediately
+         afterwards. */
+      if (path.startsWith("practice/") && !live.has(path) && model !== attached) model.dispose();
     }
-  }, [challengeId, detail?.files]);
+  }, [challengeId, detail]);
   const activeFile = detail?.files.find((file) => file.path === activePath);
   const scaffold = useMemo(
     () => detail?.source?.source === "leetcode" ? splitSolutionScaffold(drafts[activePath] ?? "") : null,
@@ -568,7 +597,9 @@ export function ChallengePage({
       <PanelGroup autoSaveId="spar-challenge-pane" className="min-h-0 flex-1" direction="horizontal">
         <Panel defaultSize={44} minSize={32} order={1}>
           <Brief
+            concepts={concepts}
             detail={detail}
+            learnerRating={learnerRating}
             onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSession={() => onOpenSession(detail.summary.sessionId)}
           />

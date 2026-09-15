@@ -145,6 +145,7 @@ export function Sidebar({
   onOpenSession,
   onOpenTrack,
   onNewTrack,
+  onDeleteTrack,
   onNewSession,
   onCommandPalette,
   onCollapse,
@@ -173,12 +174,14 @@ export function Sidebar({
   onOpenSession(session: SessionSummary): void;
   onOpenTrack(track: Track): void;
   onNewTrack(): void;
+  onDeleteTrack(track: Track): void;
   onNewSession(): void;
   onCommandPalette(): void;
   onCollapse(): void;
 }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
+  const [pendingTrackDelete, setPendingTrackDelete] = useState<Track | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   /* Which Tracks the learner has opened in the list. Only their explicit choices live here;
      the Track being worked in is open because it is the Track being worked in,
@@ -343,6 +346,7 @@ export function Sidebar({
                 <TrackGroup
                   key={track.id}
                   onOpen={() => onOpenTrack(track)}
+                  onDelete={() => setPendingTrackDelete(track)}
                   onToggle={() => setOpened((value) => ({ ...value, [track.id]: !(value[track.id] ?? activeTrackId === track.id) }))}
                   open={opened[track.id] ?? activeTrackId === track.id}
                   track={track}
@@ -421,6 +425,16 @@ export function Sidebar({
           <Settings className={cn(ROW_ICON, ROW_ICON_TONE)} />
         </button>
       </div>
+
+      <DeleteTrackDialog
+        onCancel={() => setPendingTrackDelete(null)}
+        onConfirm={() => {
+          if (pendingTrackDelete) onDeleteTrack(pendingTrackDelete);
+          setPendingTrackDelete(null);
+        }}
+        sessions={pendingTrackDelete ? sessions.filter((session) => session.trackId === pendingTrackDelete.id).length : 0}
+        track={pendingTrackDelete}
+      />
 
       <DeleteSessionDialog
         onCancel={() => setPendingDelete(null)}
@@ -534,21 +548,37 @@ function TrackGroup({
   open,
   onToggle,
   onOpen,
+  onDelete,
   children,
 }: {
   track: Track;
   open: boolean;
   onToggle(): void;
   onOpen(): void;
+  onDelete(): void;
   children: React.ReactNode;
 }) {
+  const [menu, setMenu] = useState(false);
+  /* The same two shapes a session row carries, for the same reason: the arrow is
+     the one thing you reach for often enough to spend a click on, and everything
+     else a Track can do goes behind the ⋮ rather than growing the row a third
+     icon. Deleting is the only other thing there is today, so the menu repeats
+     "Open" as well — a menu whose sole item is destructive is a trapdoor. */
+  const items: Array<{ key: string; label: string; icon: React.ComponentType<{ className?: string }>; run(): void; destructive?: boolean }> = [
+    { key: "o", label: "Open Track", icon: ArrowRight, run: onOpen },
+    { key: "d", label: "Delete…", icon: Trash2, run: onDelete, destructive: true },
+  ];
+
   return (
     <Collapsible onOpenChange={onToggle} open={open}>
       {/* No selection fill on the Track itself. The session inside it is the thing
           that is open, and lighting both made two rows look chosen when only one
           was — the Track row is a heading, and a heading does not get selected
           along with its contents. */}
-      <div className={cn(ROW, "group/track gap-1 pl-1 pr-1 hover:bg-[var(--sidebar-accent)]")}>
+      <div
+        className={cn(ROW, "group/track gap-1 pl-1 pr-1 hover:bg-[var(--sidebar-accent)]", menu && "bg-[var(--sidebar-accent)]")}
+        onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}
+      >
         <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 text-left outline-none" type="button">
           {/* No glyph beyond the disclosure. Every mark tried beside it — a
               folder, the Track target — claimed the Track was a kind of thing it
@@ -571,6 +601,47 @@ function TrackGroup({
         >
           <ArrowRight className="size-3.5" />
         </button>
+        {/* Everything else the Track can do. Held open the same way the session
+            menu is — the trigger stays visible while its menu is up, or the panel
+            would be anchored to a button that faded out from under it. */}
+        <DropdownMenu modal={false} onOpenChange={setMenu} open={menu}>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label={`Options for ${track.title}`}
+              className={cn(
+                "grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/track:opacity-100",
+                menu ? "text-foreground opacity-100" : "opacity-0",
+              )}
+              type="button"
+            >
+              <EllipsisVertical className="size-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="start"
+            className="min-w-[11.5rem]"
+            onKeyDown={(event) => {
+              if (event.metaKey || event.ctrlKey || event.altKey) return;
+              const item = items.find((entry) => entry.key === event.key.toLowerCase());
+              if (!item) return;
+              event.preventDefault();
+              setMenu(false);
+              item.run();
+            }}
+            side="right"
+          >
+            {items.map((item) => (
+              <Fragment key={item.key}>
+                {item.destructive && <DropdownMenuSeparator />}
+                <DropdownMenuItem onSelect={item.run} variant={item.destructive ? "destructive" : "default"}>
+                  <item.icon />
+                  <span className="flex-1">{item.label}</span>
+                  <DropdownMenuShortcut className="uppercase">{item.key}</DropdownMenuShortcut>
+                </DropdownMenuItem>
+              </Fragment>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {/* Indented to the Track's own text column, so the titles inside line up
           under the name of the thing holding them. */}
@@ -1016,6 +1087,27 @@ function DeleteSessionDialog({ session, onConfirm, onCancel }: { session: Sessio
         <DialogFooter>
           <Button onClick={onCancel} variant="secondary">Cancel</Button>
           <Button onClick={onConfirm} variant="destructive">Delete permanently</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** A Track takes its sessions with it, so the count is said out loud rather than
+ *  left for the learner to remember. */
+function DeleteTrackDialog({ track, sessions, onConfirm, onCancel }: { track: Track | null; sessions: number; onConfirm(): void; onCancel(): void }) {
+  return (
+    <Dialog onOpenChange={(next) => { if (!next) onCancel(); }} open={!!track}>
+      <DialogContent className="sm:max-w-[27rem]">
+        <DialogHeader>
+          <DialogTitle>Delete {track?.title}?</DialogTitle>
+          <DialogDescription>
+            This permanently deletes this Track, its {sessions} work session{sessions === 1 ? "" : "s"}, workspace files, and learning history. This cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button onClick={onCancel} variant="secondary">Cancel</Button>
+          <Button onClick={onConfirm} variant="destructive">Delete Track</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

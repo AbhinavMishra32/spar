@@ -420,7 +420,7 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
   if (editing) {
     return (
       <div className="flex min-w-0 justify-end">
-        <div className="w-[90%] min-w-0 rounded-xl bg-secondary px-3 py-2.5">
+        <div className="w-[90%] min-w-0 rounded-[calc(1rem*1.4)] bg-secondary px-3 py-2.5 [corner-shape:superellipse(1.4)]">
           <textarea
             autoFocus
             className="app-scroll block max-h-40 w-full resize-none bg-transparent py-0.5 text-thread leading-[1.55] outline-none"
@@ -478,7 +478,7 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
           whole confirmation the action needs, which is why there is no other. */}
       <motion.div
         animate={{ opacity: queued ? 0.6 : 1, y: 0, scale: 1 }}
-        className="max-w-[min(fit-content,80%)] min-w-0 break-words learner-bubble rounded-xl bg-secondary px-3 py-2 text-thread leading-[1.55] whitespace-pre-wrap"
+        className="max-w-[min(fit-content,80%)] min-w-0 break-words learner-bubble rounded-[calc(1rem*1.4)] bg-secondary px-3 py-2 text-thread leading-[1.55] whitespace-pre-wrap [corner-shape:superellipse(1.4)]"
         initial={sending && !reduced ? { opacity: 0, y: 14, scale: 0.94 } : false}
         style={{ transformOrigin: "bottom right" }}
         transition={{

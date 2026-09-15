@@ -475,7 +475,7 @@ export interface SparApi {
    *  the message is recorded and the running turn picks it up at its next phase
    *  boundary — rather than being dropped, which is what used to happen.
    *  `steered` says which of the two occurred. */
-  sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string; steered?: boolean }>;
+  sendAgentMessage(input: { sessionId: string; message: string; contextQuestionId?: string }): Promise<{ runId: string; steered?: boolean }>;
   /** Resume the exact agent tool call which put this question on screen. */
   answerAgentQuestion(input: { sessionId: string; answer: string }): Promise<{ runId: string; resumed: boolean }>;
   /** Stops the turn running for this session, if there is one.

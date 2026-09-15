@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { ArrowRight, FlaskConical } from "lucide-react";
-import type { ActiveQuestion } from "@spar/domain";
+import type { ActiveQuestion, RatingPoint } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { declaredCases, sourcedCases } from "@/lib/testCases";
 import { ChallengeBrief } from "./ChallengeBrief";
@@ -15,12 +15,15 @@ import { SourceGlyph } from "../common/SourceGlyph";
  */
 export function ProblemView({
   concepts,
+  learnerRating,
   onOpenExternal,
   question,
   testFiles,
 }: {
   /** What the concept chips need to preview and open. */
   concepts?: ConceptContext | undefined;
+  /** The learner's rating, for pitching this problem against them. */
+  learnerRating?: RatingPoint | null | undefined;
   /** Opens the problem at its source in the real browser. */
   onOpenExternal?: ((url: string) => void) | undefined;
   question: ActiveQuestion;

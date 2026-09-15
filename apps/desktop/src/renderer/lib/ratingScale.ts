@@ -1,4 +1,4 @@
-import { INITIAL_RATING, RATING_FLOOR } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, INITIAL_RATING, RATING_FLOOR } from "@spar/domain";
 
 /**
  * The Spar Rating, and the two contest scales it is shown against.
@@ -40,9 +40,8 @@ const UNDERLYING_CEILING = 2400;
  * Affine and monotone, so every property of the underlying rating survives it:
  * the order of two learners, the sign of a change, and the fact that a bigger
  * result moves it further. It compresses — 1600 underlying points become 1100 —
- * which is why the store's "don't record a move under 10 points" rule is applied
- * to the underlying rating rather than to this, and why this is rounded to the
- * point rather than to anything coarser.
+ * which is why it is rounded to the point rather than to anything coarser: a
+ * real move on the underlying scale must not vanish on this one.
  */
 export function sparRating(rating: number): number {
   const span = (UNDERLYING_CEILING - UNDERLYING_FLOOR) / (SPAR_CEILING - SPAR_FLOOR);
@@ -81,6 +80,43 @@ const LEETCODE_ANCHORS: Array<[codeforces: number, leetcode: number]> = [
 export function approximateRating(rating: number, site: ContestSite): number {
   if (site === "codeforces") return Math.round(rating / 10) * 10;
   return Math.round(interpolate(rating, LEETCODE_ANCHORS) / 10) * 10;
+}
+
+/**
+ * Which of LeetCode's three words a rating sits under.
+ *
+ * The boundaries are the midpoints between `LEETCODE_ANCHORS`' own band centres,
+ * translated the same way `approximateRating` translates everything else, so the
+ * word and the number under it can never disagree — a problem quoted at ~1400
+ * LeetCode points is never labelled Hard.
+ *
+ * The word exists because the number alone is the wrong unit for most people.
+ * "≈ 1240" means something to somebody who follows contest ratings; "about a
+ * LeetCode Easy" means something to everybody who has opened LeetCode.
+ */
+export function leetcodeBand(rating: number): "Easy" | "Medium" | "Hard" {
+  const leetcode = approximateRating(rating, "leetcode");
+  if (leetcode < 1575) return "Easy";
+  return leetcode < 1950 ? "Medium" : "Hard";
+}
+
+/**
+ * A solve probability as a sentence, in whole tenths.
+ *
+ * Tenths because the underlying estimate does not support more. A probability
+ * derived from a rating carrying a 150-point deviation against an item carrying
+ * 250 is not a percentage to one decimal place, and printing "62.4%" claims a
+ * precision the inputs never had. "About 6 in 10" is the same claim, said at the
+ * resolution it is actually made at.
+ *
+ * `provisional` is not a hedge on top of that number — it is the statement that
+ * there is not yet enough evidence to quote one at all, which is what a rating
+ * deviation above `ESTABLISHED_DEVIATION` means.
+ */
+export function describeChance(probability: number, deviation: number): string {
+  if (deviation > ESTABLISHED_DEVIATION) return "too early to say — Spar is still working out your level";
+  const tenths = Math.max(1, Math.min(9, Math.round(probability * 10)));
+  return `about ${tenths} in 10 at your rating`;
 }
 
 function interpolate(value: number, anchors: Array<[number, number]>): number {

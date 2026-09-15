@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { compileQuestion, fallbackDesign, type DesignOrigin } from "@spar/training";
-import { abilityStatusSchema, languageSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
+import { abilityStatusSchema, GENERATED_DIFFICULTIES, languageSchema, type AbilityStatus, type AskUserQuestionInput, type Question } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
-import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
+import { assessGeneratedLevel, assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 import { practiceSourceName } from "./practiceChoice.js";
 import { SOURCE_READ_TOOLS, VISUALIZER_TOOLS } from "../workers/agentPolicy.js";
 import type { VisualizerToolbox } from "./visualizerTools.js";
@@ -135,6 +135,26 @@ export async function executeTrainingTool(
     if (local.challengeTitleUsed(proposedTitle,trackId)) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `This Track has already used a challenge titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
     const saturation = saturatedConcept(local, sessionId, value.concepts);
     if (saturation) return { status: "invalid", report: { valid: false, checks: [{ name: "goal coverage", passed: false, detail: saturation }] } };
+    /* The same level check the sourced path has always run, before the compile
+       rather than after it: a challenge pitched at the wrong learner is wrong
+       whether or not it builds, and building it first spends a toolchain round
+       trip to find that out. */
+    const levelTarget = local.latestTarget(sessionId);
+    if (levelTarget) {
+      const level = assessGeneratedLevel({
+        difficulty: (GENERATED_DIFFICULTIES as readonly string[]).includes(String(value.difficulty)) ? (value.difficulty as Question["difficulty"]) : "developing",
+        /* More than the point every profile is seeded with means at least one
+           challenge has been graded, which is the whole of what this needs to
+           know: whether the window is a measurement or an assumption. */
+        graded: local.ratingHistory().length > 1,
+        target: {
+          rating: local.currentRating(),
+          abilityStatus: local.readAbilityDetail(String(levelTarget.ability_id))?.ability.status ?? "uncertain",
+          experience: local.getProfile()?.experience ?? "new",
+        },
+      });
+      if (!level.passed) return { status: "invalid", report: { valid: false, checks: [level] } };
+    }
     const compiled = await compileCandidate(input, sessionId, workspaces, runner);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
     const questionCreatedWhileCompiling = openChallenge(local, sessionId);

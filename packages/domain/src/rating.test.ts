@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decay, ESTABLISHED_DEVIATION, generatedItemRating, INITIAL_DEVIATION, ITEM_DEVIATION, itemDeviation, itemRating, itemRatingFor, outcomeScore, RATING_FLOOR, solveProbability, UNRATED, updateRating } from "./rating.js";
+import { challengeItemRating, decay, ESTABLISHED_DEVIATION, generatedItemRating, INITIAL_DEVIATION, ITEM_DEVIATION, itemDeviation, itemRating, itemRatingFor, outcomeScore, RATING_FLOOR, solveProbability, UNRATED, updateRating } from "./rating.js";
 
 /**
  * The first test is the only one that can tell you the implementation is right:
@@ -182,6 +182,51 @@ describe("what a challenge is worth as an opponent", () => {
     expect(rating.rating).toBeLessThan(2100);
     const further = updateRating(rating, [{ rating: generatedItemRating("developing"), deviation: ITEM_DEVIATION.generated, score: 1 }]);
     expect(further.rating - rating.rating).toBeLessThan(12);
+  });
+});
+
+/**
+ * The number on the problem and the number it is scored against are one number.
+ * These are the tests that keep it that way: each case pins what
+ * `challengeItemRating` returns to the pricing rule it is standing in for, so a
+ * change to either half fails here rather than quietly showing the learner one
+ * figure and rating them against another.
+ */
+describe("what a challenge is worth, once", () => {
+  const sourced = { source: "codeforces", difficulty: "medium", sourceRating: 1737 } as const;
+
+  it("takes a published Codeforces rating as the rating, at the tightest deviation", () => {
+    expect(challengeItemRating({ difficulty: "proficient", source: sourced })).toEqual({
+      rating: 1737,
+      deviation: ITEM_DEVIATION.rated,
+      basis: "published",
+    });
+  });
+
+  it("bands a sourced problem that published no rating of its own", () => {
+    const leetcode = { source: "leetcode", difficulty: "hard" } as const;
+    expect(challengeItemRating({ difficulty: "advanced", source: leetcode })).toEqual({
+      rating: itemRating(leetcode),
+      deviation: itemDeviation(leetcode),
+      basis: "band",
+    });
+  });
+
+  it("prices a challenge Spar wrote by its difficulty word, at the widest deviation", () => {
+    expect(challengeItemRating({ difficulty: "developing", source: null })).toEqual({
+      rating: generatedItemRating("developing"),
+      deviation: ITEM_DEVIATION.generated,
+      basis: "generated",
+    });
+  });
+
+  it("ignores the Spar difficulty word once the problem carries a source", () => {
+    /* A sourced problem's own difficulty is the source's, so the word Spar filed
+       it under must not move what it is worth — otherwise the same Codeforces
+       problem is two different opponents depending on who it was set for. */
+    const foundation = challengeItemRating({ difficulty: "foundation", source: sourced });
+    const advanced = challengeItemRating({ difficulty: "advanced", source: sourced });
+    expect(foundation).toEqual(advanced);
   });
 });
 

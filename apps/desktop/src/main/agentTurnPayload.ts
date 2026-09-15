@@ -1,4 +1,4 @@
-import { ESTABLISHED_DEVIATION } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, generatedDifficultyFor } from "@spar/domain";
 import type { LocalStore } from "./store.js";
 import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
@@ -122,11 +122,17 @@ function learnerStanding(store: LocalStore, target: { ability_id?: unknown } | n
   const rating = store.currentRating();
   const ability = target ? store.readAbilityDetail(String(target.ability_id)) : null;
   const status = ability?.ability.status ?? "uncertain";
+  const window = trainingWindow({ rating, abilityStatus: status, experience: profile?.experience ?? "new" });
   return {
     rating: Math.round(rating.rating),
     provisional: rating.deviation > ESTABLISHED_DEVIATION,
     abilityStatus: status,
-    setProblemsRated: trainingWindow({ rating, abilityStatus: status, experience: profile?.experience ?? "new" }),
+    setProblemsRated: window,
+    /* The same window, said in the only vocabulary `create_question` has. The
+       range is what the host enforces, but the agent cannot write a challenge to
+       a number — it picks one of four words, and before this it picked one with
+       nothing to pick against. */
+    writeProblemsAt: generatedDifficultyFor(window),
   };
 }
 

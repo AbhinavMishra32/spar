@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useMotionValue, useReducedMotion } from "motion/react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { FileSearch } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -13,6 +13,7 @@ import { useMarkdownLinks } from "./MarkdownLinks";
 import { FadedScroll, RawPayload } from "./ToolPayload";
 import { SourceGlyph } from "../common/SourceGlyph";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
+import { ChallengeCardMeta, ChallengeCardMenu, ChallengeOutcomeTag } from "./ChallengeCardMeta";
 import { SaveProblem } from "../common/SaveProblem";
 import { readPublishedChallenge } from "./publishedChallenge";
 import { useRevealOnExpand } from "./useRevealOnExpand";
@@ -545,7 +546,9 @@ const BLOCK_SURFACE = "transcript-block";
    are faded rather than cut: a hard edge at the top reads as a clipped card, a
    fade reads as more list. The bottom fade is shorter because the live card
    sits right under it and closes the list off on its own. */
-const STACK_FADE = "linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 10px), transparent 100%)";
+const STACK_FADE_BOTH = "linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 18px), transparent 100%)";
+const STACK_FADE_TOP = "linear-gradient(to bottom, transparent 0, #000 24px)";
+const STACK_FADE_BOTTOM = "linear-gradient(to bottom, #000 calc(100% - 18px), transparent 100%)";
 
 const ROW = "relative inline-flex w-fit min-w-0 max-w-full items-center gap-2.5 px-1.5 py-[3px] text-left text-thread";
 /** The icon column every row of a turn hangs its mark in.
@@ -963,8 +966,15 @@ export function SolveRead({ part }: { part: ToolPart }) {
 
   return (
     <Collapsible className="group/step" onOpenChange={setOpen} open={open}>
-      <motion.div {...arrival} className="min-w-0" ref={block}>
-        <CollapsibleTrigger className={cn("relative isolate block w-full min-w-0 overflow-hidden", BLOCK_SURFACE, TRIGGER)}>
+      {/* One surface, opening.
+          The panel used to be a second card 6px under the first, so asking to see
+          the replay produced another object in the thread rather than more of the
+          one already there. The card is the thing being opened, so the card is
+          what grows: header and payload share one bordered, clipped surface, and
+          the spring on the panel's height (see `CollapsibleContent`) is the card
+          itself getting taller. */}
+      <motion.div {...arrival} className={cn("relative isolate min-w-0 overflow-hidden", BLOCK_SURFACE)} ref={block}>
+        <CollapsibleTrigger className={cn("relative block w-full min-w-0", TRIGGER)}>
           {/* Their own file, behind their own numbers.
               The row claims to have read their solve, and until this it made that
               claim over an empty panel. Set at the size of a minimap and at the
@@ -1007,6 +1017,7 @@ export function SolveRead({ part }: { part: ToolPart }) {
             <Stat label="on it" value={spentOn(stats.elapsedMs)} />
             <Stat label={stats.runs === 1 ? "run" : "runs"} value={stats.runs} />
             {stats.submissions > 0 && <Stat label={stats.submissions === 1 ? "submission" : "submissions"} value={stats.submissions} />}
+
             {stats.casesTracked > 0 && (
               <Stat label={passing === stats.casesTracked ? "cases, all passing" : `of ${stats.casesTracked} cases passing`} tone="var(--success)" value={passing} />
             )}
@@ -1018,11 +1029,12 @@ export function SolveRead({ part }: { part: ToolPart }) {
           </div>
         </CollapsibleTrigger>
 
-        {/* Their code and the log behind the numbers, in the same panel every
-            other step opens into — so the card is a step you can look inside
-            rather than a summary with nowhere to go. */}
-        <CollapsibleContent className={cn("mt-1.5", BLOCK_SURFACE)} expandDuration={0.42}>
-          <div className="agent-tool-detail min-w-0">
+        {/* Their code and the log behind the numbers, inside the card rather than
+            under it — so the card is a step you can look inside rather than a
+            summary with somewhere else to go. The rule is the only new edge the
+            expansion draws, and it arrives with the panel it separates. */}
+        <CollapsibleContent expandDuration={0.42}>
+          <div className="agent-tool-detail min-w-0 border-t border-[var(--border-surface-strong)]">
             <ToolDetail input={part.input} output={part.output} tool={part.tool} />
           </div>
         </CollapsibleContent>
@@ -1161,21 +1173,91 @@ export function ChallengePublished({
   const open = stop && !current ? () => trail?.onGo(stop) : undefined;
   const ordinal = challenge.ordinal ?? stop?.ordinal;
   const sessionStops = trail?.stops ?? [];
-  /* Two is all a pile needs to say "there are more behind this"; a third
-     sliver is another few px of grey carrying no extra fact. */
-  const behind = Math.min(2, Math.max(0, sessionStops.length - 1));
+  const historyStops = useMemo(
+    () => sessionStops.filter((item) => item.id !== challenge.questionId),
+    [sessionStops, challenge.questionId],
+  );
+  const behind = Math.min(2, historyStops.length);
+  const maskId = useId().replace(/:/g, "");
   const stackRef = useRef<HTMLDivElement | null>(null);
-  /* Opens looking at the stop the learner is on. It is the last row, and a pile
-     that opens scrolled to its oldest entry hides the one row that answers
-     "where am I". */
-  useEffect(() => {
-    if (!historyOpen) return;
-    const el = stackRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+  const frontRef = useRef<HTMLDivElement | null>(null);
+  const cardTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pinHistoryRef = useRef(true);
+  const historyAnimatingRef = useRef(false);
+  const stackHeightsRef = useRef({ viewport: 0, content: 0 });
+  const [historyEdges, setHistoryEdges] = useState({ top: false, bottom: false });
+  const updateHistoryEdges = useCallback(() => {
+    const element = stackRef.current;
+    if (!element || !historyOpen) return;
+    const tolerance = 1;
+    const next = {
+      top: element.scrollTop > tolerance,
+      bottom: element.scrollTop + element.clientHeight < element.scrollHeight - tolerance,
+    };
+    setHistoryEdges((previous) => previous.top === next.top && previous.bottom === next.bottom ? previous : next);
   }, [historyOpen]);
+  const pinHistory = () => {
+    if (!pinHistoryRef.current || !stackRef.current) return;
+    const { content, viewport } = stackHeightsRef.current;
+    // Both values come from Motion; avoid a forced layout read on every frame.
+    stackRef.current.scrollTop = Math.max(0, content - viewport);
+  };
+  const [cardGeometry, setCardGeometry] = useState({ width: 0, radius: 22.4 });
+  useLayoutEffect(() => {
+    const element = frontRef.current;
+    if (!element) return;
+    const measure = () => {
+      const surface = element.firstElementChild;
+      const width = element.getBoundingClientRect().width;
+      const radius = surface ? parseFloat(getComputedStyle(surface).borderTopLeftRadius) : 22.4;
+      setCardGeometry((previous) => previous.width === width && previous.radius === radius
+        ? previous
+        : { width, radius });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [compact]);
+  const closedHeight = behind * 10;
+  /* Give every card its own timestamp across one bounded deal. A fixed capped
+     per-card delay made the oldest cards in a long session share the cap and
+     drop as a clump. Normalising the whole list preserves the same cadence for
+     ordinary sessions, compresses only when the list is genuinely long, and
+     gives collapse an exact set of timestamps to mirror. */
+  const dealSteps = Math.max(0, historyStops.length - 1);
+  const lastDealDelay = Math.min(0.42, dealSteps * 0.038);
+  const maskBottom = useMotionValue(closedHeight + 80);
+  const [historyClipped, setHistoryClipped] = useState(false);
+  useEffect(() => {
+    historyAnimatingRef.current = true;
+    if (historyOpen) setHistoryClipped(true);
+    const timer = window.setTimeout(() => {
+      historyAnimatingRef.current = false;
+      if (historyOpen) updateHistoryEdges();
+      else setHistoryClipped(false);
+    }, reduced ? 0 : Math.ceil((0.95 + lastDealDelay) * 1_000));
+    return () => window.clearTimeout(timer);
+  }, [historyOpen, lastDealDelay, reduced, updateHistoryEdges]);
+  const rowPitch = 60;
+  const listHeight = historyStops.length * rowPitch;
+  const contentHeight = historyOpen ? listHeight : closedHeight;
+  const historyFade = historyEdges.top && historyEdges.bottom
+    ? STACK_FADE_BOTH
+    : historyEdges.top
+      ? STACK_FADE_TOP
+      : historyEdges.bottom
+        ? STACK_FADE_BOTTOM
+        : undefined;
   const stackTransition = reduced
     ? { duration: 0 }
-    : { type: "spring" as const, visualDuration: 0.5, bounce: 0.06 };
+    : { type: "spring" as const, stiffness: 105, damping: 22, mass: 1.5 };
+  const occlusionPaths = useMemo(() => [0, 1].map((depth) => stackOcclusionPath(
+    cardGeometry.width * depth * 0.05,
+    0,
+    cardGeometry.width * (1 - depth * 0.1),
+    cardGeometry.radius,
+  )), [cardGeometry]);
 
   if (compact) {
     return (
@@ -1200,17 +1282,25 @@ export function ChallengePublished({
 
   const card = (
     <motion.div
-      animate={{ opacity: 1, scale: 1 }}
+      animate={arrival.animate}
+      data-stack-front={behind > 0 && !historyOpen ? "true" : undefined}
       /* Lifted a little further than a step row's entrance, and no further: this
          arrives after a minute of work and should land rather than appear, but a
          card that slides in from 10px past a settled list is the transcript
          performing. */
       className={cn(
-        "group/challenge relative min-w-0 overflow-visible transition-[background-color,box-shadow] duration-100",
+        "group/challenge relative my-0 min-w-0 overflow-visible transition-[background-color,box-shadow] duration-100",
         BLOCK_SURFACE,
         open && "hover:bg-[var(--surface-primary)]",
+        sessionStops.length > 1 && "hover:bg-[var(--surface-primary)]",
         historyOpen && "shadow-[var(--app-shadow-composer)]",
       )}
+      onClick={(event) => {
+        if (sessionStops.length < 2 || (event.target as HTMLElement).closest("button,a,input,textarea,select")) return;
+        pinHistoryRef.current = true;
+        setHistoryOpen((value) => !value);
+      }}
+      style={{ marginBlock: 0 }}
       initial={arrival.initial}
       transition={{ ...stackTransition, opacity: { duration: 0.18 } }}
     >
@@ -1231,15 +1321,30 @@ export function ChallengePublished({
         {/* The controls float over the card's top-right corner rather than sitting
             in this row, so the reserved gutter is the only trace they leave in
             the flow — a title that stops short of running under them. */}
-        <div className={cn("min-w-0 flex-1", sessionStops.length > 1 ? "pr-14" : "pr-6")}>
+        <div className={cn(
+          "min-w-0 flex-1",
+          stop?.outcome
+            ? current ? "pr-28" : "pr-20"
+            : current ? "pr-14" : "pr-8",
+        )}>
           <div className="flex min-w-0 items-center gap-1.5">
             {ordinal ? <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/60">#{ordinal}</span> : null}
             <button
+              ref={cardTriggerRef}
               aria-current={current ? "page" : undefined}
+              aria-controls={sessionStops.length > 1 ? `${maskId}-history` : undefined}
+              aria-expanded={sessionStops.length > 1 ? historyOpen : undefined}
               className="min-w-0 truncate rounded-md text-left text-thread font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
-              disabled={!open}
-              onClick={open}
-              title={open ? `Open challenge ${challenge.title}` : current ? "Current challenge" : undefined}
+              disabled={sessionStops.length < 2 && !open}
+              onClick={() => {
+                if (sessionStops.length > 1) {
+                  pinHistoryRef.current = true;
+                  setHistoryOpen((value) => !value);
+                  return;
+                }
+                open?.();
+              }}
+              title={sessionStops.length > 1 ? (historyOpen ? "Hide session challenges" : "Show session challenges") : open ? `Open challenge ${challenge.title}` : current ? "Current challenge" : undefined}
               type="button"
             >{challenge.title}</button>
           </div>
@@ -1247,7 +1352,7 @@ export function ChallengePublished({
           {/* One line, in the order it is read: how hard, what it is about, who
               grades it. Wraps rather than truncates — losing the grader to an
               ellipsis is losing the only part of this that is a promise. */}
-          <span className="mt-px flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-thread text-[var(--transcript-step-mark)]">
+          {stop ? <ChallengeCardMeta stop={stop} /> : <span className="mt-px flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-thread text-[var(--transcript-step-mark)]">
             {challenge.difficulty && <span className="font-medium text-foreground/70">{DIFFICULTY_WORD[challenge.difficulty]}</span>}
             {challenge.band && <span className="font-medium text-foreground/70">{BAND_WORD[challenge.band]}</span>}
             {challenge.concepts.slice(0, 2).map((concept) => (
@@ -1260,120 +1365,192 @@ export function ChallengePublished({
                   ? `· ${challenge.cases} cases will grade it`
                   : "· validated"}
             </span>
-          </span>
+          </span>}
         </div>
       </div>
 
-      {/* Two quiet controls, one cluster, floating at the corner: the history of
-          this session's challenges, and the bookmark that files this one. Both
-          are the same 24px square in the same muted grey as every other icon
-          control in the app, so neither competes with the title — the old
-          "History · 2" pill sat inside the title line wearing a border and a
-          fill, and read as a status badge the card was wearing rather than as a
-          thing to press. Filed from here, on the same shelf the library reads:
-          this is the one moment the learner is certain to see the problem, and
-          "come back to this one" is a thought people have while reading a
-          problem rather than while browsing a list of them. */}
+      {/* Status and actions share the same top-right alignment used by every
+          revealed history card. The card surface itself opens the stack. */}
       <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5">
-        {sessionStops.length > 1 && (
-          <Tooltip>
-            <TooltipTrigger
-              aria-expanded={historyOpen}
-              aria-label={historyOpen ? "Collapse session challenges" : `Show all ${sessionStops.length} challenges in this session`}
-              className={cn(
-                "inline-flex h-6 shrink-0 items-center gap-1 rounded-[var(--radius-md)] px-1.5 outline-none transition-[color,background-color] duration-150",
-                "hover:bg-[var(--color-background-elevated-secondary)] focus-visible:ring-1 focus-visible:ring-ring",
-                historyOpen ? "bg-[var(--color-background-elevated-secondary)] text-foreground" : "text-muted-foreground hover:text-foreground",
-              )}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setHistoryOpen((value) => !value);
-              }}
-              type="button"
-            >
-              <IconHistory className="size-3.5" />
-              <span className="font-mono text-ui-sm tabular-nums leading-none">{sessionStops.length}</span>
-            </TooltipTrigger>
-            <TooltipContent>{historyOpen ? "Hide session challenges" : `All ${sessionStops.length} challenges this session`}</TooltipContent>
-          </Tooltip>
-        )}
-        <SaveProblem problemKey={challenge.questionId ? `spar:${challenge.questionId}` : null} title={challenge.title} />
+        {stop && <ChallengeOutcomeTag outcome={stop.outcome} />}
+        {current && <SaveProblem problemKey={challenge.questionId ? `spar:${challenge.questionId}` : null} title={challenge.title} />}
+        {stop && trail
+          ? <ChallengeCardMenu includeSave={!current} stop={stop} trail={trail} />
+          : !current && <SaveProblem problemKey={challenge.questionId ? `spar:${challenge.questionId}` : null} title={challenge.title} />}
       </div>
     </motion.div>
   );
 
   return (
-    <motion.div
-      className={cn("relative min-w-0 isolate", behind > 0 && !historyOpen && "pb-2.5")}
+    <div
+      className="relative isolate my-4 min-w-0"
       onKeyDown={(event) => {
-        if (event.key === "Escape") { event.stopPropagation(); setHistoryOpen(false); }
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          pinHistoryRef.current = true;
+          setHistoryOpen(false);
+          cardTriggerRef.current?.focus({ preventScroll: true });
+        }
       }}
     >
-      {/* The pile opens upward, out of the live card, rather than pushing it
-          down the transcript: the card the learner is reading is the thing that
-          should hold still while the session unfolds behind it. */}
-      <AnimatePresence initial={false}>
-        {historyOpen && (
-          <motion.div
-            animate={{ height: "auto", opacity: 1 }}
-            className="overflow-hidden"
-            exit={{ height: 0, opacity: 0 }}
-            initial={{ height: 0, opacity: 0 }}
-            key="session-stack"
-            transition={stackTransition}
-          >
-            <div
-              className="flex max-h-[19rem] min-w-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden px-0.5 pb-2.5 pt-1"
-              ref={stackRef}
-              style={{ maskImage: STACK_FADE, WebkitMaskImage: STACK_FADE }}
-            >
-              {sessionStops.map((item, index) => (
-                /* Each row stands up out of the card rather than fading in, and
-                   the one nearest the live card goes first, so a long session
-                   unfurls from the present backward instead of all at once. */
-                <motion.button
-                  animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0 }}
-                  aria-current={item.id === currentQuestionId ? "page" : undefined}
-                  className="flex h-12 w-full min-w-0 shrink-0 items-center gap-2.5 rounded-2xl bg-[var(--color-background-editor)] px-3 text-left shadow-[var(--app-shadow-composer)] ring-[0.5px] ring-[var(--border-surface-strong)] outline-none transition-colors duration-100 hover:bg-[var(--surface-primary)] focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
-                  disabled={item.id === currentQuestionId}
-                  initial={{ opacity: 0, y: 18, scale: reduced ? 1 : 0.9, rotateX: reduced ? 0 : 22 }}
-                  key={item.id}
-                  onClick={() => { setHistoryOpen(false); trail?.onGo(item); }}
-                  style={{ transformPerspective: 900, transformOrigin: "center bottom" }}
-                  transition={{ ...stackTransition, delay: reduced ? 0 : Math.min(0.24, (sessionStops.length - 1 - index) * 0.035) }}
-                  type="button"
-                >
-                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] font-mono text-ui-sm tabular-nums text-muted-foreground">#{item.ordinal}</span>
-                  <span className="min-w-0 flex-1 truncate text-thread font-medium">{item.title}</span>
-                  {item.replaced && <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-ui-sm text-muted-foreground">Replaced</span>}
-                  {item.live && <span className="shrink-0 rounded-full bg-foreground px-2 py-0.5 text-ui-sm text-background">Current</span>}
-                  {item.id !== currentQuestionId && <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
-                </motion.button>
-              ))}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-      <div className="relative min-w-0">
-        {/* Closed, the rest of the session is two slivers under the live card,
-            each a little narrower and a little dimmer — the whole claim is
-            "there is a pile here", and the history chip opens it. */}
-        {!historyOpen && Array.from({ length: behind }, (_, i) => i + 1).map((depth) => (
-          <motion.div
-            animate={{ y: depth * 5, scaleX: 1 - depth * 0.05, opacity: 1 - depth * 0.25 }}
-            aria-hidden
-            className="pointer-events-none absolute inset-0 rounded-2xl bg-[var(--color-background-elevated-secondary)] ring-[0.5px] ring-[var(--border-surface-strong)]"
-            initial={false}
-            key={depth}
-            style={{ zIndex: 10 - depth }}
-            transition={stackTransition}
-          />
-        ))}
-        <div className="relative" style={{ zIndex: 20 }}>{card}</div>
-      </div>
-    </motion.div>
+      <motion.div
+        ref={stackRef}
+        id={`${maskId}-history`}
+        className="relative"
+        onScroll={() => { if (!historyAnimatingRef.current) updateHistoryEdges(); }}
+        onWheel={() => { pinHistoryRef.current = false; }}
+        onTouchStart={() => { pinHistoryRef.current = false; }}
+        onPointerDown={() => { pinHistoryRef.current = false; }}
+        onKeyDown={() => { pinHistoryRef.current = false; }}
+        initial={false}
+        animate={{ height: historyOpen ? Math.min(216, listHeight) : closedHeight }}
+        transition={stackTransition}
+        style={{
+          overflow: historyOpen || historyClipped ? "auto" : "visible",
+          overflowX: historyOpen || historyClipped ? "hidden" : "visible",
+          scrollbarWidth: "none",
+          maskImage: historyOpen || historyClipped ? historyFade : undefined,
+          WebkitMaskImage: historyOpen || historyClipped ? historyFade : undefined,
+        }}
+        onUpdate={(latest) => {
+          stackHeightsRef.current.viewport = Number(latest.height);
+          pinHistory();
+        }}
+      >
+        <motion.div
+          className="relative"
+          style={{ overflow: historyOpen || historyClipped ? "hidden" : "visible" }}
+          initial={false}
+          animate={{ height: contentHeight }}
+          transition={stackTransition}
+          onUpdate={(latest) => {
+            stackHeightsRef.current.content = Number(latest.height);
+            maskBottom.set(Number(latest.height) + 80);
+            pinHistory();
+          }}
+        >
+          {historyStops.map((item, index) => {
+            const depth = historyStops.length - index;
+            const visibleDepth = Math.min(depth, 2);
+            const nextDepth = Math.max(0, visibleDepth - 1);
+            const cutout = `${maskId}-${item.id}`;
+            const delayFor = (cardDepth: number) => {
+              const progress = dealSteps > 0 ? Math.max(0, cardDepth - 1) / dealSteps : 0;
+              const openingDelay = lastDealDelay * progress;
+              return reduced ? 0 : historyOpen ? openingDelay : lastDealDelay - openingDelay;
+            };
+            const dealTransition = { ...stackTransition, delay: delayFor(depth) };
+            const nearerTransition = { ...stackTransition, delay: depth > 1 ? delayFor(depth - 1) : 0 };
+            return (
+              // These same mounted cards move into the list and back. Each mask
+              // subtracts the nearer card's silhouette, including rounded corners,
+              // instead of painting over it or cutting a detached horizontal strip.
+              <div
+                key={item.id}
+                className="pointer-events-none absolute inset-x-0 top-0"
+                style={{ height: "calc(100% + 80px)", zIndex: index }}
+              >
+                <svg aria-hidden className="absolute h-full w-full overflow-visible">
+                  <defs>
+                    <mask id={cutout} maskUnits="userSpaceOnUse" x="0" y="-1" width="100%" height="100%" style={{ maskType: "luminance" }}>
+                      <rect x="0" y="-1" width="100%" height="100%" fill="white" />
+                      <motion.g style={{ y: maskBottom }}>
+                        <motion.g
+                          initial={false}
+                          animate={{ y: -80 - (historyOpen ? (depth - 1) * rowPitch : nextDepth * 10) }}
+                          transition={nearerTransition}
+                        >
+                          <motion.path
+                            initial={false}
+                            animate={{ d: occlusionPaths[historyOpen ? 0 : nextDepth]! }}
+                            fill="black"
+                            transition={nearerTransition}
+                          />
+                        </motion.g>
+                      </motion.g>
+                    </mask>
+                  </defs>
+                </svg>
+                <div className="absolute inset-0" style={{ mask: `url(#${cutout})`, WebkitMask: `url(#${cutout})` }}>
+                  <motion.div
+                    initial={false}
+                    animate={{
+                      y: -80 - (historyOpen ? depth * rowPitch : visibleDepth * 10),
+                      left: historyOpen ? "0%" : `${visibleDepth * 5}%`,
+                      width: historyOpen ? "100%" : `${100 - visibleDepth * 10}%`,
+                      opacity: historyOpen ? 1 : depth <= 2 ? 1 - depth * 0.15 : 0,
+                    }}
+                    data-stack-depth={historyOpen ? undefined : visibleDepth}
+                    aria-hidden={!historyOpen}
+                    inert={!historyOpen}
+                    className={cn(BLOCK_SURFACE, "absolute my-0 flex h-14 min-w-0 items-center gap-2.5 px-3 text-left outline-none transition-colors duration-100 hover:bg-[var(--surface-primary)]")}
+                    style={{ top: "100%", pointerEvents: historyOpen ? "auto" : "none", marginBlock: 0 }}
+                    transition={dealTransition}
+                  >
+                    <motion.span
+                      className="flex w-full min-w-0 items-center gap-2.5"
+                      initial={false}
+                      animate={{ opacity: historyOpen ? 1 : 0 }}
+                      transition={dealTransition}
+                    >
+                      <button
+                        aria-current={item.id === currentQuestionId ? "page" : undefined}
+                        className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={() => {
+                          pinHistoryRef.current = true;
+                          setHistoryOpen(false);
+                          trail?.onGo(item);
+                        }}
+                        type="button"
+                      >
+                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] font-mono text-ui-sm tabular-nums text-muted-foreground">#{item.ordinal}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span className="min-w-0 flex-1 truncate text-thread font-medium">{item.title}</span>
+                            <ChallengeOutcomeTag outcome={item.outcome} />
+                          </span>
+                          <ChallengeCardMeta stop={item} />
+                        </span>
+                      </button>
+                      {trail && <ChallengeCardMenu stop={item} trail={trail} />}
+                    </motion.span>
+                  </motion.div>
+                </div>
+              </div>
+            );
+          })}
+        </motion.div>
+      </motion.div>
+      <div className="relative z-20" ref={frontRef}>{card}</div>
+    </div>
   );
+}
+
+/** Match transcript-block's superellipse(1.4) top corners. The cutout
+ * continues below the card so no deeper layer can bleed through its surface. */
+function stackOcclusionPath(x: number, y: number, width: number, radius: number): string {
+  const r = Math.min(radius, width / 2, 24);
+  const power = 2 / 2 ** 1.4;
+  const points: string[] = [`M ${x} ${y + 10000}`, `L ${x} ${y + r}`];
+  for (let step = 1; step <= 20; step++) {
+    const angle = step / 20 * Math.PI / 2;
+    points.push(`L ${x + r - r * Math.cos(angle) ** power} ${y + r - r * Math.sin(angle) ** power}`);
+  }
+  points.push(`L ${x + width - r} ${y}`);
+  for (let step = 1; step <= 20; step++) {
+    const angle = step / 20 * Math.PI / 2;
+    points.push(`L ${x + width - r + r * Math.sin(angle) ** power} ${y + r - r * Math.cos(angle) ** power}`);
+  }
+  points.push(`L ${x + width} ${y + 10000} Z`);
+  return points.join(" ");
+}
+
+function formatChallengeTime(elapsedMs: number): string {
+  const seconds = Math.max(0, Math.round(elapsedMs / 1_000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
 /** Spar's own bands, and a judge's, in the one word each that fits on the line. */

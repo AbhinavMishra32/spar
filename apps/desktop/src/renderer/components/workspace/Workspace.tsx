@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Panel, PanelGroup } from "react-resizable-panels";
 import { Check, FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send, WrapText } from "lucide-react";
-import type { ActiveQuestion, AttemptEvent, SessionDetail } from "@spar/domain";
+import type { ActiveQuestion, AttemptEvent, RatingPoint, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { runEvidence } from "../../../shared/testReport";
 import { sourceRunOutput } from "../../../shared/sourceOutput";
@@ -39,6 +39,7 @@ const SOURCE_NAME: Record<"leetcode" | "codeforces", string> = { leetcode: "Leet
 export function Workspace({
   detail,
   concepts,
+  learnerRating,
   question,
   api,
   run,
@@ -55,6 +56,8 @@ export function Workspace({
   detail: SessionDetail;
   /** What the problem's concept chips need to preview and open. */
   concepts?: ConceptContext | undefined;
+  /** The learner's rating, for pitching the problem against them. */
+  learnerRating?: RatingPoint | null | undefined;
   question: ActiveQuestion;
   api: SparApi | undefined;
   run: AgentRun | null;
@@ -356,7 +359,7 @@ export function Workspace({
     }
   };
 
-  const send = async (answer?: string) => {
+  const send = async (answer?: string, contextQuestionId?: string) => {
     const body = (answer ?? draft).trim();
     /* A running turn no longer refuses the message: it steers it. The guard
        that remains is against two sends racing each other, not against the
@@ -368,7 +371,7 @@ export function Workspace({
     setSending(true);
     setDraft("");
     try {
-      await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
+      await api.sendAgentMessage({ sessionId: detail.summary.id, message: body, ...(contextQuestionId ? { contextQuestionId } : {}) });
       await onRefresh();
     } catch (error) {
       setDraft((current)=>current||body);
@@ -615,6 +618,7 @@ export function Workspace({
           <AgentPanel
             answering={sending}
             concepts={concepts}
+            learnerRating={learnerRating}
             complexityCheckpoint={complexityCheckpoint}
             detail={detail}
             draft={draft}
@@ -625,7 +629,7 @@ export function Workspace({
             onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSettings={onOpenSettings}
             optimisticMessages={optimisticMessages}
-            onSend={() => void send()}
+            onSend={(contextQuestionId) => void send(undefined, contextQuestionId)}
             onAnswer={(answer) => void answerQuestion(answer)}
             onEditMessage={edit}
             undoable={undoable}

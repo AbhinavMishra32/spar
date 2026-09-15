@@ -290,6 +290,7 @@
           "type": "array"
         },
         "difficulty": {
+          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Write to context.learnerStanding.writeProblemsAt, which is the word that lands in the window this ability's status calls for — the host checks this the same way it checks a problem you fetch, and rejects a challenge pitched outside it. A challenge they would almost certainly solve teaches nothing when they solve it.",
           "enum": [
             "foundation",
             "developing",
@@ -1076,6 +1077,7 @@
           "type": "array"
         },
         "difficulty": {
+          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Write to context.learnerStanding.writeProblemsAt, which is the word that lands in the window this ability's status calls for — the host checks this the same way it checks a problem you fetch, and rejects a challenge pitched outside it. A challenge they would almost certainly solve teaches nothing when they solve it.",
           "enum": [
             "foundation",
             "developing",

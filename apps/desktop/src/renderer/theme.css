@@ -1874,6 +1874,36 @@
     corner-shape: superellipse(1.4);
   }
 
+  /* Receding cards use darker pigment with less coverage in light mode. */
+  :root:not(.dark) .transcript-block[data-stack-depth="1"] {
+    background: rgb(0 0 0 / 0.5%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%), 0 -1px 3px rgb(0 0 0 / 2.5%);
+  }
+
+  :root:not(.dark) .transcript-block[data-stack-depth="2"] {
+    background: rgb(0 0 0 / 0.25%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 25%), 0 -1px 3px rgb(0 0 0 / 2%);
+  }
+
+  /* A dark stack needs the same loss of material with depth that the light
+     stack gets above. Without it, each exposed shoulder reads as another solid
+     card even though its geometry has moved into the background. */
+  .dark .transcript-block[data-stack-depth="1"] {
+    background: color-mix(in oklab, var(--code-background) 58%, transparent);
+    border-color: color-mix(in oklab, var(--border-surface-strong) 72%, transparent);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 4%);
+  }
+
+  .dark .transcript-block[data-stack-depth="2"] {
+    background: color-mix(in oklab, var(--code-background) 38%, transparent);
+    border-color: color-mix(in oklab, var(--border-surface-strong) 48%, transparent);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 2.5%);
+  }
+
+  :root:not(.dark) .transcript-block[data-stack-front="true"] {
+    box-shadow: 0 -1px 4px rgb(0 0 0 / 2.5%), var(--app-shadow-panel);
+  }
+
   .code-block {
     display: flex;
     flex-direction: column;

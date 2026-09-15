@@ -4,15 +4,16 @@ import { Clock3, CornerDownRight, Folder, Search as SearchMark } from "lucide-re
 import { Tabs } from "radix-ui";
 
 import { languageForPath } from "@spar/domain";
-import { useCodeTheme } from "@/hooks/use-code-theme";
-import { highlight, type Span } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
 import { FileTab } from "../common/FileTab";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 import { Inline } from "./Markdown";
 import { useMarkdownLinks } from "./MarkdownLinks";
 import { memoryLabel } from "./toolSubject";
-import { FadedScroll, RawPayload } from "./ToolPayload";
+import { closeOff, FadedScroll, RawPayload } from "./ToolPayload";
+import { Snippet } from "./Snippet";
+import { readAttempt } from "./attemptReport";
+import { AttemptReadView } from "./AttemptRead";
 
 /**
  * What a tool call actually did, drawn rather than dumped.
@@ -45,6 +46,11 @@ export function ToolDetail({
      bare string, so the two are read with different expectations. */
   const args = useObject(input);
   const result = useJson(output);
+  /* The replay is read back into the shapes its report was printed from, which
+     is the one payload in the app that survives the 16k cap badly enough to need
+     its own reader. Only for the calls that carry one — every other tool would
+     be paying for a parse of a report it never returns. */
+  const replay = useMemo(() => (ATTEMPT_TOOLS.has(tool) ? readAttempt(output) : null), [tool, output]);
 
   switch (tool) {
     case "read-file": {
@@ -123,10 +129,14 @@ export function ToolDetail({
        JSON, and the learner's own file buried somewhere inside it. */
     case "inspect_current_attempt":
     case "read_attempt":
+    case "replay_attempt":
     case "evaluate_attempt": {
       /* Only when the payload actually arrived. A result too damaged to read is
          the raw payload's job — a drawn view of nothing says the attempt is
          empty, which is a different and false claim. */
+      if (replay && (replay.nothing || replay.log.length || replay.cases.length || replay.runs.length || replay.files.length)) {
+        return <AttemptReadView read={replay} />;
+      }
       const attempt = record(result);
       if (!Array.isArray(attempt.events) && !Array.isArray(attempt.files)) break;
       return <Attempt result={attempt} />;
@@ -146,6 +156,11 @@ export function ToolDetail({
      plain, never blank. */
   return <RawPayload input={input} output={output} />;
 }
+
+/** The calls that come back with a solve log. `evaluate_attempt` and
+ *  `inspect_current_attempt` are v0.7 spellings of the same read, and old turns
+ *  still draw. */
+const ATTEMPT_TOOLS = new Set(["read_attempt", "evaluate_attempt", "inspect_current_attempt", "replay_attempt"]);
 
 /* ---- Pieces ------------------------------------------------------------- */
 
@@ -174,47 +189,6 @@ function parseJson(body: string): unknown {
   }
 }
 
-/**
- * A payload that was cut off, made readable up to the cut.
- *
- * The worker caps what it stores at 16k, so the long results — an attempt's
- * whole event log above all — reach the renderer as valid JSON with the end
- * sawn off. Parsing that fails, and a view handed nothing has no way to tell
- * "the tool returned nothing" from "I could not read this", which is how a
- * panel ends up stating the first when the second is true.
- *
- * So the half that did arrive is closed: cut back to the last value that
- * finished, then shut the brackets that were open at that point. Ten of twelve
- * events is the honest reading of a payload with ten complete events in it.
- */
-export function closeOff(body: string): string {
-  const stack: string[] = [];
-  let shut: string[] = [];
-  let end = -1;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < body.length; index += 1) {
-    const character = body[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === "\"") inString = false;
-      continue;
-    }
-    if (character === "\"") inString = true;
-    else if (character === "{" || character === "[") stack.push(character === "{" ? "}" : "]");
-    else if (character === "}" || character === "]") {
-      stack.pop();
-      /* A value just finished, and everything still open at this point is what
-         has to be closed to make the prefix whole. */
-      end = index;
-      shut = [...stack].reverse();
-    }
-  }
-  return end < 0 ? body : body.slice(0, end + 1) + shut.join("");
-}
-
 /** The same, narrowed to a tool's arguments. */
 function useObject(body: string): Record<string, unknown> | null {
   const parsed = useJson(body);
@@ -225,66 +199,6 @@ function useObject(body: string): Record<string, unknown> | null {
  *  as one thing rather than as several. */
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <p className="px-2.5 pt-2 pb-1 text-[length:inherit] font-medium tracking-wide text-muted-foreground uppercase">{children}</p>;
-}
-
-/**
- * Code, in the theme the editor uses.
- *
- * Capped by default and openable. A file the agent read can be four hundred
- * lines, and a transcript that grows by a screenful every time the agent looks
- * at something is a transcript nobody can scroll.
- */
-function Snippet({ body, language }: { body: string; language: string }) {
-  const { theme } = useCodeTheme();
-  const [spans, setSpans] = useState<Span[] | null>(null);
-  const [full, setFull] = useState(false);
-  const trimmed = body.replace(/\s+$/, "");
-  const lines = trimmed ? trimmed.split("\n").length : 0;
-
-  useEffect(() => {
-    let alive = true;
-    void highlight(trimmed, language).then((next) => {
-      if (alive) setSpans(next);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [trimmed, language]);
-
-  if (!trimmed) return null;
-
-  return (
-    <>
-      <pre
-        className={cn(
-          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-[length:inherit] leading-[1.55]",
-          !full && lines > 14 && "max-h-[15.5rem] overflow-y-hidden",
-        )}
-        style={{ color: theme.slots.foreground }}
-      >
-        {/* Plain until the grammar resolves, so a long file is readable
-            immediately rather than blank for a beat. */}
-        <code>
-          {spans
-            ? spans.map((span, index) => (
-                <span key={index} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>
-                  {span.text}
-                </span>
-              ))
-            : trimmed}
-        </code>
-      </pre>
-      {lines > 14 && (
-        <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-[length:inherit] text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => setFull((value) => !value)}
-          type="button"
-        >
-          {full ? "Collapse" : `Show all ${lines} lines`}
-        </button>
-      )}
-    </>
-  );
 }
 
 /** Plain output — a command's, a page's. Same cap, no grammar. */

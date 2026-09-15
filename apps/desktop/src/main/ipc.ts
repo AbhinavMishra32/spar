@@ -621,8 +621,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
    * learner meant either way.
    */
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
-    const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
+    const input = value as { sessionId?: unknown; message?: unknown; contextQuestionId?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
     const said = input.message.trim();
+    const contextQuestionId = input.contextQuestionId === undefined ? null : zUuid(input.contextQuestionId);
+    const contextChallenge = contextQuestionId ? deps.store.readChallenge(contextQuestionId) : null;
+    if (contextChallenge && contextChallenge.session_id !== sessionId) throw new Error("That challenge does not belong to this session.");
+    const contextual = contextChallenge
+      ? `The learner attached challenge #${contextChallenge.ordinal}, "${contextChallenge.title}" (question ID: ${contextQuestionId}) to this message. Answer about that specific challenge.\n\nThe learner said: ${said}`
+      : said;
     clearAutoResume(sessionId);
     /* Steering and starting a turn are the same act from the learner's side, so
        which one happens is decided here rather than at four call sites. The
@@ -658,7 +664,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     }
     const session=deps.store.readSession(sessionId);
     const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
-    return deliver(said,turnKind);
+    return deliver(contextual,turnKind,said);
   });
   /**
    * A submission judged by the source that wrote the problem.

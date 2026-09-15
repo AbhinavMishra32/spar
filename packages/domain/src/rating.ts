@@ -295,6 +295,27 @@ export function generatedItemRating(difficulty: "foundation" | "developing" | "p
   return SPAR_BAND[difficulty];
 }
 
+/** The four words in price order, for the places that have to choose one rather
+ *  than price one that has already been chosen. */
+export const GENERATED_DIFFICULTIES = ["foundation", "developing", "proficient", "advanced"] as const;
+
+/**
+ * The difficulty word whose price sits closest to the middle of a target window.
+ *
+ * Spar's four anchors are absolute and 300 points apart, and a training window is
+ * about 300 points wide, so for most learners exactly one word lands inside it —
+ * which is the word the agent should be writing to. Returning the nearest rather
+ * than only an exact hit is deliberate: above roughly 2000 the window climbs past
+ * `advanced` and no word is inside it, and a learner who has outgrown the top
+ * band still has to be given something.
+ */
+export function generatedDifficultyFor(window: { minRating: number; maxRating: number }): "foundation" | "developing" | "proficient" | "advanced" {
+  const middle = (window.minRating + window.maxRating) / 2;
+  return GENERATED_DIFFICULTIES.reduce((best, word) =>
+    Math.abs(SPAR_BAND[word] - middle) < Math.abs(SPAR_BAND[best] - middle) ? word : best,
+  );
+}
+
 /**
  * How certain the item's own rating is, which decides how much weight the result
  * carries. Glicko's g(φ) discounts a result against an opponent whose rating is
@@ -310,6 +331,41 @@ export const ITEM_DEVIATION = { rated: 50, band: 150, generated: 250 } as const;
 export function itemDeviation(item: { source?: "leetcode" | "codeforces" | null | undefined; sourceRating?: number | null | undefined }): number {
   if (!item.source) return ITEM_DEVIATION.generated;
   return item.source === "codeforces" && item.sourceRating ? ITEM_DEVIATION.rated : ITEM_DEVIATION.band;
+}
+
+/** How a challenge's own rating is arrived at, which decides what the learner is
+ *  told it is rather than only how firmly it is quoted. */
+export type ItemBasis = "published" | "band" | "generated";
+
+/**
+ * What one challenge is worth as an opponent, whatever kind of challenge it is.
+ *
+ * The three cases were already decided — `itemRating` for a sourced problem,
+ * `generatedItemRating` for one Spar wrote, `itemDeviation` for how firmly either
+ * is known — but the choice between them lived inside the scorer, so it was only
+ * ever made at the moment an attempt ended. A learner looking at a problem could
+ * not be told what it was worth without a second copy of that choice, and a
+ * second copy is a second answer as soon as either moves.
+ *
+ * So the choice lives here and the scorer calls it. The number shown on the
+ * problem is the number the result is scored against, by construction rather than
+ * by agreement. `basis` comes back with it because the three are not the same
+ * kind of fact: a published Codeforces rating is a measurement, a band is a
+ * bucket covering hundreds of points, and a generated challenge's word is one
+ * author's judgement — and a UI that prints all three as a bare number says they
+ * are equally solid when `deviation` already says they are not.
+ */
+export function challengeItemRating(challenge: {
+  difficulty: "foundation" | "developing" | "proficient" | "advanced";
+  source?: { source: "leetcode" | "codeforces"; difficulty: "easy" | "medium" | "hard"; sourceRating?: number | null | undefined } | null | undefined;
+}): { rating: number; deviation: number; basis: ItemBasis } {
+  const source = challenge.source;
+  if (!source) return { rating: generatedItemRating(challenge.difficulty), deviation: ITEM_DEVIATION.generated, basis: "generated" };
+  return {
+    rating: itemRating({ source: source.source, difficulty: source.difficulty, sourceRating: source.sourceRating }),
+    deviation: itemDeviation({ source: source.source, sourceRating: source.sourceRating }),
+    basis: source.source === "codeforces" && source.sourceRating ? "published" : "band",
+  };
 }
 
 /**

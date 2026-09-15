@@ -187,7 +187,7 @@ export function RunFold({
           <AnimatePresence initial={false} mode="popLayout">
             <motion.span
               animate={{ y: 0, opacity: 1 }}
-              className={cn("inline-block min-w-0 truncate", working && "thinking-shimmer")}
+              className={cn("block min-w-0 truncate", working && "thinking-shimmer")}
               exit={reduced ? { opacity: 0 } : { y: -10, opacity: 0 }}
               initial={reduced ? false : { y: 10, opacity: 0 }}
               key={working ? "working" : "worked"}
