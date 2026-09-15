@@ -37,17 +37,17 @@ export function ProblemStatement({ source, language }: { source: string; languag
 
       {parsed.examples.length > 0 && (
         <div className="mt-4">
-          <p className="mb-1.5 text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">EXAMPLES</p>
+          <p className="mb-1.5 text-content-sm font-medium tracking-[0.06em] text-muted-foreground/80">EXAMPLES</p>
           <div className="overflow-hidden rounded-lg border border-border">
             {parsed.examples.map((example, index) => (
               <div
                 key={index}
                 className="flex min-w-0 flex-col gap-1 border-b border-border/60 bg-[var(--color-background-elevated-secondary)] px-2.5 py-2 last:border-b-0"
               >
-                <code className="min-w-0 break-words font-mono text-ui-sm text-foreground/85">{example.call}</code>
+                <code className="min-w-0 break-words font-mono text-content-sm text-foreground/85">{example.call}</code>
                 <span className="flex min-w-0 items-start gap-1.5">
                   <ArrowRight className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
-                  <code className="min-w-0 break-words font-mono text-ui-sm text-[var(--success)]">{example.result}</code>
+                  <code className="min-w-0 break-words font-mono text-content-sm text-[var(--success)]">{example.result}</code>
                 </span>
                 {/* Why this one is the answer. The agent writes it and it is
                     often the whole point of the example — which case the

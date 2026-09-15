@@ -303,7 +303,7 @@ function Reading({ moved, text }: { moved: boolean; text: string }) {
   return (
     <motion.span
       animate={{ opacity: 1, y: 0 }}
-      className={cn("font-mono text-[0.95rem] tabular-nums", moved ? "text-[var(--trace-change)]" : "text-foreground")}
+      className={cn("font-mono text-thread tabular-nums", moved ? "text-[var(--trace-change)]" : "text-foreground")}
       initial={moved ? { opacity: 0, y: -3 } : false}
       key={text}
       transition={{ duration: 0.22, ease: [0.32, 0.72, 0, 1] }}

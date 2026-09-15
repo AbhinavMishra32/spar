@@ -127,12 +127,87 @@
   --font-spar: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "SF Mono", "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --text-ui: 0.75rem;
+
+}
+
+/* Deliberately a plain `@theme`, not the `@theme inline` above.
+
+   `inline` bakes a token's value straight into the utilities it generates, so
+   `text-thread` ships as a literal `font-size` while `.md-prose` reads the same
+   token through `var()`. Two spellings of one number is how the thread came
+   apart: the `:root` value and the utility layer are emitted separately, and
+   anything that refreshes one without the other — a hot reload, a cached
+   stylesheet — puts the step rows at the old size and the reply at the new one
+   in the same column. Without `inline` the utility emits `var(--text-thread)`
+   too, so there is one value in the document and the thread cannot drift out of
+   step with itself. */
+@theme {
+  /* ---- The app's type scale -------------------------------------------------
+
+     Five sizes, and every one of them is a declaration here rather than a
+     literal in a component. Only the four marked SET are numbers to edit; the
+     rest derive, so a tweak to a base carries its own captions and headings
+     with it instead of leaving them behind at the old proportion.
+
+     Deliberately NOT in the `@theme inline` block above. `inline` bakes a
+     token's value into the utilities it generates, so `text-content` would ship
+     as a literal `font-size` while `.md-prose-content` read the same token
+     through `var()` — two spellings of one number, which is exactly how the
+     thread came apart once already. Without `inline` every utility emits
+     `var(--text-…)`, so there is one value in the document and a `calc()` that
+     hangs off a base actually tracks it.
+
+     Adding a token here means adding its name to the `font-size` list in
+     `lib/utils.ts`, or tailwind-merge will file it as a colour and silently
+     delete it from any class string that also carries an arbitrary-value
+     text colour. (Written without the bracket syntax on purpose: Tailwind scans
+     these comments for class names and will happily emit a rule for anything
+     that looks like one.) */
+
+  /* Chrome: toolbars, panels, the result rail. Read at a glance, not at length. */
+  --text-ui: 0.75rem;                                    /* SET */
   --text-ui--line-height: 1.125rem;
-  --text-ui-sm: 0.6875rem;
+  --text-ui-sm: calc(var(--text-ui) - 0.0625rem);
   --text-ui-sm--line-height: 1rem;
-  --text-content: 0.8125rem;
-  --text-content--line-height: 1.375rem;
+
+  /* ---- The problem pane ----------------------------------------------------
+
+     One base, and the pane's heading and captions hang off it. They used to be
+     a literal `1.0625rem` in `ChallengeBrief` and a borrowed `--text-ui-sm` in
+     `ProblemStatement`, which meant the statement could be moved and the title
+     above it and the sample cases below it would stay exactly where they were —
+     the pane came apart into three unrelated sizes the moment anyone touched
+     the one knob it was supposed to have.
+
+     The multipliers are the proportions those literals already had against a
+     13px base (1.3× and 0.85×), so at the current value this renders within a
+     fifth of a pixel of what it did before. They are here to hold that
+     relationship at 16px or at 11px, not to change it at 13. */
+  --text-content: 0.8250rem;                             /* SET */
+  --text-content--line-height: calc(var(--text-content) * 1.667);
+  --text-content-sm: calc(var(--text-content) * 0.85);
+  --text-content-sm--line-height: calc(var(--text-content-sm) * 1.5);
+  --text-content-title: calc(var(--text-content) * 1.3);
+  --text-content-title--line-height: calc(var(--text-content-title) * 1.3);
+
+  /* The source list runs a step above the rest of the chrome, and deliberately.
+     A sidebar is read at a glance and from further away than a toolbar — it is
+     the one surface you navigate by shape rather than by reading — so its labels
+     are set at the size the platform's own source lists use rather than at the
+     dense size that suits a row of controls. Every sidebar text size comes from
+     this pair; nothing in there is set in `--text-ui`.
+     Line height stays at 1.375rem rather than scaling with the size. Sidebar rows
+     are a fixed 1.875rem, so this number sets how much room the label has inside
+     that pill, not the space between rows; letting it grow with the text is what
+     would make the hover fill look stuffed. */
+  --text-source: 0.8250rem;                              /* SET */
+  --text-source--line-height: 1.375rem;
+  /* One step under the rows, always. This was a literal `0.875rem`, which was a
+     step *under* the old 15px source size and a step *over* the current one —
+     the section headers, the ⌘ hints and the empty-state lines were rendering
+     larger than the rows they caption. Derived, it cannot invert again. */
+  --text-source-sm: calc(var(--text-source) - 0.0625rem);
+  --text-source-sm--line-height: 1.25rem;
 
   /* The agent thread, at one size.
 
@@ -145,44 +220,21 @@
 
      Its own token rather than `--text-ui`, because `--text-ui` is the chrome of
      every other surface in the app — toolbars, panels, the result rail — and
-     none of those is a reading column. And the same size as the problem
-     statement rather than a fourth number: the challenge on one side and the
-     agent talking about it on the other are the two things a learner reads back
-     and forth between, and they should be set the same. */
-  --text-thread: 0.8125rem;
-  --text-thread--line-height: 1.375rem;
+     none of those is a reading column.
 
-  /* The source list runs a step above the rest of the chrome, and deliberately.
-     A sidebar is read at a glance and from further away than a toolbar — it is
-     the one surface you navigate by shape rather than by reading — so its labels
-     are set at the size the platform's own source lists use rather than at the
-     dense size that suits a row of controls. Every sidebar text size comes from
-     this pair; nothing in there is set in `--text-ui`.
-
-     15px, in the platform's own face. The 13px this replaces was argued from
-     NSFont.systemFontSize — the size AppKit sets a source list in — and that number
-     is real, but it is a convention rather than a constraint: SF Pro Text is the cut
-     the platform hints below 20px, so 15px is still inside the range the face was
-     drawn and hinted for. This is now two steps above the platform's own source-list
-     size, which is a deliberate break with it rather than an oversight.
-
-     What settled the face was looking at the candidates side by side against Codex's
-     sidebar, which is set in OpenAI Sans — a licensed face bundled in their app, so
-     never one we could have shipped. Seven open alternatives were rendered against
-     the system face at this size, Inter and Onest among them, and the system face
-     won each time: it holds its colour beside native chrome where a webfont goes
-     soft and grey. That is the same objection the `--font-sans` comment records
-     against Geist, and it has now survived two more attempts, so treat it as settled
-     rather than untried. The size was always the problem here, not the typeface.
-
-     Line height stays at 1.375rem rather than scaling with the size. Sidebar rows
-     are a fixed 1.875rem, so this number sets how much room the label has inside
-     that pill, not the space between rows; letting it grow with the text is what
-     would make the hover fill look stuffed. */
-  --text-source: 0.9375rem;
-  --text-source--line-height: 1.375rem;
-  --text-source-sm: 0.875rem;
-  --text-source-sm--line-height: 1.25rem;
+     15px: the problem statement's 13px plus two. The problem pane is the
+     baseline — it is scanned against code in a narrow column and stays where it
+     is — and the thread is the one surface read at length, which is why it gets
+     the step up rather than the pane coming with it. Nothing in the thread is
+     sized relative to anything else: it is all this one token, so raising it
+     raises every row, caption and payload together and the column stays one
+     size. */
+  --text-thread: 0.8250rem;
+  /* Derived, so the size above is genuinely the only number to touch. 1.6 is
+     what 15px/24px already was; changing the size alone now carries the leading
+     with it instead of leaving the thread tight or loose until someone
+     remembers this line. */
+  --text-thread--line-height: calc(var(--text-thread) * 1.6);
 }
 
 :root {
@@ -890,7 +942,7 @@
   /* ---- Agent transcript -------------------------------------------------- */
 
   .agent-transcript {
-    --transcript-width: 46rem;
+    --transcript-width: 56rem;
 
     /* ---- The reference thread, matched rather than approximated ------------
        The transcript is the one surface in this window that is not chrome, and
@@ -999,7 +1051,7 @@
      resolves to nothing, max-width is dropped, and those rows go full-bleed. */
   .transcript-column {
     width: 100%;
-    max-width: var(--transcript-width, 46rem);
+    max-width: var(--transcript-width, 56rem);
     margin-inline: auto;
   }
 
@@ -1378,21 +1430,22 @@
      Named `md-` rather than pasted onto the component so the transcript, concept
      entries and anything else that renders agent prose can share one scale. */
   .md-prose {
-    /* 13.5px: prose, not a headline.
+    /* The thread's one size, read from the thread's one token.
 
-       Chrome and prose are different jobs and want different sizes — the agent's
-       text was set at 13px, the size of a toolbar label, which is why a
-       paragraph of teaching had the density of a settings row. But ChatGPT's own
-       16px assumes a column about twice this panel's width, and at 380px that
-       reads as oversized.
+       This used to carry its own number, and that is exactly how the column
+       ended up with two sizes in it again: the step rows follow
+       `--text-thread`, this followed a literal, and the moment the token moved
+       the reply was a step smaller than the work above it. The doctrine was
+       already written down — a thread where the reply, the step rows and a
+       payload caption are three sizes reads as three surfaces stacked on each
+       other — but it was being held by two numbers agreeing rather than by one
+       number. Now there is one.
 
-       It used to sit half a step above the app's UI size, and the rest of the
-       thread has come up to meet it rather than the other way round — a thread
-       where the reply is 13.5px, the step rows are 12px and a payload caption is
-       11px reads as three surfaces stacked on each other. Every margin, heading,
-       pill and list indent below is a multiple of this, so moving this one line
-       rescales the whole system together. */
-    --md-font-size: 0.8125rem;
+       `.md-prose-content` overrides it for the problem pane, which is the one
+       surface that is deliberately not the thread. Every margin, heading, pill
+       and list indent below is a multiple of this, so the whole system still
+       rescales from a single line. */
+    --md-font-size: var(--text-thread);
     /* The system face, and the system's own optical sizing.
 
        `--font-display` is named for the job rather than for a file: on macOS it
@@ -1403,6 +1456,10 @@
     /* Slightly off the full foreground. Pure white text at this size on a dark
        ground buzzes; ChatGPT's body sits just under its own maximum too. */
     color: color-mix(in oklab, var(--foreground) 92%, transparent);
+    /* Derived, not read from the thread token: `.md-prose-content` changes the
+       font size for the problem pane and its leading has to come with it. At
+       the thread's own size this lands within half a pixel of the step rows'
+       line box, which is the agreement that matters. */
     --md-line-height: calc(var(--md-font-size) * 1.625);
     /* Not smaller: the thread is one size, and a caption that shrinks is the
        thing this was meant to stop. */
@@ -1431,20 +1488,30 @@
     letter-spacing: -0.011em;
     color: var(--foreground);
   }
+  /* Headings are weight and space, not size.
+
+     These ran at 1.5×, 1.25× and 1.125×, which is the right scale for a document
+     with a title and sections. The thread is not that: it is one column where a
+     step row, a reply and a payload all sit within a few pixels of each other,
+     and a reply that opens with an `h2` was a third size arriving in the middle
+     of it. The rule the thread is held to is that nothing in it is larger or
+     smaller than anything else — so a heading is marked by its 700 weight and by
+     the room around it, both of which still say "new section" without changing
+     the size of the text. */
   .md-prose h1 {
     margin: 0 0 calc(var(--md-space) * 2);
-    font-size: calc(var(--md-font-size) * 1.5);
-    line-height: calc(var(--md-space) * 8);
+    font-size: var(--md-font-size);
+    line-height: var(--md-line-height);
   }
   .md-prose h2 {
     margin: calc(var(--md-space) * 5) 0 calc(var(--md-space) * 2);
-    font-size: calc(var(--md-font-size) * 1.25);
-    line-height: calc(var(--md-space) * 7);
+    font-size: var(--md-font-size);
+    line-height: var(--md-line-height);
   }
   .md-prose h3 {
     margin: calc(var(--md-space) * 5) 0 calc(var(--md-space) * 2);
-    font-size: calc(var(--md-font-size) * 1.125);
-    line-height: calc(var(--md-space) * 7);
+    font-size: var(--md-font-size);
+    line-height: var(--md-line-height);
   }
   .md-prose h4 {
     margin: calc(var(--md-space) * 4) 0 0;
@@ -1560,10 +1627,10 @@
 
      `.md-prose` is scaled for the thread, which is a reading surface. A problem
      statement sits beside the editor in a column the learner is scanning against
-     code, and it was 13px there before the two surfaces started sharing one
-     renderer. Rescoped rather than reverted: every margin, heading and list
-     indent still derives from this one line, so the pane keeps the same system
-     at its own size. */
+     code, and it stays at 13px there — that size is the baseline the thread's
+     own size is set from, not something that follows it. Rescoped rather than
+     reverted: every margin, heading and list indent still derives from this one
+     line, so the pane keeps the same system at its own size. */
   .md-prose-content {
     --md-font-size: var(--text-content);
   }

@@ -89,9 +89,9 @@ export function ChallengeBrief({
               larger now and shared by both surfaces, and at this size the same
               pull is what keeps a semibold line from falling apart — the setting
               `ChallengeIntro` has always used. */}
-          <p className="truncate text-[1.0625rem] font-semibold leading-[1.3] tracking-[-0.015em]">{brief.title}</p>
+          <p className="truncate text-content-title font-semibold tracking-[-0.015em]">{brief.title}</p>
           {brief.abilityTitle && (
-            <p className="mt-0.5 truncate text-ui leading-[1.35] text-muted-foreground">Testing: {brief.abilityTitle}</p>
+            <p className="mt-0.5 truncate text-content-sm leading-[1.35] text-muted-foreground">Testing: {brief.abilityTitle}</p>
           )}
         </div>
         {brief.source && (
@@ -137,11 +137,11 @@ export function ChallengeBrief({
           type="button"
         >
           <Target className="size-3 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-ui font-medium">Why this problem</span>
+          <span className="min-w-0 flex-1 truncate text-content font-medium">Why this problem</span>
           <ChevronDown className={cn("size-3 shrink-0 text-muted-foreground transition-transform", !whyOpen && "-rotate-90")} />
         </button>
         {whyOpen && (
-          <div className="space-y-1.5 border-t border-border/70 px-3 py-2 text-ui leading-[1.6]">
+          <div className="space-y-1.5 border-t border-border/70 px-3 py-2 text-content leading-[1.6]">
             <p className="text-foreground/85">{brief.specificGap}</p>
             <p className="text-muted-foreground">
               <span className="font-medium text-foreground">Evidence wanted: </span>
