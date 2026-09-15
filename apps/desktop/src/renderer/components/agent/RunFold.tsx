@@ -130,7 +130,7 @@ export function RunFold({
         {/* React 19 takes `inert` as a boolean. A closed fold is zero pixels
             tall but still in the document, and without this its buttons stay
             tabbable — the learner would tab into steps they cannot see. */}
-        <div className={cn("min-w-0 overflow-hidden", open ? "pt-1" : undefined)} inert={!open}>
+        <div className={cn("min-w-0 overflow-hidden", open ? "pt-2" : undefined)} inert={!open}>
           {!bodyLoaded && loading && <p className="py-1 text-thread text-muted-foreground" role="status">Loading the steps…</p>}
           {!bodyLoaded && failed && (
             <button className="py-1 text-thread text-muted-foreground transition-colors hover:text-foreground" onClick={() => void load()} type="button">
