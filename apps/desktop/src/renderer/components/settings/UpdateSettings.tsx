@@ -3,6 +3,7 @@ import { Check, Download, Loader2, RefreshCw, ShieldCheck } from "lucide-react";
 import type { SparApi, UpdateState } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { message } from "@/lib/format";
+import { SettingsRow } from "./layout";
 
 const STATUS: Record<UpdateState["status"], string> = {
   idle: "Ready to check",
@@ -52,7 +53,7 @@ export function UpdateSettings({ api }: { api: SparApi | undefined }) {
             : "Spar checks securely when it opens and every few hours while it is running.";
 
   return (
-    <div className="flex items-center gap-4 px-4 py-3.5">
+    <SettingsRow className="gap-4">
       <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-foreground">
         {busy ? <Loader2 className="size-4 animate-spin" /> : state?.status === "current" ? <Check className="size-4 text-success" /> : <ShieldCheck className="size-4" />}
       </div>
@@ -65,6 +66,6 @@ export function UpdateSettings({ api }: { api: SparApi | undefined }) {
       ) : (
         <Button disabled={!api || busy || state?.status === "unsupported"} onClick={check} size="sm" variant="secondary"><RefreshCw />Check now</Button>
       )}
-    </div>
+    </SettingsRow>
   );
 }

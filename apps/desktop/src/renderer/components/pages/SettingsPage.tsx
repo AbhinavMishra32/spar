@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrainCircuit, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type BaselineState, type Language } from "@spar/domain";
 import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
@@ -21,6 +21,8 @@ import { message } from "@/lib/format";
 import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsHeader, SettingsRow, SettingsSection } from "../settings/layout";
+import { SectionRail } from "../settings/SectionRail";
+import { SettingsSidebar, type SidebarGroup } from "../settings/SettingsSidebar";
 import { refreshProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
@@ -33,7 +35,7 @@ import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
 type SettingsSection = "account" | "models" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
-type NavItem = { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> };
+type NavItem = SidebarGroup<SettingsSection>["items"][number];
 
 /**
  * Seven destinations under three headings.
@@ -44,38 +46,33 @@ type NavItem = { id: SettingsSection; label: string; icon: React.ComponentType<{
  * of Spar and the person signed into it, three about the machinery that reads
  * and teaches, two about what is kept.
  */
-const SETTINGS_NAV: Array<{ label: string; items: NavItem[] }> = [
+const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
   {
     label: "Spar",
     items: [
-      { id: "account", label: "Account", icon: UserRound },
-      { id: "appearance", label: "Appearance", icon: Palette },
+      { id: "account", label: "Account", icon: UserRound, sections: ["Account", "About"] },
+      { id: "appearance", label: "Appearance", icon: Palette, sections: ["Appearance", "Updates"] },
     ],
   },
   {
     label: "Training",
     items: [
-      { id: "models", label: "Models", icon: BrainCircuit },
-      { id: "learning", label: "Learning", icon: Settings2 },
-      { id: "connections", label: "Connections", icon: Link2 },
+      { id: "models", label: "Models", icon: BrainCircuit, sections: ["Providers", "Agent", "Web search"] },
+      { id: "learning", label: "Learning", icon: Settings2, sections: ["Baseline", "Training preferences"] },
+      { id: "connections", label: "Connections", icon: Link2, sections: ["Practice sources"] },
     ],
   },
   {
     label: "Your record",
     items: [
-      { id: "privacy", label: "Data & Privacy", icon: Eye },
-      { id: "advanced", label: "Learning Engine", icon: Globe },
+      { id: "privacy", label: "Data & Privacy", icon: Eye, sections: ["Data & Privacy"] },
+      { id: "advanced", label: "Learning Engine", icon: Globe, sections: ["Learning Engine", "Raw snapshot"] },
     ],
   },
 ];
 
 /** Flat, for the one question the groups cannot answer: what this page is called. */
 const SETTINGS_PAGES: NavItem[] = SETTINGS_NAV.flatMap((group) => group.items);
-
-/* One string, because every row in the list has to agree about its height, its
-   resting colour, and what selection does to it — a row that disagrees is
-   visible immediately. */
-const NAV_ITEM = "flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-ui outline-none transition-colors";
 
 /** Resolved in the main process before the window paints, so it is already here. */
 const buildInfo = window.spar?.build;
@@ -518,6 +515,44 @@ export function SettingsPage({
   const [languageBusy, setLanguageBusy] = useState(false);
   const [accountAction, setAccountAction] = useState<"sign-out" | "delete" | null>(null);
   const [section, setSection] = useState<SettingsSection>("account");
+  /* Both the rail in the margin and the sidebar's search read the rendered
+     tree, so the page has to hand them the two nodes it owns: the thing that
+     scrolls, and the thing inside it the sections live in. */
+  const viewport = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLElement>(null);
+
+  /**
+   * Going to a page, and optionally to a heading on it.
+   *
+   * The heading cannot be scrolled to in the tick that asks for the page — it
+   * does not exist yet — and it may not exist in the next one either, since a
+   * section can be waiting on its own data. So this polls for it briefly and
+   * gives up rather than scrolling to whatever happens to be there. Landing is
+   * a flash, not just a scroll: on a page that is nothing but headings,
+   * arriving silently at one is indistinguishable from not having moved.
+   */
+  const goto = useCallback((next: SettingsSection, heading?: string) => {
+    setSection(next);
+    if (!heading) return;
+    let tries = 0;
+    const find = () => {
+      const node = content.current?.querySelector<HTMLElement>(`[data-settings-section="${CSS.escape(heading)}"] h2`);
+      if (!node) {
+        if (++tries < 40) setTimeout(find, 50);
+        return;
+      }
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      node.classList.remove("settings-search-focus");
+      void node.offsetWidth;
+      node.classList.add("settings-search-focus");
+      setTimeout(() => node.classList.remove("settings-search-focus"), 2_250);
+    };
+    setTimeout(find, 0);
+  }, []);
+
+  /* A page you arrive at is a page you start at the top of. Without this,
+     switching from a long page to a short one lands you in its footer. */
+  useEffect(() => { if (viewport.current) viewport.current.scrollTop = 0; }, [section]);
 
   /* Through the shared store, not the bridge directly: connecting here has to
      retire the "no model provider" notice on the composer waiting behind this
@@ -580,61 +615,38 @@ export function SettingsPage({
        a sheet laid on top, the same card every other content pane gets. A
        settings screen drawn as one flat field reads as a web page that happened
        to open here rather than as a place in the app. */
-    <div className="flex h-full min-h-0 gap-1.5 py-1.5 pr-1.5">
-      {/* Narrow, and padded only on the leading edge: the rows are the column,
-          so the space between them and the page belongs to the page. */}
-      <aside className="relative flex h-full w-[12.5rem] shrink-0 flex-col pl-2 pt-1">
-        {/* No search field. Seven destinations is a list you read, not one you
-            query. */}
-        <nav aria-label="Settings sections" className="app-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-1">
-          {SETTINGS_NAV.map((group) => (
-            <section key={group.label}>
-              {/* The same heading the page's own sections wear, one step
-                  quieter, and inset to the rows rather than spaced away from
-                  them — a 28px band on the same left edge as the glyphs, so the
-                  column reads as one ruled list instead of headings floating
-                  above groups of buttons. */}
-              <h2 className="flex h-7 items-center pl-2.5 text-ui-sm font-medium text-muted-foreground/70">{group.label}</h2>
-              <ul className="flex flex-col gap-0.5">
-                {group.items.map(({ id, label, icon: Icon }) => (
-                  <li key={id}>
-                    <button
-                      className={cn(NAV_ITEM, section === id ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
-                      onClick={() => setSection(id)}
-                      type="button"
-                    >
-                      <Icon className="size-4" />
-                      {label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </nav>
+    <div className="flex h-full min-h-0">
+      <SettingsSidebar
+        active={section}
+        footer={
+          /* The bottom of the column, and the reason it no longer reads as
+             empty: a list that ends in mid-air looks unfinished, one that ends
+             on a line of type looks placed. It also answers from anywhere in
+             Settings the question the About panel answers only from Account. */
+          buildInfo ? (
+            <p className="mt-auto shrink-0 px-2.5 pt-3 pb-1 text-xs font-medium text-muted-foreground/60">
+              Spar {buildInfo.version}
+              {!buildInfo.packaged && " · dev"}
+            </p>
+          ) : null
+        }
+        groups={SETTINGS_NAV}
+        onSelect={goto}
+      />
 
-        {/* The bottom of the column, and the reason it no longer reads as empty:
-            a list that ends in mid-air looks unfinished, one that ends on a line
-            of type looks placed. It also answers from anywhere in Settings the
-            question the About panel answers only from Account. */}
-        {buildInfo && (
-          <p className="shrink-0 pb-1 pl-2.5 pt-3 text-ui-sm text-muted-foreground/60">
-            Spar {buildInfo.version}
-            {!buildInfo.packaged && " · dev"}
-          </p>
-        )}
-      </aside>
-      {/* The sheet is the ground, not the material. Everything on it — the
-          provider cards, the rows, the switches — is a raised surface, so the
-          sheet has to sit *under* card level or the stack inverts and the cards
-          read as holes cut into a lighter page. `surface-under` is the app's
-          recessed step: a hair grey in light, a step darker than the window in
-          dark, and in both cases the thing a card can be lifted off. */}
-      <div className="app-scroll min-w-0 flex-1 overflow-y-auto rounded-[var(--radius-2xl)] border border-border bg-[var(--color-background-surface-under)] shadow-[inset_0_1px_2px_oklch(0%_0_0/4%)]">
-      {/* Wide top padding rather than a title bar: the heading sits in air, which
-          is what makes it read as the page's name rather than as the first row
-          of the list under it. */}
-      <div className="mx-auto w-full max-w-[42rem] px-8 pb-32 pt-16">
+
+      {/* The sheet: the window's own paper, lifted off the chrome by a hairline
+          and a contact shadow rather than by a fill. Everything you operate sits
+          on it as a bordered card, so the sheet itself has to stay quiet — a
+          tinted page under tinted cards is two materials competing to be the
+          background. */}
+      <div className="min-w-0 min-h-0 flex-1 p-1.5">
+        <div className="settings-sheet relative size-full @container">
+          <div className="app-scroll size-full overflow-y-auto rounded-[inherit]" ref={viewport}>
+            {/* Wide top padding rather than a title bar: the heading sits in air,
+                which is what makes it read as the page's name rather than as the
+                first row of the list under it. */}
+            <main className="mx-auto w-full max-w-2xl px-8 pt-16 pb-40 text-left" ref={content}>
         <SettingsHeader>
           <h1>{SETTINGS_PAGES.find((item) => item.id === section)?.label ?? "Settings"}</h1>
         </SettingsHeader>
@@ -790,8 +802,11 @@ export function SettingsPage({
         </Group>}
 
         {section === "advanced" && <LearningEngineInspector api={api} />}
+            </div>
+            </main>
+          </div>
+          <SectionRail contentRef={content} viewportRef={viewport} />
         </div>
-      </div>
       </div>
 
       <ProviderConnectDialog api={api} onClose={() => setSelected(null)} onConnected={refresh} provider={selected} />

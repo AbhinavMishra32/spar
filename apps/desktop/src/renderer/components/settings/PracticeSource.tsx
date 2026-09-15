@@ -9,6 +9,7 @@ import { SparDots } from "@/components/common/SparDots";
 import { message } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SourceGlyph } from "../common/SourceGlyph";
+import { SettingsRow } from "./layout";
 
 type SourceNote = { tone: "muted" | "error"; text: string };
 
@@ -302,6 +303,8 @@ function topSkills(account: NonNullable<PracticeInventory["account"]>): string {
     .join(", ");
 }
 
+/* The shared row, not a local one: every row in a settings card has to agree
+   about its surface, or the card is a stack of panes in two colours. */
 function Row({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex min-h-[3.375rem] items-center gap-3 px-3.5 py-2", className)} {...props} />;
+  return <SettingsRow className={className} {...props} />;
 }
