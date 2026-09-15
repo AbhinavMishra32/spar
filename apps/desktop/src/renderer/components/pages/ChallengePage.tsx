@@ -129,8 +129,6 @@ function Brief({
             abilityTitle: detail.abilityTitle,
             statement: detail.statement,
             source: detail.source,
-            specificGap: detail.specificGap,
-            desiredEvidence: detail.desiredEvidence,
           }}
           {...(onOpenExternal ? { onOpenExternal } : {})}
         >

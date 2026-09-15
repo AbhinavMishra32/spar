@@ -36,6 +36,30 @@ describe("Training Agent controller policy", () => {
     expect(completionInstruction("session-start",sourced)).toContain("connected-provider problem");
   });
 
+  /* The reason a challenge was set is the learner's to read, and it is only
+     ever asked for on the two turns that actually set one — a reply about a
+     replacement, or about something they just asked, has no new problem to
+     justify and would be inventing a rationale to fill the slot. */
+  it("asks every turn that sets a challenge why this problem, and no other turn",()=>{
+    const local=new Map<string,unknown[]>([["create_question",[{result:{status:"playable"}}]]]);
+    for(const kind of ["session-start","cold-start","attempt-complete"] as const){
+      expect(completionInstruction(kind,local)).toContain("why this problem and why now");
+    }
+    for(const kind of ["challenge-revision","learner-message"] as const){
+      expect(completionInstruction(kind,local)).not.toContain("why this problem and why now");
+    }
+  });
+
+  /* The reason has to come out of the solve the turn just read. An instruction
+     that only said "explain your decision" is answered with the decision
+     restated, which is what the problem panel's own disclosure already did. */
+  it("points the attempt-complete reason at the replay rather than the verdict",()=>{
+    const outcomes=new Map<string,unknown[]>([["replay_attempt",[{result:{log:[]}}]]]);
+    const instruction=completionInstruction("attempt-complete",outcomes);
+    expect(instruction).toContain("you have just read the solve");
+    expect(instruction).toContain("what that left you unsure of");
+  });
+
   it("stops requiring retrieval once the ledger has answered with nothing", () => {
     /* A Track with no evidence has no abilities, no attempts, and therefore no
        challenges either. Asking all three was three forced round-trips to be

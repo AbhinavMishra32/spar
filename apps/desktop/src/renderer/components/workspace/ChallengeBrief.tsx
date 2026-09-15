@@ -1,7 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, Target, TriangleAlert } from "lucide-react";
+import { useMemo, type ReactNode } from "react";
+import { TriangleAlert } from "lucide-react";
 import type { ChallengeSource, ConceptTag, Language, Question } from "@spar/domain";
-import { cn } from "@/lib/utils";
 import { presentSourcedStatement } from "@/lib/sourcedStatement";
 import { ChallengeEmblem } from "./ChallengeEmblem";
 import { ProblemStatement } from "./ProblemStatement";
@@ -27,6 +26,17 @@ import { SourceBadge } from "../common/SourceBadge";
  * in `children` — which is after the statement, so the two views are identical
  * from the top of the page down to the end of the problem — and anything that
  * would not belongs in this file.
+ *
+ * What is deliberately *not* here is why the challenge was set. This used to end
+ * with a "Why this problem" disclosure holding the training target's own
+ * `specificGap` and `desiredEvidence` — Spar's internal note about what it is
+ * trying to find out, shown to the learner in the vocabulary of a test plan
+ * ("Evidence wanted: correctly implements and explains a typed array
+ * transformation"). It read as generated because it was: the same two sentences
+ * the target already held, in the same shape, under every problem. The reason a
+ * problem was set for *this* learner lives in what the agent says when it hands
+ * it over, where it can name the moment in their own last solve that produced it
+ * — see `completionInstruction` in the worker's agent policy.
  */
 
 /** What any surface needs to present a challenge, named rather than taken whole
@@ -43,11 +53,6 @@ export type ChallengeBriefData = {
   statement: string;
   source: ChallengeSource | null;
   concepts: ConceptTag[];
-  /** The "Why this problem" disclosure. A past challenge carries no
-   *  `avoidTesting`, so it is optional rather than faked as an empty promise. */
-  specificGap: string;
-  desiredEvidence: string;
-  avoidTesting?: string[];
 };
 
 export function ChallengeBrief({
@@ -57,14 +62,13 @@ export function ChallengeBrief({
   onOpenExternal,
 }: {
   brief: ChallengeBriefData;
-  /** Whatever the surface adds between the statement and the disclosure. */
+  /** Whatever the surface adds after the statement. */
   children?: ReactNode;
   /** What the concept chips need to preview and open. */
   conceptContext?: ConceptContext | undefined;
   /** Opens the problem at its source in the real browser. */
   onOpenExternal?: ((url: string) => void) | undefined;
 }) {
-  const [whyOpen, setWhyOpen] = useState(false);
   const presented = useMemo(
     () => presentSourcedStatement(brief.statement, brief.source),
     [brief.source, brief.statement],
@@ -129,33 +133,6 @@ export function ChallengeBrief({
       )}
 
       {children}
-
-      <div className="mt-4 overflow-hidden rounded-[var(--radius-xl)] border border-border bg-[var(--color-background-elevated-secondary)]">
-        <button
-          className="flex w-full items-center gap-2 px-3 py-2 text-left"
-          onClick={() => setWhyOpen((value) => !value)}
-          type="button"
-        >
-          <Target className="size-3 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate text-content font-medium">Why this problem</span>
-          <ChevronDown className={cn("size-3 shrink-0 text-muted-foreground transition-transform", !whyOpen && "-rotate-90")} />
-        </button>
-        {whyOpen && (
-          <div className="space-y-1.5 border-t border-border/70 px-3 py-2 text-content leading-[1.6]">
-            <p className="text-foreground/85">{brief.specificGap}</p>
-            <p className="text-muted-foreground">
-              <span className="font-medium text-foreground">Evidence wanted: </span>
-              {brief.desiredEvidence}
-            </p>
-            {brief.avoidTesting && brief.avoidTesting.length > 0 && (
-              <p className="text-muted-foreground">
-                <span className="font-medium text-foreground">Not under test: </span>
-                {brief.avoidTesting.join(", ")}
-              </p>
-            )}
-          </div>
-        )}
-      </div>
     </>
   );
 }
