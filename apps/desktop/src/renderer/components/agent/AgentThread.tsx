@@ -429,7 +429,7 @@ function LearnerMessage({ body, createdAt, editable, queued = false, onEdit }: {
 function messageTime(value: string | number): string {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hour12: true }).format(date);
 }
 
 export function AgentThread({
