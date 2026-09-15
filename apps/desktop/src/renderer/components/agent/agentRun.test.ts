@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupParts, reasoningAtLiveEdge, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, publishedRunArtifacts, reasoningAtLiveEdge, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
 
 const tool = (name: string): Extract<RunPart, { kind: "tool" }> => ({
   kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", startedAt: 0,
@@ -266,5 +266,19 @@ describe("a message the turn has not picked up yet", () => {
     expect(run([]).steersConsumed).toBe(0);
     expect(status("steered:1").steersConsumed).toBe(1);
     expect(status("steered:3").steersConsumed).toBe(3);
+  });
+});
+
+ describe("published artifacts outside the work fold", () => {
+  it("keeps a legacy completed run's challenge visible without a final phase", () => {
+    const card = tool("create_question");
+    expect(publishedRunArtifacts(run([tool("read_ability"), card], "done"))).toEqual([card]);
+  });
+  it("retains the work artifact alongside the final response without repeating final artifacts", () => {
+    const card = tool("replace_current_question");
+    expect(publishedRunArtifacts({ ...run([card, { kind: "text", id: "reply", body: "Try this next." }, tool("create_question")], "done"), finalFrom: 1 })).toEqual([card]);
+  });
+  it("does not announce failed or unfinished publications", () => {
+    expect(publishedRunArtifacts(run([{ ...tool("create_question"), phase: "error" }, { ...tool("assign_practice_problem"), phase: "running" }]))).toEqual([]);
   });
 });

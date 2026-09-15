@@ -7,7 +7,7 @@ import { Markdown } from "./Markdown";
 import { ChallengePublished, PROSE_GAP, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
 import { ExplainedTrace } from "./ExplainedTrace";
 import { SystemEvent } from "./SystemEvent";
-import { groupParts, reasoningAtLiveEdge, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, isChallengePublished, publishedRunArtifacts, reasoningAtLiveEdge, type AgentRun, type RunPart } from "./agentRun";
 import { RunFold } from "./RunFold";
 import { unreconciledOptimisticMessages, type OptimisticLearnerMessage } from "./optimisticMessages";
 
@@ -87,6 +87,8 @@ function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefi
   const boundary = run.finalFrom ?? run.parts.length;
   const work = run.parts.slice(0, boundary);
   const reply = run.parts.slice(boundary);
+  // Published artifacts remain accessible even when the work is collapsed.
+  const published = publishedRunArtifacts(run);
   const thinkingAtEdge = reasoningAtLiveEdge(work, streaming, run.finalStartedAt);
   return (
     <div className="min-w-0">
@@ -96,6 +98,7 @@ function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefi
         {thinkingAtEdge && <div style={{ marginTop: STEP_GAP }}><ThinkingLine /></div>}
         {streaming && run.finalStartedAt === undefined && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={work} /></div>}
       </RunFold>
+      {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={published} /></div>}
       {reply.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={reply} /></div>}
     </div>
   );
@@ -226,7 +229,7 @@ function WaitingLine({ parts }: { parts: RunPart[] }) {
  * of storing them. A turn with no reply is still a turn worth seeing; that is
  * what an attempt-complete turn is, and it used to leave nothing behind at all.
  */
-function AgentMessage({ body, activity, activityCount, messageId, workedMs }: {
+export function AgentMessage({ body, activity, activityCount, messageId, workedMs }: {
   body: string;
   activity: AgentActivityStep[];
   activityCount: number;
@@ -240,6 +243,8 @@ function AgentMessage({ body, activity, activityCount, messageId, workedMs }: {
      saving is in what is resident rather than in what the learner can see. */
   const [fetched, setFetched] = useState<AgentActivityStep[] | null>(null);
   const steps = fetched ?? activity;
+  const parts = steps.map(storedPart);
+  const published = parts.filter(isChallengePublished);
   /* Steps this turn has on disk but not in memory. The fold offers them and
      fetches them when it is opened, so an old turn reads as a turn that did
      work rather than one that did nothing. */
@@ -258,9 +263,10 @@ function AgentMessage({ body, activity, activityCount, messageId, workedMs }: {
     <div className="min-w-0">
       {(steps.length > 0 || deferred) && (
         <RunFold bodyLoaded={!deferred} live={false} onOpen={open} workedMs={workedMs}>
-          <Rows parts={steps.map(storedPart)} />
+          <Rows parts={parts} />
         </RunFold>
       )}
+      {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={published} /></div>}
       {body.trim() && (
         <div className="min-w-0 pb-2" style={{ marginTop: steps.length || deferred ? PROSE_GAP : undefined }}>
           <Markdown source={body} />

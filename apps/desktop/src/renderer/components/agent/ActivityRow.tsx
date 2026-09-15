@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { AnimatePresence, motion } from "motion/react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
 import { ToolDetail } from "./ToolDetail";
@@ -10,7 +11,11 @@ import { thoughts } from "./thoughts";
 import { useMarkdownLinks } from "./MarkdownLinks";
 import { FadedScroll, RawPayload } from "./ToolPayload";
 import { SourceGlyph } from "../common/SourceGlyph";
+import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
+import { SaveProblem } from "../common/SaveProblem";
+import { readPublishedChallenge } from "./publishedChallenge";
 import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
+import { solveHead, solveStats, spentOn, type SolveStats } from "./solveStats";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
@@ -318,8 +323,16 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           cross. The whole row is pulled 4px left of the prose column so the
           16px mark centres where the reference centres it — left only: the
           matching right pull bought nothing and pushed every open panel 4px
-          past the column, which is where the thread clipped its edge off. */}
-      <div className="relative -ml-1 flex min-w-0 items-start gap-1.5 pb-2">
+          past the column, which is where the thread clipped its edge off.
+
+          That bottom padding is the gap to the *next step*, so it is only paid
+          when there is one. A step at the end of a cluster was adding it on top
+          of the prose gap the paragraph beneath already sets, which is why a
+          sentence sat 22px under a tool row and 14px above the next one — the
+          asymmetry read as the rows being attached to the wrong paragraph. An
+          open row keeps it: there the padding is what the thread's line runs
+          through to reach the panel. */}
+      <div className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", (continues || open) && "pb-2")}>
         <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
           {/* One element, not three. The line starts below this row's mark and
               runs to the foot of its block — which grows when the panel opens,
@@ -341,12 +354,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           )}
           {hasPayload && (
             <CollapsibleContent>
-              {/* A ring, not a border. A 1px border and a shadow on the same box
-                  draw a hard line and then a soft edge just outside it; the
-                  reference draws one half-pixel ring and lets the shadow start
-                  from there, which is the same rule `smooth-shadow-ring` states
-                  for the rest of this app. */}
-              <div className="mt-1.5 min-w-0 overflow-hidden rounded-xl bg-[var(--surface-primary)] shadow-sm ring-[0.5px] ring-[var(--border-surface-strong)]">
+              <div className="agent-tool-detail mt-1.5 min-w-0 overflow-hidden rounded-xl border border-[var(--border-surface-strong)] bg-[var(--color-background-editor)]">
                 {/* Built for the tool when there is a view for it, raw when there is
                     not — `ToolDetail` decides, and falls back itself.
 
@@ -744,67 +752,303 @@ function Thought({ title, body, settling }: { title: string; body: string; settl
  * attempt. It is deliberately not a retrieval row — "read your solve" is a
  * statement about them, and it is the difference between a tutor that saw the
  * verdict and one that watched the work.
+ *
+ * And because it is about them, it is the one step in a turn that gets a card.
+ * The replay counts the things a learner actually remembers about an attempt —
+ * how long they were in it, how many times they ran it, which cases never once
+ * went green — and those numbers were being flattened into a grey clause at the
+ * end of a row, in the same weight as every tool label above it. A count that
+ * carries a verdict should look like one: the cases that never passed are red,
+ * because they are the reason the attempt went the way it did.
+ *
+ * Two lines, deliberately. It is the account of a step the agent took, not a
+ * dashboard tile dropped into the middle of one — so it carries no shadow, no
+ * chart and no row it does not need, and the case split is a ring in the corner
+ * of the header rather than anything with a row of its own. Behind all of it, at
+ * the opacity of a watermark, is the head of the file they wrote: the step says
+ * it read their solve, and this is the solve it read.
+ *
+ * The numbers come from the call's own result rather than from the sentence the
+ * worker wrote about it — see `solveStats`. A replay still running, and one with
+ * nothing to count, fall back to the plain row: a card with no numbers in it is
+ * a frame around a sentence.
  */
 export function SolveRead({ part }: { part: ToolPart }) {
   const running = part.phase === "running";
+  const stats = running ? null : solveStats(part.output);
+
+  if (!stats || (!stats.casesTracked && !stats.runs && !stats.elapsedMs)) {
+    return (
+      <div className={cn(ROW, "text-[var(--transcript-step)]")}>
+        <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}>
+          {running
+            ? <ThinkingOrb aria-label="Reading your solve" size={20} state="searching" style={{ width: 15, height: 15 }} />
+            : <IconHistory className="size-4" />}
+        </span>
+        <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
+          {running ? "Reading your solve" : "Read your solve"}
+        </span>
+        {/* What the replay found, on the same line. It used to be a stack of chips
+            built by splitting the label on an em dash — a shape that broke the day
+            that field started carrying the agent's own title for the step. */}
+        {!running && part.detail && (
+          <span className="min-w-0 truncate text-[var(--transcript-step-mark)]">{part.detail}</span>
+        )}
+      </div>
+    );
+  }
+
+  const solve = solveHead(part.output);
+  const verdict = stats.outcome ? VERDICT[stats.outcome] : null;
+  /* Every case that went green at least once. The replay reports the complement,
+     because a case that never passed is the durable fact — one that passed and
+     broke again is counted separately, as a regression. */
+  const passing = Math.max(0, stats.casesTracked - stats.neverPassed);
+
   return (
-    <div className={cn(ROW, "text-[var(--transcript-step)]")}>
-      <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}>
-        {running
-          ? <ThinkingOrb aria-label="Reading your solve" size={20} state="searching" style={{ width: 15, height: 15 }} />
-          : <IconHistory className="size-4" />}
-      </span>
-      <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
-        {running ? "Reading your solve" : "Read your solve"}
-      </span>
-      {/* What the replay found, on the same line. It used to be a stack of chips
-          built by splitting the label on an em dash — a shape that broke the day
-          that field started carrying the agent's own title for the step. */}
-      {!running && part.detail && (
-        <span className="min-w-0 truncate text-[var(--transcript-step-mark)]">{part.detail}</span>
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className="relative isolate min-w-0 overflow-hidden rounded-lg bg-[var(--surface-primary)] ring-[0.5px] ring-[var(--border-surface-strong)]"
+      initial={{ opacity: 0, y: 4 }}
+      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+    >
+      {/* Their own file, behind their own numbers.
+          The row claims to have read their solve, and until this it made that
+          claim over an empty panel. Set at the size of a minimap and at the
+          opacity of a watermark, and masked away from the top-left so it never
+          runs under the words — it is texture that happens to be true, not a
+          code block, and nothing in it is meant to be read line by line. */}
+      {solve && (
+        <pre
+          aria-hidden
+          className="pointer-events-none absolute inset-0 -z-10 overflow-hidden px-2.5 py-1 font-mono text-[8px] leading-[1.45] whitespace-pre text-foreground opacity-[0.07] select-none dark:opacity-[0.11]"
+          style={{
+            maskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
+            WebkitMaskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
+          }}
+        >
+          {solve.text}
+        </pre>
       )}
-    </div>
+
+      <div className="flex min-w-0 items-center gap-2 px-2.5 pt-1.5">
+        <IconHistory className="size-4 shrink-0 text-[var(--transcript-step-mark)]" />
+        <span className="min-w-0 truncate text-thread font-medium text-foreground">Read your solve</span>
+        {stats.casesTracked > 0 && (
+          <CaseRing className="ml-auto" neverPassed={stats.neverPassed} passing={passing} regressions={stats.regressions} total={stats.casesTracked} />
+        )}
+        {verdict && (
+          <span
+            className={cn("shrink-0 rounded-md px-1.5 text-thread font-medium", !stats.casesTracked && "ml-auto")}
+            style={{ color: verdict.tone, background: `color-mix(in oklab, ${verdict.tone} 12%, transparent)` }}
+          >
+            {verdict.word}
+          </span>
+        )}
+      </div>
+
+      {/* Under the title rather than under the mark, so the card is two lines of
+          one statement instead of a header with a table beneath it. */}
+      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5 pr-2.5 pb-1.5 pl-[2.125rem]">
+        <Stat label="on it" value={spentOn(stats.elapsedMs)} />
+        <Stat label={stats.runs === 1 ? "run" : "runs"} value={stats.runs} />
+        {stats.submissions > 0 && <Stat label={stats.submissions === 1 ? "submission" : "submissions"} value={stats.submissions} />}
+        {stats.casesTracked > 0 && (
+          <Stat label={passing === stats.casesTracked ? "cases, all passing" : `of ${stats.casesTracked} cases passing`} tone="var(--success)" value={passing} />
+        )}
+        {stats.neverPassed > 0 && <Stat label="never passed" tone="var(--destructive)" value={stats.neverPassed} />}
+        {stats.regressions > 0 && <Stat label="broke after passing" tone="var(--warning)" value={stats.regressions} />}
+        {/* The thing the counts cannot show, and it explains more failed attempts
+            than any of them. */}
+        {stats.submittedBlind && <span className="text-thread whitespace-nowrap text-[var(--warning)]">submitted without running</span>}
+      </div>
+
+    </motion.div>
+  );
+}
+
+/** What the attempt came to, in the corner of its card. */
+const VERDICT: Record<Exclude<SolveStats["outcome"], "">, { word: string; tone: string }> = {
+  passed: { word: "Passed", tone: "var(--success)" },
+  failed: { word: "Failed", tone: "var(--destructive)" },
+  abandoned: { word: "Left unfinished", tone: "var(--warning)" },
+  "in-progress": { word: "Still open", tone: "var(--transcript-step-mark)" },
+};
+
+/**
+ * How the cases stand, as one mark.
+ *
+ * This replaces a two-pixel bar along the card's bottom edge. The bar was
+ * efficient — colour that cost no height — and wrong in a way efficiency does
+ * not fix: at the foot of a card, spanning its whole width, it read as the
+ * card's own border having gone green, which is a decorative state rather than a
+ * measurement. Nothing about it invited a second look, so the one number in it
+ * had nowhere to go.
+ *
+ * A ring reads as a figure because it is round and small and sits beside a
+ * label, and it can hold what the bar could not: the ratio at a glance, and the
+ * whole of it — including the cases that broke after passing, which the bar
+ * never had a third colour for — on hover.
+ */
+function CaseRing({ className, neverPassed, passing, regressions, total }: { className?: string; neverPassed: number; passing: number; regressions: number; total: number }) {
+  /* Drawn as a dash on one circle rather than as an arc path: one length to
+     compute, no trigonometry, and no seam where two arcs meet. Rotated so it
+     starts at twelve o'clock, which is where a proportion is read from. */
+  const radius = 6;
+  const circumference = 2 * Math.PI * radius;
+  const complete = total > 0 && passing === total;
+  const tone = complete ? "var(--success)" : neverPassed > 0 ? "var(--destructive)" : "var(--warning)";
+
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        className={cn("grid size-4 shrink-0 cursor-default place-items-center rounded-full outline-none focus-visible:ring-1 focus-visible:ring-ring", className)}
+        tabIndex={0}
+        type="button"
+      >
+        <svg aria-hidden className="size-4 -rotate-90" viewBox="0 0 16 16">
+          <circle cx="8" cy="8" fill="none" r={radius} stroke="var(--border-surface-strong)" strokeWidth="2.5" />
+          <circle
+            cx="8"
+            cy="8"
+            fill="none"
+            r={radius}
+            stroke={tone}
+            strokeDasharray={`${(circumference * passing) / Math.max(1, total)} ${circumference}`}
+            strokeLinecap={complete ? "butt" : "round"}
+            strokeWidth="2.5"
+          />
+        </svg>
+        <span className="sr-only">{`${passing} of ${total} cases passing`}</span>
+      </TooltipTrigger>
+      {/* Everything the mark stands for, in the order it matters. The two lines
+          below the count are only drawn when they happened, so a clean solve
+          gets one line rather than a report with two zeroes in it. */}
+      <TooltipContent className="max-w-[16rem]">
+        <span className="block">{passing === total ? `All ${total} cases passing` : `${passing} of ${total} cases passing`}</span>
+        {neverPassed > 0 && <span className="mt-0.5 block opacity-80">{neverPassed} never passed in any run</span>}
+        {regressions > 0 && <span className="mt-0.5 block opacity-80">{regressions} passed and then broke again</span>}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** One number and what it counts. The number carries the weight and the colour
+ *  and the word after it stays at the step's own grey, so a row of these reads as
+ *  figures with captions rather than as a sentence with numerals in it. */
+function Stat({ value, label, tone }: { value: string | number; label: string; tone?: string }) {
+  return (
+    <span className="flex items-baseline gap-1 whitespace-nowrap">
+      <span className="text-thread font-medium tabular-nums" style={tone ? { color: tone } : undefined}>{value}</span>
+      <span className="text-thread text-[var(--transcript-step-mark)]">{label}</span>
+    </span>
   );
 }
 
 /**
  * The moment the session exists to reach.
  *
- * Still the one row that is allowed to draw the eye, because it is the turn's
- * output rather than a step toward it — but a row, not a panel. It was a bordered
- * green card with an uppercase kicker, a chip, a spring-scaled badge and a light
- * sweep across it, which was defensible when the rows around it were dense grey
- * lines and is not now that they are a clean list: it read as a component from a
- * different application that had been pasted into the transcript. The colour on
- * the check and the weight on the title carry it.
+ * A card, and the only one in a turn that is allowed to look like an object
+ * rather than a line of a log — because it is the one thing in the transcript
+ * the learner is being handed rather than told about. It earns the shape by
+ * carrying what a handover actually has to carry: which language they are about
+ * to write, what the problem is called, what it is aimed at, and what will grade
+ * it. As a single grey line — `Typed Record Partitioning · validated` — every one
+ * of those facts was somewhere else on the screen or nowhere at all.
+ *
+ * It is deliberately not the card this replaced two revisions ago. That one was
+ * a bordered green panel with an uppercase kicker, a spring-scaled badge and a
+ * light sweep across it, and it read as a component from a different application
+ * pasted into the thread; the note it left behind when it was cut back to a row
+ * is worth keeping, because it is the failure mode this has to stay clear of.
+ * So: the transcript's own surface and hairline, the same as `SolveRead` beside
+ * it, no fill, no accent panel. The language mark and the weight on the title do
+ * the work.
+ *
+ * Nothing here is claimed that the row cannot prove. A challenge Spar compiled
+ * says how many cases will run because the compiler counted them; a problem Spar
+ * mounted says which judge decides it, and nothing about cases, because Spar
+ * never compiled it and has no number of its own to give.
  */
 export function ChallengePublished({ part }: { part: ToolPart }) {
-  const replaced = part.tool === "replace_current_question";
-  /* A problem from the source is not "validated" — nothing was compiled, because
-     nobody wrote it. What it carries instead is the source's own judge, and the mark
-     is how that reads at a glance. */
-  const sourced = part.tool === "assign_practice_problem";
-  const source = sourceFor(part);
+  const challenge = readPublishedChallenge(part);
+  const sourced = challenge.source !== null;
+  /* Falls back to the sniffer for a row stored before the result carried the
+     mounted problem — the old row guessed the same way, and guessing which of
+     two logos to draw is a different order of claim from guessing a fact. */
+  const source = challenge.source ?? sourceFor(part);
   const sourceName = source === "codeforces" ? "Codeforces" : "LeetCode";
+
   return (
     <motion.div
       animate={{ opacity: 1, y: 0 }}
-      className={cn(ROW, "text-muted-foreground")}
-      initial={{ opacity: 0, y: 4 }}
-      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+      /* Lifted a little further than a step row's entrance, and no further: this
+         arrives after a minute of work and should land rather than appear, but a
+         card that slides in from 10px past a settled list is the transcript
+         performing. */
+      className="group/challenge min-w-0 overflow-hidden rounded-lg bg-[var(--color-background-editor)] shadow-[var(--app-shadow-card)] ring-[0.5px] ring-[var(--border-surface-strong)] transition-shadow duration-200 hover:shadow-[var(--app-shadow-composer)]"
+      initial={{ opacity: 0, y: 6 }}
+      transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
     >
-      <span className={cn("grid size-4 shrink-0 place-items-center", sourced ? "text-foreground/80" : "text-[var(--success)]")}>
-        {sourced ? <SourceGlyph className="size-3.5" source={source} /> : <IconCheck className="size-4" />}
-      </span>
-      <span className="min-w-0 truncate">
-        <span className="text-thread font-medium text-foreground">{part.label || (sourced ? "Problem set" : replaced ? "Challenge replaced" : "Challenge ready")}</span>
-        <span className="ml-1.5 text-muted-foreground">
-          {sourced ? `· from ${sourceName} · judged there` : replaced ? "· replaced · validated" : "· validated"}
+      <div className="flex min-w-0 items-center gap-2.5 px-2.5 py-2">
+        {/* What they are about to write in, as its own mark rather than as the
+            word "TypeScript" in a list of metadata. A learner on a Track that
+            switched language last session reads this before they read the
+            title. The tile is what stops a vendor logo in its own colours from
+            floating unanchored on the card's surface. */}
+        <span className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] bg-[var(--color-background-elevated-secondary)] ring-[0.5px] ring-[var(--border-surface-strong)]">
+          {sourced
+            ? <SourceGlyph className="size-4" source={source} />
+            : challenge.language
+              ? <LanguageGlyph aria-label={LANGUAGE_LABEL[challenge.language]} className="size-4" language={challenge.language} role="img" />
+              : <IconPuzzle className="size-4 text-[var(--transcript-step-mark)]" />}
         </span>
-      </span>
+
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="min-w-0 truncate text-thread font-semibold text-foreground">{challenge.title}</span>
+            {/* Only when it is true. A "New" chip on every card is a chip that
+                says nothing; a replacement is the case worth marking, because it
+                means the problem they were looking at a moment ago is gone. */}
+            {challenge.replaced && (
+              <span className="shrink-0 rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 text-thread font-medium text-[var(--transcript-step-mark)]">
+                Replaced
+              </span>
+            )}
+          </span>
+
+          {/* One line, in the order it is read: how hard, what it is about, who
+              grades it. Wraps rather than truncates — losing the grader to an
+              ellipsis is losing the only part of this that is a promise. */}
+          <span className="mt-px flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-thread text-[var(--transcript-step-mark)]">
+            {challenge.difficulty && <span className="font-medium text-foreground/70">{DIFFICULTY_WORD[challenge.difficulty]}</span>}
+            {challenge.band && <span className="font-medium text-foreground/70">{BAND_WORD[challenge.band]}</span>}
+            {challenge.concepts.slice(0, 2).map((concept) => (
+              <span className="min-w-0 truncate" key={concept}>· {concept}</span>
+            ))}
+            <span className="whitespace-nowrap">
+              {sourced
+                ? `· judged by ${sourceName}${challenge.displayId ? ` · ${challenge.displayId}` : ""}`
+                : challenge.cases
+                  ? `· ${challenge.cases} cases will grade it`
+                  : "· validated"}
+            </span>
+          </span>
+        </span>
+
+        {/* Filed from here, on the same shelf the library reads. This is the one
+            moment the learner is certain to see the problem, and "come back to
+            this one" is a thought people have while reading a problem rather
+            than while browsing a list of them. */}
+        <SaveProblem problemKey={challenge.questionId ? `spar:${challenge.questionId}` : null} title={challenge.title} />
+      </div>
     </motion.div>
   );
 }
+
+/** Spar's own bands, and a judge's, in the one word each that fits on the line. */
+const DIFFICULTY_WORD: Record<string, string> = { foundation: "Foundation", developing: "Developing", proficient: "Proficient", advanced: "Advanced" };
+const BAND_WORD: Record<string, string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
 
 function sourceFor(part: ToolPart): "leetcode" | "codeforces" {
   const text = `${part.input} ${part.output} ${part.detail} ${part.label} ${part.actionTitle}`.toLowerCase();

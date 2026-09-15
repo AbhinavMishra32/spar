@@ -572,3 +572,8 @@ export function diffTotals(files: AgentActivityFile[]): { added: number; removed
     { added: 0, removed: 0 },
   );
 }
+
+/** Keep successful artifacts outside the work fold, including older runs without a final phase. */
+export function publishedRunArtifacts(run: AgentRun): RunPart[] {
+  return run.parts.slice(0, run.finalFrom ?? run.parts.length).filter(isChallengePublished);
+}

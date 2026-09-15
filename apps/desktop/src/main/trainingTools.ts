@@ -199,7 +199,7 @@ export async function executeTrainingTool(
     const reopened = local.reopenAttempt(attemptId, reasons.join(" ") || "The solution did not meet the challenge's stated requirements.");
     return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
   }
-  if (name === "replay_attempt") return replayForAgent(local, value);
+  if (name === "replay_attempt") return replayForAgent(local, value, sessionId, workspaces);
   /* The document plus what is open under it. The markdown is the claim; the
      patterns are the questions still outstanding about it and the evidence is
      what each one rests on. This read sits immediately before the update is
@@ -368,7 +368,7 @@ function openChallenge(local: LocalStore, sessionId: string) {
  * since the last submission pays for that much. `stats` rides along for the row
  * the learner sees in the transcript; the log itself is `report`.
  */
-function replayForAgent(local: LocalStore, value: Record<string, unknown>) {
+async function replayForAgent(local: LocalStore, value: Record<string, unknown>, sessionId: string, workspaces: WorkspaceService) {
   const attemptId = String(value.attemptId ?? "");
   const events = local.readAttempt(attemptId);
   if (!events.length) {
@@ -387,7 +387,34 @@ function replayForAgent(local: LocalStore, value: Record<string, unknown>) {
     ...(subject?.title ? { title: subject.title } : {}),
     ...(subject?.language ? { language: subject.language } : {}),
   });
-  return { report: formatSolveLog(replay, filters), stats: replay.stats, filters };
+  /* Stats first, and deliberately. The transcript renders the numbers as a card
+     and reads them back out of this payload, which is capped at 16k — and the
+     report is the part that overruns it. Serialised after the log, the numbers
+     were the first thing truncation took. */
+  return { stats: replay.stats, filters, solve: await solveHead(sessionId, workspaces), report: formatSolveLog(replay, filters) };
+}
+
+/**
+ * The top of the file they actually wrote, beside the log of how they wrote it.
+ *
+ * Deliberately a head and not the file: `read_attempt` is what hands the agent
+ * the whole thing, and this is the opening of it — enough to say which solve the
+ * replay is a replay of, and small enough that a step which already carries a
+ * full event log does not carry a second copy of the source with it.
+ *
+ * The transcript draws it behind the card this call produces, which is the other
+ * reason it is here: "read your solve" is a claim about their code, and a row
+ * that makes that claim over a blank panel is the agent talking about something
+ * the learner cannot see.
+ */
+async function solveHead(sessionId: string, workspaces: WorkspaceService): Promise<{ path: string; text: string } | null> {
+  /* A replay that cannot reach the workspace is still a replay. This is the one
+     part of the result that is decoration, so it never takes the call down with
+     it. */
+  const [file] = await attemptFiles(sessionId, workspaces).catch(() => []);
+  if (!file) return null;
+  const head = file.text.split("\n").slice(0, SOLVE_HEAD_LINES).join("\n");
+  return { path: file.path, text: head.length > SOLVE_HEAD ? `${head.slice(0, SOLVE_HEAD)}…` : head };
 }
 
 function sectionList(value: unknown): ReplaySection[] {
@@ -517,6 +544,10 @@ async function compileCandidate(input:unknown,sessionId:string,workspaces:Worksp
  *  any challenge's solution; short enough that a learner who pasted a library
  *  into their workspace cannot spend the turn's context on it. */
 const MAX_FILE = 6_000;
+/** The opening of the learner's solve, as `replay_attempt` carries it. A screen
+ *  of code at the size the transcript draws it, and no more. */
+const SOLVE_HEAD_LINES = 28;
+const SOLVE_HEAD = 1_200;
 
 /**
  * What the learner has written, right now.
