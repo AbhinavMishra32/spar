@@ -306,7 +306,9 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
     if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
     // Reading the solve is set apart for the same reason: it is what the rest of
     // the turn is a response to.
-    else if (part.kind === "tool" && part.tool === "replay_attempt" && part.phase !== "error") grouped.push({ kind: "solve-read", id: `solve-${part.id}`, part });
+    /* `replay_attempt` is here for transcripts written before the four attempt
+       tools became one; the card it draws is the same card. */
+    else if (part.kind === "tool" && (part.tool === "read_attempt" || part.tool === "replay_attempt") && part.phase !== "error") grouped.push({ kind: "solve-read", id: `solve-${part.id}`, part });
     // A successful visualisation is the picture; a failed one is an ordinary
     // failed step, because there is nothing to draw.
     else if (part.kind === "tool" && part.tool === "visualize_explain" && part.phase === "done") grouped.push({ kind: "explained-trace", id: `trace-${part.id}`, part });
@@ -357,7 +359,7 @@ const TOOL_VERBS: Record<string, string> = {
   search_learner_model: "Searched the learner model",
   search_attempt_history: "Searched attempt history",
   read_ability: "Read ability document",
-  read_attempt: "Read attempt trace",
+  read_attempt: "Read your attempt",
   read_session: "Read session",
   read_concept_graph: "Read concept graph",
   search_concept_evidence: "Checked your concept evidence",
@@ -410,7 +412,7 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   search_attempt_history: ["Review past attempts", "Reviewed past attempts"],
   search_challenge_history: ["Review challenge history", "Reviewed challenge history"],
   read_ability: ["Read ability context", "Read ability context"],
-  read_attempt: ["Read attempt evidence", "Read attempt evidence"],
+  read_attempt: ["Read your attempt", "Read your attempt"],
   read_session: ["Read session context", "Read session context"],
   read_challenge: ["Read challenge context", "Read challenge context"],
   read_concept_graph: ["Read concept context", "Read concept context"],

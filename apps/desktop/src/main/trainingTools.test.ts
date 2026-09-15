@@ -192,7 +192,16 @@ describe("challenge coverage across the whole library", () => {
   });
 });
 
-describe("replay_attempt", () => {
+/**
+ * One call, everything about the attempt.
+ *
+ * This was four tools — two of them the same handler under different names —
+ * and a turn that wanted to know how the learner was doing paid a host round
+ * trip for each. What the merge has to keep is that none of what any of them
+ * returned went missing: the log, the code, and the raw events whose ids are
+ * what an ability update cites as its evidence.
+ */
+describe("read_attempt", () => {
   it("returns the attempt log with every case inside every run", async () => {
     const store = new LocalStore(":memory:");
     try {
@@ -209,7 +218,7 @@ describe("replay_attempt", () => {
       append("test_run", 120, { scope: "visible", passed: false, passedCases: 1, failedCases: 1, cases: [{ name: "counts positives", status: "passed" }, { name: "ignores the threshold itself", status: "failed", expected: "2", actual: "3" }] });
       append("test_run", 300, { scope: "visible-and-hidden", passed: false, passedCases: 2, failedCases: 1, cases: [{ name: "counts positives", status: "passed" }, { name: "ignores the threshold itself", status: "passed" }, { name: "handles an empty array", status: "failed", expected: "0", actual: "NaN" }] });
 
-      const result = await executeTrainingTool("replay_attempt", { attemptId }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { report: string; stats: { runs: number; regressions: number } };
+      const result = await executeTrainingTool("read_attempt", { attemptId }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { report: string; stats: { runs: number; regressions: number } };
 
       expect(result.report).toContain("SOLVE LOG — Count values above a threshold (javascript)");
       // The log itself: the learner's save, both runs, and every case inside them.
@@ -230,10 +239,61 @@ describe("replay_attempt", () => {
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Practise arrays");
-      const result = await executeTrainingTool("replay_attempt", { attemptId: randomUUID() }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { report: string; stats: null };
+      const result = await executeTrainingTool("read_attempt", { attemptId: randomUUID() }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { report: string; stats: null };
 
       expect(result.report).toContain("no log to read");
       expect(result.stats).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
+  /* The three halves of the old arrangement, in one result. `events` carries the
+     ids `propose_ability_update` cites as evidence, so losing it to the merge
+     would have quietly broken every ability update; `files` is the code the two
+     read tools existed to hand over; `stats` is the runner's own verdict, which
+     the model is never allowed to form its own opinion of. */
+  it("hands back the code and the raw events beside the log", async () => {
+    const store = new LocalStore(":memory:");
+    const workspaces = {
+      list: async () => ["src/count.js"],
+      read: async () => "export function count(values, threshold) {\n  return 0;\n}\n",
+    } as unknown as WorkspaceService;
+    try {
+      const { sessionId } = store.createSession("Practise arrays");
+      store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
+      const question = store.createQuestion(sessionId, design("Count values above a threshold"), { valid: true });
+
+      const result = await executeTrainingTool("read_attempt", { attemptId: question.attemptId }, sessionId, store, workspaces, {} as UtilityClient) as {
+        files: Array<{ path: string; text: string }>;
+        events: Array<{ id: string }>;
+        solve: { path: string } | null;
+        stats: { outcome: string };
+      };
+
+      expect(result.files).toEqual([{ path: "src/count.js", text: "export function count(values, threshold) {\n  return 0;\n}\n" }]);
+      expect(result.events.length).toBeGreaterThan(0);
+      expect(result.events.every((event) => typeof event.id === "string" && event.id.length > 0)).toBe(true);
+      expect(result.solve?.path).toBe("src/count.js");
+      expect(result.stats.outcome).toBe("in-progress");
+    } finally {
+      store.close();
+    }
+  });
+
+  /* The id the model used to have to carry out of the context and into every
+     call, and got wrong. Omitting it means the attempt in front of the learner. */
+  it("reads the attempt the learner has open when no id is given", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise arrays");
+      store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
+      store.createQuestion(sessionId, design("Count values above a threshold"), { valid: true });
+
+      const result = await executeTrainingTool("read_attempt", {}, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { report: string; stats: { runs: number } | null };
+
+      expect(result.report).toContain("SOLVE LOG — Count values above a threshold");
+      expect(result.stats?.runs).toBe(0);
     } finally {
       store.close();
     }

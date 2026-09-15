@@ -50,6 +50,7 @@ describe("reading a published challenge off its transcript row", () => {
     expect(published.difficulty).toBe("developing");
     expect(published.cases).toBe(36);
     expect(published.replaced).toBe(false);
+    expect(published.ordinal).toBe(4);
   });
 
   /* Most specific first is the agent's instruction and the primary is what the
@@ -86,7 +87,9 @@ describe("reading a published challenge off its transcript row", () => {
 
   it("marks a replacement as one, whichever tool published it", () => {
     expect(readPublishedChallenge(row({ tool: "replace_current_question", input: design(), output: result() })).replaced).toBe(true);
-    expect(readPublishedChallenge(row({ tool: "assign_practice_problem", output: result({ replacedQuestionId: "q0" }) })).replaced).toBe(true);
+    const replacement = readPublishedChallenge(row({ tool: "assign_practice_problem", output: result({ replacedQuestionId: "q0" }) }));
+    expect(replacement.replaced).toBe(true);
+    expect(replacement.replacedQuestionId).toBe("q0");
   });
 
   /* Spar's four bands and a judge's three are claims by different graders. A

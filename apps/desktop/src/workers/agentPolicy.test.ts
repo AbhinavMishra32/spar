@@ -54,7 +54,7 @@ describe("Training Agent controller policy", () => {
      that only said "explain your decision" is answered with the decision
      restated, which is what the problem panel's own disclosure already did. */
   it("points the attempt-complete reason at the replay rather than the verdict",()=>{
-    const outcomes=new Map<string,unknown[]>([["replay_attempt",[{result:{log:[]}}]]]);
+    const outcomes=new Map<string,unknown[]>([["read_attempt",[{result:{log:[]}}]]]);
     const instruction=completionInstruction("attempt-complete",outcomes);
     expect(instruction).toContain("you have just read the solve");
     expect(instruction).toContain("what that left you unsure of");
@@ -114,8 +114,8 @@ describe("Training Agent controller policy", () => {
 
   it("requires the complete revision transaction for explicit change requests", () => {
     const outcomes = new Map<string, unknown[]>();
-    expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: ["replay_attempt"], toolChoice: "required" });
-    outcomes.set("replay_attempt", [{ result: { report: "SOLVE REPLAY" } }]);
+    expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: ["read_attempt"], toolChoice: "required" });
+    outcomes.set("read_attempt", [{ result: { report: "SOLVE REPLAY" } }]);
     expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: ["set_training_target"], toolChoice: "required" });
     outcomes.set("set_training_target", [{ result: { committed: true } }]);
     expect(nextToolStage("challenge-revision", outcomes, 15, { hasActiveQuestion: true })).toEqual({ activeTools: ["replace_current_question"], toolChoice: "required" });
@@ -125,7 +125,7 @@ describe("Training Agent controller policy", () => {
 
   it("exposes one deterministic action at a time", () => {
     expect(nextToolStage("session-start", new Map()).activeTools).toEqual(["search_learner_model"]);
-    expect(nextToolStage("attempt-complete", new Map()).activeTools).toEqual(["replay_attempt"]);
+    expect(nextToolStage("attempt-complete", new Map()).activeTools).toEqual(["read_attempt"]);
     const coldStartSearches = new Map<string, unknown[]>([["search_learner_model", [{ result: { passages: [] } }]], ["search_attempt_history", [{ result: { attempts: [] } }]]]);
     expect(nextToolStage("cold-start", coldStartSearches).activeTools).toEqual(["ask_user_question"]);
     const noAbility = new Map<string, unknown[]>([["search_learner_model", [{ result: [] }]], ["search_attempt_history", [{ result: [] }]], ["search_challenge_history", [{ result: { challenges: [] } }]]]);
@@ -193,9 +193,7 @@ describe("Training Agent controller policy", () => {
      */
     it("offers the visualiser beside the ability update, once the evidence is in hand", () => {
       const graded = (extra: Array<[string, unknown[]]> = []) => new Map<string, unknown[]>([
-        ["replay_attempt", [{ result: {} }]],
-        ["evaluate_attempt", [{ result: {} }]],
-        ["inspect_current_attempt", [{ result: {} }]],
+        ["read_attempt", [{ result: {} }]],
         ["review_solution", [{ result: { review: "accepted" } }]],
         ["read_ability", [{ result: {} }]],
         ...extra,
@@ -216,8 +214,7 @@ describe("Training Agent controller policy", () => {
        that answers that by saying the visualiser is gone is the worse failure. */
     it("stops offering it once the turn has spent its budget on it", () => {
       const graded: Array<[string, unknown[]]> = [
-        ["replay_attempt", [{ result: {} }]], ["evaluate_attempt", [{ result: {} }]],
-        ["inspect_current_attempt", [{ result: {} }]], ["review_solution", [{ result: { review: "accepted" } }]],
+        ["read_attempt", [{ result: {} }]], ["review_solution", [{ result: { review: "accepted" } }]],
         ["read_ability", [{ result: {} }]],
       ];
       const spend = (calls: number) => new Map<string, unknown[]>([
@@ -274,21 +271,19 @@ describe("Training Agent controller policy", () => {
     expect(nextToolStage("session-start", outcomes).activeTools).toEqual(["search_challenge_history"]);
   });
 
-  it("replays the solve before judging it, and lets a question replace the next target", () => {
+  it("reads the solve before judging it, and lets a question replace the next target", () => {
     const outcomes = new Map<string, unknown[]>();
     const stage = () => nextToolStage("attempt-complete", outcomes);
     const settle = (name: string) => outcomes.set(name, [{ result: { ok: true } }]);
 
-    // How it was solved is read first; everything after it judges that reading.
-    expect(stage().activeTools).toEqual(["replay_attempt"]);
-    settle("replay_attempt");
-    expect(stage().activeTools).toEqual(["evaluate_attempt"]);
-    settle("evaluate_attempt");
-    /* The code, then the judgement about how it was written. Both come before
-       anything is written down, because a solution that is about to be sent
-       back has no ability update and no next challenge to its name. */
-    expect(stage().activeTools).toEqual(["inspect_current_attempt"]);
-    settle("inspect_current_attempt");
+    /* How it was solved is read first, in one call — the log, the code and the
+       runner's verdict used to be three required stages and three round trips
+       against the same attempt — and everything after it judges that reading. */
+    expect(stage().activeTools).toEqual(["read_attempt"]);
+    settle("read_attempt");
+    /* Then the judgement about how it was written, still before anything is
+       written down, because a solution that is about to be sent back has no
+       ability update and no next challenge to its name. */
     expect(stage().activeTools).toEqual(["review_solution"]);
     for (const name of ["review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) settle(name);
 
@@ -301,7 +296,7 @@ describe("Training Agent controller policy", () => {
 
   it("continues the same turn from an answered question before publishing a challenge", () => {
     const outcomes = new Map<string, unknown[]>();
-    for (const name of ["replay_attempt", "evaluate_attempt", "inspect_current_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) {
+    for (const name of ["read_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) {
       outcomes.set(name, [{ result: { ok: true } }]);
     }
     outcomes.set("ask_user_question", [{ result: { pending: false, status: "answered", answer: "The shrink ran only once" } }]);
@@ -408,9 +403,7 @@ describe("practice sources in the stage machine", () => {
 
   it("makes an attempt-complete turn consult the source too, after it has read the solve", () => {
     const outcomes = new Map<string, unknown[]>([
-      ["replay_attempt", [{ result: { report: "log" } }]],
-      ["evaluate_attempt", [{ result: {} }]],
-      ["inspect_current_attempt", [{ result: {} }]],
+      ["read_attempt", [{ result: { report: "log" } }]],
       ["review_solution", [{ result: { review: "accepted" } }]],
       ["read_ability", [{ result: {} }]],
       ["propose_ability_update", [{ result: { committed: true } }]],
@@ -446,9 +439,7 @@ describe("practice sources in the stage machine", () => {
      attempt, and the attempt has just been reopened. */
   it("ends the turn when the review sends the solution back", () => {
     const outcomes = new Map<string, unknown[]>([
-      ["replay_attempt", [{ result: {} }]],
-      ["evaluate_attempt", [{ result: {} }]],
-      ["inspect_current_attempt", [{ result: {} }]],
+      ["read_attempt", [{ result: {} }]],
       ["review_solution", [{ result: { review: "rework", reopened: true } }]],
     ]);
     expect(nextToolStage("attempt-complete", outcomes)).toEqual({ activeTools: [], toolChoice: "none" });
@@ -456,9 +447,7 @@ describe("practice sources in the stage machine", () => {
 
   it("carries on through the record when the review accepts", () => {
     const outcomes = new Map<string, unknown[]>([
-      ["replay_attempt", [{ result: {} }]],
-      ["evaluate_attempt", [{ result: {} }]],
-      ["inspect_current_attempt", [{ result: {} }]],
+      ["read_attempt", [{ result: {} }]],
       ["review_solution", [{ result: { review: "accepted" } }]],
     ]);
     expect(nextToolStage("attempt-complete", outcomes).activeTools).toEqual(["read_ability"]);
@@ -468,7 +457,7 @@ describe("practice sources in the stage machine", () => {
     // The likeliest moment for a real problem to be the right answer is the moment
     // the learner says this one is not what they want.
     const done = new Map<string, unknown[]>([
-      ["replay_attempt", [{}]],
+      ["read_attempt", [{}]],
       ["set_training_target", [{}]],
       ["search_practice_problems", [{}]],
     ]);
@@ -478,7 +467,7 @@ describe("practice sources in the stage machine", () => {
   });
 
   it("looks at what the source has before writing a replacement", () => {
-    const done = new Map<string, unknown[]>([["replay_attempt", [{}]], ["set_training_target", [{}]]]);
+    const done = new Map<string, unknown[]>([["read_attempt", [{}]], ["set_training_target", [{}]]]);
     const stage = nextToolStage("challenge-revision", done, 15, { hasActiveQuestion: true, practiceSource: true });
     expect(stage.activeTools).toEqual(["search_practice_problems"]);
   });
@@ -493,3 +482,4 @@ describe("practice sources in the stage machine", () => {
     }
   });
 });
+

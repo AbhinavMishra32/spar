@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { FileSearch } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -15,10 +15,75 @@ import { SourceGlyph } from "../common/SourceGlyph";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { SaveProblem } from "../common/SaveProblem";
 import { readPublishedChallenge } from "./publishedChallenge";
+import { useRevealOnExpand } from "./useRevealOnExpand";
 import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
 import { solveHead, solveStats, spentOn, type SolveStats } from "./solveStats";
+import type { ChallengeTrail } from "../workspace/ChallengeStepper";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
+
+/**
+ * How a step arrives.
+ *
+ * A turn is a list that writes itself while you watch it, and the arrival is the
+ * only thing that tells you a line is new rather than one you have already read.
+ * Before, it was 5px and a fade on a flat curve, which at the speed steps land
+ * is indistinguishable from the row simply being there — so a turn that ran
+ * twelve tools read as a block of text growing rather than as work happening.
+ *
+ * So: up eight pixels on a spring with a little bounce, and a fraction under
+ * full size on the way. The scale is the part that does the work — it is what
+ * makes the row read as coming forward into the transcript rather than sliding
+ * up it — and it is held to one and a half percent, because at 96% a line of
+ * text visibly re-renders its glyphs and the arrival becomes a blur.
+ *
+ * The fade leads slightly and finishes early: the row is fully opaque before it
+ * has stopped moving, so what settles is a line you are already reading rather
+ * than one still resolving. A card is the same gesture with more of everything,
+ * because a published challenge is a bigger thing to land.
+ *
+ * Only mounts animate. A streaming row updates its own text several times a
+ * second, and re-running the entrance on each of those is a step that vibrates.
+ */
+function useThreadArrival(card = false) {
+  const reduced = useReducedMotion();
+  return {
+    initial: { opacity: 0, y: reduced ? 0 : card ? 14 : 8, scale: reduced ? 1 : card ? 0.97 : 0.985 },
+    animate: { opacity: 1, y: 0, scale: 1 },
+    transition: reduced
+      ? { duration: 0.1 }
+      : {
+          type: "spring" as const,
+          visualDuration: card ? 0.5 : 0.38,
+          bounce: card ? 0.08 : 0.16,
+          opacity: { duration: card ? 0.24 : 0.16, ease: "easeOut" as const },
+        },
+  };
+}
+
+/** The gutter mark's own arrival, a beat behind its row.
+ *
+ *  It is a 16px glyph on a line of text, so it can afford a gesture the row
+ *  cannot: it comes in from three quarters size with real bounce, and the delay
+ *  is what turns that into a sequence — the row arrives, then the mark lands on
+ *  it — rather than two things springing at once. This is the piece of a step
+ *  that reads as mechanical, in the good sense: the transcript stamping the line
+ *  it just wrote. */
+function useMarkArrival() {
+  const reduced = useReducedMotion();
+  if (reduced) return { initial: false as const, animate: { opacity: 1, scale: 1 } };
+  return {
+    initial: { opacity: 0, scale: 0.72 },
+    animate: { opacity: 1, scale: 1 },
+    transition: {
+      type: "spring" as const,
+      visualDuration: 0.34,
+      bounce: 0.42,
+      delay: 0.06,
+      opacity: { duration: 0.14, delay: 0.06 },
+    },
+  };
+}
 
 /**
  * Which orb a running step spins.
@@ -131,8 +196,11 @@ function ToolIcon({ part }: { part: ToolPart }) {
       return <IconPuzzle className={MARK} />;
     /* Lucide already ships the combined document-lines + search glyph. It says
        both what is being read and that this row is inspecting it. */
-    case "inspect_current_attempt":
     case "read_attempt":
+      return <IconHistory className={MARK} />;
+    /* Both retired into read_attempt, and both still drawn: a transcript written
+       before the merge is still a transcript somebody scrolls back through. */
+    case "inspect_current_attempt":
       return <FileSearch className={MARK} strokeWidth={1.75} />;
     case "replay_attempt":
       return <IconHistory className={MARK} />;
@@ -282,6 +350,10 @@ function oneLine(value: string, limit = 72): string {
 
 export function ToolRow({ part, after, continues = false, thinking }: { part: ToolPart; after?: ReasoningPart | undefined; continues?: boolean; thinking?: ReasoningPart | undefined }) {
   const [open, setOpen] = useState(false);
+  const block = useRevealOnExpand<HTMLDivElement>(open);
+  const arrival = useThreadArrival();
+  const mark = useMarkArrival();
+  const reduced = useReducedMotion();
   const reasons = thinking ? thoughts(thinking.body) : [];
   const concluded = after ? thoughts(after.body) : [];
   const hasCall = Boolean(part.input.trim() || part.output.trim());
@@ -333,15 +405,48 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           asymmetry read as the rows being attached to the wrong paragraph. An
           open row keeps it: there the padding is what the thread's line runs
           through to reach the panel. */}
-      <div className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", (continues || open) && "pb-2")}>
+      <motion.div {...arrival} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", (continues || open) && "pb-2")} ref={block}>
         <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
           {/* One element, not three. The line starts below this row's mark and
               runs to the foot of its block — which grows when the panel opens,
               so opening a row stretches the thread rather than adding a second
               piece of it. Consecutive rows join with no seam because each one's
               own bottom padding is inside the box the line is measured against. */}
-          <span aria-hidden className={cn(RAIL, !continues && RAIL_LAST)} data-line />
-          <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}><ToolIcon part={part} /></span>
+          {/* Drawn downward from under the mark, at the speed the next row is
+              arriving, so the thread reads as being run between the two steps
+              rather than as a rule that was already there waiting. */}
+          <motion.span
+            aria-hidden
+            animate={{ scaleY: 1 }}
+            className={cn(RAIL, !continues && RAIL_LAST)}
+            data-line
+            initial={reduced ? false : { scaleY: 0 }}
+            style={{ transformOrigin: "top" }}
+            transition={{ duration: reduced ? 0 : 0.34, ease: [0.22, 0.61, 0.36, 1], delay: reduced ? 0 : 0.08 }}
+          />
+          <motion.span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")} {...mark}>
+            {/* The mark changes when the call lands — an orb while it runs, the
+                tool's own glyph once it has. Crossing them on a scale rather
+                than cutting is what makes the finish of a step something you
+                can see out of the corner of your eye, which is where a reader
+                following a turn actually has it. */}
+            <AnimatePresence initial={false}>
+              {/* Stacked in the mark's own 24px box rather than laid out, so the
+                  two glyphs cross without either of them costing a measurement:
+                  a turn finishing eight calls should not be eight reflows of the
+                  transcript, and nothing here needs to know how wide an icon is.
+                  The size selector rides on this span because the icon is no
+                  longer the gutter's direct child. */}
+              <motion.span
+                animate={{ opacity: 1, scale: 1 }}
+                className="absolute inset-0 grid place-items-center [&>svg]:size-4"
+                exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+                initial={reduced ? false : { opacity: 0, scale: 0.6 }}
+                key={running ? "running" : part.phase}
+                transition={reduced ? { duration: 0 } : { type: "spring", visualDuration: 0.3, bounce: 0.3 }}
+              ><ToolIcon part={part} /></motion.span>
+            </AnimatePresence>
+          </motion.span>
         </div>
 
         <div className="min-w-0 flex-1">
@@ -353,9 +458,15 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
                line. */
             <div className={cn(LABEL_ROW, "text-[var(--transcript-step)] transition-colors hover:text-[var(--transcript-step-strong)]")}>{label}</div>
           )}
+          {/* One rounded box, not two. The surface lives on the element that
+              clips, because that element is also the one animating the height —
+              and a bordered panel nested inside a clip of exactly its own radius
+              loses half its stroke to the curve at every corner, which is what
+              ate the top-left. The clip owns the corner, the border, the
+              background and the lift; what is inside it is only content. */}
           {hasPayload && (
-            <CollapsibleContent>
-              <div className="agent-tool-detail mt-1.5 min-w-0 overflow-hidden rounded-xl border border-[var(--border-surface-strong)] bg-[var(--color-background-editor)]">
+            <CollapsibleContent className={cn("mt-1.5", BLOCK_SURFACE)} expandDuration={0.42}>
+              <div className="agent-tool-detail min-w-0">
                 {/* Built for the tool when there is a view for it, raw when there is
                     not — `ToolDetail` decides, and falls back itself.
 
@@ -392,7 +503,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
             </CollapsibleContent>
           )}
         </div>
-      </div>
+      </motion.div>
     </Collapsible>
   );
 }
@@ -412,6 +523,30 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
    clustered steps land on a 32px pitch once the joining gap is added. The padding
    is small on purpose — the space between steps is what separates them, and paying
    for it twice is what spread a run of five calls over half a screen. */
+/**
+ * Every block inside a turn wears the one material, and it is declared in CSS.
+ *
+ * `.transcript-block` is the same rule the fenced code block in a reply draws —
+ * literally the same rule, a shared selector in `theme.css` — so the panel a
+ * tool row opens, the published challenge and the reading of the solve cannot
+ * drift from it or from each other again. Stroke, fill, lift and corner all come
+ * from there — there is nothing left to decide here, which is the point.
+ *
+ * In CSS rather than in a string of utilities because the last attempt at it was
+ * `border-[0.5px]` beside `border-[var(--x)]` — two arbitrary values in one
+ * utility family that neither Tailwind nor `cn`'s merge can tell apart, so the
+ * merge kept the last, the width fell back to the `border: 0` default, and the
+ * cards were drawn with no edge at all beside a code block whose border, being
+ * plain CSS, was fine.
+ */
+const BLOCK_SURFACE = "transcript-block";
+
+/* The session pile becomes a scroller once it outgrows a few stops, so its ends
+   are faded rather than cut: a hard edge at the top reads as a clipped card, a
+   fade reads as more list. The bottom fade is shorter because the live card
+   sits right under it and closes the list off on its own. */
+const STACK_FADE = "linear-gradient(to bottom, transparent 0, #000 28px, #000 calc(100% - 10px), transparent 100%)";
+
 const ROW = "relative inline-flex w-fit min-w-0 max-w-full items-center gap-2.5 px-1.5 py-[3px] text-left text-thread";
 /** The icon column every row of a turn hangs its mark in.
  *
@@ -425,7 +560,13 @@ export const ROW_GLYPH = "relative z-10 flex size-6 shrink-0 items-center justif
 /* `cursor-default` for the same reason the sidebar sets it: AppKit shows the arrow
    over a list of rows, never the hand, and the pointer cursor is the clearest tell
    that a desktop app was built in a browser. These rows are a list, not controls. */
-const TRIGGER = "group/row cursor-default border-0 p-0 text-[var(--transcript-step)] transition-colors outline-none hover:text-[var(--transcript-step-strong)]";
+/* No `border-0` here. Preflight already zeroes every element's border, so it was
+   saying nothing — right up until this string was put on a card that wants one,
+   where it silently won: a utility sits in a layer declared after `components`,
+   so it beats `.transcript-block` no matter how specific that rule is, and the
+   solve reading was drawn with no edge while the code block three lines below it
+   kept its own. */
+const TRIGGER = "group/row cursor-default p-0 text-[var(--transcript-step)] transition-colors outline-none hover:text-[var(--transcript-step-strong)]";
 /** The row's own horizontal inset, which anything hanging beneath a row aligns to.
  *  This is also the transcript's prose edge: a paragraph starts where a row's
  *  mark starts, not where its label does. */
@@ -486,11 +627,13 @@ const LABEL_ROW = "flex min-h-6 w-full min-w-0 items-center justify-start gap-1 
  * the distance between an icon and a sentence, which is far too much between a
  * sentence and the small mark that belongs to it.
  */
-function Caret({ open, standing = false }: { open: boolean; standing?: boolean }) {
+function Caret({ className, open, standing = false }: { className?: string; open: boolean; standing?: boolean }) {
   return (
     <IconChevronRight
       className={cn(
-        "size-4 shrink-0 text-[var(--transcript-step-mark)] transition-all duration-200",
+        /* The same curve the panel opens on, so the caret and the thing it
+           opens are one movement rather than two that start together. */
+        "size-4 shrink-0 text-[var(--transcript-step-mark)] transition-all duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
         /* Hidden until hover on a row that already shows its own heading: the
            caret is an offer to see the working behind a line you have read.
            `standing` is for a row that is standing in for rows you cannot see —
@@ -498,6 +641,7 @@ function Caret({ open, standing = false }: { open: boolean; standing?: boolean }
            there, so the affordance cannot be something you have to find. */
         standing ? "opacity-100" : "opacity-0 group-hover/row:opacity-100",
         open && "rotate-90 opacity-100",
+        className,
       )}
     />
   );
@@ -652,6 +796,7 @@ function LiveThought({
   title: string;
 }) {
   const [open, setOpen] = useState(false);
+  const block = useRevealOnExpand<HTMLDivElement>(open);
 
   const trigger = (
     <>
@@ -666,7 +811,7 @@ function LiveThought({
   if (sections.length === 0) return <div className={cn(ROW, "text-[var(--transcript-step)]")}>{trigger}</div>;
 
   return (
-    <Collapsible onOpenChange={setOpen} open={open}>
+    <Collapsible onOpenChange={setOpen} open={open} ref={block}>
       <CollapsibleTrigger className={cn(ROW, TRIGGER)}>{trigger}</CollapsibleTrigger>
       <CollapsibleContent>
         <FadedScroll className="mx-1.5 mb-1" follow watch={body}>
@@ -707,6 +852,7 @@ function LiveThought({
  */
 function Thought({ title, body, settling }: { title: string; body: string; settling: boolean }) {
   const [open, setOpen] = useState(false);
+  const block = useRevealOnExpand<HTMLDivElement>(open);
   /* Starts where the live row left it, then moves on the next frame. Setting
      both the start and the end in one commit would give the browser a single
      computed value and nothing to interpolate between. */
@@ -730,7 +876,7 @@ function Thought({ title, body, settling }: { title: string; body: string; settl
     );
   }
   return (
-    <Collapsible onOpenChange={setOpen} open={open}>
+    <Collapsible onOpenChange={setOpen} open={open} ref={block}>
       <CollapsibleTrigger className={cn(ROW, TRIGGER, "motion-reduce:transition-none")} style={travel}>
         <span className="min-w-0 truncate">{title}</span>
         <Caret open={open} />
@@ -777,19 +923,26 @@ function Thought({ title, body, settling }: { title: string; body: string; settl
  * a frame around a sentence.
  */
 export function SolveRead({ part }: { part: ToolPart }) {
+  const arrival = useThreadArrival(true);
+  /* The card opens like any other step. It is the summary of the one call a turn
+     makes about the learner's work, and that call now carries the work itself —
+     their file and the whole event log — so a card that could not be opened would
+     be the only row in the transcript that hid its own payload. */
+  const [open, setOpen] = useState(false);
+  const block = useRevealOnExpand<HTMLDivElement>(open);
   const running = part.phase === "running";
   const stats = running ? null : solveStats(part.output);
 
   if (!stats || (!stats.casesTracked && !stats.runs && !stats.elapsedMs)) {
     return (
-      <div className={cn(ROW, "text-[var(--transcript-step)]")}>
+      <motion.div {...arrival} className={cn(ROW, "text-[var(--transcript-step)]")}>
         <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}>
           {running
-            ? <ThinkingOrb aria-label="Reading your solve" size={20} state="searching" style={{ width: 15, height: 15 }} />
+            ? <ThinkingOrb aria-label="Reading your attempt" size={20} state="searching" style={{ width: 15, height: 15 }} />
             : <IconHistory className="size-4" />}
         </span>
         <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
-          {running ? "Reading your solve" : "Read your solve"}
+          {running ? "Reading your attempt" : "Read your attempt"}
         </span>
         {/* What the replay found, on the same line. It used to be a stack of chips
             built by splitting the label on an em dash — a shape that broke the day
@@ -797,7 +950,7 @@ export function SolveRead({ part }: { part: ToolPart }) {
         {!running && part.detail && (
           <span className="min-w-0 truncate text-[var(--transcript-step-mark)]">{part.detail}</span>
         )}
-      </div>
+      </motion.div>
     );
   }
 
@@ -809,64 +962,72 @@ export function SolveRead({ part }: { part: ToolPart }) {
   const passing = Math.max(0, stats.casesTracked - stats.neverPassed);
 
   return (
-    <motion.div
-      animate={{ opacity: 1, y: 0 }}
-      className="relative isolate min-w-0 overflow-hidden rounded-lg bg-[var(--surface-primary)] ring-[0.5px] ring-[var(--border-surface-strong)]"
-      initial={{ opacity: 0, y: 4 }}
-      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-    >
-      {/* Their own file, behind their own numbers.
-          The row claims to have read their solve, and until this it made that
-          claim over an empty panel. Set at the size of a minimap and at the
-          opacity of a watermark, and masked away from the top-left so it never
-          runs under the words — it is texture that happens to be true, not a
-          code block, and nothing in it is meant to be read line by line. */}
-      {solve && (
-        <pre
-          aria-hidden
-          className="pointer-events-none absolute inset-0 -z-10 overflow-hidden px-2.5 py-1 font-mono text-[8px] leading-[1.45] whitespace-pre text-foreground opacity-[0.07] select-none dark:opacity-[0.11]"
-          style={{
-            maskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
-            WebkitMaskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
-          }}
-        >
-          {solve.text}
-        </pre>
-      )}
+    <Collapsible className="group/step" onOpenChange={setOpen} open={open}>
+      <motion.div {...arrival} className="min-w-0" ref={block}>
+        <CollapsibleTrigger className={cn("relative isolate block w-full min-w-0 overflow-hidden", BLOCK_SURFACE, TRIGGER)}>
+          {/* Their own file, behind their own numbers.
+              The row claims to have read their solve, and until this it made that
+              claim over an empty panel. Set at the size of a minimap and at the
+              opacity of a watermark, and masked away from the top-left so it never
+              runs under the words — it is texture that happens to be true, not a
+              code block, and nothing in it is meant to be read line by line. */}
+          {solve && (
+            <pre
+              aria-hidden
+              className="pointer-events-none absolute inset-0 -z-10 overflow-hidden px-2.5 py-1 font-mono text-[8px] leading-[1.45] whitespace-pre text-foreground opacity-[0.07] select-none dark:opacity-[0.11]"
+              style={{
+                maskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
+                WebkitMaskImage: "linear-gradient(105deg, transparent 22%, black 78%)",
+              }}
+            >
+              {solve.text}
+            </pre>
+          )}
 
-      <div className="flex min-w-0 items-center gap-2 px-2.5 pt-1.5">
-        <IconHistory className="size-4 shrink-0 text-[var(--transcript-step-mark)]" />
-        <span className="min-w-0 truncate text-thread font-medium text-foreground">Read your solve</span>
-        {stats.casesTracked > 0 && (
-          <CaseRing className="ml-auto" neverPassed={stats.neverPassed} passing={passing} regressions={stats.regressions} total={stats.casesTracked} />
-        )}
-        {verdict && (
-          <span
-            className={cn("shrink-0 rounded-md px-1.5 text-thread font-medium", !stats.casesTracked && "ml-auto")}
-            style={{ color: verdict.tone, background: `color-mix(in oklab, ${verdict.tone} 12%, transparent)` }}
-          >
-            {verdict.word}
-          </span>
-        )}
-      </div>
+          <div className="flex min-w-0 items-center gap-2 px-2.5 pt-1.5">
+            <IconHistory className="size-4 shrink-0 text-[var(--transcript-step-mark)]" />
+            <span className="min-w-0 truncate text-thread font-medium text-foreground">Read your attempt</span>
+            {stats.casesTracked > 0 && (
+              <CaseRing className="ml-auto" neverPassed={stats.neverPassed} passing={passing} regressions={stats.regressions} total={stats.casesTracked} />
+            )}
+            {verdict && (
+              <span
+                className={cn("shrink-0 rounded-md px-1.5 text-thread font-medium", !stats.casesTracked && "ml-auto")}
+                style={{ color: verdict.tone, background: `color-mix(in oklab, ${verdict.tone} 12%, transparent)` }}
+              >
+                {verdict.word}
+              </span>
+            )}
+            <Caret className={cn(!stats.casesTracked && !verdict && "ml-auto")} open={open} />
+          </div>
 
-      {/* Under the title rather than under the mark, so the card is two lines of
-          one statement instead of a header with a table beneath it. */}
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5 pr-2.5 pb-1.5 pl-[2.125rem]">
-        <Stat label="on it" value={spentOn(stats.elapsedMs)} />
-        <Stat label={stats.runs === 1 ? "run" : "runs"} value={stats.runs} />
-        {stats.submissions > 0 && <Stat label={stats.submissions === 1 ? "submission" : "submissions"} value={stats.submissions} />}
-        {stats.casesTracked > 0 && (
-          <Stat label={passing === stats.casesTracked ? "cases, all passing" : `of ${stats.casesTracked} cases passing`} tone="var(--success)" value={passing} />
-        )}
-        {stats.neverPassed > 0 && <Stat label="never passed" tone="var(--destructive)" value={stats.neverPassed} />}
-        {stats.regressions > 0 && <Stat label="broke after passing" tone="var(--warning)" value={stats.regressions} />}
-        {/* The thing the counts cannot show, and it explains more failed attempts
-            than any of them. */}
-        {stats.submittedBlind && <span className="text-thread whitespace-nowrap text-[var(--warning)]">submitted without running</span>}
-      </div>
+          {/* Under the title rather than under the mark, so the card is two lines of
+              one statement instead of a header with a table beneath it. */}
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-0.5 pr-2.5 pb-1.5 pl-[2.125rem]">
+            <Stat label="on it" value={spentOn(stats.elapsedMs)} />
+            <Stat label={stats.runs === 1 ? "run" : "runs"} value={stats.runs} />
+            {stats.submissions > 0 && <Stat label={stats.submissions === 1 ? "submission" : "submissions"} value={stats.submissions} />}
+            {stats.casesTracked > 0 && (
+              <Stat label={passing === stats.casesTracked ? "cases, all passing" : `of ${stats.casesTracked} cases passing`} tone="var(--success)" value={passing} />
+            )}
+            {stats.neverPassed > 0 && <Stat label="never passed" tone="var(--destructive)" value={stats.neverPassed} />}
+            {stats.regressions > 0 && <Stat label="broke after passing" tone="var(--warning)" value={stats.regressions} />}
+            {/* The thing the counts cannot show, and it explains more failed attempts
+                than any of them. */}
+            {stats.submittedBlind && <span className="text-thread whitespace-nowrap text-[var(--warning)]">submitted without running</span>}
+          </div>
+        </CollapsibleTrigger>
 
-    </motion.div>
+        {/* Their code and the log behind the numbers, in the same panel every
+            other step opens into — so the card is a step you can look inside
+            rather than a summary with nowhere to go. */}
+        <CollapsibleContent className={cn("mt-1.5", BLOCK_SURFACE)} expandDuration={0.42}>
+          <div className="agent-tool-detail min-w-0">
+            <ToolDetail input={part.input} output={part.output} tool={part.tool} />
+          </div>
+        </CollapsibleContent>
+      </motion.div>
+    </Collapsible>
   );
 }
 
@@ -973,7 +1134,21 @@ function Stat({ value, label, tone }: { value: string | number; label: string; t
  * mounted says which judge decides it, and nothing about cases, because Spar
  * never compiled it and has no number of its own to give.
  */
-export function ChallengePublished({ part, compact = false }: { part: ToolPart; compact?: boolean }) {
+
+export function ChallengePublished({
+  part,
+  compact = false,
+  currentQuestionId,
+  trail,
+}: {
+  part: ToolPart;
+  compact?: boolean;
+  currentQuestionId?: string | undefined;
+  trail?: ChallengeTrail | undefined;
+}) {
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const reduced = useReducedMotion();
+  const arrival = useThreadArrival(true);
   const challenge = readPublishedChallenge(part);
   const sourced = challenge.source !== null;
   /* Falls back to the sniffer for a row stored before the result carried the
@@ -981,10 +1156,30 @@ export function ChallengePublished({ part, compact = false }: { part: ToolPart; 
      two logos to draw is a different order of claim from guessing a fact. */
   const source = challenge.source ?? sourceFor(part);
   const sourceName = source === "codeforces" ? "Codeforces" : "LeetCode";
+  const stop = challenge.questionId ? trail?.stops.find((item) => item.id === challenge.questionId) : undefined;
+  const current = challenge.questionId === currentQuestionId;
+  const open = stop && !current ? () => trail?.onGo(stop) : undefined;
+  const ordinal = challenge.ordinal ?? stop?.ordinal;
+  const sessionStops = trail?.stops ?? [];
+  /* Two is all a pile needs to say "there are more behind this"; a third
+     sliver is another few px of grey carrying no extra fact. */
+  const behind = Math.min(2, Math.max(0, sessionStops.length - 1));
+  const stackRef = useRef<HTMLDivElement | null>(null);
+  /* Opens looking at the stop the learner is on. It is the last row, and a pile
+     that opens scrolled to its oldest entry hides the one row that answers
+     "where am I". */
+  useEffect(() => {
+    if (!historyOpen) return;
+    const el = stackRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [historyOpen]);
+  const stackTransition = reduced
+    ? { duration: 0 }
+    : { type: "spring" as const, visualDuration: 0.5, bounce: 0.06 };
 
   if (compact) {
     return (
-      <div className="flex min-w-0 items-center gap-2 px-1 py-1 text-thread text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-2 py-1 text-thread text-muted-foreground">
         <span className="grid size-5 shrink-0 place-items-center text-[var(--transcript-step-mark)]">
           {sourced
             ? <SourceGlyph className="size-3.5" source={source} />
@@ -992,6 +1187,7 @@ export function ChallengePublished({ part, compact = false }: { part: ToolPart; 
               ? <LanguageGlyph className="size-3.5" language={challenge.language} />
               : <IconPuzzle className="size-3.5" />}
         </span>
+        {ordinal && <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/60">#{ordinal}</span>}
         <span className="min-w-0 truncate text-thread text-foreground/80">{challenge.title}</span>
         <span className="shrink-0 truncate text-thread text-muted-foreground/70">
           {challenge.difficulty ? DIFFICULTY_WORD[challenge.difficulty] : ""}
@@ -1002,18 +1198,23 @@ export function ChallengePublished({ part, compact = false }: { part: ToolPart; 
     );
   }
 
-  return (
+  const card = (
     <motion.div
-      animate={{ opacity: 1, y: 0 }}
+      animate={{ opacity: 1, scale: 1 }}
       /* Lifted a little further than a step row's entrance, and no further: this
          arrives after a minute of work and should land rather than appear, but a
          card that slides in from 10px past a settled list is the transcript
          performing. */
-      className="group/challenge min-w-0 overflow-hidden rounded-lg bg-[var(--color-background-editor)] shadow-[var(--app-shadow-card)] ring-[0.5px] ring-[var(--border-surface-strong)] transition-shadow duration-200 hover:shadow-[var(--app-shadow-composer)]"
-      initial={{ opacity: 0, y: 6 }}
-      transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
+      className={cn(
+        "group/challenge relative min-w-0 overflow-visible transition-[background-color,box-shadow] duration-100",
+        BLOCK_SURFACE,
+        open && "hover:bg-[var(--surface-primary)]",
+        historyOpen && "shadow-[var(--app-shadow-composer)]",
+      )}
+      initial={arrival.initial}
+      transition={{ ...stackTransition, opacity: { duration: 0.18 } }}
     >
-      <div className="flex min-w-0 items-center gap-2.5 px-2.5 py-2">
+      <div className="flex min-w-0 items-center gap-2.5 px-2.5 py-1.5">
         {/* What they are about to write in, as its own mark rather than as the
             word "TypeScript" in a list of metadata. A learner on a Track that
             switched language last session reads this before they read the
@@ -1027,18 +1228,21 @@ export function ChallengePublished({ part, compact = false }: { part: ToolPart; 
               : <IconPuzzle className="size-4 text-[var(--transcript-step-mark)]" />}
         </span>
 
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="min-w-0 truncate text-thread font-semibold text-foreground">{challenge.title}</span>
-            {/* Only when it is true. A "New" chip on every card is a chip that
-                says nothing; a replacement is the case worth marking, because it
-                means the problem they were looking at a moment ago is gone. */}
-            {challenge.replaced && (
-              <span className="shrink-0 rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 text-thread font-medium text-[var(--transcript-step-mark)]">
-                Replaced
-              </span>
-            )}
-          </span>
+        {/* The controls float over the card's top-right corner rather than sitting
+            in this row, so the reserved gutter is the only trace they leave in
+            the flow — a title that stops short of running under them. */}
+        <div className={cn("min-w-0 flex-1", sessionStops.length > 1 ? "pr-14" : "pr-6")}>
+          <div className="flex min-w-0 items-center gap-1.5">
+            {ordinal ? <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/60">#{ordinal}</span> : null}
+            <button
+              aria-current={current ? "page" : undefined}
+              className="min-w-0 truncate rounded-md text-left text-thread font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+              disabled={!open}
+              onClick={open}
+              title={open ? `Open challenge ${challenge.title}` : current ? "Current challenge" : undefined}
+              type="button"
+            >{challenge.title}</button>
+          </div>
 
           {/* One line, in the order it is read: how hard, what it is about, who
               grades it. Wraps rather than truncates — losing the grader to an
@@ -1057,13 +1261,116 @@ export function ChallengePublished({ part, compact = false }: { part: ToolPart; 
                   : "· validated"}
             </span>
           </span>
-        </span>
+        </div>
+      </div>
 
-        {/* Filed from here, on the same shelf the library reads. This is the one
-            moment the learner is certain to see the problem, and "come back to
-            this one" is a thought people have while reading a problem rather
-            than while browsing a list of them. */}
+      {/* Two quiet controls, one cluster, floating at the corner: the history of
+          this session's challenges, and the bookmark that files this one. Both
+          are the same 24px square in the same muted grey as every other icon
+          control in the app, so neither competes with the title — the old
+          "History · 2" pill sat inside the title line wearing a border and a
+          fill, and read as a status badge the card was wearing rather than as a
+          thing to press. Filed from here, on the same shelf the library reads:
+          this is the one moment the learner is certain to see the problem, and
+          "come back to this one" is a thought people have while reading a
+          problem rather than while browsing a list of them. */}
+      <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5">
+        {sessionStops.length > 1 && (
+          <Tooltip>
+            <TooltipTrigger
+              aria-expanded={historyOpen}
+              aria-label={historyOpen ? "Collapse session challenges" : `Show all ${sessionStops.length} challenges in this session`}
+              className={cn(
+                "inline-flex h-6 shrink-0 items-center gap-1 rounded-[var(--radius-md)] px-1.5 outline-none transition-[color,background-color] duration-150",
+                "hover:bg-[var(--color-background-elevated-secondary)] focus-visible:ring-1 focus-visible:ring-ring",
+                historyOpen ? "bg-[var(--color-background-elevated-secondary)] text-foreground" : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setHistoryOpen((value) => !value);
+              }}
+              type="button"
+            >
+              <IconHistory className="size-3.5" />
+              <span className="font-mono text-ui-sm tabular-nums leading-none">{sessionStops.length}</span>
+            </TooltipTrigger>
+            <TooltipContent>{historyOpen ? "Hide session challenges" : `All ${sessionStops.length} challenges this session`}</TooltipContent>
+          </Tooltip>
+        )}
         <SaveProblem problemKey={challenge.questionId ? `spar:${challenge.questionId}` : null} title={challenge.title} />
+      </div>
+    </motion.div>
+  );
+
+  return (
+    <motion.div
+      className={cn("relative min-w-0 isolate", behind > 0 && !historyOpen && "pb-2.5")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") { event.stopPropagation(); setHistoryOpen(false); }
+      }}
+    >
+      {/* The pile opens upward, out of the live card, rather than pushing it
+          down the transcript: the card the learner is reading is the thing that
+          should hold still while the session unfolds behind it. */}
+      <AnimatePresence initial={false}>
+        {historyOpen && (
+          <motion.div
+            animate={{ height: "auto", opacity: 1 }}
+            className="overflow-hidden"
+            exit={{ height: 0, opacity: 0 }}
+            initial={{ height: 0, opacity: 0 }}
+            key="session-stack"
+            transition={stackTransition}
+          >
+            <div
+              className="flex max-h-[19rem] min-w-0 flex-col gap-1.5 overflow-y-auto overflow-x-hidden px-0.5 pb-2.5 pt-1"
+              ref={stackRef}
+              style={{ maskImage: STACK_FADE, WebkitMaskImage: STACK_FADE }}
+            >
+              {sessionStops.map((item, index) => (
+                /* Each row stands up out of the card rather than fading in, and
+                   the one nearest the live card goes first, so a long session
+                   unfurls from the present backward instead of all at once. */
+                <motion.button
+                  animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0 }}
+                  aria-current={item.id === currentQuestionId ? "page" : undefined}
+                  className="flex h-12 w-full min-w-0 shrink-0 items-center gap-2.5 rounded-2xl bg-[var(--color-background-editor)] px-3 text-left shadow-[var(--app-shadow-composer)] ring-[0.5px] ring-[var(--border-surface-strong)] outline-none transition-colors duration-100 hover:bg-[var(--surface-primary)] focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+                  disabled={item.id === currentQuestionId}
+                  initial={{ opacity: 0, y: 18, scale: reduced ? 1 : 0.9, rotateX: reduced ? 0 : 22 }}
+                  key={item.id}
+                  onClick={() => { setHistoryOpen(false); trail?.onGo(item); }}
+                  style={{ transformPerspective: 900, transformOrigin: "center bottom" }}
+                  transition={{ ...stackTransition, delay: reduced ? 0 : Math.min(0.24, (sessionStops.length - 1 - index) * 0.035) }}
+                  type="button"
+                >
+                  <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] font-mono text-ui-sm tabular-nums text-muted-foreground">#{item.ordinal}</span>
+                  <span className="min-w-0 flex-1 truncate text-thread font-medium">{item.title}</span>
+                  {item.replaced && <span className="shrink-0 rounded-full bg-secondary px-2 py-0.5 text-ui-sm text-muted-foreground">Replaced</span>}
+                  {item.live && <span className="shrink-0 rounded-full bg-foreground px-2 py-0.5 text-ui-sm text-background">Current</span>}
+                  {item.id !== currentQuestionId && <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <div className="relative min-w-0">
+        {/* Closed, the rest of the session is two slivers under the live card,
+            each a little narrower and a little dimmer — the whole claim is
+            "there is a pile here", and the history chip opens it. */}
+        {!historyOpen && Array.from({ length: behind }, (_, i) => i + 1).map((depth) => (
+          <motion.div
+            animate={{ y: depth * 5, scaleX: 1 - depth * 0.05, opacity: 1 - depth * 0.25 }}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 rounded-2xl bg-[var(--color-background-elevated-secondary)] ring-[0.5px] ring-[var(--border-surface-strong)]"
+            initial={false}
+            key={depth}
+            style={{ zIndex: 10 - depth }}
+            transition={stackTransition}
+          />
+        ))}
+        <div className="relative" style={{ zIndex: 20 }}>{card}</div>
       </div>
     </motion.div>
   );

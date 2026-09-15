@@ -61,7 +61,6 @@ export const toolDefinitions = {
      for looking up answers, which the host compiler decides anyway. */
   web_search: ["Search the web for current, external information: what a company's interviews actually cover, what a library's current API is, what a topic's standard formulation is. Returns titles, URLs, and short extracts. Use it to ground a goal in reality when the learner's own record cannot answer the question, and prefer one focused query over several vague ones.", z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(10).default(5) })],
   web_fetch: ["Read one or more web pages in full, by URL. Use it after web_search has told you which page is worth reading. http and https only.", z.object({ urls: z.array(z.string().url()).min(1).max(5) })],
-  read_attempt: ["Read a focused attempt trace.", z.object({ attemptId: z.string().uuid() })],
   read_session: ["Read the current session summary and decisions.", z.object({ sessionId: z.string().uuid() })],
   read_concept_graph: ["Read the concept vocabulary near a topic, with this learner's evidence against each one. Use it to choose what to tag and what to test next.", z.object({ query: z.string().optional(), limit: z.number().int().min(1).max(24).default(14) })],
   search_concept_evidence: ["Read how this learner behaves under one concept, broken down by sub-concept, with the recent challenges and outcomes behind it. This is the tool for finding which specific sub-concept is failing inside an area that looks fine on average.", z.object({ concept: z.string().min(2).describe("a concept slug or a topic in words"), limit: z.number().int().min(1).max(6).default(3) })],
@@ -70,11 +69,21 @@ export const toolDefinitions = {
   set_training_target: ["Persist one primary evidence target.", z.object({ ability: z.string(), specificGap: z.string(), desiredEvidence: z.string(), avoidTesting: z.array(z.string()) })],
   create_question: ["Compile and validate a complete question from the active target. All paths are relative and the reference implementation must replace starter implementation files.", questionInputSchema],
   replace_current_question: ["Compile a validated replacement for the active challenge while preserving its attempt, tests, and replacement lineage in history.", questionInputSchema.extend({reason:z.string().min(3).max(500)})],
-  inspect_current_attempt: ["Read the learner's code as it stands right now, with the attempt's events, diffs, test runs and submission evidence. This is the cheap first look: when the question is what they wrote or why a case fails, read this before reaching for the tracer — a trace is a whole program run and costs far more than a file that already says it.", z.object({ attemptId: z.string().uuid() })],
-  replay_attempt: [
-    "Read the attempt's own log: every recorded event in order — edits, runs, submissions, verdicts — with its offset from when the attempt opened, plus one line per test case inside every run with its expected/actual values. Nothing in it is summarised or interpreted; it is what was recorded. Two derived sections come with it because a log in order cannot show them: each case's verdict across every run (a transpose) and each run's newly-passing and newly-failing cases (a diff). Take the whole log when the attempt is small — that is the default — and use the parameters to narrow it when it is long or when you only need one metric. This is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
+  /**
+   * One attempt, read once.
+   *
+   * This was four tools. `inspect_current_attempt` and `read_attempt` were the
+   * same host handler under two names, `evaluate_attempt` was that handler's
+   * events with the files left off, and `replay_attempt` was the same attempt
+   * with its log folded — so an agent asked "how am I doing" spent its whole
+   * budget on each of them in turn and the learner watched nine rows go by for
+   * one act of reading their code. A question with one answer gets one tool.
+   */
+  read_attempt: [
+    "Read one attempt completely, in a single call. You get their code exactly as it stands right now; the deterministic runner's own verdict on it, which is the sole authority on whether it works and is never yours to second-guess; and the whole log of how they got there — every recorded event in order with its offset from when the attempt opened, every test case inside every run with its expected and actual values, plus two derived views a log in order cannot show: each case's verdict across all runs, and each run's newly-passing and newly-failing cases against the last run that saw it. Nothing in it is summarised or interpreted; it is what was recorded. This is the only tool that reads an attempt and it answers the whole question at once, so call it once and work from what came back rather than reaching for a second look. Take the whole thing when the attempt is small — that is the default — and use the parameters to narrow the log when it is long or when you only need one metric; the code and the verdict come back either way. It is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
     z.object({
-      attemptId: z.string().uuid(),
+      attemptId: z.string().uuid().optional()
+        .describe("Omit for the attempt the learner has open right now, which is almost always the one you mean. Name one only to read a different attempt out of their history."),
       sections: z.array(z.enum(["log", "cases", "runs", "timings"])).min(1).max(4).optional()
         .describe("log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs."),
       eventTypes: z.array(z.string().min(3).max(40)).max(12).optional()
@@ -87,7 +96,6 @@ export const toolDefinitions = {
       maxLines: z.number().int().min(20).max(2_000).optional().describe("Cap on log lines, newest kept, and it says how many it dropped. Default 400. Raise it rather than guessing at what a truncated log left out."),
     }),
   ],
-  evaluate_attempt: ["Read the already-recorded deterministic runner outcome and evidence. Never judge correctness with the model.", z.object({ attemptId: z.string().uuid() })],
   /**
    * The one judgement about the solution that the tests cannot make.
    *
@@ -233,7 +241,7 @@ export function withActionTitle(schema: z.ZodTypeAny): z.ZodTypeAny {
  * Schema on the wire — and it used `zod-to-json-schema` to do it. So does this,
  * at the version Mastra pinned, which is why the output is byte-identical to
  * what the agent sent before the migration rather than merely equivalent to it.
- * agentTools.test.ts holds Mastra's own output and checks all thirty-five.
+ * agentTools.test.ts holds Mastra's own output and checks every one of them.
  *
  * `parse` comes along because the schema cannot carry everything zod knows.
  * A JSON Schema validator checks a value; zod also *produces* one, filling in

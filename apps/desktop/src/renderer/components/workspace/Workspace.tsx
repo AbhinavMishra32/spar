@@ -632,6 +632,7 @@ export function Workspace({
             question={question}
             run={run}
             testFiles={testFiles}
+            trail={trail}
           />
         </Panel>
 

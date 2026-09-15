@@ -26,6 +26,8 @@ export type ChallengeStop = {
   title: string;
   /** The session's open challenge — the one where work still counts. */
   live: boolean;
+  /** Superseded by a later challenge in this session. */
+  replaced: boolean;
 };
 
 export type ChallengeTrail = {

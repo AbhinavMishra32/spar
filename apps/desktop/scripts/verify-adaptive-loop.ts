@@ -109,8 +109,8 @@ async function verify() {
     await assertHiddenDiscrimination(created.sessionId, secondBundle.design);
 
     const secondNames = new Set(toolCalls.filter((call) => call.phase === "second").map((call) => call.name));
-    for (const required of ["inspect_current_attempt", "evaluate_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "set_training_target", "create_question"]) {
-      if (!secondNames.has(required) && !(required === "inspect_current_attempt" && secondNames.has("read_attempt"))) throw new Error(`Second agent turn skipped required tool ${required}`);
+    for (const required of ["read_attempt", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "set_training_target", "create_question"]) {
+      if (!secondNames.has(required)) throw new Error(`Second agent turn skipped required tool ${required}`);
     }
 
     console.log(JSON.stringify({

@@ -509,7 +509,13 @@ export function App() {
     const stops = data.challenges
       .filter((challenge) => challenge.sessionId === sessionId)
       .sort((a, b) => a.ordinal - b.ordinal)
-      .map((challenge) => ({ id: challenge.id, ordinal: challenge.ordinal, title: challenge.title, live: challenge.id === liveId }));
+      .map((challenge) => ({
+        id: challenge.id,
+        ordinal: challenge.ordinal,
+        title: challenge.title,
+        live: challenge.id === liveId,
+        replaced: Boolean(challenge.replacedByQuestionId),
+      }));
     if (stops.length < 2) return undefined;
     return {
       stops,

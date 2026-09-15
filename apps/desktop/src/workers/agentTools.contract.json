@@ -416,54 +416,6 @@
       "type": "object"
     }
   },
-  "evaluate_attempt": {
-    "description": "Read the already-recorded deterministic runner outcome and evidence. Never judge correctness with the model.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "attemptId": {
-          "format": "uuid",
-          "type": "string"
-        }
-      },
-      "required": [
-        "attemptId",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "inspect_current_attempt": {
-    "description": "Read the learner's code as it stands right now, with the attempt's events, diffs, test runs and submission evidence. This is the cheap first look: when the question is what they wrote or why a case fails, read this before reaching for the tracer — a trace is a whole program run and costs far more than a file that already says it.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "attemptId": {
-          "format": "uuid",
-          "type": "string"
-        }
-      },
-      "required": [
-        "attemptId",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
   "open_visualizer": {
     "description": "Load the execution visualiser: Spar can run code under a real tracer and draw every variable, structure and pointer at any step, inline in this conversation. Call this whenever the learner is confused about what their code is actually doing at some point in the run — a value that is not what they expect, a loop that ends early, a pointer somewhere surprising, an off-by-one — or when a small idea would land better shown than described. Returns instructions and the visualiser's tools.",
     "inputSchema": {
@@ -709,7 +661,7 @@
     }
   },
   "read_attempt": {
-    "description": "Read a focused attempt trace.",
+    "description": "Read one attempt completely, in a single call. You get their code exactly as it stands right now; the deterministic runner's own verdict on it, which is the sole authority on whether it works and is never yours to second-guess; and the whole log of how they got there — every recorded event in order with its offset from when the attempt opened, every test case inside every run with its expected and actual values, plus two derived views a log in order cannot show: each case's verdict across all runs, and each run's newly-passing and newly-failing cases against the last run that saw it. Nothing in it is summarised or interpreted; it is what was recorded. This is the only tool that reads an attempt and it answers the whole question at once, so call it once and work from what came back rather than reaching for a second look. Take the whole thing when the attempt is small — that is the default — and use the parameters to narrow the log when it is long or when you only need one metric; the code and the verdict come back either way. It is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -721,12 +673,69 @@
           "type": "string"
         },
         "attemptId": {
+          "description": "Omit for the attempt the learner has open right now, which is almost always the one you mean. Name one only to read a different attempt out of their history.",
           "format": "uuid",
           "type": "string"
+        },
+        "caseDetail": {
+          "description": "`brief` drops the expected/actual pair from each failing case line in the log. Default full.",
+          "enum": [
+            "brief",
+            "full"
+          ],
+          "type": "string"
+        },
+        "cases": {
+          "description": "Narrow the case history. `still-failing` is what is wrong now; `fixed` is what they repaired themselves, which is evidence of learning inside one attempt.",
+          "enum": [
+            "all",
+            "failed-ever",
+            "still-failing",
+            "fixed"
+          ],
+          "type": "string"
+        },
+        "eventTypes": {
+          "description": "Keep only these event types in the log, e.g. [\"test_run\"] for nothing but the runs, or [\"file_changed\",\"test_run\"] for the edit-and-run rhythm. Omit for every type. Recorded types: attempt_started, file_changed, command_executed, test_run, submission_created, submission_evaluated, attempt_completed, hint_requested, learner_remark, agent_message.",
+          "items": {
+            "maxLength": 40,
+            "minLength": 3,
+            "type": "string"
+          },
+          "maxItems": 12,
+          "type": "array"
+        },
+        "maxLines": {
+          "description": "Cap on log lines, newest kept, and it says how many it dropped. Default 400. Raise it rather than guessing at what a truncated log left out.",
+          "maximum": 2000,
+          "minimum": 20,
+          "type": "integer"
+        },
+        "scope": {
+          "description": "`since-last-submission` keeps only what happened after the last graded run, which is often the whole question on a follow-up turn.",
+          "enum": [
+            "all",
+            "since-last-submission"
+          ],
+          "type": "string"
+        },
+        "sections": {
+          "description": "log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs.",
+          "items": {
+            "enum": [
+              "log",
+              "cases",
+              "runs",
+              "timings"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "type": "array"
         }
       },
       "required": [
-        "attemptId",
         "actionTitle"
       ],
       "type": "object"
@@ -1194,87 +1203,6 @@
         "accidentalDifficulty",
         "expectedFailureSignatures",
         "reason",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "replay_attempt": {
-    "description": "Read the attempt's own log: every recorded event in order — edits, runs, submissions, verdicts — with its offset from when the attempt opened, plus one line per test case inside every run with its expected/actual values. Nothing in it is summarised or interpreted; it is what was recorded. Two derived sections come with it because a log in order cannot show them: each case's verdict across every run (a transpose) and each run's newly-passing and newly-failing cases (a diff). Take the whole log when the attempt is small — that is the default — and use the parameters to narrow it when it is long or when you only need one metric. This is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "attemptId": {
-          "format": "uuid",
-          "type": "string"
-        },
-        "caseDetail": {
-          "description": "`brief` drops the expected/actual pair from each failing case line in the log. Default full.",
-          "enum": [
-            "brief",
-            "full"
-          ],
-          "type": "string"
-        },
-        "cases": {
-          "description": "Narrow the case history. `still-failing` is what is wrong now; `fixed` is what they repaired themselves, which is evidence of learning inside one attempt.",
-          "enum": [
-            "all",
-            "failed-ever",
-            "still-failing",
-            "fixed"
-          ],
-          "type": "string"
-        },
-        "eventTypes": {
-          "description": "Keep only these event types in the log, e.g. [\"test_run\"] for nothing but the runs, or [\"file_changed\",\"test_run\"] for the edit-and-run rhythm. Omit for every type. Recorded types: attempt_started, file_changed, command_executed, test_run, submission_created, submission_evaluated, attempt_completed, hint_requested, learner_remark, agent_message.",
-          "items": {
-            "maxLength": 40,
-            "minLength": 3,
-            "type": "string"
-          },
-          "maxItems": 12,
-          "type": "array"
-        },
-        "maxLines": {
-          "description": "Cap on log lines, newest kept, and it says how many it dropped. Default 400. Raise it rather than guessing at what a truncated log left out.",
-          "maximum": 2000,
-          "minimum": 20,
-          "type": "integer"
-        },
-        "scope": {
-          "description": "`since-last-submission` keeps only what happened after the last graded run, which is often the whole question on a follow-up turn.",
-          "enum": [
-            "all",
-            "since-last-submission"
-          ],
-          "type": "string"
-        },
-        "sections": {
-          "description": "log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs.",
-          "items": {
-            "enum": [
-              "log",
-              "cases",
-              "runs",
-              "timings"
-            ],
-            "type": "string"
-          },
-          "maxItems": 4,
-          "minItems": 1,
-          "type": "array"
-        }
-      },
-      "required": [
-        "attemptId",
         "actionTitle"
       ],
       "type": "object"

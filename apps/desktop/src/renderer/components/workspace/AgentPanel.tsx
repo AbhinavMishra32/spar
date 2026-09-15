@@ -14,6 +14,7 @@ import { DifficultyPill } from "./Difficulty";
 import { ProblemView } from "./ProblemView";
 import type { ConceptContext } from "../concepts/ConceptChip";
 import { ComplexityCheckpoint, type ComplexityCheckpointState } from "./ComplexityCheckpoint";
+import type { ChallengeTrail } from "./ChallengeStepper";
 
 type View = "problem" | "chat";
 const ORDER: View[] = ["problem", "chat"];
@@ -44,6 +45,7 @@ export function AgentPanel({
   onComplexityReview,
   onComplexityAcknowledge,
   optimisticMessages,
+  trail,
 }: {
   answering: boolean;
   concepts?: ConceptContext | undefined;
@@ -68,6 +70,7 @@ export function AgentPanel({
   onComplexityReview(): void;
   onComplexityAcknowledge(): void;
   optimisticMessages: OptimisticLearnerMessage[];
+  trail?: ChallengeTrail | undefined;
 }) {
   const [view, setView] = useState<View>("problem");
   const busy = run?.status === "streaming";
@@ -156,7 +159,7 @@ export function AgentPanel({
             {view === "problem" ? (
               <ProblemView concepts={concepts} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
             ) : (
-              <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} onEditMessage={onEditMessage} optimisticMessages={optimisticMessages} run={run} undoable={undoable} />
+              <AgentThread className="[--transcript-width:46rem]" currentQuestionId={question.id} messages={detail.messages} onEditMessage={onEditMessage} optimisticMessages={optimisticMessages} run={run} trail={trail} undoable={undoable} />
             )}
           </motion.div>
         </AnimatePresence>

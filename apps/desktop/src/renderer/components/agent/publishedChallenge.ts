@@ -35,6 +35,10 @@ export type PublishedChallenge = {
   concepts: string[];
   /** Whether this took the place of a challenge that was already open. */
   replaced: boolean;
+  /** The challenge this one superseded. Kept separately from `replaced` so the
+   *  transcript can offer the actual earlier card instead of a decorative
+   *  second layer that leads nowhere. */
+  replacedQuestionId: string | null;
   /** Cases the grader runs, measured by the compiler rather than counted off the
    *  test source. Null for a sourced problem, which Spar did not compile. */
   cases: number | null;
@@ -42,6 +46,9 @@ export type PublishedChallenge = {
    *  it, opening it. Null while the call is still running and for a row stored
    *  before the result carried one. */
   questionId: string | null;
+  /** Its place in the session, for the same compact identity the workspace
+   *  toolbar uses. */
+  ordinal: number | null;
 };
 
 const DIFFICULTIES = new Set(["foundation", "developing", "proficient", "advanced"]);
@@ -113,6 +120,12 @@ function questionId(value: unknown): string | null {
   return typeof id === "string" && id ? id : null;
 }
 
+function questionOrdinal(value: unknown): number | null {
+  if (!value || typeof value !== "object") return null;
+  const ordinal = (value as Record<string, unknown>).ordinal;
+  return typeof ordinal === "number" && Number.isInteger(ordinal) && ordinal > 0 ? ordinal : null;
+}
+
 export function readPublishedChallenge(part: ToolPart): PublishedChallenge {
   const sent = fields(part.input);
   const back = fields(part.output);
@@ -139,7 +152,9 @@ export function readPublishedChallenge(part: ToolPart): PublishedChallenge {
     displayId: text(published, "displayId") || null,
     concepts: concepts(sent.concepts),
     replaced: part.tool === "replace_current_question" || typeof back.replacedQuestionId === "string",
+    replacedQuestionId: typeof back.replacedQuestionId === "string" && back.replacedQuestionId ? back.replacedQuestionId : null,
     cases: sourced ? null : caseCount(back.report),
     questionId: questionId(back.question),
+    ordinal: questionOrdinal(back.question),
   };
 }

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, Check, Copy, Pencil } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
@@ -11,6 +12,7 @@ import { SystemEvent } from "./SystemEvent";
 import { groupParts, isChallengePublished, publishedRunArtifacts, reasoningAtLiveEdge, type AgentRun, type RunPart } from "./agentRun";
 import { RunFold } from "./RunFold";
 import { unreconciledOptimisticMessages, type OptimisticLearnerMessage } from "./optimisticMessages";
+import type { ChallengeTrail } from "../workspace/ChallengeStepper";
 
 export type { OptimisticLearnerMessage } from "./optimisticMessages";
 
@@ -83,7 +85,7 @@ function PhaseWait({ phase }: { phase?: string | null | undefined }) {
  * the work and folds itself away when the answer starts; everything after is
  * the answer and stays where the learner is already reading.
  */
-function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefined }) {
+function LiveRun({ run, phase, currentQuestionId, trail }: { run: AgentRun; phase?: string | null | undefined; currentQuestionId?: string | undefined; trail?: ChallengeTrail | undefined }) {
   const streaming = run.status === "streaming";
   const boundary = run.finalFrom ?? run.parts.length;
   const work = run.parts.slice(0, boundary);
@@ -91,17 +93,88 @@ function LiveRun({ run, phase }: { run: AgentRun; phase?: string | null | undefi
   // Published artifacts remain accessible even when the work is collapsed.
   const published = publishedRunArtifacts(run);
   const thinkingAtEdge = reasoningAtLiveEdge(work, streaming, run.finalStartedAt);
+  const reduced = useReducedMotion();
+  /* The same rule live: the fold is the lid on the work, and a turn that went
+     straight to answering has no work under it. While it is still waiting for
+     the first token the lid stays — there the transient line inside it is the
+     only thing saying the turn is alive. */
+  const waiting = streaming && run.finalStartedAt === undefined;
+  const shows = waiting || thinkingAtEdge || work.some((part) => part.kind !== "reasoning");
   return (
-    <div className="min-w-0">
+    /* The turn opening. A send used to be answered by a header, a rule and a
+       waiting line all appearing in one frame in the empty space under the
+       bubble — the reply to pressing Return was a block of chrome landing on the
+       page, which reads as something having gone wrong rather than as work
+       starting. It comes up from under the message it answers instead, on the
+       bubble's own spring, so the send and the turn it starts are one movement. */
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className="min-w-0"
+      initial={reduced ? false : { opacity: 0, y: 10 }}
+      transition={{ type: "spring", visualDuration: 0.45, bounce: 0 }}
+    >
       <PhaseLine live={streaming} phase={phase} />
+      {shows && (
       <RunFold finalStartedAt={run.finalStartedAt} live={streaming} startedAt={run.startedAt}>
-        <Rows compactChallenges parts={work} />
-        {thinkingAtEdge && <div style={{ marginTop: STEP_GAP }}><ThinkingLine /></div>}
-        {streaming && run.finalStartedAt === undefined && <div style={{ marginTop: STEP_GAP }}><WaitingLine parts={work} /></div>}
+        <Rows compactChallenges currentQuestionId={currentQuestionId} parts={work} trail={trail} />
+        {/* The two transient lines of a live turn, which are each other's
+            replacement and the first tool row's. Held in one presence group so
+            the one going out fades while the one coming in rises, rather than
+            the row beneath jumping up into a slot that emptied in a frame. */}
+        <AnimatePresence initial={false} mode="popLayout">
+          {thinkingAtEdge && (
+            <motion.div
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
+              initial={reduced ? false : { opacity: 0, y: 6 }}
+              key="thinking"
+              style={{ marginTop: STEP_GAP }}
+              transition={{ type: "spring", visualDuration: 0.35, bounce: 0 }}
+            ><ThinkingLine /></motion.div>
+          )}
+          {streaming && run.finalStartedAt === undefined && (
+            <motion.div
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
+              initial={reduced ? false : { opacity: 0, y: 6 }}
+              key="waiting"
+              style={{ marginTop: STEP_GAP }}
+              transition={{ type: "spring", visualDuration: 0.35, bounce: 0 }}
+            ><WaitingLine parts={work} /></motion.div>
+          )}
+        </AnimatePresence>
       </RunFold>
-      {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={published} /></div>}
-      {reply.length > 0 && <div style={{ marginTop: FINAL_GAP }}><Rows parts={reply} /></div>}
-    </div>
+      )}
+      {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows currentQuestionId={currentQuestionId} parts={published} trail={trail} /></div>}
+      {reply.length > 0 && <FinalReply gap={shows || published.length > 0}><Rows currentQuestionId={currentQuestionId} parts={reply} trail={trail} /></FinalReply>}
+    </motion.div>
+  );
+}
+
+/**
+ * The answer arriving, once.
+ *
+ * The moment the work stops and the reply starts is the one the learner has been
+ * waiting through a minute of tool rows for, and it used to be the least marked
+ * thing on screen: the fold collapsed and text was simply there, in the space
+ * the steps had been, with no frame between the two states. So the reply rises
+ * the same few pixels the fold falls, on the fold's own timing — the two read as
+ * one exchange rather than as a disappearance followed by an appearance.
+ *
+ * Only on mount, and only here. The settled turn draws the same words from
+ * storage a moment later, and animating those too would play the arrival twice
+ * for one answer.
+ */
+function FinalReply({ children, gap }: { children: React.ReactNode; gap: boolean }) {
+  const reduced = useReducedMotion();
+  return (
+    <motion.div
+      animate={{ opacity: 1, y: 0 }}
+      className="min-w-0"
+      initial={reduced ? false : { opacity: 0, y: 10 }}
+      style={{ marginTop: gap ? FINAL_GAP : 0 }}
+      transition={{ type: "spring", visualDuration: 0.5, bounce: 0 }}
+    >{children}</motion.div>
   );
 }
 
@@ -127,7 +200,7 @@ function hasGutter(row: ReturnType<typeof groupParts>[number] | undefined): bool
   return row?.kind === "tool-row";
 }
 
-function Rows({ parts, compactChallenges = false }: { parts: RunPart[]; compactChallenges?: boolean }) {
+function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { parts: RunPart[]; compactChallenges?: boolean; currentQuestionId?: string | undefined; trail?: ChallengeTrail | undefined }) {
   const rows = groupParts(parts);
   return (
     <>
@@ -175,7 +248,7 @@ function Rows({ parts, compactChallenges = false }: { parts: RunPart[]; compactC
              the tool is intentionally not rendered as another content surface. */
           return wrap(<ToolRow continues={continues} part={part.part} />);
         }
-        if (part.kind === "challenge") return wrap(<ChallengePublished compact={compactChallenges} part={part.part} />);
+        if (part.kind === "challenge") return wrap(<ChallengePublished compact={compactChallenges} currentQuestionId={currentQuestionId} part={part.part} trail={trail} />);
         if (part.kind === "solve-read") return wrap(<SolveRead part={part.part} />);
         if (part.kind === "explained-trace") return wrap(<ExplainedTrace part={part.part} />);
         if (part.kind === "error") return wrap(<RunFailure body={part.body} />);
@@ -230,14 +303,19 @@ function WaitingLine({ parts }: { parts: RunPart[] }) {
  * of storing them. A turn with no reply is still a turn worth seeing; that is
  * what an attempt-complete turn is, and it used to leave nothing behind at all.
  */
-export function AgentMessage({ body, activity, activityCount, messageId, workedMs }: {
+export function AgentMessage({ body, activity, activityCount, messageId, workedMs, landing = false, currentQuestionId, trail }: {
   body: string;
   activity: AgentActivityStep[];
   activityCount: number;
   messageId: string;
+  /** Whether this turn has just finished and is taking the live run's place, as
+   *  opposed to being drawn with a transcript that was already there. */
+  landing?: boolean;
   /** How long the turn behind this message ran. Zero for turns recorded before
    *  it was kept, which fold without naming a length. */
   workedMs: number;
+  currentQuestionId?: string | undefined;
+  trail?: ChallengeTrail | undefined;
 }) {
   /* Older turns arrive with their steps left on disk — see the window in the
      store. The row says how many there were and fetches them when asked, so the
@@ -250,9 +328,16 @@ export function AgentMessage({ body, activity, activityCount, messageId, workedM
      fetches them when it is opened, so an old turn reads as a turn that did
      work rather than one that did nothing. */
   const deferred = !steps.length && activityCount > 0;
+  /* Steps that draw something. Provider reasoning is runtime state and `Rows`
+     renders none of it, so a turn whose only "work" was thinking had a fold
+     announcing five seconds of nothing and opening onto an empty panel — the
+     turn that answered straight away is exactly the one with nothing to show.
+     No drawn rows, no fold. */
+  const shows = deferred || parts.some((part) => part.kind !== "reasoning");
   const open = async () => {
     setFetched(await window.spar!.messageActivity({ messageId }));
   };
+  const reduced = useReducedMotion();
   return (
     /* No `space-y` here. It reaches every row `Rows` emits — they are direct
        children of this element, not of the fragment — and put a margin between
@@ -261,19 +346,28 @@ export function AgentMessage({ body, activity, activityCount, messageId, workedM
        line into a column of dashes on every settled turn while a live one
        looked right. Spacing between steps belongs to `Rows`; the only gap this
        element owns is the one before the reply. */
-    <div className="min-w-0">
-      {(steps.length > 0 || deferred) && (
+    <motion.div
+      animate={{ opacity: 1 }}
+      className="min-w-0"
+      /* Not from zero. The turn underneath this one is the same turn, so the
+         crossing only has to cover the seam between them — starting from
+         invisible would be the answer fading in over itself, which is a longer
+         and more conspicuous event than the swap it is hiding. */
+      initial={landing && !reduced ? { opacity: 0.35 } : false}
+      transition={{ duration: 0.28, ease: "linear" }}
+    >
+      {shows && (
         <RunFold bodyLoaded={!deferred} live={false} onOpen={open} workedMs={workedMs}>
-          <Rows compactChallenges parts={parts} />
+          <Rows compactChallenges currentQuestionId={currentQuestionId} parts={parts} trail={trail} />
         </RunFold>
       )}
-      {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows parts={published} /></div>}
+      {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows currentQuestionId={currentQuestionId} parts={published} trail={trail} /></div>}
       {body.trim() && (
-        <div className="min-w-0 pb-2" style={{ marginTop: steps.length || deferred ? FINAL_GAP : undefined }}>
+        <div className="min-w-0 pb-2" style={{ marginTop: shows ? FINAL_GAP : undefined }}>
           <Markdown source={body} />
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -317,10 +411,11 @@ function storedPart(step: AgentActivityStep, index: number): RunPart {
  * that, because a control that promised to undo the record would be lying about
  * the one thing the learner would most want to be true.
  */
-function LearnerMessage({ body, createdAt, editable, queued = false, onEdit }: { body: string; createdAt?: string | number; editable: boolean; queued?: boolean; onEdit?: ((body: string) => void) | undefined }) {
+function LearnerMessage({ body, createdAt, editable, queued = false, sending = false, onEdit }: { body: string; createdAt?: string | number; editable: boolean; queued?: boolean; /** Whether this bubble is arriving now, rather than being drawn with the rest of a transcript that was already there. */ sending?: boolean; onEdit?: ((body: string) => void) | undefined }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(body);
   const [copied, setCopied] = useState(false);
+  const reduced = useReducedMotion();
 
   if (editing) {
     return (
@@ -373,16 +468,27 @@ function LearnerMessage({ body, createdAt, editable, queued = false, onEdit }: {
     <div className="group/said flex min-w-0 flex-col items-end">
       {/* Held back until the turn picks it up: dimmed, with the reason on hover.
           The bubble is the learner's own words either way — what changes is
-          whether the agent has them yet. */}
-      <div
-        className={cn(
-          "max-w-[min(fit-content,80%)] min-w-0 break-words learner-bubble rounded-xl bg-secondary px-3 py-2 text-thread leading-[1.55] whitespace-pre-wrap transition-opacity",
-          queued && "opacity-60",
-        )}
+          whether the agent has them yet.
+
+          It arrives from the composer: up a few pixels, off a corner nearest the
+          field it was typed in, on a spring with just enough bounce to land
+          rather than stop. The draft clearing and the bubble appearing in one
+          frame was the send reading as a field that lost what you typed —
+          watching the words travel the short distance to the transcript is the
+          whole confirmation the action needs, which is why there is no other. */}
+      <motion.div
+        animate={{ opacity: queued ? 0.6 : 1, y: 0, scale: 1 }}
+        className="max-w-[min(fit-content,80%)] min-w-0 break-words learner-bubble rounded-xl bg-secondary px-3 py-2 text-thread leading-[1.55] whitespace-pre-wrap"
+        initial={sending && !reduced ? { opacity: 0, y: 14, scale: 0.94 } : false}
+        style={{ transformOrigin: "bottom right" }}
+        transition={{
+          opacity: { duration: 0.2 },
+          default: { type: "spring", visualDuration: 0.42, bounce: 0.2 },
+        }}
         {...(queued ? { title: "Waiting for the agent to finish this step" } : {})}
       >
         {body}
-      </div>
+      </motion.div>
       <div className="mt-1 flex h-6 items-center justify-end gap-1 pr-1 text-muted-foreground/70 opacity-0 transition-opacity group-hover/said:opacity-100 focus-within:opacity-100">
         {createdAt !== undefined && <span className="mr-0.5 text-thread tabular-nums">{messageTime(createdAt)}</span>}
         <Tooltip delayDuration={450}>
@@ -443,6 +549,8 @@ export function AgentThread({
   undoable,
   optimisticMessages = [],
   className,
+  currentQuestionId,
+  trail,
 }: {
   messages: Message[];
   run: AgentRun | null;
@@ -463,9 +571,39 @@ export function AgentThread({
   /** Learner bubbles inserted before IPC persistence/agent startup completes. */
   optimisticMessages?: OptimisticLearnerMessage[] | undefined;
   className?: string;
+  /** Challenge cards use the same route as the toolbar stepper. The active
+   *  card stays inert; earlier cards reopen their read-only practice surface. */
+  currentQuestionId?: string | undefined;
+  trail?: ChallengeTrail | undefined;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
   const [pinned, setPinned] = useState(true);
+  /* Which bubbles are new to this screen. Opening a session is not forty
+     messages being sent, so everything present at the first commit is recorded
+     as already seen and only what appears after it animates in.
+
+     `spoken` is the hand-off: a learner message is drawn optimistically the
+     instant they press Return and again, under a different id, once the session
+     comes back from disk. Both are the same words being said once, so the
+     durable one inherits the arrival the optimistic one already played instead
+     of repeating it. */
+  const seen = useRef<Set<string>>(new Set());
+  const spoken = useRef<Set<string>>(new Set());
+  const firstCommit = useRef(true);
+  useEffect(() => {
+    for (const item of messages) seen.current.add(item.id);
+    for (const item of optimisticMessages ?? []) {
+      seen.current.add(item.id);
+      spoken.current.add(item.body.trim());
+    }
+    firstCommit.current = false;
+  });
+  const arriving = (id: string, body: string) =>
+    !firstCommit.current && !seen.current.has(id) && !spoken.current.has(body.trim());
+  /* A stored turn that was not on screen a moment ago is one that has just
+     finished, and it is crossing with the live run it replaces. One read back
+     from storage is not. */
+  const landing = (id: string) => !firstCommit.current && !seen.current.has(id);
   /* Completion persists the final streamed text before the refreshed session
      reaches the renderer. Reconcile by content during that narrow hand-off so the
      durable message and its live precursor can never render twice. Dropping the
@@ -517,10 +655,23 @@ export function AgentThread({
     <div className={cn("agent-transcript relative min-h-0 min-w-0 flex-1", className)}>
       {/* overflow-x-hidden: the column never scrolls sideways. Anything genuinely
           wide (a code block) scrolls inside its own box instead. */}
-      <div ref={viewport} className="app-scroll h-full overflow-y-auto overflow-x-hidden px-5 pt-4 pb-6">
+      {/* The right padding is the left padding plus the scrollbar, and that is
+          the whole of it.
+
+          `overflow-x: hidden` clips at the padding box less the space the
+          classic scrollbar takes, so a column with `px-5` has 20px of room for a
+          shadow on its left and 11px on its right — and a block whose shadow
+          reaches further than that has it cut off in a straight vertical line
+          down the right-hand side, which is exactly what it looked like. The 9px
+          is `--app-scrollbar-width`, the same figure `.app-scroll` gives the
+          webkit scrollbar, so the two cannot drift apart. `overflow-x: clip`
+          with a clip margin would be the direct way to say this, but a clip on
+          one axis computes to `hidden` when the other axis scrolls, which is
+          where this started. The column inside stays centred in what is left. */}
+      <div ref={viewport} className="app-scroll h-full overflow-y-auto overflow-x-hidden pl-5 pr-[calc(1.25rem+var(--app-scrollbar-width))] pt-4 pb-6">
         <div
           className={cn(
-            "transcript-column flex min-h-full min-w-0 flex-col gap-6",
+            "transcript-column relative flex min-h-full min-w-0 flex-col gap-6",
             isEmpty ? "justify-center" : "justify-start",
           )}
         >
@@ -537,18 +688,44 @@ export function AgentThread({
                       createdAt={item.createdAt}
                       editable={undoable?.has(item.id) ?? false}
                       queued={queued.has(item.id)}
+                      sending={arriving(item.id, item.body)}
                       {...(onEditMessage ? { onEdit: (body: string) => onEditMessage(item.id, body) } : {})}
                     />
                   ) : item.role === "system" ? (
                     <SystemEvent key={item.id} body={item.body} />
                   ) : (
-                    <AgentMessage activity={item.activity} activityCount={item.activityCount ?? 0} body={item.body} key={item.id} messageId={item.id} workedMs={item.workedMs ?? 0} />
+                    <AgentMessage activity={item.activity} activityCount={item.activityCount ?? 0} body={item.body} currentQuestionId={currentQuestionId} key={item.id} landing={landing(item.id)} messageId={item.id} trail={trail} workedMs={item.workedMs ?? 0} />
                   ),
                 )}
                 {visibleOptimistic.map((item) => (
-                  <LearnerMessage body={item.body} createdAt={item.createdAt} editable={false} key={item.id} queued={run?.status === "streaming"} />
+                  <LearnerMessage body={item.body} createdAt={item.createdAt} editable={false} key={item.id} queued={run?.status === "streaming"} sending={arriving(item.id, item.body)} />
                 ))}
-                {visibleRun ? <LiveRun phase={phase} run={visibleRun} /> : <PhaseWait phase={phase} />}
+                {/* The end of a turn is a hand-off, not an event: the live run
+                    stops being rendered and the stored message takes its place,
+                    drawing the same steps and the same words from disk. They are
+                    two subtrees, so React cannot reconcile one into the other —
+                    which is why the finish read as a flicker, the whole turn
+                    being torn down and rebuilt in a frame under a reader already
+                    looking at it.
+
+                    `popLayout` is what makes that a dissolve. The outgoing run
+                    is lifted out of the flow at the position it already held, so
+                    the stored message can take that space in the same frame
+                    rather than after it, and the two identical turns cross over
+                    each other in place. No movement, because nothing has
+                    actually moved — the only thing the reader should see at the
+                    end of a turn is the shimmer stopping. */}
+                <AnimatePresence initial={false} mode="popLayout">
+                  {visibleRun ? (
+                    <motion.div
+                      className="min-w-0"
+                      exit={{ opacity: 0, transition: { duration: 0.22, ease: "linear" } }}
+                      key="live-run"
+                    >
+                      <LiveRun currentQuestionId={currentQuestionId} phase={phase} run={visibleRun} trail={trail} />
+                    </motion.div>
+                  ) : <PhaseWait key="phase-wait" phase={phase} />}
+                </AnimatePresence>
                 {footer}
               </>
             )}

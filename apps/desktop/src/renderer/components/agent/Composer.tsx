@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowUp, ChevronDown, Loader2, Paperclip, Plus, Square, Unplug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProviders } from "../../hooks/use-providers";
@@ -57,6 +58,10 @@ export function Composer({
 }) {
   const field = useRef<HTMLTextAreaElement>(null);
   const [focused, setFocused] = useState(false);
+  /* Counts sends rather than flagging one, so holding Return down animates each
+     message instead of the first. */
+  const [sent, setSent] = useState(0);
+  const reduced = useReducedMotion();
   const { ready } = useProviders();
 
   // Grows with the draft up to a ceiling, then scrolls — same behaviour as the
@@ -89,10 +94,17 @@ export function Composer({
      button away from them there is how the message used to get lost. */
   const showStop = busy && Boolean(onStop) && !(steerable && drafted);
 
+  /* Every route out of the composer goes through here, so the arrow leaves the
+     button whether the draft was sent with the mouse or with Return. */
+  const send = () => {
+    setSent((count) => count + 1);
+    onSubmit();
+  };
+
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
-      if (canSend) onSubmit();
+      if (canSend) send();
     }
   };
 
@@ -176,17 +188,35 @@ export function Composer({
           <button
             aria-label="Send"
             className={cn(
-              "grid size-7 shrink-0 place-items-center rounded-full transition-[background-color,color,transform,opacity] duration-150",
+              "grid size-7 shrink-0 place-items-center overflow-hidden rounded-full transition-[background-color,color,transform,opacity] duration-150",
               canSend
                 ? "bg-primary text-primary-foreground hover:opacity-90 active:scale-95"
                 : "bg-[var(--color-background-elevated-secondary)] text-muted-foreground/50",
             )}
             disabled={!canSend}
-            onClick={onSubmit}
+            onClick={send}
             title="Send"
             type="button"
           >
-            {busy && !steerable ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
+            {/* The arrow goes with the message. It leaves through the top of the
+                button and the next one rises into its place from the bottom,
+                which is the same short journey the bubble makes into the
+                transcript — the button is where the send starts and the send is
+                the only thing it does. `overflow-hidden` on the button is what
+                keeps that a departure rather than an arrow flying across the
+                toolbar. */}
+            <AnimatePresence initial={false} mode="popLayout">
+              <motion.span
+                animate={{ y: 0, opacity: 1 }}
+                className="inline-flex"
+                exit={reduced ? { opacity: 0 } : { y: -18, opacity: 0 }}
+                initial={reduced ? false : { y: 14, opacity: 0 }}
+                key={busy && !steerable ? "busy" : `idle-${sent}`}
+                transition={reduced ? { duration: 0 } : { type: "spring", visualDuration: 0.34, bounce: 0.24 }}
+              >
+                {busy && !steerable ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
+              </motion.span>
+            </AnimatePresence>
           </button>
         )}
       </div>

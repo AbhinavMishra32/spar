@@ -99,7 +99,7 @@ export function scriptedAgent(deps: AgentDeps) {
       const { attempt, eventIds, attemptNumber } = input;
       if (attempt.outcome !== "passed" || attempt.hints > 0) sawTrouble = true;
 
-      await call("replay_attempt", { attemptId: input.attemptId }, "Reading how it went");
+      await call("read_attempt", { attemptId: input.attemptId }, "Reading how it went");
       const ability = await call("read_ability", { abilityId }, "Reading what Spar already believes");
       const search = await call("search_learner_model", { query: `${scenario.misconception.slug} invariant shrink`, limit: 4 }, "Looking for the same mistake before");
 

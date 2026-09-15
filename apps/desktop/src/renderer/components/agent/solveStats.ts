@@ -1,7 +1,7 @@
 /**
  * The replay's own numbers, recovered from the tool result the row was drawn from.
  *
- * `replay_attempt` comes back with a `stats` block beside a report that can run to
+ * `read_attempt` comes back with a `stats` block beside a report that can run to
  * thousands of lines, and the transcript kept only the one-line English summary the
  * worker wrote from it — so the row could say "4 never passed" and had no way to
  * colour the 4, size a bar, or tell a pass from an abandonment. The numbers are

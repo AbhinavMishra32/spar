@@ -135,7 +135,7 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
   const source = practiceSource ? SOURCE_TOOLS : [];
   if (turnKind === "cold-start") return allowedTools("session-start", hasActiveQuestion, webSearch, practiceSource);
   if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
-  if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, "replay_attempt", "inspect_current_attempt", "evaluate_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
+  if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, "read_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
   /* Both ways of changing the challenge, because "give me a real problem instead"
      is a revision request like any other. Withholding the assignment here was a
      dead end with one exit: the agent could not hand over the LeetCode problem the
@@ -143,8 +143,8 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
      and had it graded locally — a counterfeit of the thing that was available all
      along. A sourced problem supersedes rather than edits, which the store already
      records as a replacement. */
-  if (turnKind === "challenge-revision") return new Set(["replay_attempt", "inspect_current_attempt", "set_training_target", "replace_current_question", ...source]);
-  return new Set([...VISUALIZER_TOOLS, "read_session", ...(hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]), ...source, "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
+  if (turnKind === "challenge-revision") return new Set(["read_attempt", "set_training_target", "replace_current_question", ...source]);
+  return new Set([...VISUALIZER_TOOLS, "read_session", ...(hasActiveQuestion ? ["replace_current_question"] : ["create_question"]), ...source, "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
 }
 
 /**
@@ -202,7 +202,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
   // request without actually replacing the active challenge.
   if (turnKind === "challenge-revision") {
     if (playableQuestion) return { activeTools: [], toolChoice: "none" };
-    if (!completed("replay_attempt")) return { activeTools: ["replay_attempt"], toolChoice: "required" };
+    if (!completed("read_attempt")) return { activeTools: ["read_attempt"], toolChoice: "required" };
     if (!completed("set_training_target")) return { activeTools: ["set_training_target"], toolChoice: "required" };
     /* One optional look at what the source has before the swap is written, for the
        same reason the session-start path takes one: the learner asking for a
@@ -225,14 +225,14 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
          for the picture on its own from that. */
       ...visualizerStageTools(outcomes),
       "read_session",
-      ...(context.hasActiveQuestion ? ["inspect_current_attempt", "replace_current_question"] : ["create_question"]),
+      ...(context.hasActiveQuestion ? ["replace_current_question"] : ["create_question"]),
       /* The source stays available in full even mid-challenge. The reads because
          "is this like anything I have done?" is a question about the problem in
          front of them; the assignment because "give me a real problem instead" is
          a request this turn can actually carry out, and the tool refuses on its
          own unless the agent says the learner asked to be moved. */
       ...(context.practiceSource ? SOURCE_TOOLS : []),
-      "replay_attempt", "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability",
+      "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability",
       ...(context.webSearch ? WEB_TOOLS : []),
     ],
     toolChoice: "auto",
@@ -313,7 +313,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
      It needs the replay and the code to judge how the challenge was solved, and
      everything after it — the ability, the decision, the next target — is only
      worth writing if the attempt actually counts. */
-  for (const stage of [["replay_attempt", "evaluate_attempt"], ["inspect_current_attempt"], ["review_solution"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["search_concept_evidence"]]) {
+  for (const stage of [["read_attempt"], ["review_solution"], ["read_ability"], ["propose_ability_update"], ["commit_session_decision"], ["search_learner_model"], ["search_concept_evidence"]]) {
     const next = stage.find((name) => !completed(name));
     if (!next) continue;
     /* One place in this sequence where the visualiser is offered, and it is

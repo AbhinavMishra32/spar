@@ -22,7 +22,13 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * return the learner's patterns and behavioural evidence beside the documents,
  * `propose_ability_update` requires at least one interpreted evidence entry, and
  * `assign_practice_problem` points at the rating window the host admits against
- * rather than leaving the agent to discover it from a refusal.
+ * rather than leaving the agent to discover it from a refusal, and the four
+ * tools that read an attempt became one — `inspect_current_attempt` and the old
+ * `read_attempt` were the same host handler under two names, `evaluate_attempt`
+ * was that handler with the files left off, and `replay_attempt` was the same
+ * attempt with its log folded, so a turn asked how the learner was doing spent a
+ * round trip on each of them in turn. `read_attempt` now returns all of it at
+ * once and the other three are gone from the table.
  */
 describe("the tool contract, against what Mastra sent", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;

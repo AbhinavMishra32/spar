@@ -178,15 +178,6 @@ export async function executeTrainingTool(
     rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report };
   }
-  if (name === "inspect_current_attempt" || name === "read_attempt") {
-    /* The code comes with the log. Reading what someone wrote is the cheapest
-       and most direct thing an agent can do about a failing attempt, and until
-       this it was the one thing no tool did — so a turn that wanted to see the
-       code reached for the tracer, which is a run of the program and a payload
-       to match, to find out what a file already said. */
-    return { events: local.readAttempt(String(value.attemptId)), files: await attemptFiles(sessionId, workspaces) };
-  }
-  if (name === "evaluate_attempt") return { events: local.readAttempt(String(value.attemptId)) };
   if (name === "review_solution") {
     const attemptId = String(value.attemptId);
     const verdict = value.verdict === "rework" ? "rework" : "accepted";
@@ -199,7 +190,7 @@ export async function executeTrainingTool(
     const reopened = local.reopenAttempt(attemptId, reasons.join(" ") || "The solution did not meet the challenge's stated requirements.");
     return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
   }
-  if (name === "replay_attempt") return replayForAgent(local, value, sessionId, workspaces);
+  if (name === "read_attempt") return readAttemptForAgent(local, value, sessionId, workspaces);
   /* The document plus what is open under it. The markdown is the claim; the
      patterns are the questions still outstanding about it and the evidence is
      what each one rests on. This read sits immediately before the update is
@@ -358,21 +349,33 @@ function openChallenge(local: LocalStore, sessionId: string) {
 }
 
 /**
- * One tool call, the attempt's whole log.
+ * One attempt, read whole.
  *
- * A string rather than a structure on purpose: the questions worth asking of a
- * solve are questions about order and adjacency — was this fixed before or after
- * that was seen — and a nested object makes the reader rebuild both. The
- * parameters are the only thing that decides how much comes back, so a turn that
- * needs the entire log takes it and a turn that needs only the failing cases
- * since the last submission pays for that much. `stats` rides along for the row
- * the learner sees in the transcript; the log itself is `report`.
+ * Four tools used to arrive here. Two of them were this same function with a
+ * different name on the wire, one was it with the files left off, and the fourth
+ * folded the log — so a turn that wanted to know how someone was doing paid for
+ * the same read up to four times over, and the learner watched a row for each.
+ * What comes back now is what all four returned together: their code, the log,
+ * the derived views, and the deterministic verdict that the model is never
+ * allowed to form an opinion of its own about.
+ *
+ * The order of the keys is load-bearing. The transcript stores a 16k slice of
+ * this payload and draws the card and the attempt view out of it, so the small
+ * things it needs — the numbers, the file — are serialised ahead of the two that
+ * can run to thousands of lines. The agent itself always receives the whole
+ * thing; this ordering decides only what survives into the UI.
  */
-async function replayForAgent(local: LocalStore, value: Record<string, unknown>, sessionId: string, workspaces: WorkspaceService) {
-  const attemptId = String(value.attemptId ?? "");
+async function readAttemptForAgent(local: LocalStore, value: Record<string, unknown>, sessionId: string, workspaces: WorkspaceService) {
+  /* Omitting the id means the attempt in front of the learner, which is what it
+     nearly always was. The model used to have to carry a uuid from the context
+     into every call, and a call it got wrong came back empty. */
+  const attemptId = String(value.attemptId ?? "") || activeAttemptId(local, sessionId);
   const events = local.readAttempt(attemptId);
+  /* The workspace is the live one, so it answers for the open attempt and not
+     for an older one being read out of history. Never fails the read. */
+  const files = await attemptFiles(sessionId, workspaces).catch(() => []);
   if (!events.length) {
-    return { report: `No events are recorded for attempt ${attemptId || "(none given)"}, so there is no log to read. Do not infer anything about the learner from this.`, stats: null, filters: null };
+    return { stats: null, filters: null, solve: null, files, events: [], report: `No events are recorded for attempt ${attemptId || "(none given)"}, so there is no log to read. Do not infer anything about the learner from this.` };
   }
   const subject = local.attemptSubject(attemptId);
   const filters = {
@@ -387,31 +390,25 @@ async function replayForAgent(local: LocalStore, value: Record<string, unknown>,
     ...(subject?.title ? { title: subject.title } : {}),
     ...(subject?.language ? { language: subject.language } : {}),
   });
-  /* Stats first, and deliberately. The transcript renders the numbers as a card
-     and reads them back out of this payload, which is capped at 16k — and the
-     report is the part that overruns it. Serialised after the log, the numbers
-     were the first thing truncation took. */
-  return { stats: replay.stats, filters, solve: await solveHead(sessionId, workspaces), report: formatSolveLog(replay, filters) };
+  return { stats: replay.stats, filters, solve: solveHead(files), files, events, report: formatSolveLog(replay, filters) };
+}
+
+/** The attempt the learner has open right now, for a call that named none. */
+function activeAttemptId(local: LocalStore, sessionId: string): string {
+  return local.readSession(sessionId)?.question?.attemptId ?? "";
 }
 
 /**
  * The top of the file they actually wrote, beside the log of how they wrote it.
  *
- * Deliberately a head and not the file: `read_attempt` is what hands the agent
- * the whole thing, and this is the opening of it — enough to say which solve the
- * replay is a replay of, and small enough that a step which already carries a
- * full event log does not carry a second copy of the source with it.
- *
- * The transcript draws it behind the card this call produces, which is the other
- * reason it is here: "read your solve" is a claim about their code, and a row
- * that makes that claim over a blank panel is the agent talking about something
- * the learner cannot see.
+ * A head and not the file, because the whole file is already in `files`: this is
+ * the copy the transcript draws behind the card, at the opacity of a watermark,
+ * and it is serialised early precisely so a long log cannot take it. "Read your
+ * attempt" is a claim about their code, and a row that makes that claim over a
+ * blank panel is the agent talking about something the learner cannot see.
  */
-async function solveHead(sessionId: string, workspaces: WorkspaceService): Promise<{ path: string; text: string } | null> {
-  /* A replay that cannot reach the workspace is still a replay. This is the one
-     part of the result that is decoration, so it never takes the call down with
-     it. */
-  const [file] = await attemptFiles(sessionId, workspaces).catch(() => []);
+function solveHead(files: Array<{ path: string; text: string }>): { path: string; text: string } | null {
+  const [file] = files;
   if (!file) return null;
   const head = file.text.split("\n").slice(0, SOLVE_HEAD_LINES).join("\n");
   return { path: file.path, text: head.length > SOLVE_HEAD ? `${head.slice(0, SOLVE_HEAD)}…` : head };
@@ -544,7 +541,7 @@ async function compileCandidate(input:unknown,sessionId:string,workspaces:Worksp
  *  any challenge's solution; short enough that a learner who pasted a library
  *  into their workspace cannot spend the turn's context on it. */
 const MAX_FILE = 6_000;
-/** The opening of the learner's solve, as `replay_attempt` carries it. A screen
+/** The opening of the learner's solve, as `read_attempt` carries it. A screen
  *  of code at the size the transcript draws it, and no more. */
 const SOLVE_HEAD_LINES = 28;
 const SOLVE_HEAD = 1_200;

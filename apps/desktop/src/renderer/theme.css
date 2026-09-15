@@ -401,6 +401,13 @@
   --app-shadow-menu: 0 16px 40px -12px oklch(0% 0 0 / 20%), 0 4px 10px -4px oklch(0% 0 0 / 8%);
   --app-shadow-composer: 0 4px 18px -6px color-mix(in srgb, var(--foreground) 8%, transparent);
   --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 4%);
+  /* Every block inside a turn: the panel a tool row opens, the two cards, and a
+     fenced block in the reply. One step up from `--app-shadow-card` and no
+     further — these sit in a reading column rather than on the window, so the
+     shadow is there to lift an edge off the page, not to float a sheet above it.
+     Two passes, both downward: a short soft fall for the lift and a hairline
+     contact under it for the edge. */
+  --app-shadow-panel: 0 2px 6px -2px oklch(0% 0 0 / 6%), 0 1px 2px oklch(0% 0 0 / 4%);
   /* Working sheets sit on a canvas that is nearly their own colour, so the
      contact shadow alone cannot separate them. A wider, softer ambient pass
      underneath does the lifting; the edge below draws the shape. Two passes and
@@ -582,6 +589,7 @@
   --app-shadow-menu: 0 16px 40px -10px oklch(0% 0 0 / 55%), 0 4px 12px -4px oklch(0% 0 0 / 40%);
   --app-shadow-composer: 0 6px 24px -10px oklch(0% 0 0 / 45%);
   --app-shadow-card: 0 1px 2px oklch(0% 0 0 / 20%);
+  --app-shadow-panel: 0 2px 8px -2px oklch(0% 0 0 / 28%), 0 1px 2px oklch(0% 0 0 / 20%);
   --app-shadow-sheet:
     0 1px 2px oklch(0% 0 0 / 26%),
     0 10px 26px -14px oklch(0% 0 0 / 55%);
@@ -989,12 +997,16 @@
 
   .app-scroll {
     scrollbar-width: thin;
+    /* Named because layout has to know it: a scroller that clips its overflow
+       clips at the padding box minus this, so anything that wants room for a
+       shadow on the right has to pay for the bar as well as the gutter. */
+    --app-scrollbar-width: 9px;
     scrollbar-color: color-mix(in srgb, var(--foreground) 18%, transparent) transparent;
   }
 
   .app-scroll::-webkit-scrollbar {
-    width: 9px;
-    height: 9px;
+    width: var(--app-scrollbar-width);
+    height: var(--app-scrollbar-width);
   }
 
   .app-scroll::-webkit-scrollbar-thumb {
@@ -1111,28 +1123,6 @@
     background: color-mix(in oklab, var(--foreground) 5%, var(--background));
   }
 
-  /* A panel that opens does not appear — it grows, at the reference's own
-     duration and curve. Radix publishes the measured height as a custom
-     property; without these two rules the content pops to full height in one
-     frame and the thread jumps under the pointer. */
-  .agent-transcript [data-slot="collapsible-content"] {
-    overflow: hidden;
-  }
-  .agent-transcript [data-slot="collapsible-content"][data-state="open"] {
-    animation: thread-panel-down 200ms cubic-bezier(0, 0, 0.2, 1);
-  }
-  .agent-transcript [data-slot="collapsible-content"][data-state="closed"] {
-    animation: thread-panel-up 200ms cubic-bezier(0, 0, 0.2, 1);
-  }
-
-  @keyframes thread-panel-down {
-    from { height: 0; }
-    to { height: var(--radix-collapsible-content-height); }
-  }
-  @keyframes thread-panel-up {
-    from { height: var(--radix-collapsible-content-height); }
-    to { height: 0; }
-  }
 
   /* The fallback matters: composers and banners sit outside .agent-transcript,
      where --transcript-width is not in scope. Without it the custom property
@@ -1858,16 +1848,38 @@
     word-break: normal;
   }
 
+  /* Every block a turn can contain — a fenced block in the reply, the panel a
+     tool row opens, the published challenge, the reading of the solve — is one
+     material, declared once.
+
+     It was four, and they had drifted: two greys, two backgrounds, a ring on one
+     and a border on another, a shadow on some. Side by side in a single turn,
+     which is exactly where they appear, that read as four components from four
+     applications. The stroke is the transcript's own rather than the code
+     theme's `--code-border`, which is a pale grey chosen against an editor's
+     background and disappears over these; the fill is the code background at
+     80%, so a block is tinted by whichever theme the learner reads code in.
+
+     The corner is here too, and it is the card's 22.4px rather than the 16.8px
+     the code block used to take on its own. A fenced block in a reply is the
+     width of the column like everything else in this list — it only looked like
+     an inline thing because it was drawn with a tighter corner than the blocks
+     above and below it. */
+  .code-block,
+  .transcript-block {
+    border: 0.5px solid var(--border-surface-strong);
+    background: color-mix(in oklab, var(--code-background) 80%, transparent);
+    box-shadow: var(--app-shadow-panel);
+    border-radius: calc(1rem * 1.4);
+    corner-shape: superellipse(1.4);
+  }
+
   .code-block {
     display: flex;
     flex-direction: column;
     gap: 4px;
     min-width: 0;
     margin-block: 16px;
-    border-radius: calc(0.75rem * 1.4);
-    corner-shape: superellipse(1.4);
-    border: 0.5px solid var(--code-border);
-    background: color-mix(in oklab, var(--code-background) 80%, transparent);
     font-family: var(--font-mono);
   }
 
@@ -2072,30 +2084,7 @@
   mask-image: linear-gradient(to bottom, transparent, black 1.15rem, black calc(100% - 1.15rem), transparent);
 }
 
-/* Disclosure, animated.
-   Every collapsible in the transcript opens and closes on the same curve, so a
-   tool call folding out reads as the row growing rather than as the rest of the
-   thread jumping down to make room. Radix publishes the measured height as
-   --radix-collapsible-content-height, which is what lets `height: auto` be
-   animated at all; keying on data-state keeps it in one place instead of each
-   caller wiring its own AnimatePresence. */
-@keyframes disclosure-open {
-  from { height: 0; opacity: 0; }
-  to { height: var(--radix-collapsible-content-height); opacity: 1; }
-}
-@keyframes disclosure-close {
-  from { height: var(--radix-collapsible-content-height); opacity: 1; }
-  to { height: 0; opacity: 0; }
-}
-[data-slot="collapsible-content"] { overflow: hidden; }
-[data-slot="collapsible-content"][data-state="open"] { animation: disclosure-open 220ms cubic-bezier(0.32, 0.72, 0, 1); }
-[data-slot="collapsible-content"][data-state="closed"] { animation: disclosure-close 170ms cubic-bezier(0.32, 0.72, 0, 1); }
-/* Honour the OS setting: the point of the animation is continuity, and someone
-   who has asked for less motion still needs the disclosure to work. */
-@media (prefers-reduced-motion: reduce) {
-  [data-slot="collapsible-content"][data-state="open"],
-  [data-slot="collapsible-content"][data-state="closed"] { animation-duration: 1ms; }
-}
+/* Disclosure height, opacity and scale are owned by Motion in collapsible.tsx. */
 
 /* The rating curve, drawn. The line, its area and the uncertainty band behind it
    are all clipped to one rect that widens from the left, so the curve is laid
