@@ -1205,7 +1205,15 @@
           is what actually says "glass" rather than "translucent rectangle";
        3. a 0.5px outer hairline so the shape stays legible on any backdrop.
      The blur is deliberately small (8px). Past ~12px small text behind the
-     surface turns to mush and the material reads as frosted plastic. */
+     surface turns to mush and the material reads as frosted plastic.
+
+     Never hand-write `-webkit-backdrop-filter` beside `backdrop-filter` here.
+     Tailwind's lightningcss pass targets Safari 16.4, which still needs the
+     prefix, so it adds the prefixed line itself and keeps the unprefixed one. If
+     the prefixed line is already in the source the two collapse into a single
+     prefixed declaration — and Chromium has no `-webkit-backdrop-filter`, so
+     every surface below loses its blur in a packaged build while dev, which
+     never runs that pass, looks right. */
   .glass {
     background: color-mix(in oklab, var(--popover) var(--glass-fill), transparent);
     box-shadow:
@@ -1214,7 +1222,6 @@
       0 0 0 0.5px var(--glass-hairline),
       var(--glass-shadow);
     backdrop-filter: blur(8px) saturate(120%);
-    -webkit-backdrop-filter: blur(8px) saturate(120%);
     /* Keeps the blur from bleeding past the rounded corner in WebKit. */
     isolation: isolate;
   }
@@ -1230,7 +1237,6 @@
       0 0 0 0.5px var(--glass-hairline),
       var(--app-shadow-composer);
     backdrop-filter: blur(8px) saturate(120%);
-    -webkit-backdrop-filter: blur(8px) saturate(120%);
     isolation: isolate;
     transition: box-shadow 0.15s ease;
   }
@@ -1298,7 +1304,6 @@
     /* Small on purpose. Past ~4px the half-visible card stops reading as one on
        its way out and starts reading as a smear over the list. */
     backdrop-filter: blur(3px);
-    -webkit-backdrop-filter: blur(3px);
     /* Matched to the mask's transition so the softening and the fade arrive
        together; separately they read as two effects. */
     transition: opacity 180ms ease;
@@ -1335,7 +1340,6 @@
       var(--app-shadow-overlay);
     background: color-mix(in oklab, var(--popover) var(--glass-fill), transparent);
     backdrop-filter: blur(8px) saturate(120%);
-    -webkit-backdrop-filter: blur(8px) saturate(120%);
     isolation: isolate;
   }
 
@@ -1417,7 +1421,6 @@
       0 10px 15px -3px rgb(0 0 0 / 0.1),
       0 4px 6px -4px rgb(0 0 0 / 0.1);
     backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
     isolation: isolate;
   }
 
