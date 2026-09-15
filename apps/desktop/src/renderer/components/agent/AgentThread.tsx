@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { ArrowDown, PencilLine } from "lucide-react";
+import { ArrowDown, Check, Copy, Pencil } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "./Markdown";
 import { ChallengePublished, FINAL_GAP, PROSE_GAP, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
 import { ExplainedTrace } from "./ExplainedTrace";
@@ -316,17 +317,18 @@ function storedPart(step: AgentActivityStep, index: number): RunPart {
  * that, because a control that promised to undo the record would be lying about
  * the one thing the learner would most want to be true.
  */
-function LearnerMessage({ body, editable, queued = false, onEdit }: { body: string; editable: boolean; queued?: boolean; onEdit?: ((body: string) => void) | undefined }) {
+function LearnerMessage({ body, createdAt, editable, queued = false, onEdit }: { body: string; createdAt?: string | number; editable: boolean; queued?: boolean; onEdit?: ((body: string) => void) | undefined }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(body);
+  const [copied, setCopied] = useState(false);
 
   if (editing) {
     return (
       <div className="flex min-w-0 justify-end">
-        <div className="w-[85%] min-w-0 rounded-xl bg-secondary p-2">
+        <div className="w-[90%] min-w-0 rounded-xl bg-secondary px-3 py-2.5">
           <textarea
             autoFocus
-            className="app-scroll block max-h-40 w-full resize-none bg-transparent px-1 py-0.5 text-thread leading-[1.55] outline-none"
+            className="app-scroll block max-h-40 w-full resize-none bg-transparent py-0.5 text-thread leading-[1.55] outline-none"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") setEditing(false);
@@ -339,10 +341,9 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
             rows={Math.min(6, draft.split("\n").length)}
             value={draft}
           />
-          <div className="mt-1 flex items-center justify-end gap-1.5 px-1">
-            <span className="mr-auto min-w-0 truncate text-thread text-muted-foreground/85">Replies after this leave the thread · your record stays</span>
+          <div className="mt-2 flex items-center justify-end gap-1.5">
             <button
-              className="rounded-md px-2 py-0.5 text-thread text-muted-foreground transition-colors hover:text-foreground"
+              className="h-7 rounded-lg bg-background px-2.5 text-thread text-foreground shadow-sm ring-[0.5px] ring-[var(--border-surface-strong)] transition-colors hover:bg-accent"
               onClick={() => {
                 setDraft(body);
                 setEditing(false);
@@ -352,7 +353,7 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
               Cancel
             </button>
             <button
-              className="click-depth-effect-slightly rounded-md bg-[var(--foreground)] px-2 py-0.5 text-thread font-medium text-[var(--background)] transition-opacity hover:opacity-90 disabled:opacity-40"
+              className="click-depth-effect-slightly h-7 rounded-lg bg-[var(--foreground)] px-2.5 text-thread font-medium text-[var(--background)] transition-opacity hover:opacity-90 disabled:opacity-40"
               disabled={!draft.trim()}
               onClick={() => {
                 setEditing(false);
@@ -369,24 +370,7 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
   }
 
   return (
-    <div className="group/said flex min-w-0 items-center justify-end gap-1">
-      {/* On hover only, and outside the bubble: a permanent pencil beside every
-          thing the learner ever said is a column of controls down a
-          conversation. */}
-      {editable && onEdit && (
-        <button
-          aria-label="Edit and run again from here"
-          className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground/0 transition-colors group-hover/said:text-muted-foreground focus-visible:text-foreground hover:!text-foreground"
-          onClick={() => {
-            setDraft(body);
-            setEditing(true);
-          }}
-          title="Edit and run again from here"
-          type="button"
-        >
-          <PencilLine className="size-3.5" />
-        </button>
-      )}
+    <div className="group/said flex min-w-0 flex-col items-end">
       {/* Held back until the turn picks it up: dimmed, with the reason on hover.
           The bubble is the learner's own words either way — what changes is
           whether the agent has them yet. */}
@@ -399,8 +383,53 @@ function LearnerMessage({ body, editable, queued = false, onEdit }: { body: stri
       >
         {body}
       </div>
+      <div className="mt-1 flex h-6 items-center justify-end gap-1 pr-1 text-muted-foreground/70 opacity-0 transition-opacity group-hover/said:opacity-100 focus-within:opacity-100">
+        {createdAt !== undefined && <span className="mr-0.5 text-thread tabular-nums">{messageTime(createdAt)}</span>}
+        <Tooltip delayDuration={450}>
+          <TooltipTrigger asChild>
+            <button
+              aria-label={copied ? "Copied" : "Copy message"}
+              className="grid size-6 place-items-center rounded-md transition-colors hover:bg-accent hover:text-foreground"
+              onClick={() => {
+                void navigator.clipboard.writeText(body).then(() => {
+                  setCopied(true);
+                  window.setTimeout(() => setCopied(false), 1_500);
+                }).catch(() => undefined);
+              }}
+              type="button"
+            >
+              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{copied ? "Copied" : "Copy message"}</TooltipContent>
+        </Tooltip>
+        {editable && onEdit && (
+          <Tooltip delayDuration={450}>
+            <TooltipTrigger asChild>
+              <button
+                aria-label="Edit and run again from here"
+                className="grid size-6 place-items-center rounded-md transition-colors hover:bg-accent hover:text-foreground"
+                onClick={() => {
+                  setDraft(body);
+                  setEditing(true);
+                }}
+                type="button"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Edit and run again from here</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
     </div>
   );
+}
+
+function messageTime(value: string | number): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
 }
 
 export function AgentThread({
@@ -505,6 +534,7 @@ export function AgentThread({
                     <LearnerMessage
                       key={item.id}
                       body={item.body}
+                      createdAt={item.createdAt}
                       editable={undoable?.has(item.id) ?? false}
                       queued={queued.has(item.id)}
                       {...(onEditMessage ? { onEdit: (body: string) => onEditMessage(item.id, body) } : {})}
@@ -516,7 +546,7 @@ export function AgentThread({
                   ),
                 )}
                 {visibleOptimistic.map((item) => (
-                  <LearnerMessage body={item.body} editable={false} key={item.id} queued={run?.status === "streaming"} />
+                  <LearnerMessage body={item.body} createdAt={item.createdAt} editable={false} key={item.id} queued={run?.status === "streaming"} />
                 ))}
                 {visibleRun ? <LiveRun phase={phase} run={visibleRun} /> : <PhaseWait phase={phase} />}
                 {footer}
