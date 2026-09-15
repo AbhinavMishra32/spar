@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { fileName, message, relativeTime } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
-import { useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
+import { SETTLE_MS, useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
 import { FileGlyph } from "../common/LanguageGlyph";
 import { ChallengeBrief } from "../workspace/ChallengeBrief";
@@ -347,7 +347,9 @@ export function ChallengePage({
   useEffect(() => {
     if (wasBusy.current && !busy) {
       setSettled(true);
-      const timer = setTimeout(() => setSettled(false), 900);
+      /* Held for exactly as long as the sweep takes; anything shorter cuts the
+         light off part-way round the pane. */
+      const timer = setTimeout(() => setSettled(false), SETTLE_MS);
       wasBusy.current = busy;
       return () => clearTimeout(timer);
     }
@@ -579,11 +581,11 @@ export function ChallengePage({
         <Panel minSize={30} order={2}>
           <PanelGroup className="py-2 pr-2" direction="vertical">
             <Panel minSize={20} order={1}>
-              <div
-                className="work-blob flex h-full min-h-0 flex-col bg-[var(--color-background-editor)]"
-                data-busy={busy || undefined}
-                data-settled={settled || undefined}
-              >
+              {/* No busy rim here: the editor is where the learner is looking
+                  and typing, and a breathing edge around that is the one place
+                  the signal becomes a distraction. The run is reported on the
+                  panel that reports runs. */}
+              <div className="work-blob flex h-full min-h-0 flex-col bg-[var(--color-background-editor)]">
                 <div className="hairline-b flex h-8 shrink-0 items-center gap-1 px-1.5">
                   {solutionFiles.map((file) => (
                     <button
@@ -682,7 +684,7 @@ export function ChallengePage({
             >
               <div
                 className={cn(
-                  "work-blob h-full [--shimmer-phase:-1.7s] transition-[translate,opacity] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+                  "work-blob h-full transition-[translate,opacity] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
                   resultPanel.open ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
                 )}
                 data-busy={busy || undefined}

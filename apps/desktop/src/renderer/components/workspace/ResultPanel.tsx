@@ -26,6 +26,11 @@ export type RunOutcome = { kind: "passed" | "failed"; summary: string } | null;
  *  submission, or a judge at the problem's source. */
 export type RunSuite = "visible" | "hidden" | "source";
 
+/** How long the verdict copy takes to fade up once the grid has settled — the
+ *  `duration-700` on the rail below. Kept beside the class it mirrors: if that
+ *  duration changes, this is the other half of the pair. */
+const VERDICT_FADE_MS = 700;
+
 function Tab({ active, label, badge, onClick }: { active: boolean; label: string; badge?: React.ReactNode; onClick(): void }) {
   return (
     <button
@@ -246,6 +251,7 @@ export function ResultPanel({
   attempt,
   onClearTerminal,
   onCollapse,
+  onVerdictSettled,
 }: {
   /* Only the visible test files are read here, and a challenge re-opened from
      history has those without having a live attempt behind it. Narrowed to what
@@ -278,6 +284,11 @@ export function ResultPanel({
   attempt?: { title?: string; language?: string; startedAt?: string; completedAt?: string | null };
   onClearTerminal(): void;
   onCollapse(): void;
+  /** Fires when the grid has finished its wave and the verdict copy has faded
+   *  in — the moment the panel has said the result. Anything outside the panel
+   *  that wants to land *after* the answer rather than on top of it waits for
+   *  this instead of timing the same animation a second time. */
+  onVerdictSettled?: ((settled: boolean) => void) | undefined;
 }) {
   /* A sourced problem's cases travel on the challenge, already structured. The
      file parser is for challenges written as `test(…)` blocks — every generated
@@ -394,6 +405,20 @@ export function ResultPanel({
     setRawOpen(null);
     if (!terminal) setVerdictSettled(false);
   }, [terminal === ""]);
+
+  /* Read through a ref so a caller that hands down a fresh callback each render
+     does not restart the hold. The grid settles, the verdict copy takes its
+     fade, and only then is the result considered said. */
+  const announce = useRef(onVerdictSettled);
+  announce.current = onVerdictSettled;
+  useEffect(() => {
+    if (!verdictSettled || running) {
+      announce.current?.(false);
+      return;
+    }
+    const timer = window.setTimeout(() => announce.current?.(true), VERDICT_FADE_MS);
+    return () => window.clearTimeout(timer);
+  }, [running, verdictSettled]);
 
   useEffect(() => {
     if (rawShown) rawEnd.current?.scrollIntoView({ block: "end" });

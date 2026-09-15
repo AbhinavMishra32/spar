@@ -18,6 +18,24 @@
   initial-value: 0deg;
 }
 
+/* The rim's two alpha channels. Registering them is what lets the breathe, the
+   settle sweep and the fade out all be *the same surface* changing strength:
+   one animation drives a channel, and a transition picks that channel up from
+   wherever the animation left it when the state changes. Driving the element's
+   own opacity instead means each state owns the whole rim, and the handovers
+   are the steps you can see. */
+@property --blob-glow {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --blob-arc {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 /* The drum's two fade depths, registered for the same reason: they are driven from
    whether the list is scrolled away from that end, and an unregistered length
    would snap the mask on rather than ease it. Zero means no fade at all, which is
@@ -1353,15 +1371,26 @@
      spinner disguised as an edge, and it never stops, so it competes with the
      content for the rest of the run. Brightening the whole rim in and out is
      the same information with none of that: ambient, ignorable, and it has no
-     "position" that the eye starts tracking. */
-  .work-blob[data-busy="true"]::after {
+     "position" that the eye starts tracking.
+
+     One pseudo-element carries every state. It is always in the tree at zero
+     strength, and busy, settling and idle are three strengths of the same two
+     channels rather than three elements taking turns — which is what used to
+     make the stop read as a glitch: the breathing ring was torn out at whatever
+     brightness it happened to be at and a full-strength arc put in its place,
+     mid-stride, and then that arc was itself cut off before it had finished
+     going round. */
+  .work-blob::after {
     content: "";
     position: absolute;
     inset: 0;
     z-index: 3;
     padding: 1px;
     border-radius: inherit;
-    background: var(--shimmer-tint);
+    /* The ambient glow, as an alpha of the tint rather than of the element. A
+       flat fill is a cheap thing to repaint sixty times a second; the conic
+       highlight is added on top only while it is actually travelling. */
+    background: color-mix(in oklab, var(--shimmer-tint) calc(var(--blob-glow) * 100%), transparent);
     /* Border-only: punch the content box out of the mask so just the 1px
        padding ring survives. */
     -webkit-mask:
@@ -1372,41 +1401,47 @@
       linear-gradient(#000 0 0) content-box,
       linear-gradient(#000 0 0);
     mask-composite: exclude;
-    /* The phase offset is per-blob. Two panes breathing in lockstep is what
-       makes a pair of them look driven by one clock. */
-    animation: blob-breathe 3.4s cubic-bezier(0.4, 0, 0.6, 1) var(--shimmer-phase, 0s) infinite alternate;
+    /* Every handover is this line. A transition's start value is the style as
+       of the last frame *including* whatever an animation was putting there, so
+       when the breathe is removed the glow eases down from the brightness it
+       was actually at rather than snapping to the declared one. */
+    transition: --blob-glow 560ms cubic-bezier(0.33, 0, 0.1, 1);
     pointer-events: none;
+  }
+
+  /* Waking is its own short animation ahead of the loop rather than the loop
+     starting at its trough, so the rim rises out of nothing instead of being
+     switched on at a quarter strength. The loop's delay is the wake's duration:
+     until then it has no fill and the wake is the only thing applying. */
+  .work-blob[data-busy="true"]::after {
+    animation:
+      blob-wake 620ms cubic-bezier(0.33, 0, 0.1, 1),
+      blob-breathe var(--blob-period, 4.2s) cubic-bezier(0.45, 0, 0.55, 1) 620ms infinite;
   }
 
   /* Settling is the one moment a direction is meaningful — something finished,
      and the light running once around says so and then leaves. Slow, and the
      arc is wide and soft so it reads as a highlight sliding over the edge
-     rather than a marker travelling along it. */
+     rather than a marker travelling along it.
+
+     The glow is declared, not animated, so it is the transition above that
+     carries it down from the breath it was mid-way through — the ambient
+     recedes as the highlight passes, and the two are one movement. */
   .work-blob[data-settled="true"]::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 3;
-    padding: 1px;
-    border-radius: inherit;
-    background: conic-gradient(
-      from var(--shimmer-angle),
-      transparent 0turn,
-      color-mix(in oklab, var(--shimmer-tint) 55%, transparent) 0.14turn,
-      color-mix(in oklab, var(--shimmer-tint) 90%, transparent) 0.25turn,
-      color-mix(in oklab, var(--shimmer-tint) 55%, transparent) 0.36turn,
-      transparent 0.5turn
-    );
-    -webkit-mask:
-      linear-gradient(#000 0 0) content-box,
-      linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask:
-      linear-gradient(#000 0 0) content-box,
-      linear-gradient(#000 0 0);
-    mask-composite: exclude;
-    animation: blob-sweep 1.5s cubic-bezier(0.32, 0.72, 0, 1) 1 forwards;
-    pointer-events: none;
+    --blob-glow: 0.3;
+    /* The highlight rides over the ambient layer, so the two add and neither
+       has to be taken away for the other to be seen. */
+    background:
+      conic-gradient(
+        from var(--shimmer-angle),
+        transparent 0turn,
+        color-mix(in oklab, var(--shimmer-tint) calc(var(--blob-arc) * 26%), transparent) 0.1turn,
+        color-mix(in oklab, var(--shimmer-tint) calc(var(--blob-arc) * 62%), transparent) 0.25turn,
+        color-mix(in oklab, var(--shimmer-tint) calc(var(--blob-arc) * 26%), transparent) 0.4turn,
+        transparent 0.5turn
+      ),
+      color-mix(in oklab, var(--shimmer-tint) calc(var(--blob-glow) * 100%), transparent);
+    animation: blob-sweep var(--blob-settle, 1.6s) cubic-bezier(0.34, 0.62, 0.18, 1) both;
   }
 
   /* ---- Code -------------------------------------------------------------- */
@@ -1746,26 +1781,48 @@
   }
 }
 
-@keyframes blob-breathe {
+@keyframes blob-wake {
   from {
-    opacity: 0.25;
+    --blob-glow: 0;
   }
   to {
-    opacity: 1;
+    --blob-glow: 0.2;
   }
 }
 
+/* Ends where it starts, so the loop has no seam, and peaks well short of the
+   tint's full strength — the rim is meant to be noticed at the edge of vision
+   and not to light the pane. */
+@keyframes blob-breathe {
+  0% {
+    --blob-glow: 0.2;
+  }
+  50% {
+    --blob-glow: 0.62;
+  }
+  100% {
+    --blob-glow: 0.2;
+  }
+}
+
+/* One pass, and it finishes. The arc fades up over the first sixth and away
+   over the last third, so neither end of the travel is an edge appearing or
+   vanishing at a corner — the start and end angles sit past the same point so
+   whatever is left of it leaves the way it came in. */
 @keyframes blob-sweep {
-  from {
-    --shimmer-angle: -90deg;
-    opacity: 1;
+  0% {
+    --shimmer-angle: -100deg;
+    --blob-arc: 0;
   }
-  70% {
-    opacity: 1;
+  16% {
+    --blob-arc: 1;
   }
-  to {
-    --shimmer-angle: 270deg;
-    opacity: 0;
+  66% {
+    --blob-arc: 1;
+  }
+  100% {
+    --shimmer-angle: 290deg;
+    --blob-arc: 0;
   }
 }
 
@@ -2093,11 +2150,22 @@
 
   .thinking-shimmer,
   .boot-wordmark,
-  .streaming-caret::after,
-  .work-blob[data-busy="true"]::after,
-  .work-blob[data-settled="true"]::after {
+  .streaming-caret::after {
     animation: none;
     opacity: 0.55;
+  }
+
+  /* The rim keeps saying "working", just without the breath: a held glow that
+     fades in and out with the state. A cross-fade is not motion. */
+  .work-blob::after {
+    transition: --blob-glow 400ms ease;
+  }
+
+  .work-blob[data-busy="true"]::after,
+  .work-blob[data-settled="true"]::after {
+    --blob-glow: 0.45;
+    --blob-arc: 0;
+    animation: none;
   }
 
   .thinking-shimmer,

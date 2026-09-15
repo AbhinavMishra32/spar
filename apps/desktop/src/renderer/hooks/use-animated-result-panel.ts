@@ -4,6 +4,16 @@ import type { ImperativePanelHandle } from "react-resizable-panels";
 const MOTION_MS = 280;
 
 /**
+ * How long the panes hold their "a run just landed" state.
+ *
+ * It is the length of the rim sweep in `theme.css` (`--blob-settle`) and has to
+ * stay that: the state is what keeps the animation applied, so a shorter hold
+ * removes the light part-way round the pane and a longer one leaves a finished
+ * animation sitting on a pane that is idle again.
+ */
+export const SETTLE_MS = 1600;
+
+/**
  * Adds a short transition around imperative result-panel changes.
  *
  * The resizable-panel library writes `flex-grow` synchronously. We first render

@@ -50,7 +50,15 @@ function MiniGraph({value,label,claim,matched}: {value:string;label:string;claim
   const comparing=matched===false;
   const reducedMotion=useReducedMotion();
   const transition={duration:reducedMotion ? 0 : 0.6,ease:[0.22,0.61,0.36,1] as const};
-  return <div className="rounded-[var(--radius-lg)] border border-[var(--glass-hairline)] bg-[var(--color-background-surface-under)] px-2.5 pb-2 pt-2">
+  /* The well is a recess, not a hole. `--color-background-surface-under` is mixed
+     22% toward pure black, which is right under a code buffer filling a pane and
+     is not right for two small boxes sitting inside a card: at this size the
+     black reads as a gap punched through the window rather than as a step down
+     from the surface. So the dark theme lifts it back toward the foreground just
+     far enough to stay below the card and stop being black. Local rather than a
+     change to the token, because every other sunken surface in the app is large
+     enough for the deeper value to read correctly. */
+  return <div className="rounded-[var(--radius-lg)] border border-[var(--glass-hairline)] bg-[var(--color-background-surface-under)] px-2.5 pb-2 pt-2 dark:bg-[color-mix(in_oklab,var(--foreground)_4%,var(--color-background-surface-under))]">
     <div className="mb-1 flex items-center justify-between text-ui-sm"><span className="font-medium text-foreground">{label}</span><span className="text-muted-foreground">{LABEL[growth]}</span></div>
     <svg aria-label={comparing ? `${label}: your answer ${claim}; reviewed bound ${value}. Illustrative growth curves.` : `${label} ${LABEL[growth]} growth preview`} className="h-12 w-full overflow-visible" role="img" viewBox="0 0 120 56">
       <path d="M 8 48 H 114 M 8 48 V 8" fill="none" stroke="currentColor" className="text-border" strokeWidth="1" />

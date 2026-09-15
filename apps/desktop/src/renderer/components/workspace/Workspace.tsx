@@ -13,7 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { fileName, languageFor, message } from "@/lib/format";
 import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
-import { useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
+import { SETTLE_MS, useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
 import { ChallengeStepper, type ChallengeTrail } from "./ChallengeStepper";
 import { FileGlyph } from "../common/LanguageGlyph";
@@ -106,10 +106,21 @@ export function Workspace({
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [complexityCheckpoint, setComplexityCheckpoint] = useState<ComplexityCheckpointState | null>(null);
+  /* A checkpoint the submission has earned but the panel has not finished
+     announcing. The dots wave, the verdict fades up, and only then does the card
+     slide in: raised at the moment the result lands, it arrived over the top of
+     the answer the learner was still reading. Held here rather than timed inside
+     the card, because the panel is the thing that knows when it is done. */
+  const [pendingComplexity, setPendingComplexity] = useState<ComplexityCheckpointState | null>(null);
   /* A challenge announces itself once, the first time this attempt is ever
      seen — not once per mount. Coming back to a problem you are part-way
      through is not the arrival of a new problem, so it gets no reveal. */
   const [introFor, setIntroFor] = useState<string | null>(() => (introSeen(question.attemptId) ? null : question.attemptId));
+
+  /* A submission runs tests too — it is the same work over a wider suite — so it
+     lights the rim the same way. Reading only `running` here left the longest
+     wait in the app with no sign of life on the panes at all. */
+  const busy = running || submitting;
 
   const resultPanel = useAnimatedResultPanel();
   const sendingRef = useRef(false);
@@ -165,6 +176,7 @@ export function Workspace({
     terminalRef.current="";
     visibleRunId.current=null;
     setComplexityCheckpoint(null);
+    setPendingComplexity(null);
     // Reloading on a new question keeps the editor from showing the previous challenge.
   }, [question.attemptId]);
 
@@ -308,7 +320,7 @@ export function Workspace({
       setTerminal(terminalRef.current);
       setOutcome({ kind: result.outcome, summary: result.summary });
       if(result.outcome==="passed"&&result.requiresComplexity){
-        setComplexityCheckpoint({phase:"answering",time:"",space:"",review:""});
+        setPendingComplexity({phase:"answering",time:"",space:"",review:""});
       }
       await onRefresh();
     } catch (error) {
@@ -433,17 +445,19 @@ export function Workspace({
     return () => removeEventListener("keydown", listener);
   });
 
-  const wasRunning = useRef(false);
+  const wasBusy = useRef(false);
   useEffect(() => {
-    if (wasRunning.current && !running) {
+    if (wasBusy.current && !busy) {
       setSettled(true);
-      const timer = setTimeout(() => setSettled(false), 900);
-      wasRunning.current = running;
+      /* Held for exactly as long as the sweep takes. Dropping it early is what
+         used to cut the light off part-way round the pane. */
+      const timer = setTimeout(() => setSettled(false), SETTLE_MS);
+      wasBusy.current = busy;
       return () => clearTimeout(timer);
     }
-    wasRunning.current = running;
+    wasBusy.current = busy;
     return undefined;
-  }, [running]);
+  }, [busy]);
 
   const mount: OnMount = (editor) => editor.updateOptions({ fontLigatures: true });
 
@@ -626,11 +640,12 @@ export function Workspace({
         <Panel minSize={30} order={2}>
           <PanelGroup className="py-2 pr-2" direction="vertical">
             <Panel minSize={20} order={1}>
-              <div
-                className="work-blob flex h-full min-h-0 bg-[var(--color-background-editor)]"
-                data-busy={running || undefined}
-                data-settled={settled || undefined}
-              >
+              {/* Deliberately no busy rim. The editor is where the learner is
+                  looking and typing, and a breathing edge around the thing you
+                  are reading is the one place the signal turns into a
+                  distraction. The run is reported on the panel that reports
+                  runs. */}
+              <div className="work-blob flex h-full min-h-0 bg-[var(--color-background-editor)]">
                 {showTree && (
                   <div className="hairline-r flex w-44 shrink-0 flex-col bg-[var(--color-background-surface-under)]">
                     <div className="flex h-8 shrink-0 items-center gap-1.5 px-2.5 text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/70">
@@ -771,10 +786,10 @@ export function Workspace({
             >
               <div
                 className={cn(
-                  "work-blob h-full [--shimmer-phase:-1.7s] transition-[translate,opacity] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
+                  "work-blob h-full transition-[translate,opacity] duration-[240ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none",
                   resultPanel.open ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0",
                 )}
-                data-busy={running || undefined}
+                data-busy={busy || undefined}
                 data-settled={settled || undefined}
               >
                 <ResultPanel
@@ -796,6 +811,11 @@ export function Workspace({
                   tab={resultTab}
                   terminal={terminal}
                   testFiles={testFiles}
+                  onVerdictSettled={(settled)=>{
+                    if(!settled||!pendingComplexity)return;
+                    setComplexityCheckpoint(pendingComplexity);
+                    setPendingComplexity(null);
+                  }}
                 />
               </div>
             </Panel>
