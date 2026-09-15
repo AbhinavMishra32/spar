@@ -128,12 +128,11 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "create_fallback_question":
     case "assign_practice_problem":
       return <IconPuzzle className={MARK} />;
-    /* Reading what they wrote is a file operation. Use the same file mark as
-       the other read rows; the angle-bracket code mark looked like a broken
-       control beside these labels. */
+    /* “Reading…” is an inspection action. The search mark reads cleanly at this
+       size and avoids the heavier file and code silhouettes in this gutter. */
     case "inspect_current_attempt":
     case "read_attempt":
-      return <IconFile className={MARK} />;
+      return <IconSearch className={MARK} />;
     case "replay_attempt":
       return <IconHistory className={MARK} />;
     case "evaluate_attempt":
