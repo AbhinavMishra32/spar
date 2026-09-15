@@ -701,3 +701,87 @@ describe("target progress with a clock that does not move",()=>{
     }finally{store.close();}
   });
 });
+
+describe("the shelf",()=>{
+  const hit={title:"Two Sum",source:"leetcode" as const,slug:"two-sum",difficulty:"easy" as const,displayId:"1",sourceRating:null,concepts:["hashing"],sourceName:"LeetCode"};
+
+  it("keeps the moment a problem was first put aside",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const first=store.setProblemSaved("leetcode:two-sum",true,hit);
+      expect(first).toHaveLength(1);
+      /* Pressing the bookmark on something already saved must not quietly move it
+         to the top of a shelf ordered by when things were filed. */
+      const again=store.setProblemSaved("leetcode:two-sum",true,hit);
+      expect(again).toHaveLength(1);
+      expect(again[0]!.savedAt).toBe(first[0]!.savedAt);
+    }finally{store.close();}
+  });
+
+  it("newest first, and empty once everything is taken off",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      store.setProblemSaved("spar:one",true);
+      store.setProblemSaved("leetcode:two-sum",true,hit);
+      expect(store.listSavedProblems().map((row)=>row.key)).toEqual(["leetcode:two-sum","spar:one"]);
+      expect(store.setProblemSaved("leetcode:two-sum",false)).toEqual([{key:"spar:one",savedAt:expect.any(String),snapshot:null}]);
+      expect(store.setProblemSaved("spar:one",false)).toEqual([]);
+    }finally{store.close();}
+  });
+
+  /* A challenge Spar wrote is already in `questions`, so a copy of it here could
+     only ever disagree with the row every other surface reads. */
+  it("keeps no copy of a challenge the device already holds",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      expect(store.setProblemSaved("spar:one",true)[0]!.snapshot).toBeNull();
+    }finally{store.close();}
+  });
+
+  /* Filing, and a shelf that will not open because one card on it is unreadable
+     is worse than a shelf missing that card. */
+  it("drops a row it can no longer read rather than failing the whole shelf",()=>{
+    const file=path.join(mkdtempSync(path.join(tmpdir(),"spar-shelf-")),"spar.db");
+    const store=new LocalStore(file);
+    try{
+      store.setProblemSaved("leetcode:two-sum",true,hit);
+      store.setProblemSaved("spar:one",true);
+      const raw=new Database(file);
+      raw.prepare("UPDATE saved_problems SET snapshot=? WHERE key=?").run('{"title":"Two Sum"}',"leetcode:two-sum");
+      raw.close();
+      const reopened=new LocalStore(file);
+      try{
+        expect(reopened.listSavedProblems().map((row)=>row.key)).toEqual(["spar:one"]);
+      }finally{reopened.close();}
+    }finally{store.close();rmSync(path.dirname(file),{recursive:true,force:true});}
+  });
+});
+
+it("deletes a Track and its owned history while preserving other Tracks and baseline", () => {
+  const store = new LocalStore(":memory:");
+  try {
+    const keep = store.createTrack("Practise graph algorithms");
+    const baseline = store.createBaselineSession();
+    const removed = store.createTrack("Practise recursive algorithms");
+    const extra = store.createSession("More recursion practice", removed.track.id);
+    const target = store.setTrainingTarget(removed.sessionId, { ability: "Recursion", specificGap: "Base cases", desiredEvidence: "States the base case", avoidTesting: [] });
+    store.updateAbility({ abilityId: target.abilityId, markdown: "# Recursion\n\nPractise base cases.", evidenceEventIds: [] });
+    const question = store.createQuestion(removed.sessionId, design("Sum a tree"), { valid: true });
+    expect(store.deleteTrack(removed.track.id)).toBe(true);
+    expect(store.listTracks().map((track) => track.id)).toEqual([keep.track.id]);
+    expect(store.activeTrack()?.id).toBe(keep.track.id);
+    expect(store.readSession(removed.sessionId)).toBeNull();
+    expect(store.readSession(extra.sessionId)).toBeNull();
+    expect(store.readAttempt(question.attemptId)).toEqual([]);
+    expect(store.listAbilities(removed.track.id)).toEqual([]);
+    expect(store.readSession(keep.sessionId)).not.toBeNull();
+    expect(store.readSession(baseline.sessionId)).not.toBeNull();
+    expect(store.cloudLearningState().tracks.map((track) => track.id)).toEqual([keep.track.id]);
+    expect(store.pendingSync().filter((item) => item.kind === "session-delete")).toHaveLength(2);
+    expect(store.deleteTrack(removed.track.id)).toBe(false);
+    expect(store.deleteTrack(keep.track.id)).toBe(true);
+    expect(store.activeTrack()).toBeNull();
+    expect(store.listTracks()).toEqual([]);
+    expect(store.readSession(baseline.sessionId)).not.toBeNull();
+  } finally { store.close(); }
+});

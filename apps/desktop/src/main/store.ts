@@ -4,7 +4,7 @@ import type { ChallengeCodePreview } from "@spar/domain";
 import { challengeFileEntries, codePreview } from "./challengeFiles.js";
 import { decay as decayRating, updateRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, INITIAL_RATING, INITIAL_VOLATILITY, type Rating } from "@spar/domain";
 import { challengeResult, elapsedDays } from "./rating.js";
-import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
+import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, savedProblemSchema, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SavedProblem, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
 
 type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null };
 const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at";
@@ -171,6 +171,15 @@ export class LocalStore {
          degrading into a sentence about a picture that used to be there. The
          payload is a slice of a trace, not the trace. */
       CREATE TABLE IF NOT EXISTS agent_visualizations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, title TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
+      /* Problems the learner put aside, filed by the same key both populations
+         dedupe on. The snapshot is empty for a challenge Spar wrote — that row
+         is already in the questions table and a copy here could only disagree
+         with it — and holds what a source problem needs to draw itself, because
+         a saved search hit has nowhere else on the device to be read from.
+
+         Written without backticks on purpose: this comment lives inside the
+         schema's own template literal, and a backtick here ends the string. */
+      CREATE TABLE IF NOT EXISTS saved_problems (key TEXT PRIMARY KEY, snapshot TEXT NOT NULL DEFAULT '', saved_at TEXT NOT NULL);
     `);
     this.ensureColumn("questions", "replaces_question_id", "TEXT");
     /* Indexed here rather than up in the schema block, because the column it
@@ -245,6 +254,26 @@ export class LocalStore {
   createBaselineSession(){const baseline=this.getBaseline();if(baseline.sessionId&&this.readSession(baseline.sessionId))return{sessionId:baseline.sessionId};const sessionId=randomUUID();const now=new Date().toISOString();const goal="Establish a direct adaptive programming baseline.";this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,context) VALUES (?,?,?,?,?,'[]','[]',0,?,?,NULL,'baseline')").run(sessionId,"Baseline",goal,"Calibrate current problem-solving ability with the smallest useful sequence of direct coding probes.","planning",now,now);this.enqueue("session-create",{sessionId,goal,title:"Baseline",context:"baseline",createdAt:now});const importedEvidenceCount=Math.max(baseline.importedEvidenceCount,this.abilityStates().reduce((sum,item)=>sum+item.evidenceCount,0));this.setBaseline({status:"in-progress",sessionId,importedEvidenceCount});return{sessionId};}
 
   createTrack(goal:string,title?:string,language?:Language|null){const track=this.createTrackRecord(goal,title,language);const session=this.createSession(goal,track.id);return{track,sessionId:session.sessionId};}
+  deleteTrack(trackId: string): boolean {
+    return this.db.transaction(() => {
+      if (!this.db.prepare("SELECT id FROM tracks WHERE id=?").get(trackId)) return false;
+      const sessions = this.db.prepare("SELECT id FROM sessions WHERE track_id=?").all(trackId) as Array<{ id: string }>;
+      for (const session of sessions) {
+        this.db.prepare("DELETE FROM agent_visualizations WHERE session_id=?").run(session.id);
+        this.deleteSession(session.id);
+      }
+      this.db.prepare("DELETE FROM learner_patterns WHERE ability_id IN (SELECT id FROM ability_documents WHERE track_id=?)").run(trackId);
+      for (const table of ["ability_documents", "learner_notices", "rating_points"]) {
+        this.db.prepare(`DELETE FROM ${table} WHERE track_id=?`).run(trackId);
+      }
+      this.db.prepare("DELETE FROM tracks WHERE id=?").run(trackId);
+      if (this.getSetting<string>("active-track-id", "") === trackId) {
+        this.setSetting("active-track-id", this.activeTrack()?.id ?? "");
+      }
+      this.queueLearningState();
+      return true;
+    })();
+  }
   listTracks():Track[]{return (this.db.prepare("SELECT * FROM tracks ORDER BY status='active' DESC,updated_at DESC").all() as TrackRow[]).map((row)=>this.toTrack(row));}
   activeTrack():Track|null{const selected=this.getSetting<string>("active-track-id","");const row=(selected?this.db.prepare("SELECT * FROM tracks WHERE id=?").get(selected):undefined) as TrackRow|undefined;const fallback=row??this.db.prepare("SELECT * FROM tracks WHERE status='active' ORDER BY updated_at DESC LIMIT 1").get() as TrackRow|undefined;return fallback?this.toTrack(fallback):null;}
   trackIdForSession(sessionId:string){const row=this.db.prepare("SELECT track_id FROM sessions WHERE id=?").get(sessionId) as {track_id:string|null}|undefined;return row?.track_id??null;}
@@ -735,6 +764,31 @@ export class LocalStore {
   }
   private toAbility(row:AbilityRow,concepts:ConceptTag[]):AbilityHistorySummary{return {id:row.id,title:row.title,markdown:row.markdown,summary:row.summary,version:row.version,status:row.status,evidenceCount:(JSON.parse(row.evidence_ids) as string[]).length,concepts,practice:JSON.parse(row.practice) as string[],earnedAt:row.earned_at,updatedAt:row.updated_at};}
   listChallenges():ChallengeHistorySummary[]{const tags=this.conceptTagRows("",[]);const rows=this.db.prepare(`SELECT q.id,q.session_id,s.title session_title,q.ordinal,q.title,q.language,q.difficulty,q.status,q.replaces_question_id,q.source_ref,parent.title replaces_question_title,child.id replaced_by_question_id,child.title replaced_by_question_title,q.created_at,COALESCE(MAX(a.completed_at),q.created_at) updated_at,COUNT(DISTINCT a.id) attempt_count,(SELECT COUNT(*) FROM attempt_events te JOIN attempts ta ON ta.id=te.attempt_id WHERE ta.question_id=q.id AND te.type='test_run' AND te.sequence>=(SELECT MAX(start.sequence) FROM attempt_events start WHERE start.attempt_id=te.attempt_id AND start.type='attempt_started')) test_run_count,(SELECT COUNT(*) FROM attempt_events he JOIN attempts ha ON ha.id=he.attempt_id WHERE ha.question_id=q.id AND he.type='hint_requested') hint_count,(SELECT json_extract(te.payload,'$.outcome') FROM attempt_events te JOIN attempts ta ON ta.id=te.attempt_id WHERE ta.question_id=q.id AND te.type='attempt_completed' AND te.sequence>=(SELECT MAX(start.sequence) FROM attempt_events start WHERE start.attempt_id=te.attempt_id AND start.type='attempt_started') ORDER BY te.occurred_at DESC LIMIT 1) last_outcome FROM questions q JOIN sessions s ON s.id=q.session_id LEFT JOIN questions parent ON parent.id=q.replaces_question_id LEFT JOIN questions child ON child.replaces_question_id=q.id LEFT JOIN attempts a ON a.question_id=q.id GROUP BY q.id ORDER BY updated_at DESC`).all() as Array<Record<string,unknown>>;return rows.map((row)=>({id:String(row.id),sessionId:String(row.session_id),sessionTitle:String(row.session_title),ordinal:Number(row.ordinal),title:String(row.title),language:String(row.language) as ChallengeHistorySummary["language"],difficulty:String(row.difficulty) as ChallengeHistorySummary["difficulty"],status:String(row.status) as ChallengeHistorySummary["status"],replacesQuestionId:row.replaces_question_id?String(row.replaces_question_id):null,replacesQuestionTitle:row.replaces_question_title?String(row.replaces_question_title):null,replacedByQuestionId:row.replaced_by_question_id?String(row.replaced_by_question_id):null,replacedByQuestionTitle:row.replaced_by_question_title?String(row.replaced_by_question_title):null,attemptCount:Number(row.attempt_count),testRunCount:Number(row.test_run_count),lastOutcome:row.last_outcome?String(row.last_outcome) as ChallengeHistorySummary["lastOutcome"]:null,assistance:row.last_outcome?(Number(row.hint_count)>0?"assisted":"independent"):"unknown",concepts:tags.get(String(row.id))??[],source:parseSourceRef(row.source_ref as string|null),createdAt:String(row.created_at),updatedAt:String(row.updated_at)}));}
+  /**
+   * The shelf, newest first.
+   *
+   * Ordered by when it was saved rather than by anything about the problem: the
+   * list answers "what did I put aside", and a shelf sorted by difficulty is a
+   * shelf you have to search to find the thing you filed a minute ago.
+   */
+  listSavedProblems():SavedProblem[]{
+    const rows=this.db.prepare("SELECT key,snapshot,saved_at FROM saved_problems ORDER BY saved_at DESC").all() as Array<{key:string;snapshot:string;saved_at:string}>;
+    return rows.flatMap((row)=>{
+      /* A row whose snapshot no longer parses is dropped from the answer rather
+         than crashing the page that asked for it: this is filing, and a shelf
+         that fails to open because one card on it is unreadable is worse than a
+         shelf missing that card. */
+      const parsed=savedProblemSchema.safeParse({key:row.key,savedAt:row.saved_at,snapshot:row.snapshot?JSON.parse(row.snapshot) as unknown:null});
+      return parsed.success?[parsed.data]:[];
+    });
+  }
+  /** Saving is idempotent and keeps the original moment: pressing the bookmark on
+   *  a problem already saved must not quietly move it to the top of the shelf. */
+  setProblemSaved(key:string,saved:boolean,snapshot:SavedProblem["snapshot"]=null):SavedProblem[]{
+    if(!saved)this.db.prepare("DELETE FROM saved_problems WHERE key=?").run(key);
+    else this.db.prepare("INSERT INTO saved_problems (key,snapshot,saved_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET snapshot=excluded.snapshot").run(key,snapshot?JSON.stringify(snapshot):"",this.stamp());
+    return this.listSavedProblems();
+  }
   /** Concepts are part of what a challenge *is*, so they are searchable text: the
    *  agent looking for "sliding window" evidence has to find the challenges that
    *  were tagged with it even when the title never says the words. */

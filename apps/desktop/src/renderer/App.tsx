@@ -16,6 +16,7 @@ import { SIDEBAR_SLIDE, SIDEBAR_SLIDE_CSS } from "./components/shell/sidebarMoti
 import { TracksPage } from "./components/pages/TracksPage";
 import { TrackPage } from "./components/pages/TrackPage";
 import { ProblemsPage } from "./components/pages/ProblemsPage";
+import { seedSavedProblems } from "./hooks/use-saved-problems";
 import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
@@ -101,6 +102,15 @@ export function App() {
     setData(next);
     return next;
   }, []);
+
+  /* The shelf, pushed to the store that holds it for the renderer rather than
+     handed down as a prop. It is read by the transcript's challenge card and by
+     the library's rows and tiles, which have no path between them — see
+     `use-saved-problems`. Driven off `data` so every route that re-reads the
+     bootstrap refreshes it, including the restore finishing long after launch. */
+  useEffect(() => {
+    if (data) seedSavedProblems(data.saved);
+  }, [data]);
 
   /* Sidebar housekeeping. The main process is authoritative for all of it, so each
      one writes and then re-reads the bootstrap rather than patching the copy the
@@ -643,6 +653,25 @@ export function App() {
     await refresh();
   };
 
+  const deleteTrack = async (track: Track): Promise<boolean> => {
+    if (!api || !data) return false;
+    setOpening(true); setError(null);
+    const sessions = data.sessions.filter((session) => session.trackId === track.id);
+    try {
+      if (detailRef.current?.summary.trackId === track.id) setDetail(null);
+      for (const session of sessions) clearRun(session.id);
+      await api.deleteTrack(track.id);
+      // Deleted challenges and abilities may also appear in navigation history.
+      setHistory({ entries: [{ page: "tracks" }], index: 0 });
+      await refresh();
+      return true;
+    } catch (cause) {
+      setError(message(cause));
+      await refresh().catch(() => undefined);
+      return false;
+    } finally { setOpening(false); }
+  };
+
   const createTrack = async (input: { goal: string; title?: string; language?: Language }) => {
     if (!api) return;
     setOpening(true); setError(null);
@@ -785,7 +814,7 @@ export function App() {
         <div className="min-h-0 flex-1">
 
           {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
-          {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
+          {page === "tracks" && <TracksPage onDelete={deleteTrack} busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
           {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
           {page === "problems" && (
             <ProblemsPage

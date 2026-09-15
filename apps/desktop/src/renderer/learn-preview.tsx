@@ -96,6 +96,7 @@ const data: BootstrapData = {
   account: { id: "u1", displayName: "A", email: "a@example.com" },
   profile: { language: "python" } as any,
   sessions: [{ id: "s1", activeQuestion: null } as any],
+  saved: [],
   challenges: [], abilities: [], concepts: conceptFixtures, tracks: [], activeTrack: null,
   recommendation: {
     id: "rec1", trackId: "t1", trackTitle: "Graph fundamentals", sessionId: "s1", questionId: null,

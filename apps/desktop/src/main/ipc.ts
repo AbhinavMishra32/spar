@@ -3,7 +3,7 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
@@ -61,7 +61,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      them a second later. */
   ipcMain.handle(ipc.bootstrap, async () => {
     deps.store.decayAbilities();
-    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
+    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
   });
   ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
@@ -292,6 +292,20 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   /* A turn already in flight is dropped rather than waited for: the learner has
      said the session is going away, and the worker's result has nowhere to land
      once the row is gone. Anything the turn still writes is a no-op after this. */
+  ipcMain.handle(ipc.tracksDelete, async (_event, value) => {
+    const trackId = zUuid(value);
+    const sessions = deps.store.listSessions().filter((session) => session.trackId === trackId);
+    for (const session of sessions) {
+      const runId = activeAgentRuns.get(session.id);
+      activeAgentRuns.delete(session.id);
+      clearAutoResume(session.id);
+      deps.agentQuestions.cancel(session.id);
+      if (runId) void deps.agent.request("abort", { requestId: runId }).promise.catch(() => undefined);
+    }
+    if (!deps.store.deleteTrack(trackId)) return;
+    await Promise.all(sessions.map((session) => deps.workspaces.remove(session.id)));
+  });
+
   ipcMain.handle(ipc.sessionsDelete, async (_event, value) => {
     const sessionId = zUuid(value);
     activeAgentRuns.delete(sessionId);
@@ -344,6 +358,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   };
 
   ipcMain.handle(ipc.challengePreviews, () => deps.store.challengePreviews());
+  /* Validated here rather than trusted: the snapshot is the one thing the window
+     sends that the device will read back and draw without asking anyone else, so
+     a malformed one would be a bad row on the shelf forever. */
+  ipcMain.handle(ipc.problemsSave, (_event, input: { key?: unknown; saved?: unknown; snapshot?: unknown }) => {
+    const request = savedProblemSchema.pick({ key: true, snapshot: true }).safeParse({ key: input?.key, snapshot: input?.snapshot ?? null });
+    if (!request.success) throw new Error("A problem can only be saved under a problem key.");
+    return deps.store.setProblemSaved(request.data.key, input?.saved !== false, request.data.snapshot);
+  });
   ipcMain.handle(ipc.challengeRead, (_event, value) => challengeDetail(zUuid(value)));
   ipcMain.handle(ipc.challengeWrite, async (_event, value) => {
     const input = challengeWriteInput.parse(value);

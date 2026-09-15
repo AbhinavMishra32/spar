@@ -9,6 +9,7 @@ function launchFlag(name: string, fallback: string) {
 const api: SparApi = {
   bootstrap: () => ipcRenderer.invoke(ipc.bootstrap),
   createSession: (input) => ipcRenderer.invoke(ipc.sessionsCreate, input),
+  deleteTrack: (trackId) => ipcRenderer.invoke(ipc.tracksDelete, trackId),
   createTrack: (input) => ipcRenderer.invoke(ipc.tracksCreate, input),
   setActiveTrack: (trackId) => ipcRenderer.invoke(ipc.tracksActive, trackId),
   setTrainingMode: (mode) => ipcRenderer.invoke(ipc.trainingMode, mode),
@@ -38,6 +39,7 @@ const api: SparApi = {
   setSessionStatus: (input) => ipcRenderer.invoke(ipc.sessionsStatus, input),
   deleteSession: (sessionId) => ipcRenderer.invoke(ipc.sessionsDelete, sessionId),
   listChallengePreviews: () => ipcRenderer.invoke(ipc.challengePreviews),
+  setProblemSaved: (input) => ipcRenderer.invoke(ipc.problemsSave, input),
   readChallenge: (challengeId) => ipcRenderer.invoke(ipc.challengeRead, challengeId),
   writeChallengeFile: (input) => ipcRenderer.invoke(ipc.challengeWrite, input),
   runChallenge: (input) => ipcRenderer.invoke(ipc.challengeRun, input),

@@ -1,4 +1,4 @@
-import { generatedItemRating, itemRating, solveProbability, type ChallengeHistorySummary, type Rating } from "@spar/domain";
+import { generatedItemRating, itemRating, solveProbability, type ChallengeHistorySummary, type Rating, type SavedProblem } from "@spar/domain";
 import type { PracticeSearchHit } from "../../shared/api";
 import { matchRank } from "./search";
 
@@ -146,6 +146,59 @@ export function sourceItem(hit: PracticeSearchHit): ProblemItem {
 }
 
 /**
+ * A saved source problem, from what was kept of it.
+ *
+ * The shelf is the one place a problem can be named that no live population is
+ * offering: a Codeforces problem saved from a search for "two pointers" is not in
+ * the results of the next search, and it has never been attempted, so neither
+ * history nor the current hits hold it. Without this, saving a problem and then
+ * typing anything into the box would empty the shelf, which is the opposite of
+ * what saving is for.
+ *
+ * It is built to be indistinguishable from the same problem arriving live —
+ * identical key, identical price — so when the source *does* return it, the
+ * dedupe drops this one and the learner never sees the same problem twice.
+ * `standing` is the one thing a snapshot cannot honestly carry: whether they have
+ * solved it since is the source's to say, and "not done yet" is the safe claim
+ * until it does.
+ */
+export function savedSourceItem(saved: SavedProblem): ProblemItem | null {
+  const snapshot = saved.snapshot;
+  if (!snapshot) return null;
+  return sourceItem({
+    source: snapshot.source,
+    sourceName: snapshot.sourceName || ORIGIN_LABEL[snapshot.source],
+    slug: snapshot.slug,
+    displayId: snapshot.displayId ?? "",
+    title: snapshot.title,
+    difficulty: snapshot.difficulty,
+    sourceRating: snapshot.sourceRating,
+    paidOnly: false,
+    acceptanceRate: null,
+    concepts: snapshot.concepts,
+    status: "unknown",
+  });
+}
+
+/** What has to be kept about a source problem for the shelf to draw it later.
+ *  Never the statement: that belongs to the source and is fetched when the
+ *  problem is opened. */
+export function savedSnapshot(item: ProblemItem): SavedProblem["snapshot"] {
+  if (item.kind !== "source") return null;
+  const { hit } = item;
+  return {
+    title: hit.title,
+    source: hit.source,
+    slug: hit.slug,
+    difficulty: hit.difficulty,
+    displayId: hit.displayId || null,
+    sourceRating: hit.sourceRating ?? null,
+    concepts: hit.concepts,
+    sourceName: hit.sourceName,
+  };
+}
+
+/**
  * Both populations as one list, history first.
  *
  * History leads so that the dedupe keeps the row the learner has actually worked
@@ -158,7 +211,7 @@ export function sourceItem(hit: PracticeSearchHit): ProblemItem {
  * same Codeforces problem twice and there are two local rows for one problem, and
  * the one worth keeping is the attempt that reflects where the learner is now.
  */
-export function mergeProblems(challenges: ChallengeHistorySummary[], hits: PracticeSearchHit[]): ProblemItem[] {
+export function mergeProblems(challenges: ChallengeHistorySummary[], hits: PracticeSearchHit[], saved: readonly SavedProblem[] = []): ProblemItem[] {
   const items: ProblemItem[] = [];
   const seen = new Set<string>();
   for (const item of challenges.map(challengeItem).sort((a, b) => b.touchedAt - a.touchedAt)) {
@@ -172,6 +225,15 @@ export function mergeProblems(challenges: ChallengeHistorySummary[], hits: Pract
     seen.add(item.key);
     items.push(item);
   }
+  /* Last, so it can only ever add a problem the live populations did not offer —
+     a shelf row is a copy of what a search once said, and anything live outranks
+     it for the same reason a local challenge outranks a remote hit. */
+  for (const row of saved) {
+    const item = savedSourceItem(row);
+    if (!item || seen.has(item.key)) continue;
+    seen.add(item.key);
+    items.push(item);
+  }
   return items;
 }
 
@@ -180,6 +242,16 @@ export type ProblemFilter = {
   origin: ProblemOrigin | "all";
   band: ProblemBand | "all";
   standing: ProblemStanding | "all";
+  /** The shelf, as a filter. Deliberately not an origin, though it is drawn
+   *  beside them: where a problem came from and whether the learner filed it are
+   *  different questions, and folding filing into the origin list would make
+   *  "Saved" exclusive with "LeetCode" when the whole point of a shelf is that it
+   *  cuts across every source. */
+  saved?: boolean;
+  /** Which keys are on it. Passed in rather than read from the store here so the
+   *  filter stays a pure function of what it is given, like the ranking beside
+   *  it. */
+  savedKeys?: ReadonlySet<string>;
 };
 
 /** How many items each origin would leave, ignoring the origin filter itself —
@@ -196,6 +268,7 @@ export function originCounts(items: ProblemItem[], filter: ProblemFilter): Recor
 }
 
 function passesExceptOrigin(item: ProblemItem, filter: ProblemFilter): boolean {
+  if (filter.saved && !filter.savedKeys?.has(item.key)) return false;
   if (filter.band !== "all" && item.band !== filter.band) return false;
   if (filter.standing !== "all" && item.standing !== filter.standing) return false;
   return matchRank(filter.query, item.title, item.meta) !== null;

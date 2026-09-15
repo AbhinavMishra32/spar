@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, CircleDot, Plus, Radar, ShieldCheck } from "lucide-react";
+import { ArrowRight, CircleDot, Plus, Radar, ShieldCheck, Trash2 } from "lucide-react";
 import { LANGUAGES, type Language, type Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -9,11 +9,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
 
-export function TracksPage({ data, busy, onCreate, onOpen }: {
+export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
   data: BootstrapData;
   busy: boolean;
   onCreate(input: { goal: string; title?: string; language?: Language }): Promise<void>;
   onOpen(track: Track): Promise<void>;
+  onDelete(track: Track): Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
@@ -35,7 +36,7 @@ export function TracksPage({ data, busy, onCreate, onOpen }: {
       <header className="flex items-start justify-between gap-4">
         <div><h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Tracks</h1><p className="mt-1 max-w-[38rem] text-content text-muted-foreground">Separate workspaces for distinct goals. Each keeps its own sessions, learner model, memory, and training direction.</p></div>
         <Dialog onOpenChange={setOpen} open={open}>
-          <DialogTrigger asChild><Button><Plus data-icon="inline-start" />New Track</Button></DialogTrigger>
+          <DialogTrigger asChild><Button disabled={busy}><Plus data-icon="inline-start" />New Track</Button></DialogTrigger>
           <DialogContent>
             <DialogHeader><DialogTitle>Create a Track</DialogTitle><DialogDescription>Describe what you want to become better at. Spar will choose an initial direction, not a fixed syllabus.</DialogDescription></DialogHeader>
             <div className="flex flex-col gap-3">
@@ -71,14 +72,15 @@ export function TracksPage({ data, busy, onCreate, onOpen }: {
       </header>
 
       <div className="mt-6 flex flex-col gap-3">
-        {data.tracks.map((track) => <TrackRow data={data} key={track.id} onOpen={onOpen} track={track} />)}
+        {data.tracks.map((track) => <TrackRow busy={busy} onDelete={onDelete} data={data} key={track.id} onOpen={onOpen} track={track} />)}
         {!data.tracks.length && <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center"><Radar className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-content font-medium">No Tracks yet</p><p className="mt-1 text-ui text-muted-foreground">Create one from a goal; Spar will establish an independent learner workspace and initial direction.</p></div>}
       </div>
     </main>
   </div>;
 }
 
-function TrackRow({ data, track, onOpen }: { data: BootstrapData; track: Track; onOpen(track: Track): Promise<void> }) {
+function TrackRow({ data, track, onOpen, onDelete, busy }: { data: BootstrapData; track: Track; busy: boolean; onDelete(track: Track): Promise<boolean>; onOpen(track: Track): Promise<void> }) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const active = data.activeTrack?.id === track.id;
   const sessions = data.sessions.filter((session) => session.trackId === track.id).sort((a,b) => b.updatedAt.localeCompare(a.updatedAt));
   const states = data.trackProgress[track.id]?.abilities ?? [];
@@ -96,7 +98,20 @@ function TrackRow({ data, track, onOpen }: { data: BootstrapData; track: Track; 
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        <Button onClick={() => void onOpen(track)} size="sm" variant={active ? "default" : "outline"}>Open<ArrowRight data-icon="inline-end" /></Button>
+        <Dialog open={confirmOpen} onOpenChange={(open) => { if (!busy) setConfirmOpen(open); }}>
+          <DialogTrigger asChild><Button aria-label={`Delete ${track.title}`} disabled={busy} size="icon" variant="ghost"><Trash2 className="size-4" /></Button></DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Delete {track.title}?</DialogTitle>
+              <DialogDescription>This permanently deletes this Track, its {sessions.length} work session{sessions.length === 1 ? "" : "s"}, workspace files, and learning history. This cannot be undone.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button autoFocus disabled={busy} variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+              <Button disabled={busy} variant="destructive" onClick={async () => { if (await onDelete(track)) setConfirmOpen(false); }}>{busy ? "Deleting…" : "Delete Track"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Button disabled={busy} onClick={() => void onOpen(track)} size="sm" variant={active ? "default" : "outline"}>Open<ArrowRight data-icon="inline-end" /></Button>
       </div>
     </div>
   </article>;

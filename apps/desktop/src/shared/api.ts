@@ -3,11 +3,11 @@ import { canonicalWorkspacePath } from "./workspacePath.js";
 import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spar/visualizer";
 import type { AgentActivityStep } from "@spar/domain";
 export type { VisualizerSpec, VisualizerTrace };
-import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
+import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
-  tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
+  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
   /* The window reports its own state; the main process decides when that becomes
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
@@ -29,6 +29,7 @@ export const ipc = {
   challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
   challengeRun: "challenges:run", challengeCheck: "challenges:check", challengeReset: "challenges:reset",
   conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start",
+  problemsSave: "problems:save",
   /* Practice sources: where real problems come from. Distinct from `practiceStart`
      above, which is Spar's own word for drilling an ability — an unfortunate
      collision, kept because renaming a channel the renderer already calls is a
@@ -379,7 +380,7 @@ export type VisualizerProblem = {
   paidOnly: boolean;
 };
 
-export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; saved: SavedProblem[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** How far the pull half of sync has got. The shell gates on this before it
    *  gates on `profile`: a signed-in device with no local profile has either not
    *  finished restoring or could not reach the server, and treating either as "no
@@ -448,6 +449,7 @@ export type UpdateState = {
 export interface SparApi {
   bootstrap(): Promise<BootstrapData>;
   createSession(input: z.infer<typeof createSessionInput>): Promise<{ sessionId: string }>;
+  deleteTrack(trackId: string): Promise<void>;
   createTrack(input: z.infer<typeof createTrackInput>): Promise<{ track: Track; sessionId: string }>;
   setActiveTrack(trackId: string): Promise<Track | null>;
   setTrainingMode(mode: z.infer<typeof trainingModeSchema>): Promise<TrainingMode>;
@@ -517,6 +519,11 @@ export interface SparApi {
      records an attempt event, changes a question's status, or starts an agent
      turn: re-opening finished work is rehearsal, and rehearsal is not evidence. */
   listChallengePreviews(): Promise<Record<string, ChallengeCodePreview>>;
+  /** Puts a problem on the shelf, or takes it off, and answers with the whole
+   *  shelf. Returning the list rather than an acknowledgement is what keeps the
+   *  bookmark in the transcript and the bookmark in the library from having to
+   *  agree by coincidence: both are drawn from one answer. */
+  setProblemSaved(input: { key: string; saved: boolean; snapshot?: SavedProblem["snapshot"] }): Promise<SavedProblem[]>;
   readChallenge(challengeId: string): Promise<ChallengeDetail | null>;
   writeChallengeFile(input: z.infer<typeof challengeWriteInput>): Promise<void>;
   /** Runs the visible cases; output streams over `onRunnerEvent` under this id. */

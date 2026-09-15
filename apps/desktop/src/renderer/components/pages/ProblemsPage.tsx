@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, LayoutGrid, Library, Loader2, Rows3, Search, TriangleAlert, Waypoints } from "lucide-react";
+import { ArrowUpRight, Bookmark, LayoutGrid, Library, Loader2, Rows3, Search, TriangleAlert, Waypoints } from "lucide-react";
 import type { AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary, LearnerProgress } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -25,6 +25,7 @@ import { ProblemRow } from "../problems/ProblemRow";
 import { ProblemTile } from "../problems/ProblemTile";
 import { ConceptMap } from "../problems/ConceptMap";
 import { useProblemSearch } from "../../hooks/use-problem-search";
+import { useSavedProblems } from "@/hooks/use-saved-problems";
 
 /** Remembered per device rather than per account: which of the two views someone
  *  wants is a fact about the screen they are sitting at. */
@@ -89,6 +90,10 @@ export function ProblemsPage({
   const [origin, setOrigin] = useState<ProblemOrigin | "all">("all");
   const [band, setBand] = useState<ProblemBand | "all">("all");
   const [standing, setStanding] = useState<ProblemStanding | "all">("all");
+  /* Not folded into `origin`: see `ProblemFilter.saved`. Held here rather than
+     remembered, because a shelf you land on is a shelf you have to leave before
+     you can browse, and browsing is what this page is for. */
+  const [onlySaved, setOnlySaved] = useState(false);
   const [sort, setSort] = useState<ProblemSort>("suggested");
   /* The list is the default. A grid of cards is the better way to browse a
      shortlist, but this page opens on everything the learner can reach, and the
@@ -105,15 +110,25 @@ export function ProblemsPage({
 
   useEffect(() => localStorage.setItem(VIEW_KEY, view), [view]);
 
-  const items = useMemo(() => mergeProblems(challenges, search.hits), [challenges, search.hits]);
-  const filter: ProblemFilter = { query, origin, band, standing };
-  const counts = useMemo(() => originCounts(items, filter), [items, query, band, standing]);
+  const saved = useSavedProblems();
+  const savedKeys = useMemo(() => new Set(saved.map((row) => row.key)), [saved]);
+  const items = useMemo(() => mergeProblems(challenges, search.hits, saved), [challenges, search.hits, saved]);
+  const filter: ProblemFilter = { query, origin, band, standing, saved: onlySaved, savedKeys };
+  const counts = useMemo(() => originCounts(items, filter), [items, query, band, standing, onlySaved, savedKeys]);
+  /* What the shelf chip counts: how many saved problems this page can actually
+     show, not how many rows the table holds. A saved Spar challenge whose
+     session was deleted has a key and nothing to draw, and counting it would
+     promise a row that never appears. */
+  const savedCount = useMemo(
+    () => items.filter((item) => savedKeys.has(item.key)).length,
+    [items, savedKeys],
+  );
   /* The rating is passed rather than read here so the ranking stays a pure
      function of what it is given: `progress.rating` is the learner's standing,
      and the suggested order is what that standing implies about this library. */
-  const visible = useMemo(() => sortProblems(filterProblems(items, filter), sort, query, progress.rating), [items, query, origin, band, standing, sort, progress.rating]);
+  const visible = useMemo(() => sortProblems(filterProblems(items, filter), sort, query, progress.rating), [items, query, origin, band, standing, onlySaved, savedKeys, sort, progress.rating]);
 
-  const filtered = Boolean(query.trim()) || origin !== "all" || band !== "all" || standing !== "all";
+  const filtered = Boolean(query.trim()) || origin !== "all" || band !== "all" || standing !== "all" || onlySaved;
 
   /* One problem, lifted out of the list and given a card.
    *
@@ -254,6 +269,39 @@ export function ProblemsPage({
               <span className="tabular-nums text-muted-foreground">{counts[value]}</span>
             </button>
           ))}
+
+          {/* The shelf, set apart by a rule rather than added to the row.
+              Everything to the left of it answers "where is this problem from",
+              and this answers "did I put it aside" — they are both filters and
+              they are not the same kind of fact, so combining them into one
+              exclusive row would mean choosing Saved gave up choosing LeetCode,
+              which is precisely the combination a shelf is for.
+
+              Hidden until there is one. An empty shelf chip is a permanent
+              invitation to press something that will show nothing, and the
+              bookmark on every row is already the instruction for how to fill
+              it. */}
+          {savedCount > 0 && (
+            <>
+              <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-border" />
+              <button
+                aria-pressed={onlySaved}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-ui outline-none transition-colors",
+                  "focus-visible:ring-1 focus-visible:ring-ring",
+                  onlySaved
+                    ? "bg-[var(--color-background-elevated-secondary)] font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                onClick={() => setOnlySaved((value) => !value)}
+                type="button"
+              >
+                <Bookmark className={cn("size-3.5", onlySaved && "fill-current")} />
+                Saved
+                <span className="tabular-nums text-muted-foreground">{savedCount}</span>
+              </button>
+            </>
+          )}
           </div>
         </div>
       </div>

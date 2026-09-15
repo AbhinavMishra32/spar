@@ -231,6 +231,45 @@ export const challengeCodePreviewSchema = z.object({
 });
 export type ChallengeCodePreview = z.infer<typeof challengeCodePreviewSchema>;
 
+/**
+ * A problem the learner put aside to come back to.
+ *
+ * Deliberately thin. Saving is filing, not a second copy of the library: a saved
+ * Spar challenge is identified and nothing more, because the challenge itself is
+ * already in the history every surface reads and a snapshot beside it would be a
+ * second version of the same row, free to disagree with the first.
+ *
+ * A problem from a connected source is the case that does need a snapshot, and it
+ * is the reason this schema is not just a list of keys. Those rows exist only
+ * inside a search result: saving one and then searching for something else would
+ * leave a shelf of keys naming problems nothing on the device can describe. What
+ * is kept is exactly what a row needs to draw itself — never the statement, which
+ * belongs to the source and is fetched when the problem is opened.
+ */
+export const savedProblemSchema = z.object({
+  /** `problemKey`'s identity: `spar:<questionId>` or `<source>:<slug>`. The one
+   *  spelling both populations already dedupe on, so a Codeforces problem saved
+   *  from a search and the same problem later practised in a session are one
+   *  saved row rather than two. */
+  key: z.string().min(3),
+  savedAt: isoDate,
+  /** Only for a problem the device cannot otherwise describe — see above. */
+  snapshot: z.object({
+    title: z.string().min(1),
+    source: z.enum(["leetcode", "codeforces"]),
+    slug: z.string().min(1),
+    difficulty: z.enum(["easy", "medium", "hard"]),
+    /** What the source calls it on its own site — "4/A", "1". */
+    displayId: z.string().nullable().default(null),
+    /** The source's published rating where it has one, which is what prices the
+     *  problem on the same scale everything else is ranked on. */
+    sourceRating: z.number().int().nullable().default(null),
+    concepts: z.array(z.string()).default([]),
+    sourceName: z.string().default(""),
+  }).nullable().default(null),
+});
+export type SavedProblem = z.infer<typeof savedProblemSchema>;
+
 export const challengeHistorySummarySchema = z.object({
   id,
   sessionId: id,
