@@ -31,8 +31,33 @@ const WHY_THIS_PROBLEM = "Before anything else, tell them why this problem and w
  * past. Naming the specific evidence is what stops that, because the evidence is
  * different every time.
  */
+/**
+ * What a turn that taught owes the learner instead.
+ *
+ * The failure mode this exists to prevent is the obvious one: a model that has
+ * just written five pages and then writes those five pages again in prose,
+ * because every instinct it has says a reply should contain the explanation. The
+ * lesson is already on the screen. What the reply is for is the part the lesson
+ * cannot carry — why this, for them, now — and the pointer that opens it.
+ *
+ * The reference is spelled out because it has to be exact: the id from the
+ * result, not the title, not a paraphrase. A chip that resolves to nothing is
+ * worse than the plain sentence it replaced.
+ */
+const TAUGHT_THIS_TURN = "You have written them a lesson and they can see it, so do not restate its pages, summarise them, or preview what is on them. Say instead what made you teach this one now — the thing in their own work that showed the gap, named specifically — then point at the lesson as [[lesson:<the id the result returned>|its title]] and give one concrete thing to do with it. Two or three sentences. Never claim to have taught something the result does not show you filed.";
+
+/** Whether this turn filed a lesson, by the host's own account of it. */
+function filedLesson(outcomes: Map<string, unknown[]>): boolean {
+  return (outcomes.get("teach_lesson") ?? []).some((value) => Boolean(value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "taught"));
+}
+
 export function completionInstruction(turnKind:AgentTurnKind,outcomes:Map<string,unknown[]>):string{
   const playable=(name:string)=>(outcomes.get(name)??[]).some((value)=>Boolean(value&&typeof value==="object"&&(value as {result?:{status?:unknown}}).result?.status==="playable"));
+  /* Teaching wins the turn it happened on. A turn that taught set no challenge —
+     see `challengeStage` — so every instruction below it is about a handover
+     that did not take place, and asking for "why this problem" when there is no
+     problem is how a model is talked into inventing one. */
+  if(filedLesson(outcomes))return TAUGHT_THIS_TURN;
   if(turnKind==="session-start"||turnKind==="cold-start"){
     const provenance=playable("assign_practice_problem")
       ? "A connected-provider problem is now playable. Name it as a provider problem only from the successful assignment result."
@@ -127,6 +152,36 @@ function visualizerOffer(outcomes: Map<string, unknown[]>): string[] {
   return (outcomes.get(VISUALIZER_GATE)?.length ?? 0) > 0 ? offered.filter((name) => name !== VISUALIZER_GATE) : offered;
 }
 
+/**
+ * Teaching, as a stage the machine understands.
+ *
+ * `TEACH_TOOLS` is offered rather than required. The point is not that Spar
+ * should teach instead of testing — it is that a turn which has found an idea
+ * the learner is missing should be able to hand them that idea, and should not
+ * then be marched into writing a problem about it in the same breath.
+ *
+ * `taught` is what makes that true. Every path that ends in `challengeStage`
+ * checks it first, so a turn that wrote a lesson goes straight to its reply.
+ * Nothing else about the machine changes: a turn that did not teach is required
+ * to set a challenge exactly as it always was.
+ */
+export const TEACH_TOOLS = ["teach_lesson", "read_lesson", "search_lessons"];
+
+/** Whether this turn has already handed over a lesson.
+ *
+ *  One turn teaches one thing. A turn still holding the tools after publishing
+ *  will write a second lesson about the next idea along, and two lessons in one
+ *  reply is a syllabus nobody asked for — so the kit is withdrawn and the
+ *  challenge stages stand down at the same moment, off the same fact. */
+function taught(outcomes: Map<string, unknown[]>): boolean {
+  return (outcomes.get("teach_lesson") ?? []).some((value) => Boolean(value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "taught"));
+}
+
+/** The teaching kit, offered alongside whatever a stage requires. */
+function teachOffer(outcomes: Map<string, unknown[]>): string[] {
+  return taught(outcomes) ? [] : TEACH_TOOLS;
+}
+
 export const SOURCE_READ_TOOLS = ["search_practice_problems", "read_practice_problem", "read_practice_source", "read_practice_progress", "read_practice_submissions"];
 export const SOURCE_TOOLS = [...SOURCE_READ_TOOLS, "assign_practice_problem"];
 
@@ -134,8 +189,8 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
   const web = webSearch ? WEB_TOOLS : [];
   const source = practiceSource ? SOURCE_TOOLS : [];
   if (turnKind === "cold-start") return allowedTools("session-start", hasActiveQuestion, webSearch, practiceSource);
-  if (turnKind === "session-start") return new Set(["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
-  if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, "read_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
+  if (turnKind === "session-start") return new Set([...TEACH_TOOLS, "search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
+  if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, ...TEACH_TOOLS, "read_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
   /* Both ways of changing the challenge, because "give me a real problem instead"
      is a revision request like any other. Withholding the assignment here was a
      dead end with one exit: the agent could not hand over the LeetCode problem the
@@ -144,7 +199,7 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
      along. A sourced problem supersedes rather than edits, which the store already
      records as a replacement. */
   if (turnKind === "challenge-revision") return new Set(["read_attempt", "set_training_target", "replace_current_question", ...source]);
-  return new Set([...VISUALIZER_TOOLS, "read_session", ...(hasActiveQuestion ? ["replace_current_question"] : ["create_question"]), ...source, "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
+  return new Set([...VISUALIZER_TOOLS, ...TEACH_TOOLS, "read_session", ...(hasActiveQuestion ? ["replace_current_question"] : ["create_question"]), ...source, "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
 }
 
 /**
@@ -185,9 +240,28 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
    * setting a real problem or consciously writing one instead, and it has just
    * been made to look at what the source has.
    */
-  const challengeStage = (): ToolStage => context.practiceSource
-    ? { activeTools: ["assign_practice_problem", "create_question"], toolChoice: "required" }
-    : { activeTools: ["create_question"], toolChoice: "required" };
+  /* A turn that taught has already handed something over, so it goes to its
+     reply rather than being marched into writing a problem about what it has
+     just explained. This is the whole of "Spar does not always run off to set a
+     question" — and it is a consequence of a decision the agent made by calling
+     `teach_lesson`, not a loosening of the rule for turns that did not. */
+  /* The kit rides along here too, and that is the fix for the turn that meant to
+     teach and did not. Offering it only beside `set_training_target` put the
+     choice one stage too early: at that point the turn is naming the gap, and
+     the model answers the stage with the tool the stage requires. The moment it
+     is actually deciding between teaching and testing is this one — it has the
+     gap, it has looked at what the source holds, and the next call it makes is
+     the challenge. A turn brand new to a subject went all the way through that
+     and set a problem, because by the time it could see it was about to test
+     something the learner had never met, the teaching tools were gone.
+
+     `create_question` stays last so the host's narrowing after repeated
+     protocol failures still lands on the required tool. */
+  const challengeStage = (): ToolStage => taught(outcomes)
+    ? { activeTools: [], toolChoice: "none" }
+    : context.practiceSource
+      ? { activeTools: [...teachOffer(outcomes), "assign_practice_problem", "create_question"], toolChoice: "required" }
+      : { activeTools: [...teachOffer(outcomes), "create_question"], toolChoice: "required" };
   const playableQuestion = questionAttempts.some((value) => value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "playable");
   // Exhausting the budget is a fact for the controller to act on, not a reason
   // to end the turn. Throwing here left the learner with a compiler error and
@@ -224,6 +298,11 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
          they say "I thought i was 3 here", and the agent has to be able to reach
          for the picture on its own from that. */
       ...visualizerStageTools(outcomes),
+      /* And on every ordinary turn, the other thing a turn can hand over. "I
+         still don't get why this works" is the request this answers, and before
+         this the only honest response to it was a long reply the learner could
+         not keep. */
+      ...teachOffer(outcomes),
       "read_session",
       ...(context.hasActiveQuestion ? ["replace_current_question"] : ["create_question"]),
       /* The source stays available in full even mid-challenge. The reads because
@@ -281,7 +360,12 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
        open so challenge authoring stays focused on the compiler, not the vocabulary. */
     if (!completed("set_training_target")) {
       if (!completed("read_concept_graph")) return { activeTools: ["read_concept_graph"], toolChoice: "required" };
-      return { activeTools: ["set_training_target"], toolChoice: "required" };
+      /* The teaching kit rides alongside the required tool, the way the
+         visualiser does — the required one stays last so the host's narrowing
+         after repeated protocol failures still lands on it. This is the moment
+         the turn knows what the gap is and has not yet committed to testing it,
+         which is the only moment at which teaching it instead is a real choice. */
+      return { activeTools: [...teachOffer(outcomes), "set_training_target"], toolChoice: "required" };
     }
     /* Look at what the world already asks before writing something. This stage is
        the difference between a source the agent *may* use and one it actually
@@ -334,8 +418,13 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
      question has been read by now, so the agent either aims it or says that the
      trace raised something only the learner can answer — and asking is a first
      class outcome of reading a replay rather than a failure to decide. */
+  /* The strongest moment for a lesson in the whole machine: the turn has just
+     read the solve and the review, so it is holding the specific evidence of
+     what the learner does not understand. Offered here beside the target for the
+     same reason it is offered on session-start — this is where the choice
+     between teaching the idea and testing it is actually made. */
   if (!completed("set_training_target")) return {
-    activeTools: [...(completed("ask_user_question") ? [] : ["ask_user_question"]), "set_training_target"],
+    activeTools: [...(completed("ask_user_question") ? [] : ["ask_user_question"]), ...teachOffer(outcomes), "set_training_target"],
     toolChoice: "required",
   };
   if (context.practiceSource && !completed("search_practice_problems")) return { activeTools: ["search_practice_problems"], toolChoice: "required" };

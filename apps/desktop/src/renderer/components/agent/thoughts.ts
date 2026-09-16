@@ -65,3 +65,23 @@ function clean(value: string): string {
   return value.replace(/\*\*/g, "").replace(/\s*\n\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
+
+/**
+ * What to call a block of thinking on its one row.
+ *
+ * The heading the model gave the section it is currently writing, which is the
+ * rule the reference agent uses — it takes the last bold run in the thinking and
+ * puts it on the status line. Here the sections come first, because a heading
+ * that stands on its own line is the model naming a step and a phrase bolded
+ * mid-sentence is not.
+ *
+ * The bold run is the fallback, for the models that never write a heading on its
+ * own line: their thinking still has emphasis in it, and the last thing they
+ * chose to emphasise says more about where they are than the word "Thinking".
+ */
+export function latestHeading(body: string): string | undefined {
+  const titled = thoughts(body).filter((section) => section.title).at(-1);
+  if (titled?.title) return titled.title;
+  const emphasised = [...body.matchAll(/\*\*([^\n*]+)\*\*/g)].at(-1)?.[1]?.trim();
+  return emphasised || undefined;
+}

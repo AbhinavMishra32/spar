@@ -66,7 +66,7 @@ function SolvedAttempt({ body, id, verdict }: { body: string; id: string; verdic
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-thread font-semibold text-foreground">Attempt completed</span>
-        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-ui-sm text-muted-foreground">
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-thread text-muted-foreground">
           <span className="min-w-0 truncate">{result}</span>
           {requirements.length > 0 && <><span aria-hidden className="text-muted-foreground/45">·</span><span className="shrink-0">{requirements.length} requirement{requirements.length === 1 ? "" : "s"}</span></>}
           <span aria-hidden className="text-muted-foreground/45">·</span>
@@ -101,7 +101,7 @@ function Row({
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium text-foreground/85">{title}</span>
-        {meta && <span className="mt-0.5 block truncate text-ui-sm text-muted-foreground">{meta}</span>}
+        {meta && <span className="mt-0.5 block truncate text-thread text-muted-foreground">{meta}</span>}
       </span>
     </div>
   );
@@ -129,7 +129,7 @@ function Collapsible({ body }: { body: string }) {
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-foreground/85">{title}</span>
-          <span className="mt-0.5 block truncate text-ui-sm text-muted-foreground">{detail}</span>
+          <span className="mt-0.5 block truncate text-thread text-muted-foreground">{detail}</span>
         </span>
         <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
       </button>

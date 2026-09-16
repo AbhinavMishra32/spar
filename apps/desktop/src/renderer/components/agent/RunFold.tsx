@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { cn } from "@/lib/utils";
 
 /**
  * How long the turn took, the way a person says it.
@@ -96,6 +95,7 @@ export function RunFold({
   workedMs,
   onOpen,
   bodyLoaded = true,
+  connected = true,
   children,
 }: {
   /** Whether this turn is still running. */
@@ -116,6 +116,10 @@ export function RunFold({
   onOpen?: (() => void | Promise<void>) | undefined;
   /** Whether the body is here yet. False means `onOpen` has not run, or is running. */
   bodyLoaded?: boolean;
+  /** Whether the model has said anything yet. Before it has, the turn has no
+   *  work to fold and no length worth counting, so the header stays away and the
+   *  waiting line inside speaks for the turn on its own. */
+  connected?: boolean;
   children: React.ReactNode;
 }) {
   const [override, setOverride] = useState<boolean | undefined>();
@@ -144,7 +148,10 @@ export function RunFold({
   const elapsed = startedAt === undefined
     ? workedMs
     : Math.max(0, (finalStartedAt ?? (live ? now : startedAt + (workedMs ?? 0))) - startedAt);
-  const open = override ?? working;
+  /* Headerless means there is no control to fold with, so the body stays open —
+     the waiting line is the only thing in it and hiding that would leave the
+     turn showing nothing at all. */
+  const open = connected ? (override ?? working) : true;
   /* Unknown durations still fold — that is every turn recorded before this
      existed, and burying their steps would be a worse trade than a fold that
      cannot name its length. */
@@ -164,6 +171,7 @@ export function RunFold({
 
   return (
     <div className="min-w-0">
+      {connected && (
       <button
         aria-expanded={open}
         className="group/fold -mx-1 flex min-h-6 w-[calc(100%+0.5rem)] items-center gap-1 border-b border-border/40 px-1 pb-2 text-thread text-muted-foreground transition-colors select-none hover:text-foreground"
@@ -171,14 +179,15 @@ export function RunFold({
         title={known && !working ? `${workedFor(elapsed)} of work — click to ${open ? "hide" : "see"} the steps` : undefined}
         type="button"
       >
-        {/* The turn landing, said once. While it runs this line shimmers and
-            counts; the moment the agent starts answering it stops being a clock
-            and becomes a record, and swapping the words in place made the most
-            significant change of state in a turn the least visible thing on
-            screen. The past tense rises into the present tense's place and the
-            shimmer goes with it, which is the only mark the end of the work
-            gets — and the only one it needs, because the answer is arriving
-            underneath it at the same moment.
+        {/* The turn landing, said once. While it runs this line counts; the
+            moment the agent starts answering it stops being a clock and becomes
+            a record, and swapping the words in place made the most significant
+            change of state in a turn the least visible thing on screen. The past
+            tense rises into the present tense's place, which is the mark the end
+            of the work gets — and the only one it needs, because the answer is
+            arriving underneath it at the same moment. No shimmer: the running
+            clock already says the turn is live, and a second live-ness signal on
+            the same words was one too many.
 
             Keyed on the tense rather than on the text, so the clock's own ticks
             pass through without animating: a number that jumped every second
@@ -187,7 +196,7 @@ export function RunFold({
           <AnimatePresence initial={false} mode="popLayout">
             <motion.span
               animate={{ y: 0, opacity: 1 }}
-              className={cn("block min-w-0 truncate", working && "thinking-shimmer")}
+              className="block min-w-0 truncate"
               exit={reduced ? { opacity: 0 } : { y: -10, opacity: 0 }}
               initial={reduced ? false : { y: 10, opacity: 0 }}
               key={working ? "working" : "worked"}
@@ -204,6 +213,7 @@ export function RunFold({
           transition={{ type: "spring", visualDuration: reduced ? 0 : 0.34, bounce: 0.2 }}
         ><ChevronRight className="size-3.5" /></motion.span>
       </button>
+      )}
       {/* Animate to auto so the open fold continues to grow with streamed rows. */}
       <motion.div
         className="overflow-hidden"
@@ -224,7 +234,7 @@ export function RunFold({
         {/* React 19 takes `inert` as a boolean. A closed fold is zero pixels
             tall but still in the document, and without this its buttons stay
             tabbable — the learner would tab into steps they cannot see. */}
-        <div className="min-w-0 overflow-hidden pt-2" inert={!open}>
+        <div className={`min-w-0 overflow-hidden${connected ? " pt-2" : ""}`} inert={!open}>
           {!bodyLoaded && loading && <p className="py-1 text-thread text-muted-foreground" role="status">Loading the steps…</p>}
           {!bodyLoaded && failed && (
             <button className="py-1 text-thread text-muted-foreground transition-colors hover:text-foreground" onClick={() => void load()} type="button">

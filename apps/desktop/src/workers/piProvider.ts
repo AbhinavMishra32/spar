@@ -102,6 +102,24 @@ export function piTransportForApi(api: string): "sse" | undefined {
   return api === "openai-codex-responses" ? "sse" : undefined;
 }
 
+/**
+ * How much of its own reasoning the provider is asked to write out.
+ *
+ * OpenAI's default summary is titles and nothing else — "**Designing the test
+ * harness**", block after block, with no prose under any of them. Spar was
+ * storing those and drawing a row for each, which is a list of chapter headings
+ * presented as a transcript of the thinking. Asked for a detailed summary, the
+ * same request comes back with the working underneath the heading, which is the
+ * part worth keeping and the only part worth opening a row to read.
+ *
+ * Only the Responses families take the option. Everything else — Anthropic,
+ * Bedrock, the completions APIs — either streams its thinking whole or does not
+ * offer it, and neither needs asking.
+ */
+export function piReasoningSummaryForApi(api: string): "detailed" | undefined {
+  return api === "openai-responses" || api === "openai-codex-responses" || api === "azure-openai-responses" ? "detailed" : undefined;
+}
+
 /** pi's token counts, in the field names the rest of Spar already reads. The
  *  agent loop reports the same numbers from the same source, so a turn's cost
  *  does not change shape depending on which path ran it. */

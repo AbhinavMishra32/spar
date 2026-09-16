@@ -1,3 +1,5 @@
+import { normalizeStatementText } from "../../shared/statementText";
+
 /**
  * Challenge statements arrive from the agent as one unbroken paragraph: the task,
  * every rule, all the examples and the export note run together in a single
@@ -75,7 +77,7 @@ function sentences(source: string): string[] {
 }
 
 export function parseStatement(source: string): ParsedStatement {
-  const text = source.trim();
+  const text = normalizeStatementText(source).trim();
   const empty: ParsedStatement = { structured: false, lead: text, requirements: [], examples: [], note: "" };
   if (!text) return empty;
   if (alreadyStructured(text)) return fromMarkdown(text) ?? empty;

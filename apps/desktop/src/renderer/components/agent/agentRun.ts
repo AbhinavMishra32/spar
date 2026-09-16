@@ -49,11 +49,6 @@ export type AgentRun = {
   steersConsumed: number;
 };
 
-/** Provider reasoning is visible only as a transient loader at the live edge. */
-export function reasoningAtLiveEdge(parts: readonly RunPart[], streaming: boolean, finalStartedAt?: number): boolean {
-  return streaming && finalStartedAt === undefined && parts.at(-1)?.kind === "reasoning";
-}
-
 /**
  * Folds the raw utility-process stream into the shape the transcript renders.
  * Consecutive text deltas append to the trailing text part so streaming reads as
@@ -241,7 +236,8 @@ export type GroupedPart =
   /** A diagram the agent built into its reply. Lifted out of the step rows for
    *  the same reason a published challenge is: it is something the learner is
    *  meant to look at, not a record of the agent having looked at something. */
-  | { kind: "explained-trace"; id: string; part: ToolPart };
+  | { kind: "explained-trace"; id: string; part: ToolPart }
+  | { kind: "lesson"; id: string; part: ToolPart };
 
 /**
  * Rows, in the order everything happened.
@@ -312,6 +308,9 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
     // A successful visualisation is the picture; a failed one is an ordinary
     // failed step, because there is nothing to draw.
     else if (part.kind === "tool" && part.tool === "visualize_explain" && part.phase === "done") grouped.push({ kind: "explained-trace", id: `trace-${part.id}`, part });
+    /* A lesson is the turn's other handover, so it gets the other card. Only a
+       filed one: a rejected lesson is a failed call and reads as one. */
+    else if (part.kind === "tool" && isLessonPublished(part)) grouped.push({ kind: "lesson", id: `lesson-${part.id}`, part });
     /* Every other call is its own row.
        Consecutive calls used to be folded into one collapsed group under a
        synthesized summary — "Reviewed past attempts, checked concept evidence, and
@@ -381,6 +380,9 @@ const TOOL_VERBS: Record<string, string> = {
   visualize_find: "Looked for the moment it changed",
   visualize_read_step: "Read the state at that step",
   visualize_explain: "Drew what happens",
+  teach_lesson: "Taught",
+  read_lesson: "Read a lesson",
+  search_lessons: "Searched what it has taught",
   web_search: "Searched the web",
   web_fetch: "Read a web page",
 };
@@ -483,6 +485,14 @@ export function isChallengePublished(part: RunPart): boolean {
   return part.kind === "tool" && part.phase === "done" && CHALLENGE_TOOLS.includes(part.tool);
 }
 
+export function isLessonPublished(part: RunPart): boolean {
+  return part.kind === "tool" && part.tool === "teach_lesson" && part.phase === "done" && /"lessonId"\s*:\s*"[^"\s]+"/.test(part.output);
+}
+
+export function isPublishedArtifact(part: RunPart): boolean {
+  return isChallengePublished(part) || isLessonPublished(part);
+}
+
 /** What a card away from the transcript says about a turn that is under way. */
 export type RunActivity = {
   state: "working" | "failed";
@@ -577,5 +587,5 @@ export function diffTotals(files: AgentActivityFile[]): { added: number; removed
 
 /** Keep successful artifacts outside the work fold, including older runs without a final phase. */
 export function publishedRunArtifacts(run: AgentRun): RunPart[] {
-  return run.parts.slice(0, run.finalFrom ?? run.parts.length).filter(isChallengePublished);
+  return run.parts.slice(0, run.finalFrom ?? run.parts.length).filter(isPublishedArtifact);
 }

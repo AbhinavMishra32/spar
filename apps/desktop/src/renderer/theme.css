@@ -115,34 +115,29 @@
   --radius-item: 0.5rem;
   --radius-menu: 0.75rem;
 
-  /* The platform's own UI face leads, and for one reason: the window is glass, so
-     Chromium cannot use subpixel antialiasing anywhere in it — every glyph in the
-     app is rendered grayscale against a backdrop we do not own. SF Pro and Segoe UI
-     Variable are hinted and optically sized for exactly that job at chrome sizes; a
-     webfont is not.
+  /* Geist, everywhere, and the stack is the reference's own: Aside sets
+     `"Geist Variable", "Geist", sans-serif` on `html, body` and never names a
+     platform face anywhere above it. The variable cut leads because it is the
+     one we ship (`@fontsource-variable/geist`, imported at the top of this
+     file); the static name behind it catches a locally installed copy.
 
-     The generics are ChatGPT's, whose sidebar this was measured against: it resolves
-     `"OpenAI Sans", var(--font-sans-default)`, where the default is
-     `-apple-system-body, ui-sans-serif, -apple-system, system-ui, "Segoe UI", …`.
-     Only the fallback half is copied here. OpenAI Sans is a licensed face bundled
-     inside their app, so it is not ours to ship, and naming a font nobody here has
-     installed would buy nothing.
+     This used to be the platform's UI face, on the argument that the window is
+     glass — Chromium cannot subpixel-antialias against a backdrop it does not
+     own, and SF Pro and Segoe UI Variable are hinted for grayscale rendering at
+     chrome sizes where a webfont is not. The reference runs a glass window too
+     and sets Geist through all of it, so that argument was losing us the one
+     thing the app is measured against for the sake of a difference nobody
+     asked for. Geist is now the whole app's face, not just the transcript's —
+     `--thread-font` still names it separately because the transcript scopes a
+     whole system of its own and should keep working if this line moves again.
 
-     Measured in this Electron rather than assumed: `-apple-system`,
-     `-apple-system-body`, `ui-sans-serif` and `"SF Pro Text"` all fail to resolve —
-     alone, each falls through to the default serif. `system-ui` and
-     `BlinkMacSystemFont` are what actually deliver the macOS UI face, and always
-     were, so this reorder is a no-op on macOS and is here for the platforms and
-     Chromium versions where those entries do resolve.
-
-     `"Segoe UI Variable Text"` stays ahead of the generics on purpose. It is the
-     better Windows face and it is more specific than `ui-sans-serif`/`system-ui`,
-     which resolve on Windows too and would otherwise win and hand us plain Segoe UI.
-
-     Geist is gone from the tail: its stems came out soft and grey beside a native
-     source list, and `sans-serif` is a better last resort than a webfont we rejected
-     on looks. It is still the transcript's face — see `--thread-font`. */
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", -apple-system-body, ui-sans-serif, system-ui, "Segoe UI", "Helvetica", "Arial", sans-serif;
+     The platform stack stays as the tail rather than being deleted. Nothing
+     here ships Geist to a machine that fails to load it, but a missing webfont
+     falling through to the native UI face is a far better failure than falling
+     through to Times. `"Segoe UI Variable Text"` stays ahead of the generics on
+     Windows for the same reason it always did: it is the better face and it is
+     more specific than `ui-sans-serif`/`system-ui`, which resolve there too. */
+  --font-sans: "Geist Variable", "Geist", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", -apple-system-body, ui-sans-serif, system-ui, "Segoe UI", "Helvetica", "Arial", sans-serif;
   --font-spar: "Poppins", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "SF Mono", "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -183,9 +178,18 @@
      these comments for class names and will happily emit a rule for anything
      that looks like one.) */
 
-  /* Chrome: toolbars, panels, the result rail. Read at a glance, not at length. */
-  --text-ui: 0.75rem;                                    /* SET */
-  --text-ui--line-height: 1.125rem;
+  /* Chrome: toolbars, panels, the result rail. Read at a glance, not at length.
+
+     13px, which is the size the reference sets its own dense chrome at — its
+     tab strip is `text-[13px] leading-5`, and everything roomier than a tab
+     (buttons, menu rows) is the 14px the content surfaces run at. The step
+     under it lands on 12px, which is the reference's `text-xs` and what it uses
+     for timestamps, counts and badges. So the chrome is 13/12 against content's
+     14/12, rather than the 12/11 this ran at when the app was set in the
+     platform face — Geist's x-height is smaller than SF Pro's at the same
+     nominal size, and 12px chrome in it reads as small print. */
+  --text-ui: 0.8125rem;                                  /* SET */
+  --text-ui--line-height: 1.25rem;
   --text-ui-sm: calc(var(--text-ui) - 0.0625rem);
   --text-ui-sm--line-height: 1rem;
 
@@ -199,10 +203,14 @@
      the one knob it was supposed to have.
 
      The multipliers are the proportions those literals already had against a
-     13px base (1.3× and 0.85×), so at the current value this renders within a
-     fifth of a pixel of what it did before. They are here to hold that
-     relationship at 16px or at 11px, not to change it at 13. */
-  --text-content: 0.8250rem;                             /* SET */
+     13px base (1.3× and 0.85×). They are here to hold that relationship at 16px
+     or at 11px, not to change it at 14.
+
+     14px, and the same 14px the thread runs at: the pane and the transcript are
+     the two surfaces in this window read at length, they sit side by side, and
+     a statement set a step under the reply that discusses it reads as the
+     smaller of two documents rather than as the thing being worked on. */
+  --text-content: 0.875rem;                              /* SET */
   --text-content--line-height: calc(var(--text-content) * 1.667);
   --text-content-sm: calc(var(--text-content) * 0.85);
   --text-content-sm--line-height: calc(var(--text-content-sm) * 1.5);
@@ -212,20 +220,28 @@
   /* The source list runs a step above the rest of the chrome, and deliberately.
      A sidebar is read at a glance and from further away than a toolbar — it is
      the one surface you navigate by shape rather than by reading — so its labels
-     are set at the size the platform's own source lists use rather than at the
-     dense size that suits a row of controls. Every sidebar text size comes from
-     this pair; nothing in there is set in `--text-ui`.
+     are set at the size a source list is read at rather than at the dense size
+     that suits a row of controls. Every sidebar text size comes from this pair;
+     nothing in there is set in `--text-ui`.
+
+     14px, and the reference's own sidebar size: its chat list item label is
+     `text-sm`, and nothing in that list is set smaller except the badges.
+
      Line height stays at 1.375rem rather than scaling with the size. Sidebar rows
      are a fixed 1.875rem, so this number sets how much room the label has inside
      that pill, not the space between rows; letting it grow with the text is what
      would make the hover fill look stuffed. */
-  --text-source: 0.8250rem;                              /* SET */
+  --text-source: 0.875rem;                               /* SET */
   --text-source--line-height: 1.375rem;
-  /* One step under the rows, always. This was a literal `0.875rem`, which was a
-     step *under* the old 15px source size and a step *over* the current one —
-     the section headers, the ⌘ hints and the empty-state lines were rendering
-     larger than the rows they caption. Derived, it cannot invert again. */
-  --text-source-sm: calc(var(--text-source) - 0.0625rem);
+  /* Under the rows, always. This was a literal `0.875rem`, which was a step
+     *under* the old 15px source size and a step *over* the one after that — the
+     section headers, the ⌘ hints and the empty-state lines were rendering larger
+     than the rows they caption. Derived, it cannot invert again.
+
+     Two pixels down rather than one, so it lands on 12px: that is the
+     reference's `text-xs`, the size its own list badges and timestamps use, and
+     a 13px caption under a 14px row is too close to read as a caption at all. */
+  --text-source-sm: calc(var(--text-source) - 0.125rem);
   --text-source-sm--line-height: 1.25rem;
 
   /* The agent thread, at one size.
@@ -241,14 +257,13 @@
      every other surface in the app — toolbars, panels, the result rail — and
      none of those is a reading column.
 
-     15px: the problem statement's 13px plus two. The problem pane is the
-     baseline — it is scanned against code in a narrow column and stays where it
-     is — and the thread is the one surface read at length, which is why it gets
-     the step up rather than the pane coming with it. Nothing in the thread is
+     14px, which is the reference's own body size: Aside sets `.streamdown` — the
+     face of its session view, replies and tool rows alike — to Tailwind's
+     `text-sm`, and its Geist is drawn to sit there. Nothing in the thread is
      sized relative to anything else: it is all this one token, so raising it
      raises every row, caption and payload together and the column stays one
      size. */
-  --text-thread: 0.8250rem;
+  --text-thread: 0.875rem;
   /* Derived, so the size above is genuinely the only number to touch. 1.6 is
      what 15px/24px already was; changing the size alone now carries the leading
      with it instead of leaving the thread tight or loose until someone
@@ -1035,21 +1050,22 @@
     /* ---- The reference thread, matched rather than approximated ------------
        The transcript is the one surface in this window that is not chrome, and
        the reference it is measured against — Aside's session view — builds it
-       from a different system than the rest of this app uses: Geist rather than
-       the platform face, a superellipse at every radius rather than only at the
-       sheet scale, and a two-size type scale (14px for the work, 16px for the
-       prose) rather than the 12/13px the chrome runs at.
+       from a different system than the rest of this app uses: a superellipse at
+       every radius rather than only at the sheet scale, and one type size for
+       the whole column — its `.streamdown` body and its tool rows are both 14px
+       — rather than the 13/12px the chrome runs at. The face is no longer one of
+       those divergences: Geist is the whole app's now (see `--font-sans`).
 
        Those are deliberate divergences from the app's own rules, so they are
        scoped here and nowhere else. Nothing outside `.agent-transcript` sees
        any of it: the sidebar, the toolbars and the settings pages keep the
        system face and the arcs they were designed with. */
 
-    /* Geist, and only here. The rest of the window uses the platform's own UI
-       face because it is hinted for chrome sizes against a glass backdrop —
-       see `--font-sans`. The transcript is a reading surface at 14–16px, which
-       is where Geist was drawn to sit, and it is the single largest reason the
-       reference reads the way it does. */
+    /* The same Geist `--font-sans` now resolves to app-wide, named again here so
+       the transcript keeps its own handle on its face. It is the single largest
+       reason the reference reads the way it does, and the column is a system
+       unto itself: if `--font-sans` is ever pointed somewhere else, the thread
+       should not silently follow it. */
     --thread-font: "Geist Variable", "Geist", var(--font-sans);
     font-family: var(--thread-font);
 
@@ -1640,13 +1656,13 @@
        and list indent below is a multiple of this, so the whole system still
        rescales from a single line. */
     --md-font-size: var(--text-thread);
-    /* The system face, and the system's own optical sizing.
-
-       `--font-display` is named for the job rather than for a file: on macOS it
-       resolves through `-apple-system` exactly as `--font-sans` does, and the
-       platform picks the Text or Display cut from the size. Naming it here is
-       still worth it, because on Windows the two stacks genuinely differ. */
-    font-family: var(--font-display);
+    /* Whatever face the surface around it runs. Inside the transcript that is
+       Geist, which `--thread-font` puts in scope; everywhere else the custom
+       property is unset and the fallback hands back the platform stack. Written
+       as one `var()` with a fallback rather than as a bare token, because a
+       token that is never defined makes the whole declaration invalid and the
+       rule silently does nothing — which is what this line used to do. */
+    font-family: var(--thread-font, var(--font-sans));
     /* Slightly off the full foreground. Pure white text at this size on a dark
        ground buzzes; ChatGPT's body sits just under its own maximum too. */
     color: color-mix(in oklab, var(--foreground) 92%, transparent);
@@ -1822,12 +1838,12 @@
 
   /* The problem pane runs at the app's content size, not the transcript's.
 
-     `.md-prose` is scaled for the thread, which is a reading surface. A problem
-     statement sits beside the editor in a column the learner is scanning against
-     code, and it stays at 13px there — that size is the baseline the thread's
-     own size is set from, not something that follows it. Rescoped rather than
-     reverted: every margin, heading and list indent still derives from this one
-     line, so the pane keeps the same system at its own size. */
+     `.md-prose` is scaled for the thread. The pane runs at the same number today
+     — both tokens are 14px — but they are still two tokens, because the pane is
+     scanned against code in a narrow column and the thread is read at length,
+     and those are different jobs that can want different sizes. Every margin,
+     heading and list indent still derives from this one line, so the pane keeps
+     the same system whichever size it is set at. */
   .md-prose-content {
     --md-font-size: var(--text-content);
   }
@@ -1877,14 +1893,39 @@
     corner-shape: superellipse(1.4);
   }
 
-  /* Receding cards use darker pigment with less coverage in light mode. */
+  /* The same card, made opaque.
+
+     A transcript card is 80% of its own pigment so the conversation it sits on
+     stays faintly present behind it, which is right for something in the flow
+     and wrong for something over it: the lesson reader is a page you read, and
+     a paragraph with the thread showing through it is a paragraph you squint
+     at. Same material, same corner, full coverage. */
+  .transcript-block-solid {
+    background: var(--code-background);
+  }
+
+  /* A receding card is still a card. These used to be a half-percent black wash
+     over the transcript, which on a light background is nothing at all — the
+     shoulder behind the front card read as a stray outline rather than as the
+     next card in a stack, and an outline with no material in it is the one thing
+     the stack cannot afford, since the whole depth cue is bodies overlapping.
+     So the same pigment the front card is made of, at close to full coverage —
+     higher than the front card's own 80%, which is not a mistake: the stack
+     already fades each shoulder by 15% per depth in `ActivityRow`, and that
+     multiplies whatever the fill resolves to. A fill chosen to look recessed on
+     its own gets the recession applied to it twice and lands on nothing. The
+     paint here is material; the element opacity is the distance. The border
+     gives up coverage on its own, so the outline recedes faster than the body
+     rather than outliving it. */
   :root:not(.dark) .transcript-block[data-stack-depth="1"] {
-    background: rgb(0 0 0 / 0.5%);
+    background: color-mix(in oklab, var(--code-background) 96%, transparent);
+    border-color: color-mix(in oklab, var(--border-surface-strong) 80%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%), 0 -1px 3px rgb(0 0 0 / 2.5%);
   }
 
   :root:not(.dark) .transcript-block[data-stack-depth="2"] {
-    background: rgb(0 0 0 / 0.25%);
+    background: color-mix(in oklab, var(--code-background) 88%, transparent);
+    border-color: color-mix(in oklab, var(--border-surface-strong) 62%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 25%), 0 -1px 3px rgb(0 0 0 / 2%);
   }
 

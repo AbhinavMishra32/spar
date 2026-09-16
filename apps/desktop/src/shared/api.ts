@@ -38,6 +38,7 @@ export const ipc = {
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
   visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity",
+  lessonRead: "lesson:read",
   restoreRetry: "restore:retry",
   updateState: "update:state", updateCheck: "update:check", updateDownload: "update:download",
   updateDismissChangelog: "update:dismiss-changelog",
@@ -398,6 +399,11 @@ export type AgentActivityFile = { path: string; added: number; removed: number }
  *  `sliceView` in `@spar/visualizer` and is passed through the store opaquely. */
 export type AgentVisualization = { id: string; sessionId: string; title: string; payload: VisualizerView };
 export type VisualizerView = import("@spar/visualizer").TraceView & { setup: string; takeaway: string };
+/** A lesson the agent wrote, read back for the card and the reader that opens
+ *  it. The pages are the whole of it, so unlike a visualisation there is no
+ *  second payload behind this one — but it is still fetched rather than carried
+ *  in the transcript row, because eight pages of markdown is not a row. */
+export type StoredLesson = { id: string; sessionId: string; title: string; summary: string; createdAt: string } & import("@spar/domain").LessonInput;
 export type AgentStreamEvent = {
   runId: string;
   /** Which session this turn is working on. Stamped in the main process, because
@@ -639,6 +645,9 @@ export interface SparApi {
    *  far larger than the sentence that introduces it, and a transcript that
    *  inlined them would grow by a trace per explanation. */
   visualizerView(input: { id: string }): Promise<AgentVisualization | null>;
+  /** One lesson, whole. Null for an id written by a version that is gone, which
+   *  the card draws as its own missing state rather than failing the thread. */
+  lessonRead(input: { id: string }): Promise<StoredLesson | null>;
   /** The steps behind an older transcript row, which the session load leaves on
    *  disk. See `TRANSCRIPT_ACTIVITY_WINDOW`. */
   messageActivity(input: { messageId: string }): Promise<AgentActivityStep[]>;

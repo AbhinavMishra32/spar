@@ -576,72 +576,103 @@ function TrackGroup({
           was — the Track row is a heading, and a heading does not get selected
           along with its contents. */}
       <div
-        className={cn(ROW, "group/track gap-1 pl-1 pr-1 hover:bg-[var(--sidebar-accent)]", menu && "bg-[var(--sidebar-accent)]")}
+        className="sidebar-row group/track relative"
         onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}
+        // The cluster is absolute, so the gutter it needs has to be stated: one
+        // slot for the arrow, one for the ⋮, and the inset it sits in.
+        style={{ "--sidebar-controls-width": "calc(2 * 1.5rem + 0.7rem)" } as CSSProperties}
       >
-        <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 text-left outline-none" type="button">
+        <CollapsibleTrigger
+          className={cn(ROW, "gap-1 pl-1 pr-1 group-hover/track:bg-[var(--sidebar-accent)]", menu && "bg-[var(--sidebar-accent)]")}
+          type="button"
+        >
           {/* No glyph beyond the disclosure. Every mark tried beside it — a
               folder, the Track target — claimed the Track was a kind of thing it
               is not. A source list names its groups and leaves icons to items. */}
           <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
             <ChevronRight className={cn("size-3.5 transition-transform duration-200 ease-out", open && "rotate-90")} />
           </span>
-          <span className="min-w-0 flex-1 truncate">{track.title}</span>
+          {/* Same treatment the session titles get, and for the same reason: the
+              controls take their room from the title only while they are showing,
+              so a name that fits at rest is drawn whole rather than fading under
+              a gutter reserved for buttons nobody can see. What the fade does
+              hide, hovering walks past. */}
+          <RowTitle>{track.title}</RowTitle>
         </CollapsibleTrigger>
-        {/* The Track's own page, which is a different place from its sessions.
-            Hidden until the row is under the pointer, like the controls on a
-            session row: it is the rarer of the two things you want from a Track,
-            and a permanent chevron on every row is a second column of chrome. */}
-        <button
-          aria-label={`Open ${track.title}`}
-          className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground opacity-0 transition-opacity group-hover/track:opacity-100 focus-visible:opacity-100 hover:text-foreground"
-          onClick={onOpen}
-          title={`Open ${track.title}`}
-          type="button"
+
+        {/* No `flex` utility here: display is CSS's to own, because it is the
+            thing hover toggles, and a utility-layer `display` would outrank the
+            rule that hides the cluster at rest. */}
+        <div
+          className="absolute right-1 top-1/2 -translate-y-1/2 items-center gap-px"
+          data-open={menu}
+          data-row-controls
         >
-          <ArrowRight className="size-3.5" />
-        </button>
-        {/* Everything else the Track can do. Held open the same way the session
-            menu is — the trigger stays visible while its menu is up, or the panel
-            would be anchored to a button that faded out from under it. */}
-        <DropdownMenu modal={false} onOpenChange={setMenu} open={menu}>
-          <DropdownMenuTrigger asChild>
-            <button
-              aria-label={`Options for ${track.title}`}
-              className={cn(
-                "grid size-5 shrink-0 place-items-center rounded text-muted-foreground transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/track:opacity-100",
-                menu ? "text-foreground opacity-100" : "opacity-0",
-              )}
-              type="button"
+          {/* The Track's own page, which is a different place from its sessions.
+              The label rides above the icon rather than in a native `title`: the
+              OS tooltip takes a second to arrive and lands wherever it likes, and
+              these are two unlabelled shapes appearing under a pointer that is
+              already moving. */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                aria-label={`Open Track: ${track.title}`}
+                className={ICON_BUTTON}
+                onClick={onOpen}
+                type="button"
+              >
+                <ArrowRight className={CONTROL_ICON} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Open Track</TooltipContent>
+          </Tooltip>
+
+          {/* Everything else the Track can do. Held open the same way the session
+              menu is — the trigger stays visible while its menu is up, or the
+              panel would be anchored to a button that faded out from under it. */}
+          <DropdownMenu modal={false} onOpenChange={setMenu} open={menu}>
+            {/* No label once the menu is up: the menu says everything the
+                tooltip would, and the two would stack on the same button. */}
+            <Tooltip {...(menu ? { open: false } : {})}>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    aria-label={`Options for ${track.title}`}
+                    className={cn(ICON_BUTTON, menu && "text-foreground")}
+                    type="button"
+                  >
+                    <EllipsisVertical className={CONTROL_ICON} />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>More</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent
+              align="start"
+              className="min-w-[11.5rem]"
+              onKeyDown={(event) => {
+                if (event.metaKey || event.ctrlKey || event.altKey) return;
+                const item = items.find((entry) => entry.key === event.key.toLowerCase());
+                if (!item) return;
+                event.preventDefault();
+                setMenu(false);
+                item.run();
+              }}
+              side="right"
             >
-              <EllipsisVertical className="size-3.5" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            align="start"
-            className="min-w-[11.5rem]"
-            onKeyDown={(event) => {
-              if (event.metaKey || event.ctrlKey || event.altKey) return;
-              const item = items.find((entry) => entry.key === event.key.toLowerCase());
-              if (!item) return;
-              event.preventDefault();
-              setMenu(false);
-              item.run();
-            }}
-            side="right"
-          >
-            {items.map((item) => (
-              <Fragment key={item.key}>
-                {item.destructive && <DropdownMenuSeparator />}
-                <DropdownMenuItem onSelect={item.run} variant={item.destructive ? "destructive" : "default"}>
-                  <item.icon />
-                  <span className="flex-1">{item.label}</span>
-                  <DropdownMenuShortcut className="uppercase">{item.key}</DropdownMenuShortcut>
-                </DropdownMenuItem>
-              </Fragment>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+              {items.map((item) => (
+                <Fragment key={item.key}>
+                  {item.destructive && <DropdownMenuSeparator />}
+                  <DropdownMenuItem onSelect={item.run} variant={item.destructive ? "destructive" : "default"}>
+                    <item.icon />
+                    <span className="flex-1">{item.label}</span>
+                    <DropdownMenuShortcut className="uppercase">{item.key}</DropdownMenuShortcut>
+                  </DropdownMenuItem>
+                </Fragment>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
       {/* Indented to the Track's own text column, so the titles inside line up
           under the name of the thing holding them. */}

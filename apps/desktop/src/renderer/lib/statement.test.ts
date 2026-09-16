@@ -74,3 +74,24 @@ describe("statements that should be left as they were written", () => {
     expect(parsed.examples).toEqual([{ call: "total([1,2])", result: "3" }]);
   });
 });
+
+describe("saved statements with escaped line breaks", () => {
+  it("recovers the same sections, examples and constraints as real Markdown", () => {
+    expect(parseStatement(WRITTEN.replaceAll("\n", "\\n"))).toEqual(parseStatement(WRITTEN));
+  });
+  it("returns repaired Markdown even when no custom grouping is needed", () => {
+    expect(parseStatement("Read this.\\n\\nThen implement it.").lead).toBe("Read this.\n\nThen implement it.");
+  });
+});
+
+it("recovers the holdout question alongside host-appended requirements", () => {
+  const source = String.raw`Implement \`evaluate_holdout(records, test_indices)\`.\n\n- Exclude held-out records.\n- Preserve test order.\n\n**Examples**\n\n1. **Input:** \`records = [[1, 10], [2, 30], [3, 20], [4, 40]]\`, \`test_indices = [1, 3]\`\n   **Output:** \`{"predictions": [15.0, 15.0], "mae": 20.0}\`\n   **Explanation:** Training labels 10 and 20 average to 15.\n\n**Constraints**\n\n- At least one training record.`.replaceAll('\\`', '`') + "\n\n## How this must be solved\n\n- Keep held-out data out of training.";
+  const parsed = parseStatement(source);
+  expect(parsed.structured).toBe(true);
+  expect(parsed.requirements).toEqual(["Exclude held-out records.", "Preserve test order."]);
+  expect(parsed.examples).toHaveLength(1);
+  expect(parsed.examples[0]?.result).toContain('"mae": 20.0');
+  expect(parsed.note).toContain("At least one training record.");
+  expect(parsed.note).toContain("Keep held-out data out of training.");
+  expect(parsed.lead).not.toContain("\\n");
+});

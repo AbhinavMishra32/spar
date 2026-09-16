@@ -70,6 +70,7 @@ export function ProblemsPage({
   onOpenConcept,
   onStartProblem,
   progress,
+  shelfRequest,
 }: {
   /** The ledger and the subject tree, for the map view only — the list and the
    *  grid are built from problems, and this is the same library seen from
@@ -85,6 +86,11 @@ export function ProblemsPage({
   /** Opens a session on one problem the learner picked. Resolves when the session
    *  is on screen, so the row that was clicked can stay busy until it is. */
   onStartProblem(input: { source: "leetcode" | "codeforces"; slug: string }): Promise<void>;
+  /** Bumped by the shell when something elsewhere asked for the shelf — pressing
+   *  a save receipt, so far. A counter and not a boolean because this page owns
+   *  its filters: this is one request to turn the shelf on, and asking twice
+   *  after the learner has turned it back off has to work the second time. */
+  shelfRequest?: number;
 }) {
   const [query, setQuery] = useState("");
   const [origin, setOrigin] = useState<ProblemOrigin | "all">("all");
@@ -107,6 +113,11 @@ export function ProblemsPage({
   const [opening, setOpening] = useState<string | null>(null);
 
   const search = useProblemSearch(api, { query, band, standing });
+
+  useEffect(() => {
+    if (!shelfRequest) return;
+    setOnlySaved(true);
+  }, [shelfRequest]);
 
   useEffect(() => localStorage.setItem(VIEW_KEY, view), [view]);
 

@@ -73,3 +73,31 @@ export async function toggleSavedProblem(key: string, snapshot: SavedProblem["sn
     publish(before);
   }
 }
+
+/**
+ * The way back to the shelf, registered by the shell.
+ *
+ * The bookmark is drawn three components deep inside a transcript and the shelf
+ * is a page the window navigates to, so the receipt for saving something has no
+ * way to offer the place it was saved to — which is the only thing the receipt
+ * is for. The shell owns navigation and registers the one call here, next to the
+ * shelf itself rather than in a general-purpose router: this is the single
+ * destination that needs reaching from anywhere, and a registry for one route is
+ * honest about being that.
+ */
+let openShelf: (() => void) | null = null;
+
+export function registerShelfRoute(handler: (() => void) | null) {
+  openShelf = handler;
+  return () => { if (openShelf === handler) openShelf = null; };
+}
+
+/** Whether there is anywhere to send them. False in the previews and harnesses,
+ *  which mount a surface without the shell around it. */
+export function canOpenShelf(): boolean {
+  return openShelf !== null;
+}
+
+export function openSavedProblems() {
+  openShelf?.();
+}

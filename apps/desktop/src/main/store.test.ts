@@ -785,3 +785,19 @@ it("deletes a Track and its owned history while preserving other Tracks and base
     expect(store.readSession(baseline.sessionId)).not.toBeNull();
   } finally { store.close(); }
 });
+
+it("keeps published lesson cards available outside an older turn's deferred work log", () => {
+  const store = new LocalStore(":memory:");
+  try {
+    const { sessionId } = store.createSession("Learn Python");
+    const step = { kind: "tool" as const, tool: "teach_lesson", label: "First lesson", actionTitle: "", detail: "", ok: true, text: "", seconds: 0, input: "{}", output: '{"status":"taught","lessonId":"lesson-1"}' };
+    const message = store.addMessage(sessionId, "agent", "Read this lesson.", [
+      { ...step, tool: "search_lessons", output: "{}" }, step,
+      { ...step, ok: false, output: '{"status":"invalid"}' },
+    ]);
+    for (let index = 0; index < 14; index += 1) store.addMessage(sessionId, "learner", `Follow-up ${index}`);
+    const saved = store.readSession(sessionId)?.messages.find((item) => item.id === message?.id);
+    expect(saved?.activity).toEqual([step]);
+    expect(saved?.activityCount).toBe(3);
+  } finally { store.close(); }
+});

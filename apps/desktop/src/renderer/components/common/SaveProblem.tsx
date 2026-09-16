@@ -2,7 +2,8 @@ import { Bookmark } from "lucide-react";
 import type { SavedProblem } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { toggleSavedProblem, useProblemSaved } from "@/hooks/use-saved-problems";
+import { canOpenShelf, openSavedProblems, toggleSavedProblem, useProblemSaved } from "@/hooks/use-saved-problems";
+import { toast } from "@/hooks/use-toasts";
 
 /**
  * The bookmark, wherever a problem is shown.
@@ -64,7 +65,7 @@ export function SaveProblem({
              three the thing underneath opens the problem. Saving is not opening. */
           event.preventDefault();
           event.stopPropagation();
-          void toggleSavedProblem(problemKey, snapshot);
+          saveWithReceipt({ problemKey, snapshot, title, saved });
         }}
         type="button"
       >
@@ -73,4 +74,42 @@ export function SaveProblem({
       <TooltipContent>{saved ? "Saved — click to remove" : "Save for later"}</TooltipContent>
     </Tooltip>
   );
+}
+
+/**
+ * File a problem and say so.
+ *
+ * Exported because the bookmark is not the only way to save one — the card's
+ * overflow menu carries the same action, and a menu item that files something
+ * silently while the bookmark beside it announces the same act is two different
+ * promises about the same shelf. The receipt belongs to saving, not to the
+ * control that happened to do it.
+ *
+ * The shelf is a page away, which is why filing needed a word back at all — and
+ * why the word names where it went and is itself the way there. Undo is the only
+ * other offer worth making: the bookmark is how you do everything else, and it
+ * is still under the pointer. Keyed on the problem, so pressing twice replaces
+ * the receipt rather than leaving two that disagree about where it ended up.
+ */
+export function saveWithReceipt({
+  problemKey,
+  snapshot = null,
+  title,
+  saved,
+}: {
+  problemKey: string;
+  snapshot?: SavedProblem["snapshot"];
+  title: string;
+  /** Whether it was on the shelf *before* this press. */
+  saved: boolean;
+}) {
+  void toggleSavedProblem(problemKey, snapshot);
+  toast({
+    key: `saved:${problemKey}`,
+    title: saved ? "Removed from Saved" : "Saved in Problems",
+    detail: saved ? title : `${title} — open your saved list`,
+    glyph: <Bookmark className={saved ? undefined : "fill-current"} />,
+    action: { label: "Undo", onClick: () => void toggleSavedProblem(problemKey, snapshot) },
+    ...(saved || !canOpenShelf() ? {} : { onClick: openSavedProblems }),
+  });
 }

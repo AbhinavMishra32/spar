@@ -1,3 +1,4 @@
+import { ArtifactCard, ArtifactCardRow } from "./ArtifactCard";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useReducedMotion } from "motion/react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
@@ -8,18 +9,19 @@ import { cn } from "@/lib/utils";
 import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
 import { ToolDetail } from "./ToolDetail";
 import { toolSubject } from "./toolSubject";
-import { thoughts } from "./thoughts";
+import { latestHeading, thoughts } from "./thoughts";
 import { useMarkdownLinks } from "./MarkdownLinks";
 import { FadedScroll, RawPayload } from "./ToolPayload";
 import { SourceGlyph } from "../common/SourceGlyph";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
-import { ChallengeCardMeta, ChallengeCardMenu, ChallengeOutcomeTag } from "./ChallengeCardMeta";
+import { BAND_WORD, ChallengeCardMeta, ChallengeCardMenu, ChallengeOutcomeTag, DIFFICULTY_WORD } from "./ChallengeCardMeta";
+import { ChallengePreview, hasChallengePreview, publishedPreviewData, stopPreviewData, useCursorPreview } from "./ChallengePreview";
 import { SaveProblem } from "../common/SaveProblem";
 import { readPublishedChallenge } from "./publishedChallenge";
 import { useRevealOnExpand } from "./useRevealOnExpand";
 import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
 import { solveStats, spentOn, type SolveStats } from "./solveStats";
-import type { ChallengeTrail } from "../workspace/ChallengeStepper";
+import type { ChallengeStop, ChallengeTrail } from "../workspace/ChallengeStepper";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
@@ -46,7 +48,7 @@ type ToolPart = Extract<RunPart, { kind: "tool" }>;
  * Only mounts animate. A streaming row updates its own text several times a
  * second, and re-running the entrance on each of those is a step that vibrates.
  */
-function useThreadArrival(card = false) {
+export function useThreadArrival(card = false) {
   const reduced = useReducedMotion();
   return {
     initial: { opacity: 0, y: reduced ? 0 : card ? 14 : 8, scale: reduced ? 1 : card ? 0.97 : 0.985 },
@@ -540,7 +542,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
  * cards were drawn with no edge at all beside a code block whose border, being
  * plain CSS, was fine.
  */
-const BLOCK_SURFACE = "transcript-block";
+export const BLOCK_SURFACE = "transcript-block";
 
 /* The session pile becomes a scroller once it outgrows a few stops, so its ends
    are faded rather than cut: a hard edge at the top reads as a clipped card, a
@@ -690,175 +692,105 @@ function StepDetail({ detail }: { detail: string }) {
 }
 
 /**
- * The model's own reasoning, live.
+ * The model's own reasoning: one row, titled with what it is thinking about.
  *
- * While it is arriving the text is shown as it comes, following its own tail so
- * the newest line is the one in view — the point is that the learner can watch it
- * think, not read a finished essay. Once it settles it folds to one line saying
- * how long it took, because a transcript of a long session should be readable and
- * the thinking is still there to open.
+ * The row carries the model's own heading for the work in hand — "Designing
+ * deterministic test cases with oracle" — and the thinking behind it is inside,
+ * behind the same disclosure every other step uses. A fixed "Thinking" label
+ * was standing in for text the model had already written. A row per heading was
+ * the opposite mistake: six naked lines spilled into the column, no mark beside
+ * them and nothing to open, which is not a step and not a paragraph either. One
+ * block of thought is one step; its headings are its contents.
  *
- * This replaced a fixed "Thinking" label with a spinner. That label was not
- * standing in for anything: the reasoning deltas were arriving all along and
- * being dropped as protocol noise before they reached the transcript.
+ * While it streams the title follows the section being written, so the row says
+ * where the model is now rather than where it started; when it settles that
+ * heading stays, so nothing swaps under a reader mid-sentence.
  */
-export function Reasoning({ part, loadingOnly = false }: { part: Extract<RunPart, { kind: "reasoning" }>; loadingOnly?: boolean }) {
+export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning" }> }) {
   const sections = thoughts(part.body);
   const seconds = Math.max(1, Math.round(((part.endedAt ?? Date.now()) - part.startedAt) / 1_000));
+  /* The heading the row wears. Trailing prose with no heading of its own belongs
+     to the last one, so the last *titled* section is the one being written —
+     and `latestHeading` has the fallback for thinking with no headings in it. */
+  const titled = sections.map((section, index) => (section.title ? index : -1)).filter((index) => index >= 0).at(-1) ?? -1;
+  const heading = latestHeading(part.body);
 
-  /* Live reasoning is state, not transcript copy. The provider's headings are
-     useful after the turn when somebody deliberately opens its work, but while
-     it runs they read like unexplained status messages and may stack up every
-     time the provider starts a fresh reasoning block. */
-  if (loadingOnly) {
-    return (
-      <div className={cn(ROW, "text-[var(--transcript-step)]")} role="status">
-        <span className={ROW_GLYPH}>
-          <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
-        </span>
-        <span className="thinking-shimmer min-w-0 truncate">Thinking</span>
-      </div>
-    );
-  }
+  /* Live, the row is what says the turn is alive, so it draws before the first
+     delta lands. Settled, it has to have something behind it.
 
-  /* Live, and folded like everything else.
-     
-     This used to print the whole stream inline while the model wrote it: a
-     paragraph of half-finished reasoning that pushed the conversation off the
-     screen and then vanished when the turn settled. Thinking is the agent's
-     working, not its answer — the row says it is thinking and what about, and
-     the stream is there for anybody who wants it.
-     
-     Open state survives the deltas because the part keeps its identity for the
-     length of the run, so a thought opened mid-stream stays open and keeps
-     following the tail. */
-  if (part.open) {
-    const current = sections.at(-1);
-    return (
-      <LiveThought
-        body={part.body}
-        id={part.id}
-        sections={sections}
-        title={current?.title ?? "Thinking"}
-      />
-    );
-  }
+     "Something" means prose. A provider that summarises its reasoning as titles
+     and no working leaves a block that is only headings, and a row per heading
+     — or one row opening onto a list of them — is a table of contents for a
+     chapter nobody wrote. Those headings are live status and nothing more: they
+     name the row while the model is in them and go when it is done. The main
+     process drops them on the way to storage for the same reason, so a turn read
+     back and a turn just finished agree — see `dropHeadingOnly`. */
+  const prose = sections.some((section) => section.body);
+  if (!part.open && !prose) return null;
 
-  if (!sections.length) return null;
-  /* Settled: one row per heading the model gave its own thinking, however many
-     there are.
-
-     There used to be a cap here — past three headings the block collapsed into a
-     single row with a "+11" chip and a scrolling list of every heading behind
-     it. That row was a third kind of thing in a thread that only has two: a
-     step is either thinking or a tool, and the learner reads the column by that
-     distinction. A summary row that is neither, holding a list of rows that are,
-     breaks the one rule the transcript has. The work already folds as a whole —
-     see `RunFold` — so the wall the cap was defending against is behind a
-     disclosure either way. */
   return (
-    <div className="min-w-0">
-      {sections.map((section, index) => (
-        <div key={`${part.id}-${index}`} className="min-w-0" {...(index > 0 ? { style: { marginTop: LINKED_GAP } } : {})}>
-          {/* Several headings from one block of thinking are one cluster, spaced
-              like consecutive steps rather than like separate paragraphs. */}
-          <Thought
-            body={section.body}
-            /* A stored step has no clock on it — see `storedPart`. Reading a
-               transcript back is not watching one settle, and every thought in
-               it sliding into place on mount would be motion for nothing. */
-            settling={part.startedAt > 0}
-            title={section.title ?? `Thought for ${seconds}s`}
-          />
-        </div>
-      ))}
-    </div>
+    <Thought
+      body={part.body}
+      headingIndex={titled}
+      id={part.id}
+      live={part.open}
+      /* No prose means nothing to open onto. A live block of headings is a row
+         that says what the model is thinking about and nothing else, which is
+         all that block will ever have to say. */
+      sections={prose ? sections : []}
+      /* A stored step has no clock on it — see `storedPart`. Reading a transcript
+         back is not watching one settle, and every thought in it sliding into
+         place on mount would be motion for nothing. */
+      settling={!part.open && part.startedAt > 0}
+      title={heading ?? (part.open ? "Thinking" : `Thought for ${seconds}s`)}
+    />
   );
 }
 
 /**
- * Thinking as it arrives, behind a disclosure.
+ * A block of thinking: its heading, and the thinking behind it.
  *
- * The trigger is the same row every other step uses, so a turn in flight reads
- * as one column of steps rather than as a wall with rows either side of it. The
- * orb and the shimmer are what say this one is still happening.
+ * Live, the mark is the orb and the title shimmers, and the stream inside
+ * follows its own tail — so opening it mid-thought shows where the model is, not
+ * the paragraph it opened with — and is held to a height, because a thought is
+ * as long as it is and the row it opens should not push the turn off the screen.
  *
- * The stream inside follows its own tail and is capped, so opening it during a
- * long thought shows the end — where the model is now — rather than the
- * beginning, and never grows past a screenful.
+ * Settled, the orb goes, and with it the gutter it stood in. A glyph on every
+ * one of these was decoration, but removing it and keeping its column was worse
+ * than either: the text sat indented under a blank space, which reads as a child
+ * of the row above rather than as a step beside it. The thought ends at the
+ * margin.
+ *
+ * `settling` is how it gets there. While the model thinks, the row's words sit a
+ * label's width in; the moment the orb goes they have to travel that width, and
+ * doing it in one frame is a jump in the middle of a paragraph the reader is
+ * already looking at. It is only ever true for a thought that has just finished
+ * in front of them — a transcript read back from storage was never indented and
+ * has nothing to travel.
  */
-function LiveThought({
+function Thought({
   body,
+  headingIndex,
   id,
+  live,
   sections,
+  settling,
   title,
 }: {
   body: string;
+  /** The section whose heading the row is already wearing, so it is not said twice. */
+  headingIndex: number;
   id: string;
+  live: boolean;
   sections: Array<{ title?: string; body: string }>;
+  settling: boolean;
   title: string;
 }) {
   const [open, setOpen] = useState(false);
   const block = useRevealOnExpand<HTMLDivElement>(open);
-
-  const trigger = (
-    <>
-      <span className={ROW_GLYPH}>
-        <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
-      </span>
-      <span className="thinking-shimmer min-w-0 truncate">{title}</span>
-      {sections.length > 0 && <Caret open={open} />}
-    </>
-  );
-
-  if (sections.length === 0) return <div className={cn(ROW, "text-[var(--transcript-step)]")}>{trigger}</div>;
-
-  return (
-    <Collapsible onOpenChange={setOpen} open={open} ref={block}>
-      <CollapsibleTrigger className={cn(ROW, TRIGGER)}>{trigger}</CollapsibleTrigger>
-      <CollapsibleContent>
-        <FadedScroll className="mx-1.5 mb-1" follow watch={body}>
-          <div className="space-y-2 border-l border-border/70 pl-2.5 text-thread leading-[1.6] text-[var(--transcript-step)]">
-            {sections.map((section, index) => (
-              <div key={`${id}-live-${index}`}>
-                {/* The heading of a section that has finished. The one still
-                    being written is already the row's own title. */}
-                {section.title && index < sections.length - 1 && (
-                  <p className="font-medium text-[var(--transcript-step-strong)]">{section.title}</p>
-                )}
-                {section.body && <p>{section.body}</p>}
-              </div>
-            ))}
-          </div>
-        </FadedScroll>
-      </CollapsibleContent>
-    </Collapsible>
-  );
-}
-
-/**
- * A settled thought: its own heading, and the thinking behind it.
- *
- * No icon, and no space held where one used to be. A brain glyph on every one of
- * these was decoration — the row already says "Thought for 9s" — but removing it
- * and keeping its gutter was worse than either: the text sat indented under a
- * blank column, which reads as a nested child of the row above rather than as a
- * step beside it. The thought starts at the margin.
- *
- * `settling` is how it gets there. While the model is thinking the row carries
- * an orb in the gutter, so its words sit a label's width in; the moment the orb
- * goes the words have to travel that width to the margin, and doing it in one
- * frame is a jump in the middle of a paragraph the reader is already looking at.
- * It is only ever true for a thought that has just finished in front of them —
- * a transcript read back from storage was never indented and has nothing to
- * travel.
- */
-function Thought({ title, body, settling }: { title: string; body: string; settling: boolean }) {
-  const [open, setOpen] = useState(false);
-  const block = useRevealOnExpand<HTMLDivElement>(open);
-  /* Starts where the live row left it, then moves on the next frame. Setting
-     both the start and the end in one commit would give the browser a single
-     computed value and nothing to interpolate between. */
+  /* Starts where the live row left it, then moves on the next frame. Setting both
+     the start and the end in one commit would give the browser a single computed
+     value and nothing to interpolate between. */
   const [home, setHome] = useState(!settling);
   useEffect(() => {
     if (home) return;
@@ -866,30 +798,48 @@ function Thought({ title, body, settling }: { title: string; body: string; settl
     return () => cancelAnimationFrame(frame);
   }, [home]);
 
-  const travel = {
-    paddingLeft: home ? ROW_INSET : UNDER_LABEL,
-    transition: "padding-left 260ms cubic-bezier(0.32, 0.72, 0, 1)",
-  };
+  /* Live, the orb holds the gutter open and there is nothing to travel. */
+  const travel = live
+    ? undefined
+    : { paddingLeft: home ? ROW_INSET : UNDER_LABEL, transition: "padding-left 260ms cubic-bezier(0.32, 0.72, 0, 1)" };
 
-  if (!body) {
-    return (
-      <div className={cn(ROW, "motion-reduce:transition-none text-[var(--transcript-step)]")} style={travel}>
-        <span className="min-w-0 truncate">{title}</span>
-      </div>
-    );
+  const trigger = (
+    <>
+      {live && (
+        <span className={ROW_GLYPH}>
+          <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
+        </span>
+      )}
+      <span className={cn("min-w-0 truncate", live && "thinking-shimmer")}>{title}</span>
+      {sections.length > 0 && <Caret open={open} />}
+    </>
+  );
+
+  /* Nothing behind it yet — the first frames of a thought, before the provider
+     has written a word of it. A caret onto an empty panel is worse than no
+     caret, so the row is a row. */
+  if (!sections.length) {
+    return <div className={cn(ROW, "motion-reduce:transition-none text-[var(--transcript-step)]")} style={travel}>{trigger}</div>;
   }
+
   return (
     <Collapsible onOpenChange={setOpen} open={open} ref={block}>
-      <CollapsibleTrigger className={cn(ROW, TRIGGER, "motion-reduce:transition-none")} style={travel}>
-        <span className="min-w-0 truncate">{title}</span>
-        <Caret open={open} />
-      </CollapsibleTrigger>
+      <CollapsibleTrigger className={cn(ROW, TRIGGER, "motion-reduce:transition-none")} style={travel}>{trigger}</CollapsibleTrigger>
       <CollapsibleContent>
         {/* Same height it had while it streamed. A thought that filled 1.5in and
             then expanded to a screenful on settling would reflow the thread under
             the reader at the exact moment they started reading it. */}
-        <FadedScroll className="mx-1.5 mb-1">
-          <p className="border-l border-border/70 pl-2.5 text-thread leading-[1.6] text-[var(--transcript-step)]">{body}</p>
+        <FadedScroll className="mx-1.5 mb-1" follow={live} watch={body}>
+          <div className="space-y-2 border-l border-border/70 pl-2.5 text-thread leading-[1.6] text-[var(--transcript-step)]">
+            {sections.map((section, index) => (
+              <div key={`${id}-${index}`}>
+                {section.title && index !== headingIndex && (
+                  <p className="font-medium text-[var(--transcript-step-strong)]">{section.title}</p>
+                )}
+                {section.body && <p>{section.body}</p>}
+              </div>
+            ))}
+          </div>
         </FadedScroll>
       </CollapsibleContent>
     </Collapsible>
@@ -1240,6 +1190,34 @@ export function ChallengePublished({
     cardGeometry.radius,
   )), [cardGeometry]);
 
+  /* Never on the challenge they are on. The current one is open in the pane
+     beside the transcript with its own code in it, so a panel on the cursor
+     saying what it starts from is the app showing them a smaller copy of what
+     they are looking at. Suppressed while the stack is open too, for the reason
+     a tooltip is suppressed while its menu is: they are reading the session's
+     other challenges, and a panel about this one riding over them answers a
+     question nobody asked. */
+  const previewData = useMemo(
+    () => publishedPreviewData(challenge, sourced ? source : null, sourceName),
+    [challenge, sourced, source, sourceName],
+  );
+  const preview = useCursorPreview(
+    <ChallengePreview data={previewData} stop={stop} />,
+    !compact && !current && !historyOpen && hasChallengePreview(previewData),
+  );
+
+  /* One hook for the whole stack rather than one per row — rows are a `map`, and
+     a hook cannot live in one. Which row the pointer is on is state the list
+     owns anyway, since only one of them can be hovered. */
+  const [hoveredStop, setHoveredStop] = useState<ChallengeStop | null>(null);
+  const hoveredData = useMemo(() => hoveredStop ? stopPreviewData(hoveredStop) : null, [hoveredStop]);
+  const listPreview = useCursorPreview(
+    hoveredData && hoveredStop && hasChallengePreview(hoveredData)
+      ? <ChallengePreview data={hoveredData} stop={hoveredStop} />
+      : null,
+    historyOpen,
+  );
+
   if (compact) {
     return (
       <div className="flex min-w-0 items-center gap-2 py-1 text-thread text-muted-foreground">
@@ -1250,7 +1228,7 @@ export function ChallengePublished({
               ? <LanguageGlyph className="size-3.5" language={challenge.language} />
               : <IconPuzzle className="size-3.5" />}
         </span>
-        {ordinal && <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/60">#{ordinal}</span>}
+        {ordinal && <span className="shrink-0 font-mono text-thread tabular-nums text-muted-foreground/60">#{ordinal}</span>}
         <span className="min-w-0 truncate text-thread text-foreground/80">{challenge.title}</span>
         <span className="shrink-0 truncate text-thread text-muted-foreground/70">
           {challenge.difficulty ? DIFFICULTY_WORD[challenge.difficulty] : ""}
@@ -1262,7 +1240,7 @@ export function ChallengePublished({
   }
 
   const card = (
-    <motion.div
+    <ArtifactCard
       animate={arrival.animate}
       data-stack-front={behind > 0 && !historyOpen ? "true" : undefined}
       /* Lifted a little further than a step row's entrance, and no further: this
@@ -1281,24 +1259,16 @@ export function ChallengePublished({
         pinHistoryRef.current = true;
         setHistoryOpen((value) => !value);
       }}
+      {...preview.handlers}
       style={{ marginBlock: 0 }}
       initial={arrival.initial}
       transition={{ ...stackTransition, opacity: { duration: 0.18 } }}
     >
-      <div className="flex min-w-0 items-center gap-2.5 px-2.5 py-1.5">
-        {/* What they are about to write in, as its own mark rather than as the
-            word "TypeScript" in a list of metadata. A learner on a Track that
-            switched language last session reads this before they read the
-            title. The tile is what stops a vendor logo in its own colours from
-            floating unanchored on the card's surface. */}
-        <span className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] bg-[var(--color-background-elevated-secondary)] ring-[0.5px] ring-[var(--border-surface-strong)]">
-          {sourced
+      <ArtifactCardRow icon={sourced
             ? <SourceGlyph className="size-4" source={source} />
             : challenge.language
               ? <LanguageGlyph aria-label={LANGUAGE_LABEL[challenge.language]} className="size-4" language={challenge.language} role="img" />
-              : <IconPuzzle className="size-4 text-[var(--transcript-step-mark)]" />}
-        </span>
-
+              : <IconPuzzle className="size-4 text-[var(--transcript-step-mark)]" />}>
         {/* The controls float over the card's top-right corner rather than sitting
             in this row, so the reserved gutter is the only trace they leave in
             the flow — a title that stops short of running under them. */}
@@ -1309,7 +1279,7 @@ export function ChallengePublished({
             : current ? "pr-14" : "pr-8",
         )}>
           <div className="flex min-w-0 items-center gap-1.5">
-            {ordinal ? <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/60">#{ordinal}</span> : null}
+            {ordinal ? <span className="shrink-0 font-mono text-thread tabular-nums text-muted-foreground/60">#{ordinal}</span> : null}
             <button
               ref={cardTriggerRef}
               aria-current={current ? "page" : undefined}
@@ -1348,7 +1318,7 @@ export function ChallengePublished({
             </span>
           </span>}
         </div>
-      </div>
+      </ArtifactCardRow>
 
       {/* Status and actions share the same top-right alignment used by every
           revealed history card. The card surface itself opens the stack. */}
@@ -1359,7 +1329,7 @@ export function ChallengePublished({
           ? <ChallengeCardMenu includeSave={!current} stop={stop} trail={trail} />
           : !current && <SaveProblem problemKey={challenge.questionId ? `spar:${challenge.questionId}` : null} title={challenge.title} />}
       </div>
-    </motion.div>
+    </ArtifactCard>
   );
 
   return (
@@ -1465,6 +1435,18 @@ export function ChallengePublished({
                     aria-hidden={!historyOpen}
                     inert={!historyOpen}
                     className={cn(BLOCK_SURFACE, "absolute my-0 flex h-14 min-w-0 items-center gap-2.5 px-3 text-left outline-none transition-colors duration-100 hover:bg-[var(--surface-primary)]")}
+                    /* The row tells the stack's one preview which challenge it is
+                       before handing the pointer on, so the panel that opens is
+                       about the row under the cursor rather than the last one.
+                       The challenge they are on is the exception, here as on the
+                       front card: it is already open in the pane beside this. */
+                    onPointerEnter={(event) => {
+                      setHoveredStop(item.id === currentQuestionId ? null : item);
+                      listPreview.handlers.onPointerEnter(event);
+                    }}
+                    onPointerDown={listPreview.handlers.onPointerDown}
+                    onPointerLeave={listPreview.handlers.onPointerLeave}
+                    onPointerMove={listPreview.handlers.onPointerMove}
                     style={{ top: "100%", pointerEvents: historyOpen ? "auto" : "none", marginBlock: 0 }}
                     transition={dealTransition}
                   >
@@ -1484,7 +1466,7 @@ export function ChallengePublished({
                         }}
                         type="button"
                       >
-                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] font-mono text-ui-sm tabular-nums text-muted-foreground">#{item.ordinal}</span>
+                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] font-mono text-thread tabular-nums text-muted-foreground">#{item.ordinal}</span>
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-1.5">
                             <span className="min-w-0 flex-1 truncate text-thread font-medium">{item.title}</span>
@@ -1503,6 +1485,8 @@ export function ChallengePublished({
         </motion.div>
       </motion.div>
       <div className="relative z-20" ref={frontRef}>{card}</div>
+      {preview.overlay}
+      {listPreview.overlay}
     </div>
   );
 }
@@ -1535,8 +1519,6 @@ function formatChallengeTime(elapsedMs: number): string {
 }
 
 /** Spar's own bands, and a judge's, in the one word each that fits on the line. */
-const DIFFICULTY_WORD: Record<string, string> = { foundation: "Foundation", developing: "Developing", proficient: "Proficient", advanced: "Advanced" };
-const BAND_WORD: Record<string, string> = { easy: "Easy", medium: "Medium", hard: "Hard" };
 
 function sourceFor(part: ToolPart): "leetcode" | "codeforces" {
   const text = `${part.input} ${part.output} ${part.detail} ${part.label} ${part.actionTitle}`.toLowerCase();

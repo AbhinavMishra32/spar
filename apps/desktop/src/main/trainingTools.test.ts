@@ -297,6 +297,26 @@ describe("read_attempt", () => {
    * read a function from two challenges ago. What this attempt saved is the only
    * thing this attempt is about.
    */
+  it("preserves large reads and all evidence IDs without duplicating raw payloads", async () => {
+    const store = new LocalStore(":memory:");
+    const workspaces = { list: async () => ["a.py", "b.py", "c.py"], read: async () => "x".repeat(30_000) } as unknown as WorkspaceService;
+    try {
+      const { sessionId } = store.createSession("Practise arrays");
+      store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
+      const question = store.createQuestion(sessionId, design("Count values"), { valid: true });
+      for (let i = 0; i < 120; i++) store.appendNextEvent({ id: randomUUID(), attemptId: question.attemptId, type: "test_run", occurredAt: new Date().toISOString(), payload: { scope: "visible", passed: false, cases: [{ name: "large failure", status: "failed", expected: "x".repeat(10_000), actual: "y".repeat(10_000) }] }, source: "runner", schemaVersion: 1 });
+      const result = await executeTrainingTool("read_attempt", {}, sessionId, store, workspaces, {} as UtilityClient) as { report: string; files: Array<{ text: string }>; events: Array<{ id: string; payload?: unknown }>; stats: { runs: number } };
+      expect(result.report).toContain("x".repeat(10_000));
+      expect(result.report).toContain("y".repeat(10_000));
+      expect(result.files.map((file) => file.text.length)).toEqual([30_000, 30_000, 30_000]);
+      expect(result.events).toHaveLength(store.readAttempt(question.attemptId).length);
+      const ids = new Set(store.readAttempt(question.attemptId).map((event) => event.id));
+      expect(result.events.every((event) => ids.has(event.id) && event.payload === undefined)).toBe(true);
+      expect(result.stats.runs).toBe(120);
+      expect(result.report).not.toContain("omitted");
+    } finally { store.close(); }
+  });
+
   it("reads only the files this attempt touched, most recently saved first", async () => {
     const store = new LocalStore(":memory:");
     const bodies: Record<string, string> = {

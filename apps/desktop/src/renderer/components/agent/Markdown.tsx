@@ -28,7 +28,7 @@ export function Inline({ text }: { text: string }) {
        cannot use: the link is right there and unclickable, and the URL is
        spelled out in the middle of a sentence. */
     const pattern =
-      /(\[\[(?:concept|file):[^\]]+\]\])|(\[[^\]\n]*\]\((?:https?:\/\/|mailto:)[^\s)]+\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)|(https?:\/\/[^\s<>()[\]"']+)/g;
+      /(\[\[(?:concept|file|lesson):[^\]]+\]\])|(\[[^\]\n]*\]\((?:https?:\/\/|mailto:)[^\s)]+\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)|(https?:\/\/[^\s<>()[\]"']+)/g;
     const result: Array<{ key: string; node: React.ReactNode }> = [];
     let cursor = 0;
     let match: RegExpExecArray | null;

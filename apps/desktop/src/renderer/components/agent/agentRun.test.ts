@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupParts, publishedRunArtifacts, reasoningAtLiveEdge, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, publishedRunArtifacts, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
 
 const tool = (name: string): Extract<RunPart, { kind: "tool" }> => ({
   kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", startedAt: 0,
@@ -88,21 +88,6 @@ describe("transcript rows", () => {
     const published = { ...tool("create_question"), phase: "done" as const };
     const rows = groupParts([tool("search_learner_model"), tool("replay_attempt"), published]);
     expect(rows.map((row) => row.kind)).toEqual(["tool-row", "solve-read", "challenge"]);
-  });
-});
-
-describe("live thinking placement", () => {
-  const thought: RunPart = { kind: "reasoning", id: "thought", body: "working", open: true, startedAt: 0 };
-  const reply: RunPart = { kind: "text", id: "reply", body: "Here is what I found." };
-
-  it("shows thinking only when reasoning is the current live edge", () => {
-    expect(reasoningAtLiveEdge([tool("read_attempt"), thought], true)).toBe(true);
-    expect(reasoningAtLiveEdge([thought, reply], true)).toBe(false);
-  });
-
-  it("never keeps the loading state after the reply phase or completion", () => {
-    expect(reasoningAtLiveEdge([thought], true, 10)).toBe(false);
-    expect(reasoningAtLiveEdge([thought], false)).toBe(false);
   });
 });
 
@@ -280,5 +265,21 @@ describe("a message the turn has not picked up yet", () => {
   });
   it("does not announce failed or unfinished publications", () => {
     expect(publishedRunArtifacts(run([{ ...tool("create_question"), phase: "error" }, { ...tool("assign_practice_problem"), phase: "running" }]))).toEqual([]);
+  });
+});
+
+describe("published lessons", () => {
+  const lesson = { ...tool("teach_lesson"), output: JSON.stringify({ status: "taught", lessonId: "lesson-1" }) };
+  it("keeps the lesson beside the final response and alongside challenge artifacts", () => {
+    const challenge = tool("create_question");
+    expect(publishedRunArtifacts({ ...run([lesson, challenge, { kind: "text", id: "reply", body: "Read this lesson." }], "done"), finalFrom: 2 })).toEqual([lesson, challenge]);
+    expect(publishedRunArtifacts(run([lesson], "done"))).toEqual([lesson]);
+    expect(groupParts([lesson])[0]?.kind).toBe("lesson");
+  });
+  it("does not promote unfinished, failed or rejected lessons", () => {
+    for (const part of [{ ...lesson, phase: "running" as const }, { ...lesson, phase: "error" as const }, { ...lesson, output: '{"status":"invalid"}' }]) {
+      expect(publishedRunArtifacts(run([part], "done"))).toEqual([]);
+      expect(groupParts([part])[0]?.kind).not.toBe("lesson");
+    }
   });
 });

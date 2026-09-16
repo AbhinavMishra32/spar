@@ -171,6 +171,15 @@ export class LocalStore {
          degrading into a sentence about a picture that used to be there. The
          payload is a slice of a trace, not the trace. */
       CREATE TABLE IF NOT EXISTS agent_visualizations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, title TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
+      /* What Spar taught, kept past the turn that taught it.
+         A lesson is addressable so a later turn can point at it — "this is the
+         aliasing I showed you" — and durable so the pointer still resolves in a
+         session weeks later. Sessions are the scope it was written in, not the
+         scope it is readable in: the row survives its session being read back
+         and is only removed with the track. */
+      CREATE TABLE IF NOT EXISTS lessons (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS lessons_session ON lessons (session_id);
+      CREATE TABLE IF NOT EXISTS lesson_concepts (lesson_id TEXT NOT NULL REFERENCES lessons(id) ON DELETE CASCADE, concept_id TEXT NOT NULL REFERENCES concepts(id), PRIMARY KEY (lesson_id, concept_id));
       /* Problems the learner put aside, filed by the same key both populations
          dedupe on. The snapshot is empty for a challenge Spar wrote — that row
          is already in the questions table and a copy here could only disagree
@@ -260,6 +269,8 @@ export class LocalStore {
       const sessions = this.db.prepare("SELECT id FROM sessions WHERE track_id=?").all(trackId) as Array<{ id: string }>;
       for (const session of sessions) {
         this.db.prepare("DELETE FROM agent_visualizations WHERE session_id=?").run(session.id);
+        this.db.prepare("DELETE FROM lesson_concepts WHERE lesson_id IN (SELECT id FROM lessons WHERE session_id=?)").run(session.id);
+        this.db.prepare("DELETE FROM lessons WHERE session_id=?").run(session.id);
         this.deleteSession(session.id);
       }
       this.db.prepare("DELETE FROM learner_patterns WHERE ability_id IN (SELECT id FROM ability_documents WHERE track_id=?)").run(trackId);
@@ -307,7 +318,7 @@ export class LocalStore {
     const windowStart=Math.max(0,rows.length-TRANSCRIPT_ACTIVITY_WINDOW);
     const messages=rows.map((m,index)=>{
       if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0,workedMs:m.worked_ms};
-      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:[],activityCount:countActivity(m.activity),workedMs:m.worked_ms};
+      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity).filter((step)=>step.kind==="tool" && step.ok && (["create_question","replace_current_question","assign_practice_problem"].includes(step.tool) || (step.tool==="teach_lesson" && /"lessonId"\s*:\s*"[^"\s]+"/.test(step.output)))),activityCount:countActivity(m.activity),workedMs:m.worked_ms};
     });
     return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
@@ -708,6 +719,97 @@ export class LocalStore {
       // the whole transcript failing to draw.
       return null;
     }
+  }
+
+  /**
+   * A lesson, written down.
+   *
+   * The same shape as a visualisation — the agent sends a payload, the host
+   * keeps it and hands back an id — for the same reason: a turn's teaching has
+   * to outlive the turn, and the transcript row can only carry an identity, not
+   * a document.
+   *
+   * What it does that a visualisation does not is file itself against the
+   * concept vocabulary. A concept is the one name shared by what Spar tested and
+   * what Spar explained, so tagging here is what lets a concept card say "taught
+   * on the 3rd, tested on the 5th" instead of holding only the half of the
+   * record that came from challenges.
+   */
+  saveLesson(input:{id:string;sessionId:string;title:string;summary:string;concepts:string[];payload:unknown}):void{
+    this.db.transaction(()=>{
+      this.db.prepare("INSERT OR REPLACE INTO lessons (id,session_id,title,summary,payload,created_at) VALUES (?,?,?,?,?,?)")
+        .run(input.id,input.sessionId,input.title,input.summary,JSON.stringify(input.payload),new Date().toISOString());
+      this.db.prepare("DELETE FROM lesson_concepts WHERE lesson_id=?").run(input.id);
+      const insert=this.db.prepare("INSERT OR IGNORE INTO lesson_concepts (lesson_id,concept_id) VALUES (?,?)");
+      for(const slug of input.concepts.slice(0,5))insert.run(input.id,this.ensureConcept({slug}).id);
+    })();
+  }
+
+  readLesson(id:string):{id:string;sessionId:string;title:string;summary:string;createdAt:string;payload:unknown}|null{
+    const row=this.db.prepare("SELECT * FROM lessons WHERE id=?").get(id) as Record<string,unknown>|undefined;
+    if(!row)return null;
+    try{
+      return {id:String(row.id),sessionId:String(row.session_id),title:String(row.title),summary:String(row.summary),createdAt:String(row.created_at),payload:JSON.parse(String(row.payload))};
+    }catch{
+      // Same rule as a visualisation: a row written by a version that is gone
+      // draws its own "this could not be read" rather than failing the thread.
+      return null;
+    }
+  }
+
+  /** What Spar has already taught near a topic, newest first. This is what stops
+   *  the agent teaching the same idea twice and what lets it say "I showed you
+   *  this" with something the learner can actually open. */
+  searchLessons(query:string,limit=6):Array<{id:string;title:string;summary:string;concepts:string[];createdAt:string}>{
+    const term=`%${query.trim().toLowerCase()}%`;
+    const rows=this.db.prepare(`SELECT DISTINCT l.id,l.title,l.summary,l.created_at FROM lessons l LEFT JOIN lesson_concepts lc ON lc.lesson_id=l.id LEFT JOIN concepts c ON c.id=lc.concept_id WHERE ?='%%' OR lower(l.title) LIKE ? OR lower(l.summary) LIKE ? OR lower(c.slug) LIKE ? OR lower(c.title) LIKE ? ORDER BY l.created_at DESC LIMIT ?`)
+      .all(term,term,term,term,term,Math.max(1,Math.min(limit,12))) as Array<{id:string;title:string;summary:string;created_at:string}>;
+    const tags=this.db.prepare("SELECT lc.lesson_id,c.slug FROM lesson_concepts lc JOIN concepts c ON c.id=lc.concept_id");
+    const bySlug=new Map<string,string[]>();
+    for(const tag of tags.all() as Array<{lesson_id:string;slug:string}>){
+      bySlug.set(tag.lesson_id,[...(bySlug.get(tag.lesson_id)??[]),tag.slug]);
+    }
+    return rows.map((row)=>({id:row.id,title:row.title,summary:row.summary,concepts:bySlug.get(row.id)??[],createdAt:row.created_at}));
+  }
+
+  /**
+   * The lesson a challenge is following on from, if there is one.
+   *
+   * The link is made by concept rather than declared, because the declaration is
+   * the thing that would be forgotten: an agent that has just spent a turn
+   * authoring a challenge is not reliably going to remember to name the lesson it
+   * wrote two turns ago. The tags are already there and already mean the same
+   * thing on both sides, so the join is free and cannot drift.
+   *
+   * Newest first, one result: a challenge tests one idea, and the most recent
+   * lesson about that idea is the one the learner has just read.
+   */
+  lessonForConcepts(slugs:string[],trackId?:string|null):{id:string;title:string;summary:string;taughtAt:string}|null{
+    const scope=this.learningTrackId(trackId);
+    const wanted=slugs.map((slug)=>slug.trim().toLowerCase()).filter(Boolean).slice(0,5);
+    if(!scope||!wanted.length)return null;
+    const holes=wanted.map(()=>"?").join(",");
+    const row=this.db.prepare(`SELECT l.id,l.title,l.summary,l.created_at FROM lessons l JOIN sessions s ON s.id=l.session_id JOIN lesson_concepts lc ON lc.lesson_id=l.id JOIN concepts c ON c.id=lc.concept_id WHERE s.track_id=? AND lower(c.slug) IN (${holes}) ORDER BY l.created_at DESC LIMIT 1`)
+      .get(scope,...wanted) as {id:string;title:string;summary:string;created_at:string}|undefined;
+    return row?{id:row.id,title:row.title,summary:row.summary,taughtAt:row.created_at}:null;
+  }
+
+  /**
+   * What Spar has taught on this Track lately, for the turn's own context.
+   *
+   * Carried unconditionally the way `recentChallengeCoverage` is, and for the
+   * mirror-image reason. A lesson the agent cannot see is a lesson it will teach
+   * again under a new title — and, worse, it is a lesson it cannot point back at,
+   * which is the whole of what makes one worth writing. The id is here because
+   * the reference the agent writes is built from it.
+   */
+  recentLessons(limit=6,trackId?:string|null):Array<{id:string;title:string;summary:string;concepts:string[];taughtAt:string}>{
+    const scope=this.learningTrackId(trackId);
+    if(!scope)return [];
+    const rows=this.db.prepare("SELECT l.id,l.title,l.summary,l.created_at FROM lessons l JOIN sessions s ON s.id=l.session_id WHERE s.track_id=? ORDER BY l.created_at DESC LIMIT ?")
+      .all(scope,Math.max(1,Math.min(limit,12))) as Array<{id:string;title:string;summary:string;created_at:string}>;
+    const tag=this.db.prepare("SELECT c.slug FROM lesson_concepts lc JOIN concepts c ON c.id=lc.concept_id WHERE lc.lesson_id=?");
+    return rows.map((row)=>({id:row.id,title:row.title,summary:row.summary,concepts:(tag.all(row.id) as Array<{slug:string}>).map((entry)=>entry.slug),taughtAt:row.created_at}));
   }
 
   learnerProgress(trackId?:string|null):LearnerProgress{const scope=this.learningTrackId(trackId);const history=this.ratingHistory();const rating=history.at(-1)??this.ensureRating();return{rating,ratingHistory:history.length?history:[rating],abilities:this.abilityStates(scope),patterns:this.listPatterns(scope),notices:this.listNotices(6,scope)};}

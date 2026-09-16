@@ -67,11 +67,7 @@ export function AttemptReadView({ read }: { read: AttemptRead }) {
           {tab === "timings" && <Timings timings={read.timings} />}
         </motion.div>
       </AnimatePresence>
-      {read.cut && (
-        <p className="px-2.5 pb-2 text-muted-foreground/60">
-          The stored copy of this call was cut at 16k characters; the tutor read the whole of it.
-        </p>
-      )}
+
     </div>
   );
 }

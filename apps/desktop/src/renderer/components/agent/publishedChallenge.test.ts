@@ -53,6 +53,18 @@ describe("reading a published challenge off its transcript row", () => {
     expect(published.ordinal).toBe(4);
   });
 
+  /* The preview is built from the starter file, so a row that carries one has to
+     yield it whole — path included, since the plate names the file. */
+  it("takes the first starter file the design shipped", () => {
+    const published = readPublishedChallenge(row({ input: design(), output: result() }));
+    expect(published.starter).toEqual({ path: "src/partition.ts", code: "export function partition() {}" });
+  });
+
+  it("has no starter file when the row never carried one", () => {
+    expect(readPublishedChallenge(row({ input: design({ starterFiles: {} }), output: result() })).starter).toBeNull();
+    expect(readPublishedChallenge(row({ input: "", output: result() })).starter).toBeNull();
+  });
+
   /* Most specific first is the agent's instruction and the primary is what the
      challenge is actually aimed at, so the primary leads whatever order the tags
      happened to be written in. The card has room for two. */

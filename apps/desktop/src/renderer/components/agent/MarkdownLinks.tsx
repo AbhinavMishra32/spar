@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { FilePlus2, SquareArrowOutUpRight } from "lucide-react";
+import { BookOpen, FilePlus2, SquareArrowOutUpRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -27,6 +27,13 @@ export type MarkdownLinks = {
    *  and is never wrong — only plainer. */
   language?: string | undefined;
   onOpenConcept?: ((conceptId: string) => void) | undefined;
+  /** Opens a lesson Spar has already taught. This is what makes "I showed you
+   *  this" a thing the learner can act on rather than a claim. */
+  onOpenLesson?: ((lessonId: string) => void) | undefined;
+  /** The lesson the reader currently has open, if any. A card whose lesson is
+   *  open hands its pixels to the reader for the duration — the two share a
+   *  layout id, and a shared-layout animation with both ends drawn is a ghost. */
+  openLessonId?: string | null | undefined;
   /** Opens a web page outside the app. The renderer cannot navigate — the window
    *  denies it — so a search result is only a link where the surface around the
    *  transcript has handed it the door. Undefined leaves results unclickable
@@ -52,12 +59,13 @@ export function useMarkdownLinks(): MarkdownLinks {
   return useContext(LinkContext);
 }
 
-export const REFERENCE_PATTERN = /\[\[(concept|file):([^\]|]+?)(?:\|([^\]]*))?\]\]/;
+export type ReferenceKind = "concept" | "file" | "lesson";
+export const REFERENCE_PATTERN = /\[\[(concept|file|lesson):([^\]|]+?)(?:\|([^\]]*))?\]\]/;
 
-export function parseReference(value: string): { kind: "concept" | "file"; target: string; label: string } | null {
+export function parseReference(value: string): { kind: ReferenceKind; target: string; label: string } | null {
   const match = REFERENCE_PATTERN.exec(value);
   if (!match) return null;
-  const kind = match[1] as "concept" | "file";
+  const kind = match[1] as ReferenceKind;
   const target = match[2]!.trim();
   const label = (match[3] ?? "").trim() || target;
   return { kind, target, label };
@@ -66,11 +74,11 @@ export function parseReference(value: string): { kind: "concept" | "file"; targe
 const CHIP =
   "inline-flex items-baseline gap-1 rounded-[var(--radius-sm)] px-1 py-px font-medium underline decoration-dotted underline-offset-[3px] transition-colors outline-none";
 
-export function Reference({ kind, target, label }: { kind: "concept" | "file"; target: string; label: string }) {
+export function Reference({ kind, target, label }: { kind: ReferenceKind; target: string; label: string }) {
   const links = useContext(LinkContext);
   /* `undefined` until the answer is in. The link renders as plain text in that
      window rather than flickering between two different affordances. */
-  const [present, setPresent] = useState<boolean | undefined>(kind === "concept" ? true : undefined);
+  const [present, setPresent] = useState<boolean | undefined>(kind === "file" ? undefined : true);
 
   useEffect(() => {
     if (kind !== "file" || !links.checkFile) return;
@@ -78,6 +86,28 @@ export function Reference({ kind, target, label }: { kind: "concept" | "file"; t
     void links.checkFile(target).then((exists) => { if (alive) setPresent(exists); });
     return () => { alive = false; };
   }, [kind, links, target]);
+
+  /* A lesson Spar wrote. It gets a mark where a concept does not, because this
+     one is a claim about what already happened between these two — "I taught you
+     this" — and the learner should be able to see at a glance which references
+     in a sentence are that and which are vocabulary.
+
+     Plain text when nothing can open it: a chip that does nothing is worse than
+     the words it replaced. */
+  if (kind === "lesson") {
+    if (!links.onOpenLesson) return <span className="font-medium">{label}</span>;
+    return (
+      <button
+        className={cn(CHIP, "text-foreground/90 hover:bg-accent hover:text-foreground")}
+        onClick={() => links.onOpenLesson?.(target)}
+        title="Open the lesson"
+        type="button"
+      >
+        <BookOpen className="size-3 self-center" aria-hidden />
+        {label}
+      </button>
+    );
+  }
 
   if (kind === "concept") {
     return (

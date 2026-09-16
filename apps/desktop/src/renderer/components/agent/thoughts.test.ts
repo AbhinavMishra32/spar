@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { thoughts } from "./thoughts";
+import { latestHeading, thoughts } from "./thoughts";
 
 const titles = (body: string) => thoughts(body).map((section) => section.title).filter(Boolean);
 
@@ -55,5 +55,20 @@ describe("thoughts", () => {
   it("returns nothing for empty reasoning", () => {
     expect(thoughts("")).toEqual([]);
     expect(thoughts("   \n  ")).toEqual([]);
+  });
+});
+
+describe("latestHeading", () => {
+  it("names the section the model is writing now", () => {
+    const body = ["**Checking the workspace**", "main.py still has the example lines.", "", "**What is missing**", "torch is not installed."].join("\n");
+    expect(latestHeading(body)).toBe("What is missing");
+  });
+
+  it("falls back to the last thing the model emphasised when it wrote no heading", () => {
+    expect(latestHeading("I should look at the **test harness** before the **normalisation step**.")).toBe("normalisation step");
+  });
+
+  it("has nothing to say about thinking with no emphasis in it", () => {
+    expect(latestHeading("Let me re-check the workspace.")).toBeUndefined();
   });
 });

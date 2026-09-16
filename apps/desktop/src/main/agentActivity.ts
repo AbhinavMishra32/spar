@@ -63,6 +63,7 @@ export function recordAgentActivity(runId: string, event: Record<string, unknown
 function recordReasoning(runId: string, event: Record<string, unknown>) {
   if (event.phase === "end") {
     thinkingSince.delete(runId);
+    dropHeadingOnly(runId);
     return;
   }
   const text = typeof event.text === "string" ? event.text : "";
@@ -77,6 +78,28 @@ function recordReasoning(runId: string, event: Record<string, unknown>) {
   }
   thinkingSince.set(runId, Date.now());
   push(runId, { kind: "reasoning", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0, input: "", output: "" });
+}
+
+/**
+ * A block of thinking that turned out to be nothing but its own headings.
+ *
+ * Some providers summarise their reasoning as titles and no prose — three lines
+ * of `**Designing the test harness**` and nothing under them. Stored, those
+ * become rows in a transcript that say what the model was about to think about
+ * and never what it thought, which is the shape that put a column of grey
+ * headings under every turn. They are still worth seeing *while* the turn runs,
+ * where they are the live label on the thinking row — so they stream as usual
+ * and are dropped here, at the end of the block, rather than never sent.
+ *
+ * Spar asks for the prose where the provider can give it — see
+ * `piReasoningSummaryForApi`. This is for the ones that will not.
+ */
+function dropHeadingOnly(runId: string) {
+  const held = segments.get(runId);
+  const open = held?.at(-1);
+  if (!held || open?.kind !== "reasoning") return;
+  if (open.text.replace(/\*\*[^\n*]+\*\*/g, "").trim()) return;
+  held.pop();
 }
 
 /**

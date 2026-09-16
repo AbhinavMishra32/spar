@@ -94,6 +94,11 @@ export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
          back if somebody happened to search the words it was filed under. Open
          ones only: a resolved pattern is history, and history is what
          `search_learner_model` is for. */
+      /* What has already been explained to them, so it can be built on and
+         pointed at rather than taught a second time. Ids included: the reference
+         the agent writes into a reply — [[lesson:id|title]] — is what turns "I
+         showed you this" from a claim into a page the learner can open. */
+      recentLessons: store.recentLessons(6, session.summary.trackId),
       openPatterns: store.listPatterns(session.summary.trackId).filter((pattern) => pattern.status !== "resolved").slice(0, 8),
       /* Where the learner is rated, and the range of problem difficulty that
          follows from it. The host has always enforced a level rule on what the

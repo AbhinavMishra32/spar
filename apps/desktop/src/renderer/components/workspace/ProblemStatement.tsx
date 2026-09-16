@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ArrowRight } from "lucide-react";
 import { Markdown } from "../agent/Markdown";
-import { MarkdownLinkProvider } from "../agent/MarkdownLinks";
+import { MarkdownLinkProvider, useMarkdownLinks } from "../agent/MarkdownLinks";
 import { parseStatement } from "@/lib/statement";
 
 /**
@@ -15,9 +15,14 @@ export function ProblemStatement({ source, language }: { source: string; languag
      the same text is in the editor beside it. A fenced block names its own
      language; an inline span cannot, and the statement's language is the only
      honest guess. Without it every span falls back to a plain chip. */
-  const links = useMemo(() => (language ? { language } : {}), [language]);
+  /* Added to what the shell already provides rather than replacing it: a
+     statement is inside the app, so a [[concept:…]] or [[lesson:…]] in one must
+     open the same surfaces it opens everywhere else. Providing a bare
+     `{ language }` here is what made those chips dead inside the problem. */
+  const outer = useMarkdownLinks();
+  const links = useMemo(() => (language ? { ...outer, language } : outer), [language, outer]);
 
-  if (!parsed.structured) return <MarkdownLinkProvider value={links}><Markdown className="md-prose-content" source={source} /></MarkdownLinkProvider>;
+  if (!parsed.structured) return <MarkdownLinkProvider value={links}><Markdown className="md-prose-content" source={parsed.lead} /></MarkdownLinkProvider>;
 
   return (
     <MarkdownLinkProvider value={links}>

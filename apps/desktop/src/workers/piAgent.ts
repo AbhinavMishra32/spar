@@ -3,7 +3,7 @@ import { completeSimple, streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, AssistantMessageEvent, Message, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { agentToolSchemas } from "./agentTools.js";
-import { piFastModeOptions, piModelFor, piTransportForApi, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
+import { piFastModeOptions, piModelFor, piReasoningSummaryForApi, piTransportForApi, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
 import type { NormalizedAgentStreamPart } from "./agentStream.js";
 
 /**
@@ -73,6 +73,7 @@ export function piAgentTools(
  */
 export function createTrainingAgent(input: PiProviderInput, systemPrompt: string, toolChoice: ToolChoiceRef): Agent {
   const transport = piTransportForApi(input.api);
+  const reasoningSummary = piReasoningSummaryForApi(input.api);
   return new Agent({
     initialState: { systemPrompt, model: piModelFor(input), tools: [], messages: [] },
     /* The transcript is already pi messages — Spar has no custom message kinds
@@ -84,6 +85,9 @@ export function createTrainingAgent(input: PiProviderInput, systemPrompt: string
       ...(transport ? { transport } : {}),
       ...(input.headers ? { headers: input.headers } : {}),
       ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
+      /* Ask for the working, not just the chapter titles — see
+         `piReasoningSummaryForApi`. */
+      ...(reasoningSummary ? { reasoningSummary } : {}),
       ...piFastModeOptions(input),
       ...(toolChoice.current !== undefined ? { toolChoice: toolChoice.current as never } : {}),
     } as SimpleStreamOptions),

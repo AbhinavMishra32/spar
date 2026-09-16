@@ -662,84 +662,84 @@
     }
   },
   "read_attempt": {
-    "description": "Read one attempt completely, in a single call. You get their code exactly as it stands right now; the deterministic runner's own verdict on it, which is the sole authority on whether it works and is never yours to second-guess; and the whole log of how they got there — every recorded event in order with its offset from when the attempt opened, every test case inside every run with its expected and actual values, plus two derived views a log in order cannot show: each case's verdict across all runs, and each run's newly-passing and newly-failing cases against the last run that saw it. Nothing in it is summarised or interpreted; it is what was recorded. This is the only tool that reads an attempt and it answers the whole question at once, so call it once and work from what came back rather than reaching for a second look. Take the whole thing when the attempt is small — that is the default — and use the parameters to narrow the log when it is long or when you only need one metric; the code and the verdict come back either way. It is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
+    "description": "Read an attempt's current code, deterministic runner verdict, and recorded solve history. The runner is the authority on correctness. Returns the complete report and source files, plus a sequence-to-event-ID index for ability evidence. Payloads are represented once in the report instead of duplicated as raw events. Start with one call and work from that evidence. Use sections, eventTypes, cases or scope when you want a focused view.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "attemptId": {
-          "description": "Omit for the attempt the learner has open right now, which is almost always the one you mean. Name one only to read a different attempt out of their history.",
+          "type": "string",
           "format": "uuid",
-          "type": "string"
+          "description": "Omit for the attempt the learner has open right now, which is almost always the one you mean. Name one only to read a different attempt out of their history."
         },
-        "caseDetail": {
-          "description": "`brief` drops the expected/actual pair from each failing case line in the log. Default full.",
-          "enum": [
-            "brief",
-            "full"
-          ],
-          "type": "string"
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "log",
+              "cases",
+              "runs",
+              "timings"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 4,
+          "description": "log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs."
+        },
+        "eventTypes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 40
+          },
+          "maxItems": 12,
+          "description": "Keep only these event types in the log, e.g. [\"test_run\"] for nothing but the runs, or [\"file_changed\",\"test_run\"] for the edit-and-run rhythm. Omit for every type. Recorded types: attempt_started, file_changed, command_executed, test_run, submission_created, submission_evaluated, attempt_completed, hint_requested, learner_remark, agent_message."
         },
         "cases": {
-          "description": "Narrow the case history. `still-failing` is what is wrong now; `fixed` is what they repaired themselves, which is evidence of learning inside one attempt.",
+          "type": "string",
           "enum": [
             "all",
             "failed-ever",
             "still-failing",
             "fixed"
           ],
-          "type": "string"
-        },
-        "eventTypes": {
-          "description": "Keep only these event types in the log, e.g. [\"test_run\"] for nothing but the runs, or [\"file_changed\",\"test_run\"] for the edit-and-run rhythm. Omit for every type. Recorded types: attempt_started, file_changed, command_executed, test_run, submission_created, submission_evaluated, attempt_completed, hint_requested, learner_remark, agent_message.",
-          "items": {
-            "maxLength": 40,
-            "minLength": 3,
-            "type": "string"
-          },
-          "maxItems": 12,
-          "type": "array"
-        },
-        "maxLines": {
-          "description": "Cap on log lines, newest kept, and it says how many it dropped. Default 400. Raise it rather than guessing at what a truncated log left out.",
-          "maximum": 2000,
-          "minimum": 20,
-          "type": "integer"
+          "description": "Narrow the case history. `still-failing` is what is wrong now; `fixed` is what they repaired themselves, which is evidence of learning inside one attempt."
         },
         "scope": {
-          "description": "`since-last-submission` keeps only what happened after the last graded run, which is often the whole question on a follow-up turn.",
+          "type": "string",
           "enum": [
             "all",
             "since-last-submission"
           ],
-          "type": "string"
+          "description": "`since-last-submission` keeps only what happened after the last graded run, which is often the whole question on a follow-up turn."
         },
-        "sections": {
-          "description": "log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs.",
-          "items": {
-            "enum": [
-              "log",
-              "cases",
-              "runs",
-              "timings"
-            ],
-            "type": "string"
-          },
-          "maxItems": 4,
-          "minItems": 1,
-          "type": "array"
+        "caseDetail": {
+          "type": "string",
+          "enum": [
+            "brief",
+            "full"
+          ],
+          "description": "`brief` drops the expected/actual pair from each failing case line in the log. Default full."
+        },
+        "maxLines": {
+          "type": "integer",
+          "minimum": 20,
+          "maximum": 2000,
+          "description": "Cap on log lines, newest kept, and it says how many it dropped. Omit to return all log lines. Only applies when explicitly requested."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "read_challenge": {
@@ -820,6 +820,30 @@
         "actionTitle"
       ],
       "type": "object"
+    }
+  },
+  "read_lesson": {
+    "description": "Read one lesson you have already taught: its pages, its takeaways and its reading list. Use it before teaching near something in your context's recentLessons, so the new lesson continues that one instead of repeating it, and before claiming you taught something specific, so what you say you showed them is what you showed them.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "lessonId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "lessonId",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "read_practice_problem": {
@@ -1386,6 +1410,36 @@
       "type": "object"
     }
   },
+  "search_lessons": {
+    "description": "Search what Spar has already taught this learner, by topic or concept. Cite what comes back with [[lesson:id|title]] rather than explaining it again.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 2
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "default": 6
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "query",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
   "search_practice_problems": {
     "description": "Search every available problem provider for real problems. Results carry `source`; keep it paired with `slug` when reading or assigning a candidate. Prefer a fitting real problem over writing one because it carries a real judge, calibrated difficulty, and—when that provider is connected—the learner's own history. Search by Spar concept slug (translated separately to each provider's tags) and narrow by difficulty. `todo` is useful when you want something new.",
     "inputSchema": {
@@ -1510,6 +1564,205 @@
         "actionTitle"
       ],
       "type": "object"
+    }
+  },
+  "teach_lesson": {
+    "description": "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem — the concept their attempt showed they are missing, a topic they asked about, the thing the next challenge is going to need — and prefer it over explaining at length in your reply, because a reply is gone by the next turn and this is not. Scale it to what is actually being taught: one or two pages for a single misconception, more only when the idea genuinely has that many parts, never pages that exist to round the number up. Each page is one thing, in their language, short enough to hold in mind at once; the body is markdown, may use fenced code, and may reference a concept as [[concept:slug|words]] or an earlier lesson as [[lesson:id|words]] exactly as a reply can. Every entry in `references` says why it is worth their time: use `url` only for a page you actually fetched this turn or know to exist, `reading` for a book or chapter you are naming from memory, and `concept`/`lesson` for Spar's own records. Tag `concepts` in the same vocabulary you tag challenges with, primary first — that is what files this beside what you have tested. The learner can see the lesson, so your reply must not restate its pages: say in a sentence what it is for and what to do with it, and point at it as [[lesson:<the id this returns>|its title]].",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 90
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 300
+        },
+        "concepts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 60
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "concept slugs, primary first, in the same vocabulary challenges are tagged with"
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 90
+              },
+              "body": {
+                "type": "string",
+                "minLength": 20,
+                "maxLength": 4000
+              },
+              "takeaway": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "title",
+              "body"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 8
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "url"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 120
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "url",
+                  "note"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "concept"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 120
+                  },
+                  "slug": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 60
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "slug",
+                  "note"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "lesson"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 120
+                  },
+                  "lessonId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "lessonId",
+                  "note"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "reading"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 120
+                  },
+                  "note": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 240
+                  }
+                },
+                "required": [
+                  "kind",
+                  "label",
+                  "note"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          },
+          "maxItems": 6,
+          "default": []
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "concepts",
+        "pages",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "upsert_ability": {

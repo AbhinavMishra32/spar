@@ -33,6 +33,12 @@ export type PublishedChallenge = {
   displayId: string | null;
   /** What it is about, primary first, as the agent tagged it. */
   concepts: string[];
+  /** The file the learner opens, as the design shipped it. One file rather than
+   *  the map: a preview is a reminder of which challenge this is, and the first
+   *  starter file is the one with the signature they were working against. Null
+   *  for a mounted problem, which Spar wrote no starter for, and for a payload
+   *  clipped before the map — an object cut in half cannot be scraped back. */
+  starter: { path: string; code: string } | null;
   /** Whether this took the place of a challenge that was already open. */
   replaced: boolean;
   /** The challenge this one superseded. Kept separately from `replaced` so the
@@ -103,6 +109,15 @@ function concepts(value: unknown): string[] {
   return [...tags.filter((tag) => tag.primary), ...tags.filter((tag) => !tag.primary)].map((tag) => tag.label);
 }
 
+/** The first starter file that has anything in it, path and source. */
+function starterFile(value: unknown): { path: string; code: string } | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  for (const [path, code] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof code === "string" && code.trim()) return { path, code };
+  }
+  return null;
+}
+
 /** Cases the reference actually ran, as the compiler counted them. */
 function caseCount(report: unknown): number | null {
   if (!report || typeof report !== "object") return null;
@@ -151,6 +166,7 @@ export function readPublishedChallenge(part: ToolPart): PublishedChallenge {
     source: sourced ? source : null,
     displayId: text(published, "displayId") || null,
     concepts: concepts(sent.concepts),
+    starter: starterFile(sent.starterFiles),
     replaced: part.tool === "replace_current_question" || typeof back.replacedQuestionId === "string",
     replacedQuestionId: typeof back.replacedQuestionId === "string" && back.replacedQuestionId ? back.replacedQuestionId : null,
     cases: sourced ? null : caseCount(back.report),

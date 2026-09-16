@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, turnExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, TEACH_TOOLS, turnExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 
 const TURN_KINDS: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message", "challenge-revision"];
 
@@ -287,11 +287,11 @@ describe("Training Agent controller policy", () => {
     expect(stage().activeTools).toEqual(["review_solution"]);
     for (const name of ["review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence"]) settle(name);
 
-    // The only stage with a choice: aim the next question, or ask about what the
-    // trace could not explain.
-    expect(stage()).toEqual({ activeTools: ["ask_user_question", "set_training_target"], toolChoice: "required" });
+    // The stage with the choices: aim the next question, ask about what the
+    // trace could not explain, or teach the thing the solve showed they lack.
+    expect(stage()).toEqual({ activeTools: ["ask_user_question", ...TEACH_TOOLS, "set_training_target"], toolChoice: "required" });
     settle("set_training_target");
-    expect(stage().activeTools).toEqual(["create_question"]);
+    expect(stage().activeTools).toEqual([...TEACH_TOOLS, "create_question"]);
   });
 
   it("continues the same turn from an answered question before publishing a challenge", () => {
@@ -301,7 +301,7 @@ describe("Training Agent controller policy", () => {
     }
     outcomes.set("ask_user_question", [{ result: { pending: false, status: "answered", answer: "The shrink ran only once" } }]);
 
-    expect(nextToolStage("attempt-complete", outcomes)).toEqual({ activeTools: ["set_training_target"], toolChoice: "required" });
+    expect(nextToolStage("attempt-complete", outcomes)).toEqual({ activeTools: [...TEACH_TOOLS, "set_training_target"], toolChoice: "required" });
   });
 
   it("exhausts challenge authoring after the first rejected public candidate", () => {
@@ -374,12 +374,12 @@ describe("practice sources in the stage machine", () => {
     const stage = nextToolStage("session-start", outcomes, 15, { practiceSource: true });
     // Both, and required: the turn cannot end in prose, and it cannot write its
     // own challenge without having seen what the source has.
-    expect(stage).toEqual({ activeTools: ["assign_practice_problem", "create_question"], toolChoice: "required" });
+    expect(stage).toEqual({ activeTools: [...TEACH_TOOLS, "assign_practice_problem", "create_question"], toolChoice: "required" });
   });
 
   it("asks for neither when no source is connected", () => {
     const stage = nextToolStage("session-start", targeted(), 15, {});
-    expect(stage).toEqual({ activeTools: ["create_question"], toolChoice: "required" });
+    expect(stage).toEqual({ activeTools: [...TEACH_TOOLS, "create_question"], toolChoice: "required" });
   });
 
   it("ends the turn once a real problem is assigned", () => {
@@ -414,7 +414,7 @@ describe("practice sources in the stage machine", () => {
     ]);
     expect(nextToolStage("attempt-complete", outcomes, 15, { practiceSource: true }).activeTools).toEqual(["search_practice_problems"]);
     outcomes.set("search_practice_problems", [{ result: { problems: [] } }]);
-    expect(nextToolStage("attempt-complete", outcomes, 15, { practiceSource: true }).activeTools).toEqual(["assign_practice_problem", "create_question"]);
+    expect(nextToolStage("attempt-complete", outcomes, 15, { practiceSource: true }).activeTools).toEqual([...TEACH_TOOLS, "assign_practice_problem", "create_question"]);
   });
 
   it("offers the whole source mid-challenge, assignment included", () => {
@@ -483,3 +483,76 @@ describe("practice sources in the stage machine", () => {
   });
 });
 
+
+/**
+ * The other thing a turn can hand over.
+ *
+ * Asserted as a property of the stage machine rather than of the prompt: a turn
+ * that taught is not *encouraged* to stop setting a challenge, it is no longer
+ * staged to set one. That distinction is the whole feature — an instruction the
+ * model may ignore would leave the old behaviour intact on the turns that matter.
+ */
+describe("teaching", () => {
+  const taught = () => [{ result: { status: "taught", lessonId: "l1", title: "Aliasing" } }];
+  const complete = (extra: Record<string, unknown[]> = {}) => new Map<string, unknown[]>([
+    ...["read_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence", "ask_user_question", "set_training_target"]
+      .map((name) => [name, [{ result: { ok: true } }]] as [string, unknown[]]),
+    ...Object.entries(extra),
+  ]);
+
+  it("ends a turn that taught instead of making it set a challenge", () => {
+    expect(nextToolStage("attempt-complete", complete()).activeTools).toEqual([...TEACH_TOOLS, "create_question"]);
+    expect(nextToolStage("attempt-complete", complete({ teach_lesson: taught() }))).toEqual({ activeTools: [], toolChoice: "none" });
+  });
+
+  it("still requires a challenge when the lesson was not actually written", () => {
+    /* A rejected lesson is a failed call, not a turn's teaching. The old
+       behaviour has to survive every path that did not end in a filed lesson. */
+    const rejected = [{ result: { status: "invalid", report: { valid: false } } }];
+    expect(nextToolStage("attempt-complete", complete({ teach_lesson: rejected })).activeTools).toEqual([...TEACH_TOOLS, "create_question"]);
+  });
+
+  it("offers the kit where the choice is actually made, and withdraws it once used", () => {
+    const outcomes = complete();
+    outcomes.delete("set_training_target");
+    expect(nextToolStage("attempt-complete", outcomes).activeTools).toEqual([...TEACH_TOOLS, "set_training_target"]);
+    outcomes.set("teach_lesson", taught());
+    // One turn teaches one thing: the tools go the moment a lesson lands.
+    expect(nextToolStage("attempt-complete", outcomes).activeTools).toEqual(["set_training_target"]);
+  });
+
+  it("is still offered at the stage that would otherwise require a challenge", () => {
+    /* The bug this pins. Offering the kit only beside `set_training_target`
+       meant the choice was put to the turn one stage before it could see what it
+       was about to test, and a first session on a brand new subject answered
+       that stage with the tool it required and went on to set a problem. The
+       turn has to be able to teach at the moment the next call is the
+       challenge. */
+    const opened = new Map<string, unknown[]>([
+      ...["search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "set_session_objective", "read_concept_graph", "set_training_target"]
+        .map((name) => [name, [{ result: { ok: true } }]] as [string, unknown[]]),
+    ]);
+    expect(nextToolStage("session-start", opened).activeTools).toEqual([...TEACH_TOOLS, "create_question"]);
+    opened.set("teach_lesson", taught());
+    expect(nextToolStage("session-start", opened)).toEqual({ activeTools: [], toolChoice: "none" });
+  });
+
+  it("is reachable on an ordinary turn, because 'I still don't get this' is one", () => {
+    expect(nextToolStage("learner-message", new Map()).activeTools).toEqual(expect.arrayContaining(TEACH_TOOLS));
+  });
+});
+
+describe("what a turn that taught says", () => {
+  const taught = new Map<string, unknown[]>([["teach_lesson", [{ result: { status: "taught", lessonId: "l1" } }]]]);
+
+  it("asks for the reference and refuses the restatement", () => {
+    const text = completionInstruction("attempt-complete", taught);
+    expect(text).toContain("[[lesson:");
+    expect(text).toContain("do not restate its pages");
+  });
+
+  it("does not ask why this problem, because no problem was set", () => {
+    expect(completionInstruction("attempt-complete", taught)).not.toContain("why this problem");
+    expect(completionInstruction("attempt-complete", new Map())).toContain("why this problem");
+  });
+});

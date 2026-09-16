@@ -3,7 +3,7 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
@@ -463,6 +463,20 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.visualizerView, async (_event, value) => {
     const id = String((value as { id?: unknown })?.id ?? "");
     return id ? deps.store.readVisualization(id) : null;
+  });
+  /* A lesson, read back by id. Same shape and the same reason as the
+     visualisation above it: the transcript row carries an identity, the reader
+     fetches the document. */
+  ipcMain.handle(ipc.lessonRead, (_event, value) => {
+    const id = String((value as { id?: unknown })?.id ?? "");
+    if (!id) return null;
+    const found = deps.store.readLesson(id);
+    if (!found) return null;
+    const payload = lessonInputSchema.safeParse(found.payload);
+    if (!payload.success) return null;
+    /* The payload is the whole lesson; the columns beside it are a copy kept so
+       a search can read titles without parsing every row. The payload wins. */
+    return { ...payload.data, id: found.id, sessionId: found.sessionId, createdAt: found.createdAt };
   });
   ipcMain.handle(ipc.messageActivity, (_event, value) => {
     const messageId = String((value as { messageId?: unknown })?.messageId ?? "");

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { askUserQuestionInputSchema, languageSchema } from "@spar/domain";
+import { askUserQuestionInputSchema, languageSchema, lessonInputSchema } from "@spar/domain";
 import { PRACTICE_READ_TOOLS } from "@spar/practice/mcp";
 import { ACTION_TITLE_KEY } from "./toolPayload.js";
 import { syntheticChallengeAuthoringDoctrine } from "./challengeAuthoring.js";
@@ -80,7 +80,7 @@ export const toolDefinitions = {
    * one act of reading their code. A question with one answer gets one tool.
    */
   read_attempt: [
-    "Read one attempt completely, in a single call. You get their code exactly as it stands right now; the deterministic runner's own verdict on it, which is the sole authority on whether it works and is never yours to second-guess; and the whole log of how they got there — every recorded event in order with its offset from when the attempt opened, every test case inside every run with its expected and actual values, plus two derived views a log in order cannot show: each case's verdict across all runs, and each run's newly-passing and newly-failing cases against the last run that saw it. Nothing in it is summarised or interpreted; it is what was recorded. This is the only tool that reads an attempt and it answers the whole question at once, so call it once and work from what came back rather than reaching for a second look. Take the whole thing when the attempt is small — that is the default — and use the parameters to narrow the log when it is long or when you only need one metric; the code and the verdict come back either way. It is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
+    "Read an attempt's current code, deterministic runner verdict, and recorded solve history. The runner is the authority on correctness. Returns the complete report and source files, plus a sequence-to-event-ID index for ability evidence. Payloads are represented once in the report instead of duplicated as raw events. Start with one call and work from that evidence. Use sections, eventTypes, cases or scope when you want a focused view.",
     z.object({
       attemptId: z.string().uuid().optional()
         .describe("Omit for the attempt the learner has open right now, which is almost always the one you mean. Name one only to read a different attempt out of their history."),
@@ -93,7 +93,7 @@ export const toolDefinitions = {
       scope: z.enum(["all", "since-last-submission"]).optional()
         .describe("`since-last-submission` keeps only what happened after the last graded run, which is often the whole question on a follow-up turn."),
       caseDetail: z.enum(["brief", "full"]).optional().describe("`brief` drops the expected/actual pair from each failing case line in the log. Default full."),
-      maxLines: z.number().int().min(20).max(2_000).optional().describe("Cap on log lines, newest kept, and it says how many it dropped. Default 400. Raise it rather than guessing at what a truncated log left out."),
+      maxLines: z.number().int().min(20).max(2_000).optional().describe("Cap on log lines, newest kept, and it says how many it dropped. Omit to return all log lines. Only applies when explicitly requested."),
     }),
   ],
   /**
@@ -176,6 +176,35 @@ export const toolDefinitions = {
       takeaway: z.string().max(400).optional().describe("Optional: the one sentence the whole sequence adds up to, shown under it."),
     }),
   ],
+  /**
+   * Teaching, as something the agent can hand over.
+   *
+   * Everything Spar could produce durably was a challenge. An idea the learner
+   * was missing could only be handled inside a reply — and a reply is three
+   * screens up by the next turn, cannot be pointed at, cannot be reopened, and
+   * is gone from the agent's own view of what this learner has been told. So the
+   * turn that noticed the gap either wrote an essay nobody would return to, or
+   * skipped the explaining and set another problem. That second behaviour is
+   * what this exists to end.
+   *
+   * The schema is the domain's, unchanged, so the pages the agent sends are the
+   * pages the store keeps and the reader draws — there is no second definition
+   * of what a lesson is to drift from this one.
+   *
+   * Depth is deliberately not a parameter. An agent given a `depth` enum picks
+   * the middle one every time; an agent given a page budget and told what a page
+   * is for writes two pages for a small idea, because there were only two things
+   * to say.
+   */
+  teach_lesson: [
+    "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem — the concept their attempt showed they are missing, a topic they asked about, the thing the next challenge is going to need — and prefer it over explaining at length in your reply, because a reply is gone by the next turn and this is not. Scale it to what is actually being taught: one or two pages for a single misconception, more only when the idea genuinely has that many parts, never pages that exist to round the number up. Each page is one thing, in their language, short enough to hold in mind at once; the body is markdown, may use fenced code, and may reference a concept as [[concept:slug|words]] or an earlier lesson as [[lesson:id|words]] exactly as a reply can. Every entry in `references` says why it is worth their time: use `url` only for a page you actually fetched this turn or know to exist, `reading` for a book or chapter you are naming from memory, and `concept`/`lesson` for Spar's own records. Tag `concepts` in the same vocabulary you tag challenges with, primary first — that is what files this beside what you have tested. The learner can see the lesson, so your reply must not restate its pages: say in a sentence what it is for and what to do with it, and point at it as [[lesson:<the id this returns>|its title]].",
+    lessonInputSchema,
+  ],
+  /** One lesson, back in full, for the turn that has to build on what was said in
+   *  it rather than teach the same ground twice under a new title. */
+  read_lesson: ["Read one lesson you have already taught: its pages, its takeaways and its reading list. Use it before teaching near something in your context's recentLessons, so the new lesson continues that one instead of repeating it, and before claiming you taught something specific, so what you say you showed them is what you showed them.", z.object({ lessonId: z.string().uuid() })],
+  /** The search that stops the same idea being taught twice. */
+  search_lessons: ["Search what Spar has already taught this learner, by topic or concept. Cite what comes back with [[lesson:id|title]] rather than explaining it again.", z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(12).default(6) })],
   /**
    * Setting a real problem instead of writing one.
    *

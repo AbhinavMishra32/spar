@@ -6,10 +6,11 @@ import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "./Markdown";
-import { ChallengePublished, FINAL_GAP, PROSE_GAP, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
+import { ChallengePublished, FINAL_GAP, PROSE_GAP, Reasoning, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
 import { ExplainedTrace } from "./ExplainedTrace";
+import { LessonCard } from "./LessonCard";
 import { SystemEvent } from "./SystemEvent";
-import { groupParts, isChallengePublished, publishedRunArtifacts, reasoningAtLiveEdge, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, isPublishedArtifact, publishedRunArtifacts, type AgentRun, type RunPart } from "./agentRun";
 import { RunFold } from "./RunFold";
 import { unreconciledOptimisticMessages, type OptimisticLearnerMessage } from "./optimisticMessages";
 import type { ChallengeTrail } from "../workspace/ChallengeStepper";
@@ -92,14 +93,13 @@ function LiveRun({ run, phase, currentQuestionId, trail }: { run: AgentRun; phas
   const reply = run.parts.slice(boundary);
   // Published artifacts remain accessible even when the work is collapsed.
   const published = publishedRunArtifacts(run);
-  const thinkingAtEdge = reasoningAtLiveEdge(work, streaming, run.finalStartedAt);
   const reduced = useReducedMotion();
   /* The same rule live: the fold is the lid on the work, and a turn that went
      straight to answering has no work under it. While it is still waiting for
      the first token the lid stays — there the transient line inside it is the
      only thing saying the turn is alive. */
   const waiting = streaming && run.finalStartedAt === undefined;
-  const shows = waiting || thinkingAtEdge || work.some((part) => part.kind !== "reasoning");
+  const shows = waiting || work.length > 0;
   return (
     /* The turn opening. A send used to be answered by a header, a rule and a
        waiting line all appearing in one frame in the empty space under the
@@ -114,24 +114,16 @@ function LiveRun({ run, phase, currentQuestionId, trail }: { run: AgentRun; phas
       transition={{ type: "spring", visualDuration: 0.45, bounce: 0 }}
     >
       <PhaseLine live={streaming} phase={phase} />
+      {/* "Working for 0s" over an empty fold, before the provider has sent a
+          token, is the turn reporting on a wait rather than on work. The header
+          arrives with the first thing the model says. */}
       {shows && (
-      <RunFold finalStartedAt={run.finalStartedAt} live={streaming} startedAt={run.startedAt}>
+      <RunFold connected={work.length > 0 || run.finalStartedAt !== undefined} finalStartedAt={run.finalStartedAt} live={streaming} startedAt={run.startedAt}>
         <Rows compactChallenges currentQuestionId={currentQuestionId} parts={work} trail={trail} />
-        {/* The two transient lines of a live turn, which are each other's
-            replacement and the first tool row's. Held in one presence group so
-            the one going out fades while the one coming in rises, rather than
-            the row beneath jumping up into a slot that emptied in a frame. */}
+        {/* The one transient line of a live turn: the wait before the provider
+            has sent anything. Everything after it — the thinking included — is a
+            real part with a row of its own, so there is nothing left to swap. */}
         <AnimatePresence initial={false} mode="popLayout">
-          {thinkingAtEdge && (
-            <motion.div
-              animate={{ opacity: 1, y: 0 }}
-              exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
-              initial={reduced ? false : { opacity: 0, y: 6 }}
-              key="thinking"
-              style={{ marginTop: STEP_GAP }}
-              transition={{ type: "spring", visualDuration: 0.35, bounce: 0 }}
-            ><ThinkingLine /></motion.div>
-          )}
           {streaming && run.finalStartedAt === undefined && (
             <motion.div
               animate={{ opacity: 1, y: 0 }}
@@ -236,13 +228,13 @@ function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { 
            the row beneath it, and a pad here on top of that was the part that
            made the spacing around prose impossible to predict. */
         if (part.kind === "text") return wrap(<div className="text-foreground"><Markdown source={part.body} /></div>);
-        if (part.kind === "reasoning") {
-          /* Provider reasoning is runtime state, not transcript content. Its
-             position in this chronological array used to leave old "Thinking"
-             rows above later prose and tools. The live edge draws one transient
-             loader in `LiveRun`; settled reasoning draws nothing. */
-          return null;
-        }
+        /* The model's own thinking, in its place in the column. A generic
+           "Thinking" row pinned to the live edge threw away the part worth
+           reading — the heading the model gave its own working — and left a
+           turn's reasoning unaccounted for once it settled. `Reasoning` draws
+           one row per block of thought, titled with that heading and opening
+           onto the thinking behind it. */
+        if (part.kind === "reasoning") return wrap(<Reasoning part={part} />);
         if (part.kind === "tool-row") {
           /* Tool input and output remain inspectable. Provider reasoning bound to
              the tool is intentionally not rendered as another content surface. */
@@ -251,22 +243,13 @@ function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { 
         if (part.kind === "challenge") return wrap(<ChallengePublished compact={compactChallenges} currentQuestionId={currentQuestionId} part={part.part} trail={trail} />);
         if (part.kind === "solve-read") return wrap(<SolveRead part={part.part} />);
         if (part.kind === "explained-trace") return wrap(<ExplainedTrace part={part.part} />);
+        /* The turn's other handover. Same weight as a published challenge,
+           because that is what it is. */
+        if (part.kind === "lesson") return compactChallenges ? wrap(<ToolRow continues={continues} part={part.part} />) : wrap(<LessonCard part={part.part} />);
         if (part.kind === "error") return wrap(<RunFailure body={part.body} />);
         return wrap(<div className="truncate text-thread text-[var(--transcript-step)]">{part.body}</div>);
       })}
     </>
-  );
-}
-
-/** One transient state, always after everything that has already happened. */
-function ThinkingLine() {
-  return (
-    <div className="-mx-1 flex items-center gap-1.5 py-0.5">
-      <span className={cn(ROW_GLYPH, "relative")}>
-        <ThinkingOrb aria-label="Thinking" size={20} state="working" style={{ width: 16, height: 16 }} />
-      </span>
-      <span className="thinking-shimmer min-w-0 truncate text-thread font-medium">Thinking</span>
-    </div>
   );
 }
 
@@ -323,17 +306,15 @@ export function AgentMessage({ body, activity, activityCount, messageId, workedM
   const [fetched, setFetched] = useState<AgentActivityStep[] | null>(null);
   const steps = fetched ?? activity;
   const parts = steps.map(storedPart);
-  const published = parts.filter(isChallengePublished);
+  const published = parts.filter(isPublishedArtifact);
   /* Steps this turn has on disk but not in memory. The fold offers them and
      fetches them when it is opened, so an old turn reads as a turn that did
      work rather than one that did nothing. */
-  const deferred = !steps.length && activityCount > 0;
-  /* Steps that draw something. Provider reasoning is runtime state and `Rows`
-     renders none of it, so a turn whose only "work" was thinking had a fold
-     announcing five seconds of nothing and opening onto an empty panel — the
-     turn that answered straight away is exactly the one with nothing to show.
-     No drawn rows, no fold. */
-  const shows = deferred || parts.some((part) => part.kind !== "reasoning");
+  const deferred = fetched === null && activityCount > steps.length;
+  /* Steps that draw something. Thinking counts — a turn that only thought still
+     has its heading and its working to show, which is the whole reason the fold
+     is there. No drawn rows, no fold. */
+  const shows = deferred || parts.length > 0;
   const open = async () => {
     setFetched(await window.spar!.messageActivity({ messageId }));
   };

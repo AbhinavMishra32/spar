@@ -491,6 +491,8 @@ function describeToolResult(name: string, value: unknown): string {
     return `${where} · line ${String(record.line ?? "")}`;
   }
   if (name === "visualize_explain" && typeof record.steps === "number") return `${record.steps} step${record.steps === 1 ? "" : "s"} shown`;
+  if (name === "teach_lesson" && typeof record.pages === "number") return `${record.pages} page${record.pages === 1 ? "" : "s"} taught`;
+  if (name === "search_lessons" && Array.isArray(record.lessons)) return `${record.lessons.length} already taught`;
   if (typeof record.error === "string" && typeof record.note === "string") return record.note.slice(0, 200);
   if (Array.isArray(value)) return `${value.length} result${value.length === 1 ? "" : "s"}`;
   if (typeof record.outcome === "string") return `outcome ${record.outcome}`;
@@ -877,7 +879,7 @@ const ACCUMULATED_LIMIT = 6;
  * session, the conversation and the active challenge are already in front of the
  * agent, and a call spent reading them back is a round trip that learns nothing.
  */
-const ONE_READ_OF_THE_SOLVE = "The context above already holds this session, the recent conversation, and the active challenge with its target, so never spend a call reading those back. One call to read_attempt returns their code exactly as it stands, the runner's verdict on it, and every edit, run and case result behind it — that is the whole answer to how they are doing, so read what it returned rather than calling it again. ";
+const ONE_READ_OF_THE_SOLVE = "The context above already holds this session, the recent conversation, and the active challenge with its target, so never spend a call reading those back. One call to read_attempt returns their code exactly as it stands, the runner's verdict on it, and the history of edits, runs and case results. Work from that evidence rather than reading it again. ";
 
 function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string, spent: Set<string> = new Set(), evidenceBudget = Number.POSITIVE_INFINITY, interruptions: string[] = []) {
   const evidence = fitEvidence(Object.fromEntries([...outcomes.entries()].map(([name, values]) => [name, ACCUMULATING_TOOLS.has(name) ? values.slice(-ACCUMULATED_LIMIT) : values.at(-1)])), evidenceBudget);
@@ -951,6 +953,8 @@ ${replayDoctrine()}
 
 ${conceptDoctrine()}
 
+${teachingDoctrine()}
+
 ${sourceDoctrine()}
 
 ${solutionContract()}`; }
@@ -1018,11 +1022,54 @@ Be exact about who graded what. A challenge from a source with its judge behind 
  * skipping it and aiming the next question at a score.
  */
 function replayDoctrine() {
-  return `A verdict tells you almost nothing about a learner. Two people reach 6/7 by completely different routes, and the one who fixed a case in ninety seconds is not the one who broke two others getting there. read_attempt is the one call that shows you the difference: their code as it stands, the runner's own verdict on it, and the attempt's raw log — every recorded event in order with its offset, every test case's result inside every run with its expected and actual values, plus the per-case history across runs and each run's newly-passing and newly-failing sets. It states no conclusions — reading it is your job, and it is the whole read, so one call settles what you need and a second one returns the same thing. Call it before you judge a completed attempt, and again on any later turn where the learner's own behaviour is what is in question. Default to taking the whole log; narrow with eventTypes, cases, scope or maxLines only when the attempt is long or you genuinely need one metric, and when a log comes back truncated raise maxLines rather than guessing at what was cut.
+  return `Read read_attempt before judging a completed attempt, and on later turns that concern the learner's behaviour. It returns current code, the runner's verdict, the solve report, and a sequence-to-event-ID index for citations. Event payloads are represented in the report rather than duplicated as raw JSON. The default read includes the full log and source files. Use sections, eventTypes, cases or scope when the question calls for a focused view; do not repeat the same read.
 
 These are the readings that have carried the most, and you are expected to find others. A case that never passed across several runs is where the misconception lives, and it is worth far more than the total. A case that passed and then failed again is the sharpest thing in the log: their fix for one thing broke another, so the two are not separate in their model of the problem. A hidden case first seen on a submission tells you what they could not have known; a visible case failed repeatedly tells you what they could read and still could not do. Offsets are evidence too — a long stretch before the first run, a run after nearly every save, a long quiet gap before a correct fix — and so is work recorded after the grade, which counts for nothing and still says a lot.
 
 Then aim the next question at what the behaviour exposes rather than at the score, and cite the actual moment when you speak to the learner: "the shrink case was passing at +12:36 and broke when you fixed the total" is worth more to them than any summary, and it is how they learn Spar is really watching. Quote only what the log contains — offsets, case names, values — and never dress an event up as a motive. The log says what happened, never why. When the why matters for aiming the next question, and it usually does, ask them with ask_user_question and name the exact moment you are asking about. Asking is a first-class outcome of reading a log rather than a failure to decide: a question that makes the next challenge land beats a confident guess that misses, so do not hesitate to ask, and ask again whenever a later attempt raises something new.`;
+}
+
+/**
+ * When to teach rather than test, and what a lesson has to be.
+ *
+ * Spar could only ever hand over a problem. Everything else it knew — why the
+ * invariant holds, what the two meanings of a name are, the thing the learner
+ * plainly has not met yet — had to go into a reply, and a reply is gone by the
+ * next turn. So the agent's only durable move was to set another challenge, and
+ * a learner missing the idea got a second problem about the idea they were
+ * missing.
+ *
+ * The rule below is deliberately narrow. The failure mode of "you may teach" is
+ * an agent that teaches constantly, because writing pages is easier than
+ * authoring a compiled challenge — so the condition is stated as evidence, not
+ * as inclination: teach what they have shown you they do not know, not what
+ * would be nice to cover.
+ *
+ * The other half of that is scope. An agent told to teach reaches for the topic
+ * the gap belongs to, because a topic is what a textbook has a chapter about —
+ * and a chapter is not what someone who just lost an hour to an empty window
+ * needs. So the paragraph says plainly that one edge case is a whole lesson, and
+ * that it is filed at the resolution of the case rather than of its family.
+ */
+function teachingDoctrine() {
+  return `TEACHING
+Spar can hand the learner two kinds of thing: a challenge to attempt, and a lesson to read. A lesson is a few short pages that stay in the conversation and keep an id, so you can point at one later and they can open it. teach_lesson writes one.
+
+Teach when the obstacle is knowledge rather than practice, and only when you can name the evidence: their attempt shows they have not met the idea at all, they asked you a question that is genuinely about an idea, or the next challenge depends on something the record says they have never been taught. Do not teach what they have already shown they can do — a lesson about an idea someone has already used is a lecture, and they will read it as one. When the obstacle is practice, set a challenge; that is still the ordinary case.
+
+The clearest case of all is ground the learner has never stood on. A Track opening on a subject they have told you they are new to, or a target whose gap names an idea the record holds nothing about, is not a gap in practice — there is nothing there to practise yet. Teach it first. Setting someone's first problem in a subject they have just said they do not know is asking them to reinvent it, and finding that they cannot is not evidence about them. So on a turn where the concept graph and the history both come back empty for what you are about to test, the lesson is the move, and the challenge that tests it comes after — this turn if it follows directly from what you taught, otherwise next turn, once they have read it.
+
+A lesson is sized to the gap, not to the topic. Most of what is worth teaching is not a subject — it is one edge case, one invariant, one reason a thing that looks right is wrong, and those are exactly the lessons that land, because the learner has just been bitten by the thing. When the evidence is narrow, teach the narrow thing: title it as what it is and where it lives ("Empty window: when the sliding window has nothing to restore"), spend the pages on the case rather than on a tour of the topic around it, and tag it at that resolution — window-invariant-restoration, not sliding-window — so it files against the evidence that prompted it. One page about the case they actually failed beats six pages about the family it belongs to. Teaching the whole topic is for a learner who has genuinely never met it.
+
+A delivered lesson is not evidence that the learner has read, understood, or mastered it. Say "the lesson introduces" rather than "you have learned" unless their response or attempt supports that claim. The next exercise should test one concrete idea actually explained in the lesson; if it needs a new concept or metric, teach that first. Keep the target and ability description as narrow as the exercise itself.
+
+Check first. Your context carries recentLessons, and search_lessons finds the rest. If you have taught this before, read it with read_lesson and either build on it or point at it — teaching the same idea twice under a new title is how a learner stops reading any of it.
+
+Write it for them, not for the record. One page is one idea, short enough to hold in mind at once. Use their own code and their own failure where you have it — the page that names the case they never reached is the page that lands. Fenced code is welcome; a wall of prose is not. Stop when the idea is covered: pages added to make it look substantial are the thing that makes nobody open the second one.
+
+Every reference says why it is worth the click. Give a url only for a page you actually fetched this turn or genuinely know exists — a plausible-looking link that 404s costs you more than no link at all — and use reading for a book or chapter you are naming from memory, which is honest and is not dressed up as something checked.
+
+A turn that teaches does not also have to set a challenge, and usually should not: you have just given them something to do. Your reply then points at the lesson and says why it is for them now. Do not restate what is on its pages.`;
 }
 
 /**

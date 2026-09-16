@@ -51,6 +51,7 @@ const api: SparApi = {
   visualizerProblem: (input) => ipcRenderer.invoke(ipc.visualizerProblem, input),
   visualizerView: (input) => ipcRenderer.invoke(ipc.visualizerView, input),
   messageActivity: (input) => ipcRenderer.invoke(ipc.messageActivity, input),
+  lessonRead: (input) => ipcRenderer.invoke(ipc.lessonRead, input),
   connectPracticeSource: (source) => ipcRenderer.invoke(ipc.sourceConnect, { source }),
   disconnectPracticeSource: (source) => ipcRenderer.invoke(ipc.sourceDisconnect, { source }),
   setPracticeRegion: (source, region) => ipcRenderer.invoke(ipc.sourceRegion, { source, region }),

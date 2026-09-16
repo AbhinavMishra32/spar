@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ChallengeDetail, Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
+import type { ChallengeCodePreview, ChallengeDetail, Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
 import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
@@ -16,12 +16,14 @@ import { SIDEBAR_SLIDE, SIDEBAR_SLIDE_CSS } from "./components/shell/sidebarMoti
 import { TracksPage } from "./components/pages/TracksPage";
 import { TrackPage } from "./components/pages/TrackPage";
 import { ProblemsPage } from "./components/pages/ProblemsPage";
-import { seedSavedProblems } from "./hooks/use-saved-problems";
+import { registerShelfRoute, seedSavedProblems } from "./hooks/use-saved-problems";
 import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
 import { ConceptSheet } from "./components/concepts/ConceptSheet";
+import { LessonReader } from "./components/agent/LessonReader";
+import { MarkdownLinkProvider } from "./components/agent/MarkdownLinks";
 import { ChallengePage } from "./components/pages/ChallengePage";
 import { AuthPage } from "./components/pages/AuthPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
@@ -32,6 +34,7 @@ import { reduceRunBatch, type AgentRun } from "./components/agent/agentRun";
 import { canGoBack, canGoForward, forget, step, visit, type History, type View } from "./hooks/navigation";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
 import { SparDots } from "@/components/common/SparDots";
+import { Toaster } from "@/components/common/Toaster";
 import { Button } from "@/components/ui/button";
 
 const api: SparApi | undefined = window.spar;
@@ -76,6 +79,18 @@ export function App() {
      can both keep reporting live work on cards for sessions nobody has open. */
   const [runs, setRuns] = useState<Record<string, AgentRun>>({});
   const [palette, setPalette] = useState(false);
+  /* Bumped when something elsewhere in the window asks for the shelf — a save
+     receipt, so far. A counter rather than a boolean because the Problems page
+     owns its own filters and this is a request to set one, not a mode the shell
+     holds on its behalf: asking twice has to land twice. */
+  const [shelfRequest, setShelfRequest] = useState(0);
+  const shelfRouteRef = useRef<(() => void) | null>(null);
+  /* A code excerpt per challenge, for the hover preview on a session's stack.
+     Fetched rather than bootstrapped for the same reason the session cards'
+     plates are: it is a page of code per challenge, every launch would pay for
+     it, and every surface that uses one draws perfectly well in the moment
+     before it lands. */
+  const [codePreviews, setCodePreviews] = useState<Record<string, ChallengeCodePreview>>({});
   /** A retry of the cloud pull is in flight, so its button can say so. */
   const [retrying, setRetrying] = useState(false);
   /* One concept sheet for the whole app rather than one per list. A chip appears
@@ -83,6 +98,24 @@ export function App() {
      one of them has to open the same surface — nesting a second dialog inside the
      first is how you end up unable to get back out of it. */
   const [concept, setConcept] = useState<string | null>(null);
+  /* And one lesson reader, for the same reason and with the same rule. A lesson
+     is referenced from the thread, from inside another lesson's reading list and
+     from a problem statement, and all three have to land on the same surface. */
+  const [lesson, setLesson] = useState<string | null>(null);
+  /* Memoised because it is a context value: a new object every render would
+     redraw every markdown block in the window on every keystroke. */
+  const markdownLinks = useMemo(
+    () => ({
+      onOpenConcept: setConcept,
+      onOpenLesson: setLesson,
+      /* Which lesson the reader has, so the card it grew out of can stand down
+         while it is open — the two share a layout id. */
+      openLessonId: lesson,
+      onOpenUrl: (url: string) => { void api?.openExternal(url); },
+    }),
+    [lesson],
+  );
+
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
   const { width: sidebarWidth, dragging, handleProps: sidebarHandle } = useSidebarWidth();
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
@@ -357,6 +390,18 @@ export function App() {
     return api.onSyncState((syncState) => setData((current) => (current ? { ...current, syncState } : current)));
   }, []);
 
+  /* Re-read whenever the number of challenges changes, which is the one event
+     that can add an excerpt this map has not got. */
+  const challengeCount = data?.challenges.length ?? 0;
+  useEffect(() => {
+    if (!api || !challengeCount) return;
+    let cancelled = false;
+    void api.listChallengePreviews()
+      .then((value) => { if (!cancelled) setCodePreviews(value); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [challengeCount]);
+
   /* The restore reports itself the same way. Re-reading the bootstrap when it
      finishes is the point: the pull writes sessions, challenges and abilities
      straight into the local store, and none of them are in the copy the shell is
@@ -368,6 +413,14 @@ export function App() {
       if (restore === "done") void refresh().catch((cause) => setError(message(cause)));
     });
   }, [refresh]);
+
+  /* The one route anything in the window can ask for by name. Registered once
+     and kept behind a ref rather than re-registered whenever navigation changes
+     identity, because the shell's early returns mean this has to sit above them
+     while `navigate` is defined below. */
+  useEffect(() => registerShelfRoute(() => {
+    shelfRouteRef.current?.();
+  }), []);
 
   if (error && !data) return <FatalError error={error} />;
   if (!data) return <BootShell />;
@@ -427,6 +480,16 @@ export function App() {
     if (next !== "workspace" && next !== "baseline" && next !== "challenge" && next !== "ability" && next !== "track") {
       setHistory((current) => visit(current, { page: next }));
     }
+  };
+
+  /* What `registerShelfRoute` actually calls, kept current on every render. Goes
+     to the page and asks it for the saved filter, because "saved" is a filter on
+     the library rather than a page of its own — landing on the unfiltered
+     library after pressing a receipt that said "Saved in Problems" is arriving
+     somewhere true and useless. */
+  shelfRouteRef.current = () => {
+    navigate("problems");
+    setShelfRequest((value) => value + 1);
   };
 
   /**
@@ -539,6 +602,15 @@ export function App() {
         testRunCount: challenge.testRunCount,
         assistance: challenge.assistance,
         outcome: challenge.lastOutcome,
+        /* Carried so a row in the stack can raise the same hover preview the
+           transcript card does. The excerpt is fetched rather than bootstrapped
+           — see `useChallengePreviews` — so a trail built before it lands simply
+           has no code on its stops, and the panel does not open for them yet. */
+        language: challenge.language,
+        difficulty: challenge.difficulty,
+        source: challenge.source?.source ?? null,
+        concepts: challenge.concepts.map((concept) => concept.title),
+        code: codePreviews[challenge.id] ?? null,
       }));
     if (!stops.length) return undefined;
     return {
@@ -720,316 +792,331 @@ export function App() {
   };
 
   return (
-    <div className="app-vibrant relative flex h-full">
-      {/* The column, which is only ever a window onto the sidebar.
+    /* One link context for the whole window. The transcript, a lesson's own
+       reading list and a problem statement all render the agent's references,
+       and every one of them has to land on the same two surfaces — so the doors
+       are handed down from here rather than wired up pane by pane. A pane that
+       knows something extra, like the language its code is in, merges that on
+       top of this. */
+    <MarkdownLinkProvider value={markdownLinks}>
+      <div className="app-vibrant relative flex h-full">
+        {/* The column, which is only ever a window onto the sidebar.
 
-             It used to be the sidebar: one element whose width animated from
-             zero, with `<Sidebar/>` filling whatever it was that frame. So every
-             frame of the collapse re-laid-out the entire source list at a new
-             width — labels rewrapping, titles re-truncating, the Track groups
-             reflowing — which is the churn that made this read as a browser
-             panel rather than a native one, and it was the most expensive
-             animation in the window besides.
+               It used to be the sidebar: one element whose width animated from
+               zero, with `<Sidebar/>` filling whatever it was that frame. So every
+               frame of the collapse re-laid-out the entire source list at a new
+               width — labels rewrapping, titles re-truncating, the Track groups
+               reflowing — which is the churn that made this read as a browser
+               panel rather than a native one, and it was the most expensive
+               animation in the window besides.
 
-             Now nothing inside it changes size at all. The sidebar below is
-             pinned to its full width and slides; this clips. The two run on the
-             same curve, so the sidebar's right edge sits exactly on the clip
-             edge for the whole travel: a pure slide, no stretch, no reflow, and
-           the icons never move relative to the words beside them.
+               Now nothing inside it changes size at all. The sidebar below is
+               pinned to its full width and slides; this clips. The two run on the
+               same curve, so the sidebar's right edge sits exactly on the clip
+               edge for the whole travel: a pure slide, no stretch, no reflow, and
+             the icons never move relative to the words beside them.
 
-          Animated rather than mounted and unmounted, unlike the version this
-          came from: the sidebar owns state the learner set — which Tracks they
-          opened, whether the archive is showing — and unmounting it on collapse
-          throws that away every time the column is hidden. */}
-      <motion.div
-        animate={{ width: sidebar ? sidebarWidth : 0 }}
-        className="relative shrink-0 overflow-hidden"
-        initial={false}
-        /* No transition while the divider is being dragged: the width is
-           animated so collapsing eases, and the same easing applied to a drag
-           leaves the edge lagging a frame behind the cursor. */
-        transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
-      >
+            Animated rather than mounted and unmounted, unlike the version this
+            came from: the sidebar owns state the learner set — which Tracks they
+            opened, whether the archive is showing — and unmounting it on collapse
+            throws that away every time the column is hidden. */}
         <motion.div
-          /* Laid out once, at the width it will still be when the animation
-             ends. `will-change` because this is the one element in the window
-             that is worth a compositor layer of its own — a whole source list
-             being moved, sixty times a second. */
-          animate={{ x: sidebar ? 0 : -sidebarWidth }}
-          className="h-full will-change-transform"
+          animate={{ width: sidebar ? sidebarWidth : 0 }}
+          className="relative shrink-0 overflow-hidden"
           initial={false}
-          style={{ width: sidebarWidth }}
+          /* No transition while the divider is being dragged: the width is
+             animated so collapsing eases, and the same easing applied to a drag
+             leaves the edge lagging a frame behind the cursor. */
           transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
         >
-          <Sidebar
-            // The name the learner gave onboarding, not the one derived from their email.
-            account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
-            activeSessionId={detail?.summary.id}
-            challenges={data.challenges}
-            onCollapse={toggleSidebar}
-            onCommandPalette={() => setPalette(true)}
-            onNewSession={() => navigate("tracks")}
-            onNewTrack={() => navigate("tracks")}
-            onOpenSession={open}
-            onOpenTrack={(track) => void openTrack(track)}
-            onDeleteTrack={(track) => void deleteTrack(track)}
-            nav={nav}
-            onPage={navigate}
-            page={page}
-            runs={runs}
-            sessionActions={sessionActions}
-            /* Every Track's sessions, not just the open one's: the sidebar groups
-               them under their Tracks now, and a list that can only show you the
-               Track you are already in is not one. */
-            sessions={data.sessions.filter((session) => session.context !== "baseline")}
-            syncState={data.syncState}
-            tracks={data.tracks}
-            {...(data.activeTrack ? { activeTrackId: data.activeTrack.id } : {})}
-          />
+          <motion.div
+            /* Laid out once, at the width it will still be when the animation
+               ends. `will-change` because this is the one element in the window
+               that is worth a compositor layer of its own — a whole source list
+               being moved, sixty times a second. */
+            animate={{ x: sidebar ? 0 : -sidebarWidth }}
+            className="h-full will-change-transform"
+            initial={false}
+            style={{ width: sidebarWidth }}
+            transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
+          >
+            <Sidebar
+              // The name the learner gave onboarding, not the one derived from their email.
+              account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
+              activeSessionId={detail?.summary.id}
+              challenges={data.challenges}
+              onCollapse={toggleSidebar}
+              onCommandPalette={() => setPalette(true)}
+              onNewSession={() => navigate("tracks")}
+              onNewTrack={() => navigate("tracks")}
+              onOpenSession={open}
+              onOpenTrack={(track) => void openTrack(track)}
+              onDeleteTrack={(track) => void deleteTrack(track)}
+              nav={nav}
+              onPage={navigate}
+              page={page}
+              runs={runs}
+              sessionActions={sessionActions}
+              /* Every Track's sessions, not just the open one's: the sidebar groups
+                 them under their Tracks now, and a list that can only show you the
+                 Track you are already in is not one. */
+              sessions={data.sessions.filter((session) => session.context !== "baseline")}
+              syncState={data.syncState}
+              tracks={data.tracks}
+              {...(data.activeTrack ? { activeTrackId: data.activeTrack.id } : {})}
+            />
+          </motion.div>
         </motion.div>
-      </motion.div>
 
-      {/* The pane's leading corners round away from the sidebar so the translucent
-          material wraps around it and the two read as one continuous surface —
-          but only while the sidebar is there to wrap it. Collapsed, the pane owns
-          the window edge and has to meet it square. */}
-      {/* Floated over the seam rather than placed in the flex row: a handle with
-          real width would hold the two panes apart, and on a transparent window
-          that gap is a stripe of desktop. The grab target is 8px wide but shows
-          only a hairline, and only under the pointer — a permanently drawn
-          divider would cut the sidebar off from the pane it flows into. */}
-      {sidebar && (
-        <div
-          aria-label="Resize sidebar"
-          aria-orientation="vertical"
+        {/* The pane's leading corners round away from the sidebar so the translucent
+            material wraps around it and the two read as one continuous surface —
+            but only while the sidebar is there to wrap it. Collapsed, the pane owns
+            the window edge and has to meet it square. */}
+        {/* Floated over the seam rather than placed in the flex row: a handle with
+            real width would hold the two panes apart, and on a transparent window
+            that gap is a stripe of desktop. The grab target is 8px wide but shows
+            only a hairline, and only under the pointer — a permanently drawn
+            divider would cut the sidebar off from the pane it flows into. */}
+        {sidebar && (
+          <div
+            aria-label="Resize sidebar"
+            aria-orientation="vertical"
+            className={cn(
+              "app-no-drag absolute inset-y-0 z-20 w-2 cursor-col-resize",
+              "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent",
+              "after:transition-colors hover:after:bg-[var(--border-strong)]",
+              dragging && "after:bg-[var(--border-strong)]",
+            )}
+            role="separator"
+            style={{ left: sidebarWidth - 4 }}
+            {...sidebarHandle}
+          />
+        )}
+
+        {/* The two surfaces you work on rather than read keep the window's glass;
+            every other page is opaque, because the desktop moving behind a
+            paragraph is the desktop competing with it. */}
+        <main
           className={cn(
-            "app-no-drag absolute inset-y-0 z-20 w-2 cursor-col-resize",
-            "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent",
-            "after:transition-colors hover:after:bg-[var(--border-strong)]",
-            dragging && "after:bg-[var(--border-strong)]",
+            "app-pane relative flex min-w-0 flex-1 flex-col",
+            /* The content pane's rounded leading corners and inset ring arrive
+               with the sidebar rather than the instant it is asked for. */
+            "transition-[border-radius,box-shadow]",
+            SIDEBAR_SLIDE_CSS,
+            sidebar && "app-content-pane",
+            (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
           )}
-          role="separator"
-          style={{ left: sidebarWidth - 4 }}
-          {...sidebarHandle}
-        />
-      )}
-
-      {/* The two surfaces you work on rather than read keep the window's glass;
-          every other page is opaque, because the desktop moving behind a
-          paragraph is the desktop competing with it. */}
-      <main
-        className={cn(
-          "app-pane relative flex min-w-0 flex-1 flex-col",
-          /* The content pane's rounded leading corners and inset ring arrive
-             with the sidebar rather than the instant it is asked for. */
-          "transition-[border-radius,box-shadow]",
-          SIDEBAR_SLIDE_CSS,
-          sidebar && "app-content-pane",
-          (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
-        )}
-      >
-        {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
-          <Toolbar nav={nav} onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge" | "baseline">]} />
-        )}
-
-        {error && (
-          <div className="absolute right-3 top-11 z-20 flex w-[min(26rem,calc(100vw-2rem))] items-start gap-2 rounded-xl border border-destructive/30 bg-popover px-3 py-2.5 text-ui text-destructive shadow-[var(--app-shadow-overlay)]">
-            <AlertCircle className="mt-px size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1">{error}</span>
-            <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setError(null)} type="button">
-              <X className="size-3.5" />
-            </button>
-          </div>
-        )}
-
-        <div className="min-h-0 flex-1">
-
-          {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
-          {page === "tracks" && <TracksPage onDelete={deleteTrack} busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
-          {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
-          {page === "problems" && (
-            <ProblemsPage
-              abilities={data.abilities}
-              api={api}
-              challenges={data.challenges}
-              concepts={data.concepts}
-              onOpenAbility={openAbility}
-              onOpenChallenge={openChallenge}
-              onOpenConcept={setConcept}
-              onStartProblem={startProblem}
-              progress={data.progress}
-            />
+        >
+          {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
+            <Toolbar nav={nav} onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge" | "baseline">]} />
           )}
-          {/* Mounted only while it is the page. The visualiser holds a trace,
-              an editor and a running animation, and none of that is worth
-              keeping warm behind four other surfaces. */}
-          {page === "visualizer" && <VisualizerPage api={api} dark={dark} onError={setError} />}
-          {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
-          {(page === "home" || page === "ability") && (
-            <HomePage
-              abilities={data.abilities}
-              ability={ability}
-              api={api}
-              busy={opening}
-              challenges={data.challenges}
-              concepts={data.concepts}
-              data={data}
-              onBaseline={beginBaseline}
-              onCreateTrack={() => navigate("tracks")}
-              onMode={setTrainingMode}
-              onNavigate={navigate}
-              onOpen={open}
-              onOpenAbility={(next) => (next ? openAbility(next) : navigate("home"))}
-              onOpenConcept={setConcept}
-              onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
-              onPractise={practise}
-            />
-          )}
-          {(page === "history" || page === "challenges") && (
-            <ChallengesPage
-              api={api}
-              challenges={data.challenges}
-              concepts={data.concepts}
-              onOpen={(challenge) => openChallenge(challenge.id)}
-              onOpenConcept={setConcept}
-            />
-          )}
-          {page === "settings" && (
-            <SettingsPage
-              api={api}
-              baseline={data.baseline}
-              language={data.profile.language}
-              onBaseline={beginBaseline}
-              onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
-              onSignedOut={signedOut}
-              onThemeChange={changeTheme}
-              theme={data.theme}
-            />
-          )}
-          {/* The session and a past challenge, stacked rather than routed.
-              They used to be two branches of this list, so stepping between them
-              was an unmount and a mount: Monaco torn down and rebuilt, the
-              practice page reading its challenge from disk behind a full-height
-              spinner, and the workspace arriving through a blurred, scaled
-              dissolve on the way back. That is what read as flicker, and no
-              transition inside either page could have covered it — there was
-              nothing on screen to transition from.
 
-              Both are mounted for as long as either is in use, and the crossing
-              is an opacity fade between two layers that are already painted. The
-              hidden one keeps its editors, its drafts and its scroll position, so
-              stepping back is instantaneous rather than another cold load. */}
-          {(page === "workspace" || page === "challenge") && (
-            <div className="relative h-full">
-              {detail && (
-                <Surface active={page === "workspace"}>
-                  {/* Session identity and workspace mode both define the mounted
-                      surface, so both are in the key: this covers
-                      challenge-to-challenge navigation within a session as well as
-                      mode changes. The blur cross-dissolve is deliberate here and
-                      is not the same crossing as stepping between a live challenge
-                      and a past one — that one is two surfaces of the same pane and
-                      fades plainly, this one is arriving somewhere else. */}
-                  <AnimatePresence initial={false} mode="wait">
-                    <motion.div
-                      key={`${detail.summary.id}:${sessionMode(detail)}`}
-                      animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                      className="h-full"
-                      exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
-                      initial={{ opacity: 0, scale: 1.01, filter: "blur(8px)" }}
-                      transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-                    >
-                      {detail.question ? (
-                        <Workspace
-                          api={api}
-                          concepts={conceptContext}
-                          dark={dark}
-                          learnerRating={data.progress.rating}
-                          detail={detail}
-                          onAbandon={abandon}
-                          nav={nav}
-                          onError={setError}
-                          onExpandSidebar={expandSidebar}
-                          onOpenSettings={() => navigate("settings")}
-                          onRefresh={() => openSession(detail.summary.id)}
-                          question={detail.question}
-                          run={runs[detail.summary.id] ?? null}
-                          trail={trailFor(detail.summary.id)}
-                        />
-                      ) : sessionMode(detail) === "chat" ? (
-                        <ChatView
-                          api={api}
-                          detail={detail}
-                          nav={nav}
-                          onError={setError}
-                          onExpandSidebar={expandSidebar}
-                          onOpenSettings={() => navigate("settings")}
-                          onRefresh={() => openSession(detail.summary.id)}
-                          run={runs[detail.summary.id] ?? null}
-                        />
-                      ) : (
-                        <PlanningView
-                          api={api}
-                          detail={detail}
-                          nav={nav}
-                          onError={setError}
-                          onExpandSidebar={expandSidebar}
-                          onOpenSettings={() => navigate("settings")}
-                          onRefresh={() => openSession(detail.summary.id)}
-                          run={runs[detail.summary.id] ?? null}
-                        />
-                      )}
-                    </motion.div>
-                  </AnimatePresence>
-                </Surface>
-              )}
-
-              {challengeId && (
-                <Surface active={page === "challenge"}>
-                  <ChallengePage
-                    api={api}
-                    challengeId={challengeId}
-                    concepts={conceptContext}
-                    dark={dark}
-                    learnerRating={data.progress.rating}
-                    nav={nav}
-                    onError={setError}
-                    onExpandSidebar={expandSidebar}
-                    onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
-                    seed={challengeSeed}
-                    trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
-                  />
-                </Surface>
-              )}
-
-              {page === "workspace" && !detail && <WorkspaceSkeleton />}
+          {error && (
+            <div className="absolute right-3 top-11 z-20 flex w-[min(26rem,calc(100vw-2rem))] items-start gap-2 rounded-xl border border-destructive/30 bg-popover px-3 py-2.5 text-ui text-destructive shadow-[var(--app-shadow-overlay)]">
+              <AlertCircle className="mt-px size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1">{error}</span>
+              <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setError(null)} type="button">
+                <X className="size-3.5" />
+              </button>
             </div>
           )}
-        </div>
-      </main>
 
-      <SearchPalette
-        challenges={data.challenges}
-        concepts={data.concepts}
-        onNewSession={() => navigate("tracks")}
-        onOpenChallenge={openChallenge}
-        onOpenChange={setPalette}
-        onOpenConcept={setConcept}
-        onOpenSession={open}
-        onPage={navigate}
-        open={palette}
-        sessions={data.sessions.filter((session) => session.context !== "baseline")}
-      />
+          <div className="min-h-0 flex-1">
 
-      <ConceptSheet
-        api={api}
-        onOpenChange={(next) => { if (!next) setConcept(null); }}
-        onOpenSession={(sessionId) => { setConcept(null); void openSession(sessionId).catch((cause) => setError(message(cause))); }}
-        onPractise={(conceptSlug) => practise({ conceptSlug })}
-        slug={concept}
-        summaries={conceptSummaries}
-      />
-    </div>
+            {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
+            {page === "tracks" && <TracksPage onDelete={deleteTrack} busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
+            {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
+            {page === "problems" && (
+              <ProblemsPage
+                abilities={data.abilities}
+                shelfRequest={shelfRequest}
+                api={api}
+                challenges={data.challenges}
+                concepts={data.concepts}
+                onOpenAbility={openAbility}
+                onOpenChallenge={openChallenge}
+                onOpenConcept={setConcept}
+                onStartProblem={startProblem}
+                progress={data.progress}
+              />
+            )}
+            {/* Mounted only while it is the page. The visualiser holds a trace,
+                an editor and a running animation, and none of that is worth
+                keeping warm behind four other surfaces. */}
+            {page === "visualizer" && <VisualizerPage api={api} dark={dark} onError={setError} />}
+            {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
+            {(page === "home" || page === "ability") && (
+              <HomePage
+                abilities={data.abilities}
+                ability={ability}
+                api={api}
+                busy={opening}
+                challenges={data.challenges}
+                concepts={data.concepts}
+                data={data}
+                onBaseline={beginBaseline}
+                onCreateTrack={() => navigate("tracks")}
+                onMode={setTrainingMode}
+                onNavigate={navigate}
+                onOpen={open}
+                onOpenAbility={(next) => (next ? openAbility(next) : navigate("home"))}
+                onOpenConcept={setConcept}
+                onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+                onPractise={practise}
+              />
+            )}
+            {(page === "history" || page === "challenges") && (
+              <ChallengesPage
+                api={api}
+                challenges={data.challenges}
+                concepts={data.concepts}
+                onOpen={(challenge) => openChallenge(challenge.id)}
+                onOpenConcept={setConcept}
+              />
+            )}
+            {page === "settings" && (
+              <SettingsPage
+                api={api}
+                baseline={data.baseline}
+                language={data.profile.language}
+                onBaseline={beginBaseline}
+                onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
+                onSignedOut={signedOut}
+                onThemeChange={changeTheme}
+                theme={data.theme}
+              />
+            )}
+            {/* The session and a past challenge, stacked rather than routed.
+                They used to be two branches of this list, so stepping between them
+                was an unmount and a mount: Monaco torn down and rebuilt, the
+                practice page reading its challenge from disk behind a full-height
+                spinner, and the workspace arriving through a blurred, scaled
+                dissolve on the way back. That is what read as flicker, and no
+                transition inside either page could have covered it — there was
+                nothing on screen to transition from.
+
+                Both are mounted for as long as either is in use, and the crossing
+                is an opacity fade between two layers that are already painted. The
+                hidden one keeps its editors, its drafts and its scroll position, so
+                stepping back is instantaneous rather than another cold load. */}
+            {(page === "workspace" || page === "challenge") && (
+              <div className="relative h-full">
+                {detail && (
+                  <Surface active={page === "workspace"}>
+                    {/* Session identity and workspace mode both define the mounted
+                        surface, so both are in the key: this covers
+                        challenge-to-challenge navigation within a session as well as
+                        mode changes. The blur cross-dissolve is deliberate here and
+                        is not the same crossing as stepping between a live challenge
+                        and a past one — that one is two surfaces of the same pane and
+                        fades plainly, this one is arriving somewhere else. */}
+                    <AnimatePresence initial={false} mode="wait">
+                      <motion.div
+                        key={`${detail.summary.id}:${sessionMode(detail)}`}
+                        animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                        className="h-full"
+                        exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
+                        initial={{ opacity: 0, scale: 1.01, filter: "blur(8px)" }}
+                        transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
+                      >
+                        {detail.question ? (
+                          <Workspace
+                            api={api}
+                            concepts={conceptContext}
+                            dark={dark}
+                            learnerRating={data.progress.rating}
+                            detail={detail}
+                            onAbandon={abandon}
+                            nav={nav}
+                            onError={setError}
+                            onExpandSidebar={expandSidebar}
+                            onOpenSettings={() => navigate("settings")}
+                            onRefresh={() => openSession(detail.summary.id)}
+                            question={detail.question}
+                            run={runs[detail.summary.id] ?? null}
+                            trail={trailFor(detail.summary.id)}
+                          />
+                        ) : sessionMode(detail) === "chat" ? (
+                          <ChatView
+                            api={api}
+                            detail={detail}
+                            nav={nav}
+                            onError={setError}
+                            onExpandSidebar={expandSidebar}
+                            onOpenSettings={() => navigate("settings")}
+                            onRefresh={() => openSession(detail.summary.id)}
+                            run={runs[detail.summary.id] ?? null}
+                          />
+                        ) : (
+                          <PlanningView
+                            api={api}
+                            detail={detail}
+                            nav={nav}
+                            onError={setError}
+                            onExpandSidebar={expandSidebar}
+                            onOpenSettings={() => navigate("settings")}
+                            onRefresh={() => openSession(detail.summary.id)}
+                            run={runs[detail.summary.id] ?? null}
+                          />
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+                  </Surface>
+                )}
+
+                {challengeId && (
+                  <Surface active={page === "challenge"}>
+                    <ChallengePage
+                      api={api}
+                      challengeId={challengeId}
+                      concepts={conceptContext}
+                      dark={dark}
+                      learnerRating={data.progress.rating}
+                      nav={nav}
+                      onError={setError}
+                      onExpandSidebar={expandSidebar}
+                      onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+                      seed={challengeSeed}
+                      trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
+                    />
+                  </Surface>
+                )}
+
+                {page === "workspace" && !detail && <WorkspaceSkeleton />}
+              </div>
+            )}
+          </div>
+        </main>
+
+        <SearchPalette
+          challenges={data.challenges}
+          concepts={data.concepts}
+          onNewSession={() => navigate("tracks")}
+          onOpenChallenge={openChallenge}
+          onOpenChange={setPalette}
+          onOpenConcept={setConcept}
+          onOpenSession={open}
+          onPage={navigate}
+          open={palette}
+          sessions={data.sessions.filter((session) => session.context !== "baseline")}
+        />
+
+        <LessonReader lessonId={lesson} onClose={() => setLesson(null)} />
+
+        <ConceptSheet
+          api={api}
+          onOpenChange={(next) => { if (!next) setConcept(null); }}
+          onOpenSession={(sessionId) => { setConcept(null); void openSession(sessionId).catch((cause) => setError(message(cause))); }}
+          onPractise={(conceptSlug) => practise({ conceptSlug })}
+          slug={concept}
+          summaries={conceptSummaries}
+        />
+
+        {/* Last in the shell, over everything, outside every pane: what the app
+            says back is never about the pane it happened in. */}
+        <Toaster />
+      </div>
+    </MarkdownLinkProvider>
   );
 }
 

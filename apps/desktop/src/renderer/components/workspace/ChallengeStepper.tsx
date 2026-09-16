@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { ArrowDownToLine, ChevronDown, ChevronUp } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
+import type { ChallengeCodePreview, Language } from "@spar/domain";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,6 +35,15 @@ export type ChallengeStop = {
   testRunCount?: number;
   assistance?: "independent" | "assisted" | "unknown" | undefined;
   outcome?: "passed" | "failed" | "abandoned" | "replaced" | null;
+  /* What a hover preview draws and a step never has room for. Optional because
+     the stepper itself needs none of it, and a caller that builds a trail just
+     to move between challenges should not have to find a code excerpt first. */
+  language?: Language | null | undefined;
+  difficulty?: "foundation" | "developing" | "proficient" | "advanced" | null | undefined;
+  source?: "leetcode" | "codeforces" | null | undefined;
+  concepts?: string[] | undefined;
+  /** The top of the file this challenge starts from, as the store cut it. */
+  code?: ChallengeCodePreview | null | undefined;
 };
 
 export type ChallengeTrail = {

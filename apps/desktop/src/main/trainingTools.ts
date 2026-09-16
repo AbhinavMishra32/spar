@@ -1,6 +1,7 @@
+import { normalizeStatementText } from "../shared/statementText.js";
 import { randomUUID } from "node:crypto";
 import { compileQuestion, fallbackDesign, type DesignOrigin } from "@spar/training";
-import { abilityStatusSchema, GENERATED_DIFFICULTIES, languageSchema, type AbilityStatus, type AskUserQuestionInput, type Question } from "@spar/domain";
+import { abilityStatusSchema, GENERATED_DIFFICULTIES, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput, type Question } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
@@ -32,6 +33,25 @@ function rememberTrackLanguage(local: LocalStore, trackId: string | null | undef
   const track = local.listTracks().find((entry) => entry.id === trackId);
   if (!track || track.language === language.data) return;
   local.updateTrack(trackId, { language: language.data });
+}
+
+/**
+ * The lesson this challenge is testing, handed back with it.
+ *
+ * "Teach, then test what you taught" is only real if the turn that sets the
+ * challenge knows what was taught. Prompting for it is not enough — the agent
+ * that authored a challenge two turns after a lesson is not reliably holding
+ * that lesson in mind — so the host does the join on the tags both sides already
+ * carry and says so in the result. The reply then has something specific to
+ * point at, and the learner sees the two halves as one thing.
+ */
+function followsLesson(local: LocalStore, concepts: ConceptTagInput[], trackId: string | null | undefined) {
+  const found = local.lessonForConcepts(concepts.map((tag) => tag.slug), trackId);
+  if (!found) return {};
+  return {
+    followsLesson: { id: found.id, title: found.title, taughtAt: found.taughtAt },
+    followsLessonNote: `This challenge is on ground you already taught in "${found.title}". Say so in your reply and point at it as [[lesson:${found.id}|${found.title}]], so they can reread the idea they are now being asked to use — and make sure what you have set actually exercises what that lesson taught rather than a neighbouring idea.`,
+  };
 }
 
 export async function executeTrainingTool(
@@ -123,6 +143,64 @@ export async function executeTrainingTool(
     const asked = local.setPendingIntake(sessionId, value as AskUserQuestionInput);
     return { pending: asked.status === "pending", ...asked };
   }
+  /**
+   * Teaching, written down.
+   *
+   * The counterpart to `create_question`, and the reason Spar no longer has to
+   * answer every turn with a problem. A turn that has found the idea the learner
+   * is missing can now put that idea somewhere durable and point at it, rather
+   * than saying it into a reply that scrolls away — and a later turn can cite it
+   * by id, which is the difference between "I explained this" and a claim the
+   * learner can check.
+   *
+   * The host validates and files; it does not compile. There is nothing to run,
+   * so the only failure here is a malformed lesson, and the agent is told what
+   * was wrong in the same shape a rejected challenge is told.
+   */
+  if (name === "teach_lesson") {
+    const parsed = lessonInputSchema.safeParse(value);
+    if (!parsed.success) {
+      return { status: "invalid", report: { valid: false, checks: parsed.error.issues.slice(0, 6).map((issue) => ({ name: issue.path.join(".") || "lesson", passed: false, detail: issue.message })) } };
+    }
+    /* A lesson that cites another must cite one that exists. A dangling id is a
+       chip the learner clicks and nothing happens, which is worse than the plain
+       sentence it replaced — so the reference is dropped and the agent is told. */
+    const dropped: string[] = [];
+    const references = parsed.data.references.filter((reference) => {
+      if (reference.kind !== "lesson") return true;
+      if (local.readLesson(reference.lessonId)) return true;
+      dropped.push(reference.label);
+      return false;
+    });
+    const id = randomUUID();
+    const lesson = { ...parsed.data, references };
+    local.saveLesson({ id, sessionId, title: lesson.title, summary: lesson.summary, concepts: lesson.concepts, payload: lesson });
+    return {
+      status: "taught",
+      lessonId: id,
+      title: lesson.title,
+      pages: lesson.pages.length,
+      /* The id goes back so the reply can cite it, and the instruction to cite it
+         goes back with it — the agent that just taught something is the one
+         holding the reason it matters. */
+      note: `Filed. Reference it in your reply as [[lesson:${id}|${lesson.title}]] so the learner can open it.`,
+      ...(dropped.length ? { droppedReferences: dropped } : {}),
+    };
+  }
+  /** One lesson, back in full. The turn's context carries titles; this is for the
+   *  turn that has to build on what a lesson actually said rather than teach the
+   *  same ground again under a new name. */
+  if (name === "read_lesson") {
+    const found = local.readLesson(String(value.lessonId ?? ""));
+    if (!found) return { error: "not-found", note: "No lesson with that id. Check recentLessons in your context." };
+    return { id: found.id, taughtAt: found.createdAt, ...(found.payload as Record<string, unknown>) };
+  }
+  /** What Spar has already taught near a topic. Read before teaching, so the
+   *  same idea is cited rather than explained twice. */
+  if (name === "search_lessons") {
+    const found = local.searchLessons(String(value.query ?? ""), Number(value.limit ?? 6));
+    return { lessons: found, note: found.length ? "Cite one of these with [[lesson:<id>|title]] rather than teaching it again." : "Nothing taught near this yet." };
+  }
   if (name === "create_question") {
     const activeQuestion = openChallenge(local, sessionId);
     if (activeQuestion) {
@@ -164,7 +242,7 @@ export async function executeTrainingTool(
     await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: conceptTags(value.concepts) });
     rememberTrackLanguage(local, trackId, value);
-    return { status: "playable", question, report: compiled.report };
+    return { status: "playable", question, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
   }
   /* Not in the agent's tool list. The controller reaches for this only after
      every model-authored candidate has been rejected, so that a session ends
@@ -196,7 +274,7 @@ export async function executeTrainingTool(
     await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."), conceptTags(value.concepts));
     rememberTrackLanguage(local, trackId, value);
-    return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report };
+    return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
   }
   if (name === "review_solution") {
     const attemptId = String(value.attemptId);
@@ -347,6 +425,7 @@ async function assignPracticeProblem(
     source: { slug: source.slug, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
     judge: source.judge,
     localCases: source.localCaseCount,
+    ...followsLesson(local, concepts, local.trackIdForSession(sessionId)),
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
   };
@@ -411,19 +490,17 @@ async function readAttemptForAgent(local: LocalStore, value: Record<string, unkn
     cases: caseFilter(value.cases),
     scope: value.scope === "since-last-submission" ? "since-last-submission" as const : "all" as const,
     caseDetail: value.caseDetail === "brief" ? "brief" as const : "full" as const,
-    maxLines: typeof value.maxLines === "number" && Number.isFinite(value.maxLines) ? Math.max(20, Math.min(2_000, Math.round(value.maxLines))) : 400,
+    maxLines: typeof value.maxLines === "number" && Number.isFinite(value.maxLines) ? Math.max(20, Math.min(2_000, Math.round(value.maxLines))) : Number.MAX_SAFE_INTEGER,
   };
   const replay = foldAttempt(events, {
     ...(subject?.title ? { title: subject.title } : {}),
     ...(subject?.language ? { language: subject.language } : {}),
   });
-  /* Key order is what the transcript keeps. The model receives this object
-     whole; the renderer only ever sees the first 16k of it serialised, and it
-     draws the attempt panel out of the report. So the report goes ahead of the
-     two fields that exist for the model alone — the learner's whole files, and
-     the raw events an ability update cites by id — either of which could fill
-     the cap on their own and leave the panel with nothing to draw but JSON. */
-  return { stats: replay.stats, filters, solve: solveHead(files), report: formatSolveLog(replay, filters), files, events };
+  // Payloads are already represented in the report. Link its sequence numbers
+  // to durable evidence IDs without repeating the payload or its description.
+  const evidence = events.map(({ id, sequence }) => ({ id, sequence }));
+  return { stats: replay.stats, filters, solve: solveHead(files), report: formatSolveLog(replay, filters), files, events: evidence };
+
 }
 
 /** The attempt the learner has open right now, for a call that named none. */
@@ -561,7 +638,8 @@ function withRequirements(value: Record<string, unknown>): Record<string, unknow
 }
 
 async function compileCandidate(input:unknown,sessionId:string,workspaces:WorkspaceService,runner:UtilityClient,origin:DesignOrigin="authored"){
-  const value=withRequirements(input as Record<string,unknown>);
+  const candidate = input as Record<string, unknown>;
+  const value=withRequirements(typeof candidate.statement === "string" ? { ...candidate, statement: normalizeStatementText(candidate.statement) } : candidate);
   return compileQuestion(value,async(files,_command,limits)=>{
     const validationId=randomUUID();
     const root=await workspaces.writeValidation(sessionId,validationId,files);
@@ -570,10 +648,6 @@ async function compileCandidate(input:unknown,sessionId:string,workspaces:Worksp
   },origin);
 }
 
-/** Longest a file may be before the agent is given its head instead. Enough for
- *  any challenge's solution; short enough that a learner who pasted a library
- *  into their workspace cannot spend the turn's context on it. */
-const MAX_FILE = 6_000;
 /** The opening of the learner's solve, as `read_attempt` carries it. A screen
  *  of code at the size the transcript draws it, and no more. */
 const SOLVE_HEAD_LINES = 28;
@@ -611,10 +685,10 @@ async function attemptFiles(sessionId: string, workspaces: WorkspaceService, edi
   const mine = paths.filter((file) => {
     const name = file.split("/").pop() ?? file;
     return !name.startsWith("test_") && !name.endsWith("_test.py") && !name.includes(".test.") && !name.endsWith(".md") && !name.endsWith(".json");
-  }).slice(0, 6);
+  });
   const files = await Promise.all(mine.map(async (path) => {
     const text = await workspaces.read(sessionId, path).catch(() => "");
-    return { path, text: text.length > MAX_FILE ? `${text.slice(0, MAX_FILE)}\n… (${text.length - MAX_FILE} more characters)` : text };
+    return { path, text };
   }));
   return files.filter((file) => file.text.trim());
 }
