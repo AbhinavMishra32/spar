@@ -289,6 +289,7 @@ export async function executeTrainingTool(
     return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
   }
   if (name === "read_attempt") return readAttemptForAgent(local, value, sessionId, workspaces);
+  if (name === "read_submissions") return readSubmissionsForAgent(local, value, sessionId);
   /* The document plus what is open under it. The markdown is the claim; the
      patterns are the questions still outstanding about it and the evidence is
      what each one rests on. This read sits immediately before the update is
@@ -504,6 +505,54 @@ async function readAttemptForAgent(local: LocalStore, value: Record<string, unkn
 }
 
 /** The attempt the learner has open right now, for a call that named none. */
+/**
+ * What the learner sent, as a list or as one submission in full.
+ *
+ * Two reads behind one tool because they are one question asked at two depths.
+ * The listing is cheap and is what a turn opens with; the detail is a whole
+ * solution and is only worth spending once the turn knows which submission it
+ * is about.
+ *
+ * The reply is told, every time, how to cite what it just read. A tutor that
+ * says "your second submission" in prose has made a claim the learner cannot
+ * check; the same sentence with the reference in it is a door.
+ */
+function readSubmissionsForAgent(local: LocalStore, value: Record<string, unknown>, sessionId: string) {
+  const named = String(value.submissionId ?? "");
+  if (named) {
+    const submission = local.readSubmission(named);
+    if (!submission) return { submission: null, note: `No submission ${named} is recorded. List the challenge's submissions first and take an id from there.` };
+    return {
+      submission,
+      cite: `[[submission:${submission.id}|your ${ordinalWord(submission.ordinal)} submission]]`,
+      note: "`code` is exactly what was sent, and `cases` is what it was graded on — a failing case carries the input it ran and the values it produced. Refer to this submission by the `cite` string, not by its id.",
+    };
+  }
+
+  const challengeId = String(value.challengeId ?? "") || local.readSession(sessionId)?.question?.id || "";
+  if (!challengeId) return { submissions: [], note: "No challenge is open and none was named, so there are no submissions to read." };
+  const wanted = value.outcome === "passed" || value.outcome === "failed" ? value.outcome : "all";
+  const limit = typeof value.limit === "number" && Number.isFinite(value.limit) ? Math.max(1, Math.min(40, Math.round(value.limit))) : 20;
+  const all = local.submissionsForQuestion(challengeId).filter((row) => wanted === "all" || row.outcome === wanted);
+  /* Capped from the end. A learner who submitted thirty times has a story in the
+     last five, not the first five — and the ordinals stay absolute, so a capped
+     list still says which submission of the whole set each row is. */
+  const submissions = all.slice(Math.max(0, all.length - limit));
+  return {
+    challengeId,
+    submissions,
+    omitted: all.length - submissions.length,
+    note: submissions.length
+      ? "Oldest first. Name one with `submissionId` to read its code and case grid. Cite any you mention as [[submission:<id>|a few words]] so the learner can open it."
+      : "Nothing has been submitted at this challenge yet. Do not infer anything from that beyond it.",
+  };
+}
+
+const ORDINAL_WORD = ["", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"];
+function ordinalWord(value: number): string {
+  return ORDINAL_WORD[value] ?? `${value}th`;
+}
+
 function activeAttemptId(local: LocalStore, sessionId: string): string {
   return local.readSession(sessionId)?.question?.attemptId ?? "";
 }

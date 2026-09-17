@@ -6,6 +6,7 @@ import { apiOrigin } from "./apiOrigin.js";
 import type { AuthService } from "./auth.js";
 import { createSparModels } from "./piModels.js";
 import type { LocalStore } from "./store.js";
+import { anthropicAccount, codexAccountFromToken, githubAccount, type ProviderAccount } from "./subscriptionAccount.js";
 import { anthropicUsage, codexUsageFromHeaders } from "./subscriptionUsage.js";
 import type { ProviderInventory, ProviderOAuthEvent, ReasoningEffort, SubscriptionUsage } from "../shared/api.js";
 import { clineModels, clineSeedTiers, fetchClineTiers, type ClineTiers } from "../shared/clineCatalog.js";
@@ -71,6 +72,11 @@ const gatewayEnabled = () => process.env.SPAR_AI_GATEWAY_ENABLED === "true";
 /** Matches the hover card's own staleness: a quota that moves once per turn does
  *  not need re-fetching every time the pointer crosses the row. */
 const USAGE_CACHE_MS = 60_000;
+/** Which account a subscription is signed in as changes only when the learner
+ *  reconnects it — and the reconnect clears the entry itself — so this is long
+ *  enough that hovering a row never costs a round trip, and short enough that a
+ *  sign-in done outside Spar is picked up the same day. */
+const ACCOUNT_CACHE_MS = 12 * 60 * 60 * 1_000;
 /** Which models Cline promotes and bills at nothing is a promotion, not a
  *  release, so it is re-read through the day — but nowhere near as often as the
  *  composer re-reads the inventory that shows it. */
@@ -209,6 +215,44 @@ export class ProviderService {
     }
   }
 
+  /** Which account a connected subscription belongs to, for the hover on its
+   *  Settings row. Cached rather than read per hover: two of the three answers
+   *  are network calls, and the row is hovered far more often than the account
+   *  behind it changes. Nothing here throws — a row with no label is the
+   *  intended outcome for a provider that will not say. */
+  async subscriptionAccount(providerId: ProviderId): Promise<ProviderAccount | null> {
+    const descriptor = descriptorById.get(providerId);
+    if (!descriptor || descriptor.kind !== "subscription") return null;
+    const key = `provider-account:${providerId}`;
+    const cached = this.store.getSetting<{ account: ProviderAccount | null; capturedAt: number } | null>(key, null);
+    if (cached && Date.now() - cached.capturedAt < ACCOUNT_CACHE_MS) return cached.account;
+    const account = await this.readAccount(providerId).catch(() => null);
+    /* A miss is cached too. The providers that answer with nothing answer with
+       nothing every time, and re-asking on every mount would be a request per
+       hover for a label that is never coming. */
+    this.store.setSetting(key, { account, capturedAt: Date.now() });
+    return account;
+  }
+
+  private async readAccount(providerId: ProviderId): Promise<ProviderAccount | null> {
+    if (providerId === "github-copilot") {
+      /* The stored `refresh` is the GitHub OAuth token, not a refresh token in
+         the usual sense — it is what identifies the person, and the `access`
+         beside it is a Copilot proxy token that identifies nobody. */
+      const credential = await this.auth.readProviderOAuth<{ refresh?: string }>(providerId);
+      return credential?.refresh ? await githubAccount(credential.refresh) : null;
+    }
+    if (providerId !== "claude-code" && providerId !== "openai-codex") return null;
+    if (!await this.auth.readProviderOAuth(providerId)) return null;
+    /* Through pi so the token is refreshed under the store's per-provider lock,
+       the same way the quota reading takes it — an expired access token would
+       otherwise read as an account that does not exist. */
+    const resolved = await this.models.getAuth(oauthRuntimeId(providerId));
+    const token = resolved?.auth.apiKey;
+    if (!token) return null;
+    return providerId === "claude-code" ? await anthropicAccount(token) : codexAccountFromToken(token);
+  }
+
   reasoningEffort(): ReasoningEffort {
     return this.store.getSetting<ReasoningEffort>("reasoning-effort", "off");
   }
@@ -242,6 +286,7 @@ export class ProviderService {
 
   async disconnect(providerId: ProviderId) {
     await Promise.all([this.auth.deleteSecret(providerId), this.auth.deleteProviderOAuth(providerId)]);
+    this.store.setSetting(`provider-account:${providerId}`, null);
     this.store.setSetting(`provider-auth-expired:${providerId}`, false);
     this.store.setSetting(`provider-connected:${providerId}`, false);
     if (this.store.getSetting<ProviderId>("provider-id", "openrouter") === providerId) {
@@ -277,6 +322,9 @@ export class ProviderService {
       /* No save here: `login` persists what it returns through the credential
          store, which is Spar's keychain under this same provider id. */
       this.store.setSetting(`provider-auth-expired:${providerId}`, false);
+      /* Whoever just signed in may not be who signed in last time, so the label
+         is dropped rather than left to expire on its own clock. */
+      this.store.setSetting(`provider-account:${providerId}`, null);
       const descriptor = descriptorById.get(providerId)!;
       this.select(providerId, descriptor.defaultModel);
       this.emit({ flowId, provider: providerId, status: "connected", message: `${descriptor.name} connected` });

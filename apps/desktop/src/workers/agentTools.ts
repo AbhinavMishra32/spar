@@ -97,6 +97,31 @@ export const toolDefinitions = {
     }),
   ],
   /**
+   * The learner's submissions, as things that can be pointed at.
+   *
+   * `read_attempt` already returns the whole solve, and this is not a second
+   * copy of it. It answers a different question: not "how did this attempt go"
+   * but "what did they actually send, and when" — every submission at a
+   * challenge, in order, each with an id that a reply can cite. A sentence like
+   * "your second submission fixed the empty case but broke the duplicate one" is
+   * only worth writing if the learner can open the thing it names.
+   *
+   * Summaries by default because a challenge can hold ten submissions and each
+   * one carries a whole solution. Name one to read its code and its case grid.
+   */
+  read_submissions: [
+    "Read what the learner actually submitted at a challenge, in order. Without `submissionId` it returns every submission's verdict and case counts — this is the tool for \"what have they tried\", for seeing whether they converged or thrashed, and for finding which submission a question is about. With `submissionId` it returns that one in full: the exact code that was sent and every case it was graded on, including the inputs and expected/actual values of the ones that failed. Cite any submission you refer to as [[submission:<id>|a few words]] so the learner can open it — never quote its id in your prose.",
+    z.object({
+      challengeId: z.string().uuid().optional()
+        .describe("The challenge whose submissions to list. Omit for the one the learner has open right now."),
+      submissionId: z.string().uuid().optional()
+        .describe("One submission, in full, with its code and cases. Take the id from a previous listing."),
+      outcome: z.enum(["all", "passed", "failed"]).optional()
+        .describe("Narrow the listing. `failed` is the record of what they tried and why it was wrong, which is usually the interesting half."),
+      limit: z.number().int().min(1).max(40).default(20).describe("How many submissions to return. The list reads oldest first and a longer history is cut from the front, so the cap keeps the most recent and the ordinals stay absolute."),
+    }),
+  ],
+  /**
    * The one judgement about the solution that the tests cannot make.
    *
    * Correctness is settled by the runner before this is ever called — this is

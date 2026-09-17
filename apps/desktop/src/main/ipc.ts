@@ -4,10 +4,11 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
+import { snapshotCode } from "../shared/submissions.js";
 import { sourceSubmissionOutput } from "../shared/sourceOutput.js";
 import { canonicalWorkspacePath } from "../shared/workspacePath.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
@@ -367,6 +368,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return deps.store.setProblemSaved(request.data.key, input?.saved !== false, request.data.snapshot);
   });
   ipcMain.handle(ipc.challengeRead, (_event, value) => challengeDetail(zUuid(value)));
+  ipcMain.handle(ipc.challengeSubmissions, (_event, value) => deps.store.submissionsForQuestion(zUuid(value)));
+  ipcMain.handle(ipc.submissionRead, (_event, value) => deps.store.readSubmission(zUuid(value)));
+  ipcMain.handle(ipc.sessionSubmissions, (_event, value) => deps.store.submissionsForSession(zUuid(value)));
   ipcMain.handle(ipc.challengeWrite, async (_event, value) => {
     const input = challengeWriteInput.parse(value);
     const record = practiceTarget(input.challengeId);
@@ -481,6 +485,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.messageActivity, (_event, value) => {
     const messageId = String((value as { messageId?: unknown })?.messageId ?? "");
     return messageId ? deps.store.messageActivity(messageId) : [];
+  });
+  ipcMain.handle(ipc.messageRate, (_event, value) => {
+    const input = rateMessageInput.parse(value);
+    /* The rating that is now in force, so the footer settles on what was
+       written rather than on what it hoped for. A message the store would not
+       rate — a learner's own, or one that has since been rewound away — comes
+       back unrated, and the thumb the click lit goes out again. */
+    return deps.store.rateMessage(input.messageId, input.rating) ? input.rating : null;
   });
   ipcMain.handle(ipc.visualizerProblem, async (_event, value) => {
     const input = sourceSlugInput.parse(value);
@@ -734,7 +746,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          where it was, because an outage is not something they did. */
       return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output: verdict.status, summary: `${name} could not judge that submission (${verdict.status}). Nothing was recorded — try again in a moment.`, requiresComplexity:false } satisfies SubmissionResult;
     }
-    append("submission_created", { questionId: bundle.question_id, judge: source.source, url: verdict.submissionUrl }, "learner");
+    append("submission_created", { questionId: bundle.question_id, judge: source.source, url: verdict.submissionUrl, code: snapshotCode(path, code) }, "learner");
     append("test_run", {
       scope: "source-submission", judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed",
       status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases,
@@ -774,7 +786,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        what the evidence itself says. */
     const submissionSource=deps.store.readSession(sessionId)?.question?.source;
     if(submissionSource?.remoteJudge)return submitToSource({sessionId,attemptId,bundle,source:submissionSource});
-    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:runLimits(bundle.language).timeoutMs,failFast:true}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
+    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:runLimits(bundle.language).timeoutMs,failFast:true}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id,code:snapshotCode(solutionPath(bundle.design),workspaceFiles[solutionPath(bundle.design)]??"")},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
     /* A failed submission leaves the attempt open. Solving it is the point, so a
        wrong answer is a step in the attempt rather than the end of it: the learner
        keeps working and submits again, every submission is recorded as evidence,
@@ -927,6 +939,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     deps.providers.setDefault(providerId(input.provider), input.model.trim());
   });
   ipcMain.handle(ipc.settingsProviderUsage, (_event, value) => deps.providers.subscriptionUsage(providerId(value)));
+  ipcMain.handle(ipc.settingsProviderAccount, (_event, value) => deps.providers.subscriptionAccount(providerId(value)));
   ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
   ipcMain.handle(ipc.settingsFastMode, (_event, value) => deps.providers.setFastMode(z.boolean().parse(value)));
   /* The key goes in and never comes back out. Settings needs to know whether one

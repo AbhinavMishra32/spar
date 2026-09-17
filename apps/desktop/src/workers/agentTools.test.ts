@@ -32,7 +32,9 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * was that handler with the files left off, and `replay_attempt` was the same
  * attempt with its log folded, so a turn asked how the learner was doing spent a
  * round trip on each of them in turn. `read_attempt` now returns all of it at
- * once and the other three are gone from the table.
+ * once and the other three are gone from the table. `read_submissions` is new:
+ * a submission became a thing with an id the reply can cite, so there is a call
+ * that lists them and returns the code and cases of one.
  */
 describe("the tool contract, against what Mastra sent", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;

@@ -3,6 +3,7 @@ import { canonicalWorkspacePath } from "./workspacePath.js";
 import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spar/visualizer";
 import type { AgentActivityStep } from "@spar/domain";
 export type { VisualizerSpec, VisualizerTrace };
+import type { SubmissionRecord, SubmissionRow } from "./submissions.js";
 import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
 
 export const ipc = {
@@ -15,7 +16,7 @@ export const ipc = {
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentAnswer: "agent:answer", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
-  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
+  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderAccount: "settings:provider-account", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort", settingsFastMode: "settings:fast-mode",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
@@ -27,6 +28,7 @@ export const ipc = {
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
   sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
   challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
+  challengeSubmissions: "challenges:submissions", submissionRead: "submissions:read", sessionSubmissions: "sessions:submissions",
   challengeRun: "challenges:run", challengeCheck: "challenges:check", challengeReset: "challenges:reset",
   conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start",
   problemsSave: "problems:save",
@@ -37,7 +39,7 @@ export const ipc = {
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
-  visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity",
+  visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity", messageRate: "messages:rate",
   lessonRead: "lesson:read",
   restoreRetry: "restore:retry",
   updateState: "update:state", updateCheck: "update:check", updateDownload: "update:download",
@@ -207,6 +209,10 @@ export type UsageWindow = { kind: "five-hour" | "weekly"; usedPercent: number; r
 /** What Spar currently knows about a subscription's quota. Null, rather than an
  *  empty reading, whenever nothing has told it — see `subscriptionUsage`. */
 export type SubscriptionUsage = { windows: UsageWindow[]; capturedAt: number };
+/** Which account a subscription is signed in as. `email` is null when the
+ *  provider would not give one — GitHub answers with a login for everybody who
+ *  keeps their address private — and `label` is always something showable. */
+export type ProviderAccount = { email: string | null; label: string };
 export type ProviderOAuthEvent = {
   flowId: string;
   provider: ProviderId;
@@ -240,6 +246,9 @@ export const sourceSearchInput = z.object({
   offset: z.number().int().min(0).max(5_000).default(0),
 });
 export const sourceSlugInput = z.object({ source: sourceIdSchema, slug: z.string().trim().min(1).max(120) });
+/** One rating, on its way to the store. `null` is the un-rate: clicking the
+ *  thumb that is already lit takes the verdict back rather than restating it. */
+export const rateMessageInput = z.object({ messageId: z.string().trim().min(1), rating: z.enum(["good", "bad"]).nullable() });
 export const sourceConnectionInput = z.object({ source: sourceIdSchema });
 export const sourceRegionInput = sourceConnectionInput.extend({ region: sourceRegionSchema });
 export const sourceJudgeInput = sourceConnectionInput.extend({ preference: sourceJudgeSchema });
@@ -429,6 +438,10 @@ export type AgentStreamEvent = {
   input?: string;
   output?: string;
   files?: AgentActivityFile[];
+  /** How full the model's context window got on this turn, reported once per
+   *  provider turn so the composer's ring can move while the turn is running.
+   *  Only ever grows within a run — see the note in `agent.ts`. */
+  context?: { usedTokens: number; totalTokens: number };
 };
 /** Native menu items are routed to the renderer so the macOS menu bar drives the same UI as the in-app controls. */
 export type MenuCommand = "settings" | "new-session" | "command-palette";
@@ -531,6 +544,17 @@ export interface SparApi {
    *  agree by coincidence: both are drawn from one answer. */
   setProblemSaved(input: { key: string; saved: boolean; snapshot?: SavedProblem["snapshot"] }): Promise<SavedProblem[]>;
   readChallenge(challengeId: string): Promise<ChallengeDetail | null>;
+  /** Every submission ever sent at this challenge, oldest first, across every
+   *  attempt at it. Summaries only — the code and the case grid come with
+   *  `readSubmission`, because a list of ten would otherwise carry ten
+   *  solutions nobody has asked to read. */
+  listChallengeSubmissions(challengeId: string): Promise<SubmissionRow[]>;
+  /** One submission in full: what was sent and every case it was graded on. */
+  readSubmission(submissionId: string): Promise<SubmissionRecord | null>;
+  /** A whole session's submissions, newest first, across all of its challenges.
+   *  What `@` offers when the learner reaches for one directly rather than by
+   *  remembering which problem it was at. */
+  listSessionSubmissions(sessionId: string): Promise<SubmissionRow[]>;
   writeChallengeFile(input: z.infer<typeof challengeWriteInput>): Promise<void>;
   /** Runs the visible cases; output streams over `onRunnerEvent` under this id. */
   runChallenge(input: z.infer<typeof challengeIdInput>): Promise<{ id: string }>;
@@ -587,6 +611,10 @@ export interface SparApi {
   /** What a connected subscription's quota looks like right now, or null when
    *  the provider has none to report or nothing has reported one yet. */
   providerUsage(provider: ProviderId): Promise<SubscriptionUsage | null>;
+  /** Which account a connected subscription belongs to, or null when the
+   *  provider does not say. Asked separately from the inventory for the same
+   *  reason usage is: it can cost a network call, and only a hover wants it. */
+  providerAccount(provider: ProviderId): Promise<ProviderAccount | null>;
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
   /** OpenAI's priority service tier, which is what ChatGPT calls fast mode. Set
    *  for every model; only the Responses providers can act on it. */
@@ -651,6 +679,10 @@ export interface SparApi {
   /** The steps behind an older transcript row, which the session load leaves on
    *  disk. See `TRANSCRIPT_ACTIVITY_WINDOW`. */
   messageActivity(input: { messageId: string }): Promise<AgentActivityStep[]>;
+  /** Record the learner's verdict on one agent reply, or clear it by passing
+   *  null. Resolves to the rating now in force, so a footer that painted the
+   *  click optimistically can settle on what was actually stored. */
+  rateMessage(input: { messageId: string; rating: "good" | "bad" | null }): Promise<"good" | "bad" | null>;
   /** Try the pull again after it failed — the button on the screen that failure
    *  puts up. Resolves with wherever the retry landed. */
   retryRestore(): Promise<RestoreState>;

@@ -623,7 +623,7 @@ export const sessionDetailSchema = z.object({
      settled turn can fold its work under the same "Worked for 4s" the live one
      counts up. Zero for messages written before it was recorded, and for the
      learner's own, which are not turns. */
-  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate, activity: z.array(agentActivityStepSchema).default([]), activityCount: z.number().int().min(0).default(0), workedMs: z.number().int().min(0).default(0) })),
+  messages: z.array(z.object({ id, role: z.enum(["learner", "agent", "system"]), body: z.string(), createdAt: isoDate, activity: z.array(agentActivityStepSchema).default([]), activityCount: z.number().int().min(0).default(0), workedMs: z.number().int().min(0).default(0), /** The learner's verdict on this reply, when they gave one. Nullable rather than absent: "not rated" is a state the footer draws, and it is the state every reply starts in. */ rating: z.enum(["good", "bad"]).nullable().default(null) })),
   events: z.array(z.object({ id, sequence: z.number().int(), type: z.string(), occurredAt: isoDate, payload: z.record(z.unknown()), source: z.string() }))
 });
 export type SessionDetail = z.infer<typeof sessionDetailSchema>;

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { languageSchema, type Language } from "@spar/domain";
-import { piFinishReason, piUsage, type PiProviderInput } from "./piProvider.js";
+import { piFinishReason, piModelFor, piUsage, type PiProviderInput } from "./piProvider.js";
 import { createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentTools, piCompleteText, toolErrorText, turnOverflowed, type ToolChoiceRef } from "./piAgent.js";
 import { fitEvidence, nextEvidenceBudget, stableJson } from "./evidence.js";
 import { clampSteer, steeringSection } from "./steering.js";
@@ -87,7 +87,7 @@ const NARROW_AFTER = 1;
  */
 const SKIPPABLE_PHASES = new Set([
   "propose_ability_update", "commit_session_decision", "search_learner_model", "search_concept_evidence",
-  "read_ability", "read_concept_graph", "read_attempt", "search_attempt_history", "search_challenge_history",
+  "read_ability", "read_concept_graph", "read_attempt", "read_submissions", "search_attempt_history", "search_challenge_history",
   "search_practice_problems", "set_session_objective", "set_training_target", "ask_user_question",
   /* Skippable in the sense that failing to review leaves the attempt exactly as
      the runner left it — passed and closed, which is what happened before there
@@ -589,6 +589,14 @@ async function runTurn(request: Request, stopped: AbortSignal) {
   );
   try {
     const usage: unknown[] = [];
+    /* The high-water mark of the prompt across this turn's phases, which is what
+       the composer's ring reports. Spar rebuilds the transcript for every phase,
+       so there is no single conversation whose length could be read off — the
+       honest answer to "how full is the window" is the fullest any one phase got
+       it, and a reading that fell back as a later, shorter phase ran would say
+       the turn had freed room it never freed. */
+    let contextPeak = 0;
+    const contextWindow = piModelFor(request.payload.provider).contextWindow;
     let finalText = "";
     let finishReason = "stop";
     /* Cut once and kept cut for the rest of the turn. Evidence only grows, so a
@@ -697,7 +705,20 @@ async function runTurn(request: Request, stopped: AbortSignal) {
           text = message.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("");
           if (message.errorMessage) streamError = message.errorMessage;
           finishReason = piFinishReason(message.stopReason);
-          usage.push(piUsage(message.usage));
+          const turn = piUsage(message.usage);
+          usage.push(turn);
+          /* pi's own total, not input plus output. Anthropic reports
+             `input_tokens` with the cached prefix *taken out* — a 200k prompt
+             served almost entirely from cache comes back as a few thousand
+             input tokens — so adding the two visible fields reports a window
+             that is nearly empty while the turn is about to overflow it. pi
+             already sums input, output, cache reads and cache writes per
+             provider, and that sum is the prompt as the model saw it. */
+          const used = turn.totalTokens || turn.inputTokens + turn.outputTokens + turn.cachedInputTokens;
+          if (used > contextPeak) {
+            contextPeak = used;
+            parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: "context", context: { usedTokens: used, totalTokens: contextWindow } } });
+          }
         }
       });
       try {
@@ -1025,6 +1046,10 @@ function replayDoctrine() {
   return `Read read_attempt before judging a completed attempt, and on later turns that concern the learner's behaviour. It returns current code, the runner's verdict, the solve report, and a sequence-to-event-ID index for citations. Event payloads are represented in the report rather than duplicated as raw JSON. The default read includes the full log and source files. Use sections, eventTypes, cases or scope when the question calls for a focused view; do not repeat the same read.
 
 These are the readings that have carried the most, and you are expected to find others. A case that never passed across several runs is where the misconception lives, and it is worth far more than the total. A case that passed and then failed again is the sharpest thing in the log: their fix for one thing broke another, so the two are not separate in their model of the problem. A hidden case first seen on a submission tells you what they could not have known; a visible case failed repeatedly tells you what they could read and still could not do. Offsets are evidence too — a long stretch before the first run, a run after nearly every save, a long quiet gap before a correct fix — and so is work recorded after the grade, which counts for nothing and still says a lot.
+
+The learner can point at these records too. Their message may contain [[challenge:<id>|words]] or [[submission:<id>|words]], which they inserted from a picker rather than typed — it is them naming exactly which challenge or which submission they mean, and the id in it is real. Treat it as the subject of what they are asking: read that submission or that challenge before answering, rather than asking them which one they meant.
+
+Submissions are the other half of this, and they are objects rather than log lines: read_submissions lists every one the learner has sent at a challenge, and named with an id returns the exact code that went and every case it was graded on. Use it when the question is what they actually tried — whether they converged or thrashed, what changed between the attempt that failed and the one that passed, which case a fix was aimed at. Whenever you refer to one in your reply, write it as [[submission:<id>|a few words]] rather than describing it: the learner can open the reference and see the code and the cases beside your sentence, which turns "your second submission overwrote the running total" from a claim into something they can check. Never put a raw id in your prose.
 
 Then aim the next question at what the behaviour exposes rather than at the score, and cite the actual moment when you speak to the learner: "the shrink case was passing at +12:36 and broke when you fixed the total" is worth more to them than any summary, and it is how they learn Spar is really watching. Quote only what the log contains — offsets, case names, values — and never dress an event up as a motive. The log says what happened, never why. When the why matters for aiming the next question, and it usually does, ask them with ask_user_question and name the exact moment you are asking about. Asking is a first-class outcome of reading a log rather than a failure to decide: a question that makes the next challenge land beats a confident guess that misses, so do not hesitate to ask, and ask again whenever a later attempt raises something new.`;
 }

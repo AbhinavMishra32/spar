@@ -801,3 +801,73 @@ it("keeps published lesson cards available outside an older turn's deferred work
     expect(saved?.activityCount).toBe(3);
   } finally { store.close(); }
 });
+
+describe("submissions",()=>{
+  const submit=(store:LocalStore,attemptId:string,outcome:"passed"|"failed",cases:Array<{name:string;status:"passed"|"failed"}>,code:string)=>{
+    const append=(type:string,payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>store.appendNextEvent({id:randomUUID(),attemptId,type:type as never,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});
+    const created=append("submission_created",{questionId:"q",code:{path:"src/index.js",text:code,truncated:false}},"learner");
+    append("test_run",{scope:"visible-and-hidden",cases,passedCases:cases.filter((item)=>item.status==="passed").length,failedCases:cases.filter((item)=>item.status==="failed").length,durationMs:90},"runner");
+    append("submission_evaluated",{outcome,exitCode:outcome==="passed"?0:1},"system");
+    return created.id;
+  };
+  const seed=(store:LocalStore)=>{
+    const{sessionId}=store.createSession("Practise arrays");
+    store.setTrainingTarget(sessionId,{ability:"Array traversal",specificGap:"Stop at the boundary",desiredEvidence:"Stops at the first invalid value",avoidTesting:[]});
+    const question=store.createQuestion(sessionId,design("Stop at the boundary"),{valid:true});
+    return{sessionId,question};
+  };
+
+  it("keeps every submission at a challenge, in order, with where it came from",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{sessionId,question}=seed(store);
+      const first=submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      const second=submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+
+      const rows=store.submissionsForQuestion(question.id);
+      expect(rows.map((row)=>[row.id,row.ordinal,row.outcome])).toEqual([[first,1,"failed"],[second,2,"passed"]]);
+      expect(rows[0]).toMatchObject({challengeId:question.id,challengeTitle:"Stop at the boundary",language:"javascript",sessionId,attemptOrdinal:1,totalCases:1});
+    }finally{store.close();}
+  });
+
+  it("reads one submission back with the code that was actually sent",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{question}=seed(store);
+      submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      const id=submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+
+      const record=store.readSubmission(id);
+      expect(record).toMatchObject({id,ordinal:2,outcome:"passed",challengeTitle:"Stop at the boundary"});
+      expect(record?.code).toEqual({path:"src/index.js",text:"return true",truncated:false});
+      expect(record?.cases).toEqual([{name:"empty",status:"passed"}]);
+      expect(store.readSubmission(randomUUID())).toBeNull();
+    }finally{store.close();}
+  });
+
+  /* A reset is a hard visibility boundary for evidence, and deliberately not one
+     here: the learner made those submissions and this is the surface that says
+     so. */
+  it("keeps submissions made before a reset",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{sessionId,question}=seed(store);
+      submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      store.resetAttempt(sessionId,question.attemptId);
+      submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+
+      expect(store.readAttempt(question.attemptId).filter((event)=>event.type==="submission_created")).toHaveLength(1);
+      expect(store.submissionsForQuestion(question.id).map((row)=>row.outcome)).toEqual(["failed","passed"]);
+    }finally{store.close();}
+  });
+
+  it("gathers a whole session's submissions newest first",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{sessionId,question}=seed(store);
+      submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      const latest=submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+      expect(store.submissionsForSession(sessionId)[0]?.id).toBe(latest);
+    }finally{store.close();}
+  });
+});

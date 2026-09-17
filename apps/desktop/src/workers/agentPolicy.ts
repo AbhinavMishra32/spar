@@ -190,7 +190,7 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
   const source = practiceSource ? SOURCE_TOOLS : [];
   if (turnKind === "cold-start") return allowedTools("session-start", hasActiveQuestion, webSearch, practiceSource);
   if (turnKind === "session-start") return new Set([...TEACH_TOOLS, "search_learner_model", "search_attempt_history", "search_challenge_history", "read_ability", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "create_question", ...source, ...web]);
-  if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, ...TEACH_TOOLS, "read_attempt", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
+  if (turnKind === "attempt-complete") return new Set([...VISUALIZER_TOOLS, ...TEACH_TOOLS, "read_attempt", "read_submissions", "review_solution", "read_ability", "propose_ability_update", "commit_session_decision", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_training_target", "create_question", ...source, ...web]);
   /* Both ways of changing the challenge, because "give me a real problem instead"
      is a revision request like any other. Withholding the assignment here was a
      dead end with one exit: the agent could not hand over the LeetCode problem the
@@ -198,8 +198,8 @@ export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false,
      and had it graded locally — a counterfeit of the thing that was available all
      along. A sourced problem supersedes rather than edits, which the store already
      records as a replacement. */
-  if (turnKind === "challenge-revision") return new Set(["read_attempt", "set_training_target", "replace_current_question", ...source]);
-  return new Set([...VISUALIZER_TOOLS, ...TEACH_TOOLS, "read_session", ...(hasActiveQuestion ? ["replace_current_question"] : ["create_question"]), ...source, "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
+  if (turnKind === "challenge-revision") return new Set(["read_attempt", "read_submissions", "set_training_target", "replace_current_question", ...source]);
+  return new Set([...VISUALIZER_TOOLS, ...TEACH_TOOLS, "read_session", ...(hasActiveQuestion ? ["replace_current_question"] : ["create_question"]), ...source, "read_attempt", "read_submissions", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability", ...web]);
 }
 
 /**
@@ -311,7 +311,7 @@ export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unk
          a request this turn can actually carry out, and the tool refuses on its
          own unless the agent says the learner asked to be moved. */
       ...(context.practiceSource ? SOURCE_TOOLS : []),
-      "read_attempt", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability",
+      "read_attempt", "read_submissions", "read_ability", "search_learner_model", "search_attempt_history", "search_challenge_history", "read_challenge", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective", "set_training_target", "upsert_ability",
       ...(context.webSearch ? WEB_TOOLS : []),
     ],
     toolChoice: "auto",

@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { challengeFileEntries, codePreview } from "./challengeFiles.js";
+import { foldSubmissions, submissionSummary, type SubmissionContext, type SubmissionRecord, type SubmissionRow } from "../shared/submissions.js";
 import { decay as decayRating, updateRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, INITIAL_RATING, INITIAL_VOLATILITY, type Rating } from "@spar/domain";
 import { challengeResult, elapsedDays } from "./rating.js";
 import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, savedProblemSchema, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SavedProblem, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
@@ -235,6 +236,11 @@ export class LocalStore {
        to its last sentence. */
     this.ensureColumn("agent_messages", "activity", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn("agent_messages", "worked_ms", "INTEGER NOT NULL DEFAULT 0");
+    /* The learner's verdict on a reply. Nullable on purpose — "not rated" and
+       "rated neither way" are the same thing here, and a default would make
+       every reply written before this column existed look like it had been
+       judged. */
+    this.ensureColumn("agent_messages", "rating", "TEXT");
     this.ensureColumn("sessions", "pinned_at", "TEXT");
     this.ensureColumn("sessions", "archived_at", "TEXT");
     this.ensureColumn("sessions", "track_id", "TEXT");
@@ -314,11 +320,11 @@ export class LocalStore {
      * have on disk so the row can offer to fetch them. Nothing is deleted; this
      * is about what is resident, not what is kept.
      */
-    const rows=this.db.prepare("SELECT id,role,body,created_at,activity,worked_ms FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string;activity:string|null;worked_ms:number}>;
+    const rows=this.db.prepare("SELECT id,role,body,created_at,activity,worked_ms,rating FROM agent_messages WHERE session_id=? ORDER BY created_at").all(id) as Array<{id:string;role:"learner"|"agent"|"system";body:string;created_at:string;activity:string|null;worked_ms:number;rating:"good"|"bad"|null}>;
     const windowStart=Math.max(0,rows.length-TRANSCRIPT_ACTIVITY_WINDOW);
     const messages=rows.map((m,index)=>{
-      if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0,workedMs:m.worked_ms};
-      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity).filter((step)=>step.kind==="tool" && step.ok && (["create_question","replace_current_question","assign_practice_problem"].includes(step.tool) || (step.tool==="teach_lesson" && /"lessonId"\s*:\s*"[^"\s]+"/.test(step.output)))),activityCount:countActivity(m.activity),workedMs:m.worked_ms};
+      if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0,workedMs:m.worked_ms,rating:m.rating};
+      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,rating:m.rating,activity:parseActivity(m.activity).filter((step)=>step.kind==="tool" && step.ok && (["create_question","replace_current_question","assign_practice_problem"].includes(step.tool) || (step.tool==="teach_lesson" && /"lessonId"\s*:\s*"[^"\s]+"/.test(step.output)))),activityCount:countActivity(m.activity),workedMs:m.worked_ms};
     });
     return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
@@ -352,6 +358,10 @@ export class LocalStore {
      reads as amnesia rather than as history. */
   /** One older turn's steps, fetched when the learner opens it. The window keeps
    *  them out of memory; this is how they come back. */
+  /** Record — or clear — what the learner made of a reply. Agent messages only:
+   *  there is nothing to say about your own message, and a rating on a system
+   *  line would be a verdict on Spar's bookkeeping. */
+  rateMessage(messageId:string,rating:"good"|"bad"|null){const changed=this.db.prepare("UPDATE agent_messages SET rating=? WHERE id=? AND role='agent'").run(rating,messageId).changes;return changed>0;}
   messageActivity(messageId:string):AgentActivityStep[]{const row=this.db.prepare("SELECT activity FROM agent_messages WHERE id=?").get(messageId) as {activity:string|null}|undefined;return parseActivity(row?.activity??null);}
   addMessage(sessionId:string,role:"learner"|"agent"|"system",body:string,activity:AgentActivityStep[]=[],workedMs=0){const session=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!session)return null;const value={id:randomUUID(),role,body,createdAt:new Date().toISOString(),activity};this.db.prepare("INSERT INTO agent_messages (id,session_id,role,body,created_at,activity,worked_ms) VALUES (?,?,?,?,?,?,?)").run(value.id,sessionId,role,body,value.createdAt,JSON.stringify(activity),Math.round(workedMs));this.enqueue("agent-message",{sessionId,messages:[value]});return value;}
   /**
@@ -478,7 +488,12 @@ export class LocalStore {
       WHERE a.track_id=? GROUP BY p.id ORDER BY p.updated_at DESC LIMIT 200`).all(scope) as Array<Record<string,unknown>>;
     const evidenceRows=this.db.prepare(`SELECT e.event_id,e.statement,e.polarity,e.independence,e.strength,e.occurred_at,e.attempt_id,e.ability_id,a.title ability_title
       FROM learner_evidence e JOIN ability_documents a ON a.id=e.ability_id
-      WHERE a.track_id=? ORDER BY e.occurred_at DESC LIMIT 300`).all(scope) as Array<Record<string,unknown>>;
+      /* rowid breaks the tie. Two pieces of evidence written in the same
+         millisecond — which is what happens when one turn records both — are
+         otherwise returned in whatever order SQLite happens to scan them, and
+         "most recent first" stops meaning anything at exactly the moment two
+         rows are competing to be it. */
+      WHERE a.track_id=? ORDER BY e.occurred_at DESC, e.rowid DESC LIMIT 300`).all(scope) as Array<Record<string,unknown>>;
     const rank=<T extends Record<string,unknown>>(rows:T[],text:(row:T)=>string,recency:(row:T)=>string)=>rows
       .map((row)=>({row,score:relevance(text(row),terms)}))
       .filter((item)=>item.score>0)
@@ -504,6 +519,63 @@ export class LocalStore {
    *  attempt at it — far more than a replay header needs. */
   attemptSubject(attemptId:string){const row=this.db.prepare("SELECT q.id question_id,q.title,q.language,q.statement,q.ordinal,a.status,a.started_at,a.completed_at,s.id session_id FROM attempts a JOIN questions q ON q.id=a.question_id JOIN sessions s ON s.id=a.session_id WHERE a.id=?").get(attemptId) as {question_id:string;title:string;language:string;statement:string;ordinal:number;status:string;started_at:string;completed_at:string|null;session_id:string}|undefined;return row??null;}
   submissionBundle(attemptId:string){const row=this.db.prepare("SELECT a.id attempt_id,a.session_id,a.latest_event_sequence,q.id question_id,q.language,q.design FROM attempts a JOIN questions q ON q.id=a.question_id WHERE a.id=? AND a.status='active'").get(attemptId) as {attempt_id:string;session_id:string;latest_event_sequence:number;question_id:string;language:Language;design:string}|undefined;return row?{...row,design:JSON.parse(row.design) as QuestionDesign}:null;}
+  /**
+   * Every submission at a challenge, oldest first.
+   *
+   * Reads the whole ledger rather than `readAttempt`'s latest segment. That
+   * boundary exists so the agent judges the evidence a learner has not since
+   * wiped, and it is right for evidence — but a submission the learner made and
+   * then reset past is still a submission they made, and this is the surface
+   * that promises to have kept them. It spans attempts too: a challenge reopened
+   * after a rejected review has two attempts and one history.
+   */
+  submissionsForQuestion(questionId:string):SubmissionRow[]{
+    const context=this.submissionContext(questionId);
+    if(!context)return[];
+    const rows=this.db.prepare(`SELECT e.id,e.attempt_id,e.sequence,e.type,e.occurred_at,e.payload,a.started_at FROM attempt_events e
+      JOIN attempts a ON a.id=e.attempt_id
+      WHERE a.question_id=? AND e.type IN ('submission_created','test_run','submission_evaluated')
+      ORDER BY a.started_at, e.sequence`).all(questionId) as Array<{id:string;attempt_id:string;sequence:number;type:string;occurred_at:string;payload:string;started_at:string}>;
+    const attemptOrder=new Map<string,number>();
+    for(const row of rows)if(!attemptOrder.has(row.attempt_id))attemptOrder.set(row.attempt_id,attemptOrder.size+1);
+    return foldSubmissions(rows.map((row)=>({id:row.id,attemptId:row.attempt_id,sequence:row.sequence,type:row.type,occurredAt:row.occurred_at,payload:JSON.parse(row.payload) as Record<string,unknown>})))
+      .map((submission)=>({...submissionSummary(submission),...context,attemptOrdinal:attemptOrder.get(submission.attemptId)??1}));
+  }
+
+  /** One submission in full: what was sent, and every case it was graded on. */
+  readSubmission(submissionId:string):SubmissionRecord|null{
+    const owner=this.db.prepare("SELECT a.question_id FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id WHERE e.id=? AND e.type='submission_created'").get(submissionId) as {question_id:string}|undefined;
+    if(!owner)return null;
+    const context=this.submissionContext(owner.question_id);
+    if(!context)return null;
+    const rows=this.db.prepare(`SELECT e.id,e.attempt_id,e.sequence,e.type,e.occurred_at,e.payload,a.started_at FROM attempt_events e
+      JOIN attempts a ON a.id=e.attempt_id
+      WHERE a.question_id=? AND e.type IN ('submission_created','test_run','submission_evaluated')
+      ORDER BY a.started_at, e.sequence`).all(owner.question_id) as Array<{id:string;attempt_id:string;sequence:number;type:string;occurred_at:string;payload:string}>;
+    const attemptOrder=new Map<string,number>();
+    for(const row of rows)if(!attemptOrder.has(row.attempt_id))attemptOrder.set(row.attempt_id,attemptOrder.size+1);
+    const found=foldSubmissions(rows.map((row)=>({id:row.id,attemptId:row.attempt_id,sequence:row.sequence,type:row.type,occurredAt:row.occurred_at,payload:JSON.parse(row.payload) as Record<string,unknown>}))).find((submission)=>submission.id===submissionId);
+    return found?{...found,...context,attemptOrdinal:attemptOrder.get(found.attemptId)??1}:null;
+  }
+
+  /** The most recent submissions across a whole session, newest first. What the
+   *  agent reaches for when the learner says "that one where I". */
+  submissionsForSession(sessionId:string,limit=40):SubmissionRow[]{
+    const questions=this.db.prepare("SELECT id FROM questions WHERE session_id=? ORDER BY ordinal").all(sessionId) as Array<{id:string}>;
+    return questions.flatMap((question)=>this.submissionsForQuestion(question.id))
+      /* Two submissions can share a millisecond — a rejected one and the retry
+         that follows it in the same handler — so the stamp alone is not an
+         order. The ordinal breaks the tie within a challenge, and the challenge
+         number breaks it between two. */
+      .sort((left,right)=>right.submittedAt.localeCompare(left.submittedAt)||right.challengeOrdinal-left.challengeOrdinal||right.ordinal-left.ordinal)
+      .slice(0,limit);
+  }
+
+  private submissionContext(questionId:string):Omit<SubmissionContext,"attemptOrdinal">|null{
+    const row=this.db.prepare("SELECT q.id,q.title,q.ordinal,q.language,s.id session_id,s.title session_title FROM questions q JOIN sessions s ON s.id=q.session_id WHERE q.id=?").get(questionId) as {id:string;title:string;ordinal:number;language:string;session_id:string;session_title:string}|undefined;
+    return row?{challengeId:row.id,challengeTitle:row.title,challengeOrdinal:row.ordinal,language:row.language,sessionId:row.session_id,sessionTitle:row.session_title}:null;
+  }
+
   completeAttempt(attemptId:string,_outcome:"passed"|"failed"){const now=new Date().toISOString();this.db.transaction(()=>{const attempt=this.db.prepare("SELECT question_id,session_id FROM attempts WHERE id=?").get(attemptId) as {question_id:string;session_id:string}|undefined;if(!attempt)throw new Error("Attempt not found");this.db.prepare("UPDATE attempts SET status='completed',completed_at=? WHERE id=?").run(now,attemptId);this.db.prepare("UPDATE questions SET status='completed' WHERE id=?").run(attempt.question_id);this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(now,attempt.session_id);
     /* Inside the same transaction as the completion. A solve that was recorded
        but not rated would be invisible to the rating for ever: nothing re-reads
