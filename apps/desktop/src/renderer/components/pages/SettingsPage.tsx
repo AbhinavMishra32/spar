@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrainCircuit, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type BaselineState, type Language } from "@spar/domain";
-import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
+import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -17,7 +17,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
-import { message } from "@/lib/format";
+import { initials, message } from "@/lib/format";
 import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsHeader, SettingsRow, SettingsSection } from "../settings/layout";
@@ -364,6 +364,56 @@ function describeWindow(entry: UsageWindow) {
   return `resets ${new Date(entry.resetsAt * 1_000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/** Which account the subscription on this row is signed in as. Asked once per
+ *  mount and answered from the main process's own cache, so the hover it feeds
+ *  opens on a value that is already there rather than on a spinner. */
+function useProviderAccount(api: SparApi | undefined, provider: Provider) {
+  const [account, setAccount] = useState<ProviderAccount | null>(null);
+  const wanted = provider.kind === "subscription" && provider.state !== "disconnected";
+
+  useEffect(() => {
+    if (!api || !wanted) return;
+    let live = true;
+    void api.providerAccount(provider.id)
+      .then((value) => { if (live) setAccount(value); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [api, provider.id, wanted]);
+
+  return wanted ? account : null;
+}
+
+/** The row's name and kind, with the signed-in account behind a hover.
+ *
+ *  Behind a hover rather than on the row: three subscriptions each showing an
+ *  address would put a line of small grey text under every provider, and which
+ *  account is a thing you check occasionally, not something you read every time
+ *  the page opens. A provider that never answered simply has no hover — the
+ *  name is plain text then, and nothing invites a pointer that gets nothing. */
+function ProviderIdentity({ account, name }: { account: ProviderAccount | null; name: string }) {
+  const label = <span className="block truncate text-content font-medium">{name}</span>;
+  if (!account) return label;
+
+  return (
+    <HoverCard closeDelay={80} openDelay={180}>
+      {/* A button, not the bare text: the card has to open on focus too, or the
+          only way to read which account this is would be to own a pointer. */}
+      <HoverCardTrigger asChild>
+        <button
+          className="min-w-0 cursor-default rounded-[var(--radius-sm)] text-left decoration-muted-foreground/40 underline-offset-4 outline-none hover:underline hover:decoration-dotted focus-visible:underline focus-visible:decoration-dotted"
+          type="button"
+        >
+          {label}
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className="w-auto max-w-[18rem] px-3 py-2">
+        <p className="text-ui text-muted-foreground">Signed in as</p>
+        <p className="mt-0.5 truncate text-content text-foreground">{account.label}</p>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
 function ProviderRow({
   provider,
   api,
@@ -384,13 +434,14 @@ function ProviderRow({
   onKeyUrl(): void;
 }) {
   const expired = provider.state === "auth-expired";
+  const account = useProviderAccount(api, provider);
 
   return (
     <Row>
       <Mark provider={provider.id} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <p className="truncate text-content font-medium">{provider.name}</p>
+          <ProviderIdentity account={account} name={provider.name} />
           {isDefault && (
             <span className="shrink-0 rounded-full bg-success/12 px-1.5 py-px text-ui-sm font-medium text-success">Default</span>
           )}
@@ -451,9 +502,11 @@ function ConnectRow({ available, onPick }: { available: Provider[]; onPick(provi
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex w-full items-center gap-2 px-3.5 py-2.5 text-ui text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground">
+      {/* Carries the row surface, not a bare trigger: it is the last row of the
+          card, and without the background it floated below one. */}
+      <DropdownMenuTrigger className="flex min-h-[3.25rem] w-full items-center gap-3 bg-[var(--surface-secondary)] p-2.5 text-content text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground">
         <span className="grid size-6 shrink-0 place-items-center">
-          <Plus className="size-4" />
+          <Plus className="size-[1.15rem]" />
         </span>
         Connect a provider
       </DropdownMenuTrigger>
@@ -489,6 +542,7 @@ function LearningEngineInspector({ api }: { api: SparApi | undefined }) {
 }
 
 export function SettingsPage({
+  account,
   api,
   language,
   onLanguageChange,
@@ -498,6 +552,7 @@ export function SettingsPage({
   onBaseline,
   theme,
 }: {
+  account: { displayName: string; email: string };
   api: SparApi | undefined;
   language: Language;
   onLanguageChange(language: Language): void;
@@ -782,6 +837,18 @@ export function SettingsPage({
         </Group>}
 
         {section === "account" && <><Group label="Account">
+          {/* Who you are signed in as, before anything you can do about it. The
+              sidebar's row says the name and hides the address in a tooltip;
+              Settings is the one place that owes you both in plain sight. */}
+          <Row className="gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-background-elevated-secondary)] text-content font-semibold text-foreground">
+              {initials(account.displayName)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-content font-medium">{account.displayName}</p>
+              <p className="mt-0.5 truncate text-ui text-muted-foreground">{account.email}</p>
+            </div>
+          </Row>
           <Row>
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Sign out</p>

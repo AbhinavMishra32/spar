@@ -29,6 +29,7 @@ function Preview() {
     <TooltipProvider delayDuration={150} skipDelayDuration={300}>
       <div className="h-screen bg-background">
         <SettingsPage
+          account={{ displayName: "Ada Lovelace", email: "ada@example.com" }}
           api={undefined}
           baseline={baseline}
           language={language}

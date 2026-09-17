@@ -3,6 +3,7 @@ import { ArrowUpRight, ChevronDown, Search, Unplug } from "lucide-react";
 import type { ProviderInventory, ReasoningEffort } from "../../../shared/api";
 import { patchProviders, refreshProviders, useProviders } from "../../hooks/use-providers";
 import { ComposerPill } from "./Composer";
+import { ContextUsage } from "./ContextUsage";
 import {
   DropdownMenu,
   DropdownMenuCheckItem,
@@ -150,7 +151,7 @@ export function ModelPicker({
         <TooltipTrigger asChild>
           <DropdownMenuTrigger
             aria-label="Model"
-            className="group inline-flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full py-0 pr-0 pl-0 text-thread text-foreground/90 transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:pr-2 hover:pl-1.5 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:pr-2 aria-expanded:pl-1.5 aria-expanded:text-foreground"
+            className="group inline-flex h-7 max-w-[9rem] shrink-0 items-center gap-1.5 rounded-full py-0 pr-0 pl-0 text-ui-sm font-medium text-foreground/90 transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:pr-2 hover:pl-1.5 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:pr-2 aria-expanded:pl-1.5 aria-expanded:text-foreground"
             ref={trigger}
           >
             <ProviderGlyph className="size-4 shrink-0" provider={active.id} />
@@ -186,7 +187,7 @@ export function ModelPicker({
             height, no rule under it. Radix runs a typeahead on printable keys, so
             the field has to swallow them to stay typable. */}
         <div
-          className="flex min-h-8 items-center gap-2 px-2.5"
+          className="flex min-h-7 items-center gap-2 px-2"
           onKeyDown={(event) => event.stopPropagation()}
         >
           <Search className="size-4 shrink-0 text-muted-foreground/70" />
@@ -214,7 +215,7 @@ export function ModelPicker({
                 </DropdownMenuCheckItem>
               ))
             ) : (
-              <p className="px-2.5 py-1.5 text-thread text-muted-foreground">No model matches “{query.trim()}”.</p>
+              <p className="px-2 py-1 text-thread text-muted-foreground">No model matches “{query.trim()}”.</p>
             )
           ) : (
             connected.map((provider) => (
@@ -288,7 +289,7 @@ export function ReasoningPicker({
         <TooltipTrigger asChild>
           <DropdownMenuTrigger
             aria-label="Reasoning effort"
-            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-0 text-thread text-muted-foreground transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:px-2 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:px-2 aria-expanded:text-foreground"
+            className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full px-0 text-ui-sm font-medium text-muted-foreground transition-[padding,background-color,color] duration-150 outline-none hover:bg-[var(--color-background-elevated-secondary)] hover:px-2 hover:text-foreground aria-expanded:bg-[var(--color-background-elevated-secondary)] aria-expanded:px-2 aria-expanded:text-foreground"
             ref={trigger}
           >
             <span className="truncate">{current.label}</span>
@@ -312,7 +313,7 @@ export function ReasoningPicker({
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Options</DropdownMenuLabel>
         {/* The whole row toggles, and `onSelect` is prevented so it does not:
-            a switch you can only hit by landing on the switch is a 32px row
+            a switch you can only hit by landing on the switch is a 28px row
             with an 18px target, and closing the menu on a setting you are
             plainly about to compare against the efforts above it is the wrong
             answer to a click either way. */}
@@ -343,7 +344,7 @@ export function ReasoningPicker({
  * inventory threaded through every composer's parent — the model in force is a
  * property of the runtime, not of the screen you happen to be on.
  */
-export function ComposerModelPicker({ onOpenSettings }: { onOpenSettings?(): void }) {
+export function ComposerModelPicker({ onOpenSettings, sessionId }: { onOpenSettings?(): void; sessionId?: string | undefined }) {
   const { inventory } = useProviders();
 
   const reload = useCallback(() => void refreshProviders().catch(() => undefined), []);
@@ -400,7 +401,22 @@ export function ComposerModelPicker({ onOpenSettings }: { onOpenSettings?(): voi
   }
 
   return (
-    <>
+    /* Tighter than the toolbar's own `gap-1`. These three are one statement —
+       this model, at this effort, this full — and at rest none of them carries a
+       pill or a border to separate it from its neighbour, so the only thing
+       holding them apart is the gap. Four pixels read as three controls that
+       happened to land together; two read as one line. The toolbar's gap still
+       stands between the group and everything else. */
+    <div className="flex min-w-0 items-center gap-0.5">
+      {/* Left of the name, as Aside places it: the ring is a reading about the
+          model in force, so it belongs on the model's side of the toolbar
+          rather than out among the controls. It keeps its own margin on top of
+          the group's gap: the model and the effort are two halves of one
+          setting, where the ring is a reading about it, and a mark set hard
+          against the model's own glyph reads as a second glyph. The margin is
+          the indicator's own rather than a spacer here, so it leaves with it on
+          a session that has not run a turn. */}
+      <ContextUsage sessionId={sessionId} />
       <ModelPicker
         inventory={inventory}
         onSelect={(provider, model) => void select(provider, model)}
@@ -414,6 +430,6 @@ export function ComposerModelPicker({ onOpenSettings }: { onOpenSettings?(): voi
           onSelect={(effort) => void setEffort(effort)}
         />
       )}
-    </>
+    </div>
   );
 }

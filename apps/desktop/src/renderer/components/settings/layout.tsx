@@ -11,11 +11,10 @@ import { cn } from "@/lib/utils";
  *
  * The rules that matter are the ones no single row shows. The card is
  * negatively inset so its rows sit flush with the column's reading edge while
- * the heading above it does not. Rows are divided by a hairline in light and by
- * a gap in dark, because on a dark ground a translucent surface separated by a
- * gap reads as stacked material while a drawn line reads as a table. And the
- * control slot is capped rather than sized, so a long select and a switch land
- * on the same right edge.
+ * the heading above it does not. Rows are divided by a hairline in both themes,
+ * so a card reads as one piece of material however dark the ground behind it
+ * is. And the control slot is capped rather than sized, so a long select and a
+ * switch land on the same right edge.
  *
  * Written against Spar's own tokens rather than copied class-for-class: the two
  * apps share a design, not a stylesheet, and construct's utilities would have
@@ -72,12 +71,13 @@ export function SettingsGroup({ className, ...props }: React.ComponentProps<"div
            select lives in one — so it takes the card surface, and the quiet
            sheet under it is what makes the lift readable at all.
 
-           In dark the border and the dividing lines both go: the rows are
-           translucent there, and a stack of translucent panes separated by a
-           one-pixel gap already reads as material. Drawing a line as well turns
-           the card into a table. */
+           One card in both themes, divided by a hairline. Dark used to split
+           the rows with a one-pixel gap instead, on the theory that translucent
+           panes read as material — but on a near-black ground that gap is a
+           black line, and a card cut into floating strips is what it actually
+           read as. The border thins rather than disappears: at 10% white it is
+           the edge of the card, not a frame drawn around it. */
         "-mx-3.5 divide-y divide-border overflow-hidden rounded-xl border border-border",
-        "dark:space-y-px dark:divide-y-0 dark:border-transparent dark:bg-transparent",
         "[&+&]:mt-2",
         className,
       )}
