@@ -171,7 +171,9 @@ function useMenuHover(subId: string | null) {
    The highlight is no exception: a row lights up the instant the pointer is on
    it. A highlight that animates between rows is something you watch arrive,
    and on a menu it is always a frame behind the thing it is meant to be
-   following. */
+   following. So `itemClass` carries no `transition-colors` — even 75ms of it
+   smears the fill across the gap while the pointer runs down the list, which
+   is the drag you feel rather than see. Don't put one back. */
 function DropdownMenu(props: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
   return <DropdownMenuPrimitive.Root data-slot="dropdown-menu" {...props} />
 }
@@ -233,7 +235,7 @@ function MenuScroller({ children }: { children?: React.ReactNode }) {
   )
 
   return (
-    <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-1.5" ref={ref} style={style}>
+    <div className="app-scroll min-h-0 flex-1 overflow-y-auto p-1" ref={ref} style={style}>
       <SubGroupContext.Provider value={group}>
         <div>{children}</div>
       </SubGroupContext.Provider>
@@ -273,7 +275,7 @@ function DropdownMenuLabel({
       className={cn(
         /* `text-ui` is 12px, which is their `text-xs` exactly; `text-ui-sm` is
            11px and was a point light. */
-        "px-2.5 py-1 text-ui font-medium tracking-wide text-muted-foreground select-none",
+        "px-2 py-0.5 text-ui font-medium tracking-wide text-muted-foreground select-none",
         className
       )}
       data-slot="dropdown-menu-label"
@@ -284,14 +286,16 @@ function DropdownMenuLabel({
   )
 }
 
-/* Aside's row, transcribed: `min-h-8` (32px), `rounded-lg`, `px-2.5 py-1`,
-   `gap-2`, 16px icons, and 50% opacity when disabled. The one thing not taken
+/* Aside's row, tightened a notch: `min-h-7` (28px), `rounded-lg`, `px-2 py-0.5`,
+   `gap-2`, 16px icons, and 50% opacity when disabled. Theirs stands 32px, which
+   is right for a sidebar you read and loose for a list you scan — these menus
+   are mostly models, and a shorter row puts more of them on screen at once. The one thing not taken
    from it is the type size — theirs is 14px because their whole sidebar is, and
    a menu that sets its own size a point above the app around it stops reading
    as part of it. `leading-none` is load-bearing: text-content carries a 22px
    line box that would otherwise set the height itself and undo the min-height. */
 const itemClass =
-  "relative flex min-h-8 cursor-default select-none items-center gap-2 rounded-[var(--radius-item)] px-2.5 py-1 text-content leading-none outline-none transition-colors duration-75 data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
+  "relative flex min-h-7 cursor-default select-none items-center gap-2 rounded-[var(--radius-item)] px-2 py-0.5 text-content leading-none outline-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
 
 function DropdownMenuItem({
   className,
@@ -428,7 +432,7 @@ function DropdownMenuSubTrigger({
    stack of sheets — which is what they are. */
 function DropdownMenuSubContent({
   className,
-  alignOffset = -6,
+  alignOffset = -4,
   sideOffset = -4,
   children,
   ...props
@@ -474,7 +478,7 @@ function DropdownMenuSeparator({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
   return (
     <DropdownMenuPrimitive.Separator
-      className={cn("-mx-1 my-1 h-px bg-border", className)}
+      className={cn("-mx-1 my-0.5 h-px bg-border", className)}
       data-slot="dropdown-menu-separator"
       {...props}
     />

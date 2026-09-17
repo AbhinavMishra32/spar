@@ -32,7 +32,7 @@ const twMerge = extendTailwindMerge({
           "ui", "ui-sm",
           "content", "content-sm", "content-title",
           "source", "source-sm",
-          "thread",
+          "thread", "thread-tool",
         ],
       }],
     },

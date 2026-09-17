@@ -83,30 +83,41 @@ export function FadedScroll({
  */
 /** Both halves of a call, as the data they are. What every tool showed before
  *  any of them had a view, and what a tool without one still shows. */
-export function RawPayload({ input, output }: { input: string; output: string }) {
+export function RawPayload({ input, output, status }: { input: string; output: string; status?: string | undefined }) {
   return (
     <>
       <Payload body={input} title="Input" />
       {input.trim() && output.trim() && <div className="mx-2.5 border-t border-border/60" />}
-      <Payload body={output} title="Result" />
+      {/* The word goes on the result, not on the call: "Done" beside the
+          arguments would be claiming the arguments finished. */}
+      <Payload body={output} status={status} title="Output" />
     </>
   );
 }
 
-function Payload({ title, body }: { title: string; body: string }) {
+function Payload({ title, body, status }: { title: string; body: string; status?: string | undefined }) {
   const [full, setFull] = useState(false);
   const trimmed = body.trim();
   if (!trimmed) return null;
   const lines = trimmed.split("\n").length;
   return (
     <div className="min-w-0">
-      <p className="px-2.5 pt-2 pb-1 text-thread font-medium tracking-[0.12em] text-muted-foreground/70 uppercase">{title}</p>
+      {/* A name, not a field code. These were set as uppercase letter-spaced
+          eyebrows — the type of a form label — over what is plainly a block of
+          the tool's own text, and at 13px that treatment is harder to read than
+          the payload it is labelling. How the call ended sits at the other end
+          of the same line, which is where the eye already is once it has
+          finished the block. */}
+      <div className="flex min-w-0 items-baseline justify-between gap-2 px-2.5 pt-2 pb-1">
+        <p className="min-w-0 truncate text-thread-tool font-medium text-foreground/75">{title}</p>
+        {status && <span className="shrink-0 text-thread-tool text-muted-foreground/70">{status}</span>}
+      </div>
       <FadedScroll uncapped={full} watch={body}>
-        <pre className="px-2.5 pb-2 font-mono text-thread leading-[1.45] whitespace-pre text-muted-foreground/80">{trimmed}</pre>
+        <pre className="px-2.5 pb-2 font-mono text-thread-tool leading-[1.45] whitespace-pre text-muted-foreground/80">{trimmed}</pre>
       </FadedScroll>
       {lines > 8 && (
         <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[color-mix(in_oklab,var(--foreground)_5%,transparent)] px-2 py-1 text-thread text-muted-foreground transition-colors hover:text-foreground"
+          className="mx-2.5 mb-2 cursor-default rounded-md bg-[color-mix(in_oklab,var(--foreground)_5%,transparent)] px-2 py-1 text-thread-tool text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => setFull((value) => !value)}
           type="button"
         >

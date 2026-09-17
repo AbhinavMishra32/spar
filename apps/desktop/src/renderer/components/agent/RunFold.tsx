@@ -215,8 +215,17 @@ export function RunFold({
       </button>
       )}
       {/* Animate to auto so the open fold continues to grow with streamed rows. */}
+      {/* The clip the height animation needs, held a few pixels off the steps it
+          contains. A card inside the fold — the attempt reading is the one that
+          gets one — carries `--app-shadow-panel`, which reaches about 3px to
+          each side and 5px below it, and a clip flush against the column sliced
+          all three of those off: the card read as a flat rectangle with a
+          hairline, while the published challenge a few rows down, which sits
+          outside the fold, kept its lift. The padding is what the clip is taken
+          at; the matching negative margin gives it back, so the column and the
+          gap under the fold are exactly where they were in both states. */}
       <motion.div
-        className="overflow-hidden"
+        className="-mx-2 -mb-1.5 overflow-hidden px-2 pb-1.5"
         initial={false}
         animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
         /* Folding is the turn putting its working away, and it is watched more
@@ -234,7 +243,10 @@ export function RunFold({
         {/* React 19 takes `inert` as a boolean. A closed fold is zero pixels
             tall but still in the document, and without this its buttons stay
             tabbable — the learner would tab into steps they cannot see. */}
-        <div className={`min-w-0 overflow-hidden${connected ? " pt-2" : ""}`} inert={!open}>
+        {/* No clip of its own: the box above already owns the one the animation
+            needs, and a second one at the column's exact edge put the shadows
+            back where they were. */}
+        <div className={`min-w-0${connected ? " pt-2" : ""}`} inert={!open}>
           {!bodyLoaded && loading && <p className="py-1 text-thread text-muted-foreground" role="status">Loading the steps…</p>}
           {!bodyLoaded && failed && (
             <button className="py-1 text-thread text-muted-foreground transition-colors hover:text-foreground" onClick={() => void load()} type="button">

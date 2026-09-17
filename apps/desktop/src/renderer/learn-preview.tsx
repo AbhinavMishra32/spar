@@ -129,6 +129,7 @@ const api = {
   async updateState() { return { status: "current", currentVersion: "0.4.0" } as any; },
   async listProviders() { return { providers: [{ id: "chatgpt", label: "ChatGPT", kind: "subscription", models: [{ id: "gpt-5.6", label: "GPT-5.6 Luna" }], model: "gpt-5.6", connected: true, isDefault: true }], defaultProvider: "chatgpt" } as any; },
   async providerUsage() { return [] as any; },
+  async providerAccount() { return null; },
   async learningEngine() { return { state: null } as any; },
   async webSearchStatus() { return { enabled: true, hasKey: true } as any; },
   async setDefaultProvider() {},
@@ -176,7 +177,7 @@ function Harness() {
         <div className="min-h-0 flex-1 bg-background">
           {page === "home" && <HomePage abilities={abilityLedger} ability={ability} api={api} busy={false} challenges={[]} concepts={[]} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onNavigate={() => {}} onOpen={() => {}} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} />}
           {page === "map" && <div className="mx-auto w-full max-w-[72rem] px-8 pt-6"><ConceptMap abilities={abilityLedger} concepts={conceptFixtures} onOpenAbility={setAbility} onOpenConcept={() => {}} progress={progress} query="" /></div>}
-          {page === "settings" && <SettingsPage api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
+          {page === "settings" && <SettingsPage account={data.account!} api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
         </div>
       </div>
     </div>

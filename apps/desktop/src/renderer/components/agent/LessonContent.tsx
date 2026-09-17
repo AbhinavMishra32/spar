@@ -35,8 +35,8 @@ export function LessonTabs({ lesson, onSelect }: { lesson: { pages: readonly { t
         {lesson.pages.map((item, index) => <Tabs.Trigger asChild key={index} value={String(index)} onClick={onSelect}
           onFocus={(event) => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" })}
         >
-          <ArtifactCard style={{ borderRadius: "0.75rem" }} className="w-max max-w-[16rem] shrink-0 cursor-default text-muted-foreground outline-none transition-colors hover:bg-[var(--surface-primary)] focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-[var(--code-background)] data-[state=active]:text-foreground ">
-            <ArtifactCardRow compact className="gap-2 px-2 py-1.5 pr-3" icon={<span className="font-mono text-thread tabular-nums">{index + 1}</span>}>
+          <ArtifactCard className="pill-corner w-max max-w-[16rem] shrink-0 cursor-default text-muted-foreground outline-none transition-colors hover:bg-[var(--surface-primary)] focus-visible:ring-2 focus-visible:ring-ring data-[state=active]:bg-[var(--code-background)] data-[state=active]:text-foreground">
+            <ArtifactCardRow compact className="gap-2 py-1.5 pl-1.5 pr-3.5" iconClassName="rounded-full" icon={<span className="font-mono text-thread-tool tabular-nums">{index + 1}</span>}>
               <span className="min-w-0 truncate text-thread font-medium">{item.title}</span>
             </ArtifactCardRow>
           </ArtifactCard>

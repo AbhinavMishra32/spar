@@ -230,7 +230,7 @@ export function AgentPanel({
               setChallengeContext(null);
             }}
             placeholder={challengeContext ? `Ask about ${challengeContext.title}…` : "Ask for a hint, or explain your approach…"}
-            trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
+            trailing={<ComposerModelPicker sessionId={detail.summary.id} {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}
           />}
         </div>

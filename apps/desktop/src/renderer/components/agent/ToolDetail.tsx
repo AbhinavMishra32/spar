@@ -37,10 +37,14 @@ export function ToolDetail({
   input,
   output,
   tool,
+  phase,
 }: {
   input: string;
   output: string;
   tool: string;
+  /* Only the raw fallback uses it, to name how the call ended beside what it
+     came back with. A drawn view says that in its own terms. */
+  phase?: "running" | "done" | "error";
 }) {
   /* Arguments are always an object; a result can be an object, an array, or a
      bare string, so the two are read with different expectations. */
@@ -154,7 +158,25 @@ export function ToolDetail({
   /* No view for this tool, or not enough of its arguments survived to draw one.
      The raw payload is the honest answer — a tool nobody has drawn yet is
      plain, never blank. */
-  return <RawPayload input={input} output={output} />;
+  return <RawPayload input={input} output={output} status={phaseWord(phase)} />;
+}
+
+/**
+ * Whether this tool's detail is a turn of conversation rather than a payload.
+ *
+ * Those are drawn in the transcript's own column with no panel around them: a
+ * question the agent asked and the answer it got are the two things in a row
+ * that were written to be read, and boxing them in the surface reserved for
+ * arguments and results files them as machine output.
+ */
+export function baresDetail(tool: string): boolean {
+  return tool === "ask_user_question" || tool === "ask-user-question";
+}
+
+/** How the call ended, as the one word that goes beside its output. A call
+ *  still running has not come back with anything to label. */
+function phaseWord(phase?: "running" | "done" | "error"): string | undefined {
+  return phase === "done" ? "Done" : phase === "error" ? "Failed" : undefined;
 }
 
 /** The calls that come back with a solve log. `evaluate_attempt` and
@@ -889,13 +911,17 @@ function Patches({ patches }: { patches: unknown }) {
  * answer was not one of them — offering "A / B" above an answer of "A" is the
  * interface saying the same thing twice.
  */
-function Exchange({ answer, choices, question }: { answer: string; choices: string[]; question: string }) {
+export function Exchange({ answer, choices, question }: { answer: string; choices: string[]; question: string }) {
   const chosen = choices.some((choice) => choice.toLowerCase() === answer.trim().toLowerCase());
   const spare = chosen ? [] : choices;
 
   return (
-    <div className="min-w-0 px-2.5 py-2">
-      <p className="text-[length:inherit] leading-[1.55] text-foreground/90">
+    <div className="min-w-0">
+      {/* The question at the weight the agent asked it in. It used to be drawn
+          at payload size inside the machine panel, which put a sentence written
+          for the reader in the one place in a row reserved for data — and made
+          it the smallest text on screen at the moment the turn stopped for it. */}
+      <p className="text-thread leading-[1.55] font-medium text-foreground">
         <Inline text={question} />
       </p>
 
@@ -904,7 +930,7 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
           {spare.map((choice, index) => (
             <li
               key={`${choice}-${index}`}
-              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-[length:inherit] text-muted-foreground/80"
+              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-thread-tool text-muted-foreground/80"
             >
               <Inline text={choice} />
             </li>
@@ -912,13 +938,20 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
         </ul>
       )}
 
+      {/* The answer as a reply to the line above it: one turn glyph, then what
+          was said. A rule down its left made it a quotation of someone else's
+          text, which is exactly backwards — this is the only thing in the
+          transcript the reader wrote. */}
       {answer ? (
-        <p className="mt-2 border-l border-border/70 pl-2.5 text-[length:inherit] leading-[1.55] whitespace-pre-wrap text-foreground">
-          <Inline text={answer} />
+        <p className="mt-1 flex min-w-0 items-start gap-1.5 text-thread leading-[1.55] text-muted-foreground">
+          <CornerDownRight aria-hidden className="mt-[0.3em] size-3.5 shrink-0 text-muted-foreground/60" strokeWidth={2} />
+          <span className="min-w-0 whitespace-pre-wrap">
+            <Inline text={answer} />
+          </span>
         </p>
       ) : (
         /* The row is open while the card below it is still waiting. */
-        <p className="mt-2 text-[length:inherit] text-muted-foreground/85">Waiting for your answer.</p>
+        <p className="mt-1 text-thread text-muted-foreground/70">Waiting for your answer.</p>
       )}
     </div>
   );

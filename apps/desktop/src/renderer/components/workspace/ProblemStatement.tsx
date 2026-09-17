@@ -49,7 +49,7 @@ export function ProblemStatement({ source, language }: { source: string; languag
                 key={index}
                 className="flex min-w-0 flex-col gap-1 border-b border-border/60 bg-[var(--color-background-elevated-secondary)] px-2.5 py-2 last:border-b-0"
               >
-                <code className="min-w-0 break-words font-mono text-content-sm text-foreground/85">{example.call}</code>
+                <code className="min-w-0 break-words font-mono text-content-sm text-foreground">{example.call}</code>
                 <span className="flex min-w-0 items-start gap-1.5">
                   <ArrowRight className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
                   <code className="min-w-0 break-words font-mono text-content-sm text-[var(--success)]">{example.result}</code>
@@ -60,7 +60,7 @@ export function ProblemStatement({ source, language }: { source: string; languag
                     travels with the example rather than being dropped for
                     tidiness. */}
                 {example.note && (
-                  <Markdown className="md-prose-content mt-0.5 min-w-0 text-muted-foreground" source={example.note} />
+                  <Markdown className="md-prose-content mt-0.5 min-w-0 text-foreground/75" source={example.note} />
                 )}
               </div>
             ))}
@@ -70,7 +70,7 @@ export function ProblemStatement({ source, language }: { source: string; languag
 
       {parsed.note && (
         <div className="mt-3">
-          <Markdown className="md-prose-content text-muted-foreground" source={parsed.note} />
+          <Markdown className="md-prose-content text-foreground/75" source={parsed.note} />
         </div>
       )}
     </div>

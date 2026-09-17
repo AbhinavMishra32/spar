@@ -118,7 +118,7 @@ function SelectItem({
   return (
     <SelectPrimitive.Item
       className={cn(
-        "relative flex min-h-8 w-full cursor-default items-center gap-2 rounded-[var(--radius-item)] py-1 pr-8 pl-2.5 text-content leading-none outline-none transition-colors duration-75 select-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex min-h-8 w-full cursor-default items-center gap-2 rounded-[var(--radius-item)] py-1 pr-8 pl-2.5 text-content leading-none outline-none select-none focus:bg-accent focus:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       data-slot="select-item"

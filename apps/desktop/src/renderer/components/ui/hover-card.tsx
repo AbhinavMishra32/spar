@@ -58,12 +58,23 @@ function HoverCardContent({
   align = "start",
   side = "bottom",
   sideOffset = 6,
+  instant = false,
   children,
   ...props
-}: React.ComponentProps<typeof HoverCardPrimitive.Content>) {
+}: React.ComponentProps<typeof HoverCardPrimitive.Content> & {
+  /** Arrives already there. A hover card that explains the word under the
+   *  pointer is read the moment it appears, and a card that grows into place is
+   *  a card you wait for before you can read it — which is the opposite of what
+   *  hovering is for. Reserved for cards on inline words; a card on a control
+   *  the learner deliberately aimed at can still travel. */
+  instant?: boolean;
+}) {
   const isOpen = React.useContext(HoverCardOpenContext);
   const reduced = useReducedMotion() ?? false;
-  const surface = React.useMemo(() => overlaySurfaceVariants({ side, reduced }), [side, reduced]);
+  const surface = React.useMemo(
+    () => (instant ? INSTANT : overlaySurfaceVariants({ side, reduced })),
+    [instant, side, reduced],
+  );
 
   return (
     <AnimatePresence>
@@ -79,7 +90,7 @@ function HoverCardContent({
               )}
               data-slot="hover-card-content"
               exit="exit"
-              initial="hidden"
+              initial={instant ? "visible" : "hidden"}
               variants={surface}
             >
               {children}
@@ -90,5 +101,13 @@ function HoverCardContent({
     </AnimatePresence>
   );
 }
+
+/* Present on the first frame, gone on the last. The exit keeps a hint of a
+   fade so the card does not vanish mid-sentence. */
+const INSTANT = {
+  hidden: { opacity: 1 },
+  visible: { opacity: 1 },
+  exit: { opacity: 0, transition: { duration: 0.08 } },
+};
 
 export { HoverCard, HoverCardContent, HoverCardTrigger };

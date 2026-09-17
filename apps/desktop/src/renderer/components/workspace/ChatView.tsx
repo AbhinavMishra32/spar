@@ -11,6 +11,7 @@ import { Composer } from "../agent/Composer";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
+import { expandMentions } from "../agent/Mentions";
 
 /**
  * Between challenges. The session is open and the agent still remembers
@@ -46,7 +47,9 @@ export function ChatView({
   const { undoable, edit } = useEditMessage(detail, streaming, onRefresh, onError);
 
   const send = async (answer?: string) => {
-    const body = (answer ?? draft).trim();
+    const raw = (answer ?? draft).trim();
+    /* The tags in the field are words; what goes out is what they stand for. */
+    const body = expandMentions(raw);
     if (!api || !body) return;
     const optimistic={id:crypto.randomUUID(),body,createdAt:Date.now()};
     setOptimisticMessages((current)=>[...current,optimistic]);
@@ -57,7 +60,7 @@ export function ChatView({
       else await api.sendAgentMessage({ sessionId: detail.summary.id, message: body });
       await onRefresh();
     } catch (error) {
-      if(answer===undefined)setDraft((current)=>current||body);
+      if(answer===undefined)setDraft((current)=>current||raw);
       onError(message(error));
     } finally {
       setOptimisticMessages((current)=>current.filter((item)=>item.id!==optimistic.id));
@@ -158,7 +161,7 @@ export function ChatView({
             onStop={stop}
             onSubmit={() => void send()}
             placeholder="Ask the agent anything…"
-            trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
+            trailing={<ComposerModelPicker sessionId={detail.summary.id} {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}
           />}
         </div>

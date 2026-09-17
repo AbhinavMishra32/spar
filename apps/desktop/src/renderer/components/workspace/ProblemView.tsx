@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowRight, FlaskConical } from "lucide-react";
 import type { ActiveQuestion, RatingPoint } from "@spar/domain";
 import { cn } from "@/lib/utils";
+import { useTranscriptFade } from "@/hooks/use-transcript-fade";
 import { declaredCases, sourcedCases } from "@/lib/testCases";
 import { ChallengeBrief } from "./ChallengeBrief";
 import { ChallengeRoll } from "./ChallengeRoll";
@@ -40,12 +41,16 @@ export function ProblemView({
     [question.source, testFiles, question.visibleTestFiles],
   );
   const [selected, setSelected] = useState("");
-  const scroller = useRef<HTMLDivElement>(null);
+  /* The same dissolve the transcript uses on the tab beside this one: the
+     statement running on under the header, or the cases continuing past the
+     fold, should read as content travelling under the chrome rather than as a
+     column that was cut off there. */
+  const { ref: scroller, style: fade } = useTranscriptFade<HTMLDivElement>();
 
   const active = declared.cases.find((item) => item.id === selected) ?? declared.cases[0];
 
   return (
-    <div className="app-scroll h-full overflow-y-auto" ref={scroller}>
+    <div className="app-scroll transcript-fade h-full overflow-y-auto" ref={scroller} style={fade}>
       {/* One column, and the vertical rhythm is owned here rather than by each
           block's own bottom margin: the header, the chips and the statement are
           three sizes of type in a row, and spacing set per block is what left a

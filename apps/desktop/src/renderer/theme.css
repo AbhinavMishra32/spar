@@ -40,6 +40,28 @@
    whether the list is scrolled away from that end, and an unregistered length
    would snap the mask on rather than ease it. Zero means no fade at all, which is
    what an end with nothing past it gets. */
+/* The title's leading fade, registered so it can ease in when the marquee starts
+   rather than appearing on the first character the instant the row is hovered.
+   Zero is the resting state: nothing has scrolled off the left yet, so there is
+   nothing to fade. */
+@property --sidebar-title-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --transcript-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --transcript-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 @property --drum-top {
   syntax: "<length>";
   inherits: false;
@@ -269,6 +291,28 @@
      with it instead of leaving the thread tight or loose until someone
      remembers this line. */
   --text-thread--line-height: calc(var(--text-thread) * 1.6);
+
+  /* The machine layer inside the thread, one step under it.
+
+     The rule above — one size for the whole column — is about the text a person
+     reads: the reply, the row labels, the headings on a card. It was never
+     meant to cover what a tool *renders*. A JSON payload, a file listing, a
+     shell transcript, a fenced block and the metadata strip under a challenge
+     card are not prose at a smaller size; they are a different kind of object,
+     they are almost all monospaced, and a monospaced face set at the same
+     nominal size as the body reads visibly larger than it — wider glyphs, a
+     taller x-height, no descender variety to break the line up. At 14px the
+     tool panels stopped looking like insets in a conversation and started
+     looking like the conversation had been replaced by a terminal.
+
+     13px, which is where the reference puts the same material: its tool folds
+     and payload rows are `text-[13px]` against a `text-sm` body. One token for
+     the whole machine layer, applied at the container in `.agent-tool-detail`
+     so everything inside inherits it and there is still only one number to
+     move. Not smaller than this: 12px monospace in a 48rem column is the point
+     where a path stops being scannable. */
+  --text-thread-tool: 0.8125rem;
+  --text-thread-tool--line-height: 1.125rem;
 }
 
 :root {
@@ -394,13 +438,13 @@
   --app-window-fill: oklch(97.6% 0 0);
   /* Only painted when the platform gives us no native material to sit on. */
   --app-sidebar-fill: oklch(95.5% 0 0);
-  --app-vibrant-tint: oklch(100% 0 0 / 30%);
+  --app-vibrant-tint: oklch(100% 0 0 / 55%);
   /* The same tint, stepped back for Acrylic. Vibrancy and Mica are close to
      clear behind us, so the sidebar needs a wash of its own to read as the
      lighter of the two surfaces. Acrylic already carries a luminosity layer, and
-     laying the full 30% over it stacks two washes: the hole stops looking like a
-     hole and reads as a milky panel. */
-  --app-vibrant-tint-acrylic: oklch(100% 0 0 / 14%);
+     laying the full light-mode wash over it stacks two washes: the hole stops
+     looking like a hole and reads as a milky panel. */
+  --app-vibrant-tint-acrylic: oklch(100% 0 0 / 28%);
   /* Opaque, for every page that is mostly text: the desktop moving behind a
      paragraph is the desktop competing with it, and the sidebar still shows the
      native material, so the two surfaces stay told apart by the one that is meant
@@ -409,8 +453,8 @@
      The challenge surfaces opt back out — see `.app-pane-glass`. Working on a
      problem is the one place the app is a tool rather than a document, and the
      glass is what keeps that surface feeling like part of the window. */
-  --app-glass-fill: 92%;
-  --app-glass-fill-translucent: 88%;
+  --app-glass-fill: 87%;
+  --app-glass-fill-translucent: 83%;
   --app-user-message-background: oklch(14.5% 0 0 / 6%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 10%), 0 8px 10px -6px oklch(0% 0 0 / 10%);
   --app-shadow-menu: 0 16px 40px -12px oklch(0% 0 0 / 20%), 0 4px 10px -4px oklch(0% 0 0 / 8%);
@@ -433,12 +477,18 @@
     0 1px 2px oklch(0% 0 0 / 4%),
     0 8px 20px -12px oklch(0% 0 0 / 13%);
   /* Cast leading-edge-only: the pane is full height, so a shadow with any
-     vertical offset would just fall off the window. The contact pass sharpens
-     the hairline into an edge with depth behind it; the ambient pass is wide and
-     shallow so it dies out well before the sidebar's rows. */
+     vertical offset would just fall off the window. Four passes rather than two,
+     each about double the blur of the one before it and no darker: light falling
+     off a real edge is dense right at the contact and thins out over a long
+     tail, and a two-pass version has to make each pass heavy enough to cover its
+     own stretch — which is what reads as a band of grey sitting next to the pane
+     rather than as air. Spread matches the blur on every pass so nothing but the
+     falloff lands on the sidebar. */
   --app-shadow-pane:
-    -1px 0 2px -1px oklch(0% 0 0 / 5%),
-    -10px 0 20px -10px oklch(0% 0 0 / 9%);
+    -0.5px 0 1px -0.5px oklch(0% 0 0 / 5%),
+    -2px 0 4px -2px oklch(0% 0 0 / 5%),
+    -6px 0 12px -6px oklch(0% 0 0 / 5%),
+    -16px 0 32px -16px oklch(0% 0 0 / 5%);
   --sheet-edge: color-mix(in oklab, var(--foreground) 16%, transparent);
 
   /* Glass. In light the rim is a near-white specular edge; the sheen brightens
@@ -499,6 +549,11 @@
   --transcript-rail: oklch(14.5% 0 0 / 22%);
   --border-surface-strong: oklch(14.5% 0 0 / 15%);
   --brand: oklch(14.5% 0 0);
+  /* A reference the agent wrote — a concept card, a lesson, a file. It reads as
+     a link in a sentence, so it is the one ink in the transcript that is not a
+     shade of the page: blue, no rule under it until the pointer is on it. */
+  --reference: oklch(52% 0.17 255);
+  --reference-strong: oklch(44% 0.19 255);
   --code-foreground: #33363b;
   /* Inline code, light mode.
 
@@ -595,10 +650,15 @@
   /* Lighter than the pane, not darker: the sidebar is the surface the content
      sits on, so it catches more light. Only painted with no native material. */
   --app-sidebar-fill: oklch(28.5% 0 0);
-  --app-vibrant-tint: oklch(100% 0 0 / 6%);
-  --app-vibrant-tint-acrylic: oklch(100% 0 0 / 3%);
-  --app-glass-fill: 92%;
-  --app-glass-fill-translucent: 86%;
+  /* Tinted with the sidebar's own grey rather than with white. White is what
+     lifts a surface on a light ground; here it only milks the glass, and at the
+     opacity it takes to actually hide the desktop the sidebar stops reading as
+     dark at all. This is already lighter than the pane's fill, so it stays the
+     lighter of the two surfaces by being its own colour, not by being washed. */
+  --app-vibrant-tint: oklch(28.5% 0 0 / 60%);
+  --app-vibrant-tint-acrylic: oklch(28.5% 0 0 / 38%);
+  --app-glass-fill: 87%;
+  --app-glass-fill-translucent: 81%;
   --app-user-message-background: oklch(98.5% 0 0 / 8%);
   --app-shadow-overlay: 0 20px 25px -5px oklch(0% 0 0 / 40%), 0 8px 10px -6px oklch(0% 0 0 / 40%);
   --app-shadow-menu: 0 16px 40px -10px oklch(0% 0 0 / 55%), 0 4px 12px -4px oklch(0% 0 0 / 40%);
@@ -614,10 +674,14 @@
      white line offset one pixel out from the pane, which lands on the sidebar and
      traces the pane's corner as it goes, the way the leading edge of a raised
      surface catches the light. The dark pass stays, but only just: enough that the
-     line reads as an edge with air behind it rather than as drawn-on trim. */
+     line reads as an edge with air behind it rather than as drawn-on trim, and
+     spread over the same doubling falloff as light so it thins out instead of
+     stopping. */
   --app-shadow-pane:
     -1px 0 0 0 oklch(100% 0 0 / 11%),
-    -12px 0 24px -16px oklch(0% 0 0 / 22%);
+    -3px 0 6px -3px oklch(0% 0 0 / 14%),
+    -9px 0 18px -9px oklch(0% 0 0 / 14%),
+    -24px 0 44px -24px oklch(0% 0 0 / 12%);
   /* No edge in dark. The sheet is already darker than the canvas it sits in, so
      the value step does the separating and a ring on top of it only reads as a
      drawn outline. Light mode needs the line because the two are nearly the
@@ -646,6 +710,8 @@
   --transcript-rail: oklch(98.5% 0 0 / 34%);
   --border-surface-strong: oklch(98.5% 0 0 / 20%);
   --brand: oklch(98.5% 0 0);
+  --reference: oklch(75% 0.13 250);
+  --reference-strong: oklch(84% 0.12 250);
   --code-foreground: #c9d1d9;
   /* On a dark page the wash already reads as an object, and a hairline on top
      of it only adds a second edge, so the dark chip keeps the tint it had. */
@@ -898,9 +964,9 @@
      opaque because text on it has to hold contrast against an arbitrary
      desktop. `--app-glass-fill` is the dial.
 
-     92% rather than a flat 100%: at full opacity the reading pages were the one
+     87% rather than a flat 100%: at full opacity the reading pages were the one
      part of the window the material did not reach, so the shell was glass and
-     the thing inside it was a sheet of card. Eight percent lets the desktop move
+     the thing inside it was a sheet of card. The remainder lets the desktop move
      behind the page without costing body text its contrast — the challenge
      surfaces go further still, to `--app-glass-fill-translucent`, because they
      are a tool rather than a document. */
@@ -910,8 +976,8 @@
 
   /* The challenge surfaces, back on glass. Set as the variable rather than as a
      second `background`, so everything downstream that mixes against the pane fill
-     — `.composer-fade` is the one that matters — follows it instead of fading into
-     a colour the pane no longer is. */
+     — the composer's own rim and shadow are what matter — follows it instead of
+     mixing against a colour the pane no longer is. */
   .app-pane-glass {
     --app-glass-fill: var(--app-glass-fill-translucent);
   }
@@ -958,17 +1024,44 @@
      behind it, and would be wrong on every wallpaper but one. */
   .sidebar-title {
     /* In px, not rem, because the marquee below has to travel exactly this far
-       to clear the fade and reads the same number out of TypeScript. Scaled with
-       the label: a fade has to be about two characters wide to read as a fade
-       rather than as a cut, and a character got wider. */
-    --sidebar-title-fade: 26px;
+       to clear the fade and reads the same number out of TypeScript. About one
+       character wide: enough that the last letter softens out instead of being
+       sliced, and short enough that the two or three characters before it are
+       still readable — a fade wide enough to see as a gradient costs more of the
+       title than the ellipsis it replaced. */
+    --sidebar-title-fade: 14px;
     min-width: 0;
     flex: 1;
     overflow: hidden;
   }
 
+  /* Both ends, not just the trailing one. At rest the leading depth is zero and
+     the mask is a single right-hand fade; once the marquee is running there is
+     text disappearing off the left as well, and a hard left edge there reads as
+     the title being clipped by the icon beside it rather than as travelling
+     under a fade. The leading depth eases in on the animation's own delay so the
+     two arrive together. */
   .sidebar-title[data-clipped="true"] {
-    mask-image: linear-gradient(to right, #000 0, #000 calc(100% - var(--sidebar-title-fade)), transparent 100%);
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 var(--sidebar-title-fade-start),
+      #000 calc(100% - var(--sidebar-title-fade)),
+      transparent 100%
+    );
+    transition: --sidebar-title-fade-start 0.25s ease;
+  }
+
+  .sidebar-row:hover .sidebar-title[data-clipped="true"] {
+    --sidebar-title-fade-start: var(--sidebar-title-fade);
+    transition-delay: 0.45s;
+  }
+
+  /* No travel means no leading edge to soften. */
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-row:hover .sidebar-title[data-clipped="true"] {
+      --sidebar-title-fade-start: 0px;
+    }
   }
 
   .sidebar-title > span {
@@ -1092,9 +1185,17 @@
     --border-surface-strong: oklch(14.5% 0 0 / 15%);
   }
 
-  /* Tool payloads share the transcript's computed size, including native
-     pre/code elements and controls that otherwise pick up their own defaults. */
-  .agent-transcript .agent-tool-detail,
+  /* Tool payloads run the machine layer's size rather than the column's — see
+     `--text-thread-tool`. Set once on the panel; everything inside is pinned to
+     `inherit` so native pre/code elements and controls, which otherwise pick up
+     their own defaults, cannot climb back out of it. That is also why the
+     views in `ToolDetail` are written `text-[length:inherit]` rather than
+     naming a size: this rule is the one knob. */
+  .agent-transcript .agent-tool-detail {
+    font-size: var(--text-thread-tool);
+    line-height: var(--text-thread-tool--line-height);
+  }
+
   .agent-transcript .agent-tool-detail :where(*) {
     font-size: inherit;
   }
@@ -1147,6 +1248,56 @@
     width: 100%;
     max-width: var(--transcript-width, 48rem);
     margin-inline: auto;
+  }
+
+  /* The transcript's own inset, set so the column lands exactly where the
+     composer below it does — 16px clear of the pane on both sides, the same
+     `px-4` the composer's row takes.
+
+     It did not before: 20px on the left and 20px + the scrollbar on the right,
+     which put every card a few pixels inboard of the field beneath them and
+     off-centre from it, since one box was centred in the pane and the other was
+     not. The column is the composer's width now, and the misalignment goes.
+
+     Sixteen on both sides and no scrollbar arithmetic: the bar here is an
+     overlay, drawn over the content rather than laid out beside it, so it takes
+     no width to pay for. (Subtracting `--app-scrollbar-width` from the right
+     assumes a classic bar and pushes the column that much past the composer,
+     which is worth knowing because the padding this replaced was doing the
+     opposite — adding the bar's width to a 20px gutter, which is what set the
+     column inboard of the field in the first place.)
+
+     The shadow clearance that padding was also buying survives the trim.
+     `overflow-x: hidden` clips at the padding box, so a card now has the full
+     16px on each side, and the shadows in the transcript — `--app-shadow-panel`
+     and `--app-shadow-composer` — reach about 3px wide once their negative
+     spread is taken off the blur. Nothing is cut. */
+  /* The bottom inset is the other half of that alignment. There was none, so a
+     thread scrolled to its end put the last block hard against the scroller's
+     edge with only the composer's 4px under it — and because the scroller stops
+     where its content does, there was nowhere further to scroll to get any. The
+     end of a transcript read as content that had been cut off rather than as
+     content that had finished. 1.25rem is the room the bottom fade needs to
+     actually finish on empty space, so the last line dissolves into the
+     composer's clearance instead of into the composer. */
+  .transcript-scroller {
+    padding-inline: 1rem;
+    padding-block-end: 1.25rem;
+  }
+
+  /* The `@` picker.
+
+     Fully opaque, unlike every other floating surface in the app. The panel
+     stands over a transcript that is still scrolling behind it and its rows are
+     a list you read by sweeping — titles, counts, dot grids at five pixels
+     across. Any transparency at all puts a moving paragraph underneath that,
+     and a list you have to hold still to read is a list that has failed. The
+     material is the popover's, which is the one token in the theme that is
+     already solid in both schemes. */
+  .mention-panel {
+    border: 0.5px solid var(--border-surface-strong);
+    background: var(--popover);
+    box-shadow: var(--app-shadow-panel), 0 18px 48px -12px rgb(0 0 0 / 28%);
   }
 
   /* Streaming assistant text keeps a caret at the live edge. */
@@ -1267,9 +1418,45 @@
       var(--app-shadow-composer);
   }
 
-  /* Fades transcript content into the composer instead of clipping it hard. */
-  .composer-fade {
-    background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--app-window-fill) var(--app-glass-fill), transparent) 62%);
+  /* Both ends of the transcript, dissolved rather than cut. A line scrolling
+     past the toolbar or down behind the composer should look like it is
+     travelling under them, not like it hit a boundary and stopped.
+
+     A mask, not a gradient in the pane's colour: the pane is a translucent tint
+     over the window's own material, so there is no flat colour to fade into —
+     painting one would lay a milky band across the glass. Masking fades the
+     content itself, so what is genuinely behind the pane reads the same at the
+     edge as in the middle. Same reasoning as `.drum`, and the same rule about
+     when to fade: each end only while there is something past it. At the live
+     edge the last line is crisp, at the top of the history so is the first, and
+     an end with nowhere further to go never dissolves.
+
+     That is also what lets the fade run to the scroller's true ends instead of
+     over a reserved blank strip. A permanent fade has to be paid for with
+     padding deep enough that the last line sits clear of it — which is the gap
+     this replaces. Switched off at rest, it costs nothing, so the transcript sits
+     flush against the toolbar and the composer and dissolves into them on the way
+     past. Both ends run the same depth: it is one gesture, and an edge that faded
+     harder than the one opposite it would read as the pane being lit from one
+     side rather than as content travelling under chrome. */
+  .transcript-fade {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--transcript-fade-top),
+      #000 calc(100% - var(--transcript-fade-bottom)),
+      transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--transcript-fade-top),
+      #000 calc(100% - var(--transcript-fade-bottom)),
+      transparent 100%
+    );
+    transition:
+      --transcript-fade-top 180ms ease,
+      --transcript-fade-bottom 180ms ease;
   }
 
   /* ---- Scrolling drum ----------------------------------------------------- */
@@ -1464,14 +1651,14 @@
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, #fff 80%, transparent),
       0 0 0 0.5px color-mix(in oklab, var(--foreground) 20%, transparent),
-      0 4px 10px -2px rgb(0 0 0 / 0.15);
+      0 4px 8px -3px rgb(0 0 0 / 0.15);
   }
 
   .dark .tooltip-surface {
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, #fff 10%, transparent),
       0 0 0 0.5px color-mix(in oklab, var(--foreground) 20%, transparent),
-      0 4px 10px -2px rgb(0 0 0 / 0.3);
+      0 4px 8px -3px rgb(0 0 0 / 0.3);
   }
 
   /* The same shell without the glass, for a surface that moves while you are
@@ -1822,7 +2009,13 @@
     color: var(--code-inline-foreground);
     padding: 0 calc(var(--md-space) * 1.25);
     font-family: var(--font-mono);
-    font-size: var(--md-small-font-size);
+    /* Relative, and deliberately not a step down the scale. The chip has to
+       match the line it sits in — a fixed size would drift the moment the prose
+       around it moved — but mono at an identical nominal size reads bigger than
+       the sans beside it, so the chip needs the optical correction the block
+       payloads get from `--text-thread-tool`. 0.92em is the same number
+       `.code-inline` already uses for the same reason. */
+    font-size: 0.92em;
     font-weight: 500;
     /* Keep the chip inside the prose line instead of inheriting the roomy body
        leading and making a line with code visibly taller than its neighbours. */
@@ -1846,6 +2039,12 @@
      the same system whichever size it is set at. */
   .md-prose-content {
     --md-font-size: var(--text-content);
+    /* Full foreground, not the thread's 92%. The transcript pulls its body off
+       the maximum because it is read at length against a quiet ground; the
+       problem pane is scanned next to an editor whose code sits at full
+       strength, and the same veil there reads as the statement being greyed
+       out rather than settled. */
+    color: var(--foreground);
   }
 
   .code-inline {
@@ -1900,6 +2099,14 @@
      and wrong for something over it: the lesson reader is a page you read, and
      a paragraph with the thread showing through it is a paragraph you squint
      at. Same material, same corner, full coverage. */
+  /* A tab is a pill, and a pill's corner is a real semicircle — the superellipse the
+     transcript card uses reads as a squircle at a large radius, which is not
+     the same shape. Round the ends properly. */
+  .pill-corner {
+    border-radius: 999px;
+    corner-shape: round;
+  }
+
   .transcript-block-solid {
     background: var(--code-background);
   }
@@ -1955,6 +2162,10 @@
     min-width: 0;
     margin-block: 16px;
     font-family: var(--font-mono);
+    /* The machine layer, like every other rendered payload — a fenced block is
+       code, not prose, and mono at the body's own size outweighs the paragraph
+       it was quoted from. See `--text-thread-tool`. */
+    font-size: var(--text-thread-tool);
   }
 
   .code-block-header {

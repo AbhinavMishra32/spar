@@ -7,7 +7,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
-import { ToolDetail } from "./ToolDetail";
+import { baresDetail, ToolDetail } from "./ToolDetail";
 import { toolSubject } from "./toolSubject";
 import { latestHeading, thoughts } from "./thoughts";
 import { useMarkdownLinks } from "./MarkdownLinks";
@@ -241,7 +241,7 @@ function StatusPill({ part }: { part: ToolPart }) {
         ? ["Failed", "text-destructive"]
         : ["Success", "text-[var(--success)]"];
   return (
-    <span className={cn("shrink-0 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-thread font-medium", tone)}>{text}</span>
+    <span className={cn("shrink-0 rounded-md bg-[var(--accent)] px-1.5 py-0.5 text-thread-tool font-medium", tone)}>{text}</span>
   );
 }
 
@@ -363,6 +363,9 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
   const hasPayload = hasCall || reasons.length > 0 || concluded.length > 0;
   const totals = diffTotals(part.files);
   const running = part.phase === "running";
+  /* A failed call falls back to the raw payload, and a raw payload needs the
+     panel it is drawn in — so the bare shape is only for a call that landed. */
+  const bare = baresDetail(part.tool) && part.phase !== "error" && hasCall;
 
   const label = (
     <>
@@ -468,7 +471,26 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
               ate the top-left. The clip owns the corner, the border, the
               background and the lift; what is inside it is only content. */}
           {hasPayload && (
-            <CollapsibleContent className={cn("mt-1.5", BLOCK_SURFACE)} expandDuration={0.42}>
+            /* A conversational row drops the panel: no border, no fill, no
+               pinned payload type size — just the question and the answer in
+               the column the rest of the turn is written in. The thinking above
+               it keeps its own surface, because that half is still machinery. */
+            <CollapsibleContent className={cn("mt-1.5", bare ? "px-0.5" : BLOCK_SURFACE)} expandDuration={0.42}>
+              {bare ? (
+                <>
+                  {reasons.length > 0 && (
+                    <div className={cn("mb-2", BLOCK_SURFACE)}>
+                      <div className="agent-tool-detail min-w-0"><Thinking ruled={false} sections={reasons} /></div>
+                    </div>
+                  )}
+                  <ToolDetail input={part.input} output={part.output} tool={part.tool} />
+                  {concluded.length > 0 && (
+                    <div className={cn("mt-2", BLOCK_SURFACE)}>
+                      <div className="agent-tool-detail min-w-0"><Thinking heading="What it made of it" ruled={false} sections={concluded} /></div>
+                    </div>
+                  )}
+                </>
+              ) : (
               <div className="agent-tool-detail min-w-0">
                 {/* Built for the tool when there is a view for it, raw when there is
                     not — `ToolDetail` decides, and falls back itself.
@@ -489,9 +511,9 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
                     asking it for a view of two empty strings gets an empty panel
                     rather than no panel. */}
                 {!hasCall ? null : part.phase === "error" ? (
-                  <RawPayload input={part.input} output={part.output} />
+                  <RawPayload input={part.input} output={part.output} status="Failed" />
                 ) : (
-                  <ToolDetail input={part.input} output={part.output} tool={part.tool} />
+                  <ToolDetail input={part.input} output={part.output} phase={part.phase} tool={part.tool} />
                 )}
                 {/* And what it made of the result, under the result. The turn's
                     last stretch of thinking has no call of its own to lead to,
@@ -503,6 +525,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
                   </div>
                 )}
               </div>
+              )}
             </CollapsibleContent>
           )}
         </div>
@@ -601,6 +624,27 @@ export const FINAL_GAP = "0.875rem";
  *  after it. A note under a row uses this so it lines up with the words it belongs
  *  to rather than nearly lining up with them. */
 export const UNDER_LABEL = "1.625rem";
+/** Where a thought's words sit the instant its orb goes, expressed as the padding
+ *  that puts them back under UNDER_LABEL — the live row spends 6px of ROW's own
+ *  padding getting there, so it asks for 6px less. Getting this wrong is not a
+ *  static misalignment but a visible hop in the middle of a paragraph. */
+const SETTLING_FROM = "1.25rem";
+
+/** Which orb a thought wears.
+ *
+ * Every thought used to be `solving`, which made the liveliest thing in the
+ * transcript the most repetitive: eight thoughts in a turn, eight identical
+ * animations. There is nothing in a block of reasoning to read a state off — a
+ * tool has its name, a thought has only itself — so the choice is arbitrary, and
+ * arbitrary is best spent on variety. Keyed off the thought's own id rather than
+ * drawn fresh, because an orb that reshuffled on every delta would be a strobe.
+ */
+const THOUGHT_ORBS: OrbState[] = ["solving", "weaving", "working", "composing", "breathing", "shaping"];
+function orbForThought(id: string): OrbState {
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) hash = (hash * 31 + id.charCodeAt(index)) | 0;
+  return THOUGHT_ORBS[Math.abs(hash) % THOUGHT_ORBS.length] ?? "solving";
+}
 
 /** The thread, as one absolutely positioned line per row: it hangs from the
  *  bottom of this row's mark (`top-6`) to 16px short of the block's foot, and
@@ -667,7 +711,7 @@ function took(part: ToolPart): string {
 function DiffStat({ added, removed }: { added: number; removed: number }) {
   if (added === 0 && removed === 0) return null;
   return (
-    <span className="shrink-0 font-mono text-thread tabular-nums">
+    <span className="shrink-0 font-mono text-thread-tool tabular-nums">
       {added > 0 && <span className="text-[var(--success)]">+{added}</span>}
       {added > 0 && removed > 0 && " "}
       {removed > 0 && <span className="text-destructive">-{removed}</span>}
@@ -798,16 +842,22 @@ function Thought({
     return () => cancelAnimationFrame(frame);
   }, [home]);
 
-  /* Live, the orb holds the gutter open and there is nothing to travel. */
+  /* Live, the orb stands in a tool row's gutter and there is nothing to travel.
+     A tool row pulls itself 4px left of the prose column so its 24px mark centres
+     where the reference centres it; this row carries ROW's own 6px of padding, so
+     it has to give back 10px to put its orb in the same column — otherwise the one
+     row in the transcript that says the model is thinking is the one row whose
+     mark does not line up with the marks above it. The gap after the mark matches
+     the tool row's for the same reason, which puts the words at UNDER_LABEL. */
   const travel = live
-    ? undefined
-    : { paddingLeft: home ? ROW_INSET : UNDER_LABEL, transition: "padding-left 260ms cubic-bezier(0.32, 0.72, 0, 1)" };
+    ? { marginLeft: "-0.625rem" }
+    : { paddingLeft: home ? ROW_INSET : SETTLING_FROM, transition: "padding-left 260ms cubic-bezier(0.32, 0.72, 0, 1)" };
 
   const trigger = (
     <>
       {live && (
         <span className={ROW_GLYPH}>
-          <ThinkingOrb aria-label="Thinking" size={20} state="solving" style={{ width: 15, height: 15 }} />
+          <ThinkingOrb aria-label="Thinking" size={20} state={orbForThought(id)} style={{ width: 15, height: 15 }} />
         </span>
       )}
       <span className={cn("min-w-0 truncate", live && "thinking-shimmer")}>{title}</span>
@@ -819,12 +869,12 @@ function Thought({
      has written a word of it. A caret onto an empty panel is worse than no
      caret, so the row is a row. */
   if (!sections.length) {
-    return <div className={cn(ROW, "motion-reduce:transition-none text-[var(--transcript-step)]")} style={travel}>{trigger}</div>;
+    return <div className={cn(ROW, live && "gap-1.5", "motion-reduce:transition-none text-[var(--transcript-step)]")} style={travel}>{trigger}</div>;
   }
 
   return (
     <Collapsible onOpenChange={setOpen} open={open} ref={block}>
-      <CollapsibleTrigger className={cn(ROW, TRIGGER, "motion-reduce:transition-none")} style={travel}>{trigger}</CollapsibleTrigger>
+      <CollapsibleTrigger className={cn(ROW, live && "gap-1.5", TRIGGER, "motion-reduce:transition-none")} style={travel}>{trigger}</CollapsibleTrigger>
       <CollapsibleContent>
         {/* Same height it had while it streamed. A thought that filled 1.5in and
             then expanded to a screenful on settling would reflow the thread under
@@ -933,7 +983,7 @@ export function SolveRead({ part }: { part: ToolPart }) {
             )}
             {verdict && (
               <span
-                className={cn("shrink-0 rounded-md px-1.5 text-thread font-medium", !stats.casesTracked && "ml-auto")}
+                className={cn("shrink-0 rounded-md px-1.5 text-thread-tool font-medium", !stats.casesTracked && "ml-auto")}
                 style={{ color: verdict.tone, background: `color-mix(in oklab, ${verdict.tone} 12%, transparent)` }}
               >
                 {verdict.word}
@@ -956,7 +1006,7 @@ export function SolveRead({ part }: { part: ToolPart }) {
             {stats.regressions > 0 && <Stat label="broke after passing" tone="var(--warning)" value={stats.regressions} />}
             {/* The thing the counts cannot show, and it explains more failed attempts
                 than any of them. */}
-            {stats.submittedBlind && <span className="text-thread whitespace-nowrap text-[var(--warning)]">submitted without running</span>}
+            {stats.submittedBlind && <span className="text-thread-tool whitespace-nowrap text-[var(--warning)]">submitted without running</span>}
           </div>
         </CollapsibleTrigger>
 
@@ -966,7 +1016,7 @@ export function SolveRead({ part }: { part: ToolPart }) {
             expansion draws, and it arrives with the panel it separates. */}
         <CollapsibleContent expandDuration={0.42}>
           <div className="agent-tool-detail min-w-0 border-t border-[var(--border-surface-strong)]">
-            <ToolDetail input={part.input} output={part.output} tool={part.tool} />
+            <ToolDetail input={part.input} output={part.output} phase={part.phase} tool={part.tool} />
           </div>
         </CollapsibleContent>
       </motion.div>
@@ -1046,8 +1096,8 @@ function CaseRing({ className, neverPassed, passing, regressions, total }: { cla
 function Stat({ value, label, tone }: { value: string | number; label: string; tone?: string }) {
   return (
     <span className="flex items-baseline gap-1 whitespace-nowrap">
-      <span className="text-thread font-medium tabular-nums" style={tone ? { color: tone } : undefined}>{value}</span>
-      <span className="text-thread text-[var(--transcript-step-mark)]">{label}</span>
+      <span className="text-thread-tool font-medium tabular-nums" style={tone ? { color: tone } : undefined}>{value}</span>
+      <span className="text-thread-tool text-[var(--transcript-step-mark)]">{label}</span>
     </span>
   );
 }
@@ -1228,9 +1278,9 @@ export function ChallengePublished({
               ? <LanguageGlyph className="size-3.5" language={challenge.language} />
               : <IconPuzzle className="size-3.5" />}
         </span>
-        {ordinal && <span className="shrink-0 font-mono text-thread tabular-nums text-muted-foreground/60">#{ordinal}</span>}
+        {ordinal && <span className="shrink-0 font-mono text-thread-tool tabular-nums text-muted-foreground/60">#{ordinal}</span>}
         <span className="min-w-0 truncate text-thread text-foreground/80">{challenge.title}</span>
-        <span className="shrink-0 truncate text-thread text-muted-foreground/70">
+        <span className="shrink-0 truncate text-thread-tool text-muted-foreground/70">
           {challenge.difficulty ? DIFFICULTY_WORD[challenge.difficulty] : ""}
           {challenge.concepts[0] ? ` · ${challenge.concepts[0]}` : ""}
           {sourced ? ` · ${sourceName}` : ""}
@@ -1279,7 +1329,7 @@ export function ChallengePublished({
             : current ? "pr-14" : "pr-8",
         )}>
           <div className="flex min-w-0 items-center gap-1.5">
-            {ordinal ? <span className="shrink-0 font-mono text-thread tabular-nums text-muted-foreground/60">#{ordinal}</span> : null}
+            {ordinal ? <span className="shrink-0 font-mono text-thread-tool tabular-nums text-muted-foreground/60">#{ordinal}</span> : null}
             <button
               ref={cardTriggerRef}
               aria-current={current ? "page" : undefined}
@@ -1303,7 +1353,7 @@ export function ChallengePublished({
           {/* One line, in the order it is read: how hard, what it is about, who
               grades it. Wraps rather than truncates — losing the grader to an
               ellipsis is losing the only part of this that is a promise. */}
-          {stop ? <ChallengeCardMeta stop={stop} /> : <span className="mt-px flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-thread text-[var(--transcript-step-mark)]">
+          {stop ? <ChallengeCardMeta stop={stop} /> : <span className="mt-px flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-thread-tool text-[var(--transcript-step-mark)]">
             {challenge.difficulty && <span className="font-medium text-foreground/70">{DIFFICULTY_WORD[challenge.difficulty]}</span>}
             {challenge.band && <span className="font-medium text-foreground/70">{BAND_WORD[challenge.band]}</span>}
             {challenge.concepts.slice(0, 2).map((concept) => (
@@ -1466,7 +1516,7 @@ export function ChallengePublished({
                         }}
                         type="button"
                       >
-                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] font-mono text-thread tabular-nums text-muted-foreground">#{item.ordinal}</span>
+                        <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] font-mono text-thread-tool tabular-nums text-muted-foreground">#{item.ordinal}</span>
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-1.5">
                             <span className="min-w-0 flex-1 truncate text-thread font-medium">{item.title}</span>
@@ -1562,7 +1612,7 @@ export function RunFailure({ body }: { body: string }) {
                 {open && (
                   <motion.pre
                     animate={{ height: "auto", opacity: 1 }}
-                    className="mt-1.5 overflow-x-auto rounded-lg bg-[var(--accent)] px-2.5 py-2 font-mono text-thread leading-[1.5] text-muted-foreground/90"
+                    className="mt-1.5 overflow-x-auto rounded-lg bg-[var(--accent)] px-2.5 py-2 font-mono text-thread-tool leading-[1.5] text-muted-foreground/90"
                     exit={{ height: 0, opacity: 0 }}
                     initial={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}

@@ -34,7 +34,7 @@ export function LessonCard({ part }: { part: ToolPart }) {
         <ArtifactCardRow icon={<BookOpen className="size-4 text-[var(--transcript-step-mark)]" />}>
           <div className="min-w-0 flex-1 pr-14">
             <CollapsibleTrigger disabled={!lesson.id} className="block w-full truncate rounded-md text-left text-thread font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">{lesson.title}</CollapsibleTrigger>
-            <p className="mt-0.5 truncate text-thread text-muted-foreground">
+            <p className="mt-0.5 truncate text-thread-tool text-muted-foreground">
               {lesson.pages.length > 0 ? `${lesson.pages.length} ${lesson.pages.length === 1 ? "page" : "pages"}` : "Lesson"}
             </p>
           </div>

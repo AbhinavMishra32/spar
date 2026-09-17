@@ -31,6 +31,7 @@ import { ChallengeIntro } from "./ChallengeIntro";
 import { AttemptClock } from "./AttemptClock";
 import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "./ResultPanel";
 import type { ComplexityCheckpointState } from "./ComplexityCheckpoint";
+import { expandMentions } from "../agent/Mentions";
 
 /** Named here rather than derived, so the buttons say "LeetCode" instead of
  *  "leetcode" and a second source is one line rather than a search. */
@@ -360,7 +361,12 @@ export function Workspace({
   };
 
   const send = async (answer?: string, contextQuestionId?: string) => {
-    const body = (answer ?? draft).trim();
+    const raw = (answer ?? draft).trim();
+    /* The tags in the field are words; what goes out is what they stand for. The
+       optimistic bubble gets the expansion too, so the reference the learner
+       just picked arrives in the transcript as a reference rather than as the
+       words it was standing in for. */
+    const body = expandMentions(raw);
     /* A running turn no longer refuses the message: it steers it. The guard
        that remains is against two sends racing each other, not against the
        agent being busy — being busy is exactly when a correction matters. */
@@ -374,7 +380,7 @@ export function Workspace({
       await api.sendAgentMessage({ sessionId: detail.summary.id, message: body, ...(contextQuestionId ? { contextQuestionId } : {}) });
       await onRefresh();
     } catch (error) {
-      setDraft((current)=>current||body);
+      setDraft((current)=>current||raw);
       onError(message(error));
     } finally {
       setOptimisticMessages((current)=>current.filter((item)=>item.id!==optimistic.id));

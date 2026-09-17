@@ -580,7 +580,7 @@ function TrackGroup({
         onContextMenu={(event) => { event.preventDefault(); setMenu(true); }}
         // The cluster is absolute, so the gutter it needs has to be stated: one
         // slot for the arrow, one for the ⋮, and the inset it sits in.
-        style={{ "--sidebar-controls-width": "calc(2 * 1.5rem + 0.7rem)" } as CSSProperties}
+        style={{ "--sidebar-controls-width": "calc(2 * 1.5rem)" } as CSSProperties}
       >
         <CollapsibleTrigger
           className={cn(ROW, "gap-1 pl-1 pr-1 group-hover/track:bg-[var(--sidebar-accent)]", menu && "bg-[var(--sidebar-accent)]")}
@@ -765,8 +765,11 @@ function SessionRow({
           className="sidebar-row group/session relative"
           onContextMenu={(event) => { event.preventDefault(); openMenu(true); }}
           // The cluster is absolute, so the gutter it needs has to be stated: one
-          // slot per quick action plus the ⋮, and the inset it sits in.
-          style={{ "--sidebar-controls-width": `calc(${quick.length + 1} * 1.5rem + 0.7rem)` } as CSSProperties}
+          // slot per quick action plus the ⋮, and nothing for the inset. The
+          // slots are 24px boxes around 16px glyphs, so the 4px of padding on the
+          // leading one already covers the inset the cluster sits in — paying for
+          // both puts a visible hole between the title and the first icon.
+          style={{ "--sidebar-controls-width": `calc(${quick.length + 1} * 1.5rem)` } as CSSProperties}
         >
           <button
             className={cn(
@@ -975,7 +978,7 @@ function RowTitle({ children }: { children: string }) {
 }
 
 /** Width of the gradient that hides the overrun, matching `--sidebar-title-fade`. */
-const TITLE_FADE = 26;
+const TITLE_FADE = 14;
 
 /**
  * What the row could not say in one line: where the session got to, and what it
