@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowUp, ChevronDown, Loader2, Paperclip, Plus, Square, Unplug } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useProviders } from "../../hooks/use-providers";
+import { MentionPicker, type Mention, mentionRange, mentionSpans, useMentionSource } from "./Mentions";
 
 const MAX_ROWS_HEIGHT = 176;
 
@@ -61,6 +62,36 @@ export function Composer({
   className?: string;
 }) {
   const field = useRef<HTMLTextAreaElement>(null);
+  const mirror = useRef<HTMLDivElement>(null);
+  const mentions = useMentionSource();
+  /* Where the `@` being completed starts, and what has been typed after it.
+     Recomputed from the field rather than remembered, because the caret can move
+     without the value changing — an arrow key out of the mention is the end of
+     it, and a remembered range would keep the panel open over nothing. */
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const syncMention = useCallback(() => {
+    const node = field.current;
+    if (!node || !mentions) return setMention(null);
+    setMention(node.selectionStart === node.selectionEnd ? mentionRange(node.value, node.selectionStart) : null);
+  }, [mentions]);
+
+  /* Replaces the `@…` the learner was typing with the reference they picked, and
+     puts the caret after it with a space — the mention is a word in a sentence
+     they are still writing. */
+  const insertMention = (picked: Mention) => {
+    const node = field.current;
+    if (!node || !mention) return;
+    const next = `${value.slice(0, mention.start)}${picked.token} ${value.slice(node.selectionStart)}`;
+    const caret = mention.start + picked.token.length + 1;
+    setMention(null);
+    onChange(next);
+    /* Focus goes back now, not next frame. A click on a picker row lands on a
+       button, and a learner who picks and keeps typing types into nothing for
+       however long the frame takes to arrive. The caret has to wait for React to
+       write the new value into the field, so only that part is deferred. */
+    node.focus();
+    requestAnimationFrame(() => node.setSelectionRange(caret, caret));
+  };
   useEffect(() => {
     if (focusRequest) field.current?.focus();
   }, [focusRequest]);
@@ -94,6 +125,23 @@ export function Composer({
     };
   }, [resize]);
 
+  /* The draft cut at its tag boundaries. Recomputed on every keystroke, which is
+     a scan of a few hundred characters against a handful of tokens — cheaper
+     than the layout the textarea is doing on the same keystroke. */
+  const tagged = useMemo(() => {
+    const spans = mentionSpans(value);
+    if (!spans.length) return [{ tag: false, text: value }];
+    const pieces: Array<{ tag: boolean; text: string }> = [];
+    let at = 0;
+    for (const span of spans) {
+      if (span.start > at) pieces.push({ tag: false, text: value.slice(at, span.start) });
+      pieces.push({ tag: true, text: value.slice(span.start, span.end) });
+      at = span.end;
+    }
+    if (at < value.length) pieces.push({ tag: false, text: value.slice(at) });
+    return pieces;
+  }, [value]);
+
   const drafted = value.trim().length >= Math.max(1, minLength);
   const canSend = drafted && (!busy || steerable) && ready;
   /* Stop is what an empty field offers while a turn runs. A draft in the field
@@ -109,6 +157,10 @@ export function Composer({
   };
 
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    /* The picker owns the arrows, Tab, Escape and Return while it is open — it
+       binds them on the window at capture, so by the time one reaches here it
+       has already been handled and this must not also send the draft. */
+    if (mention && ["Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "Escape"].includes(event.key)) return;
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
       if (canSend) send();
@@ -117,11 +169,15 @@ export function Composer({
 
   return (
     <div className={cn("app-no-drag", className)}>
+      <div className="relative">
+      {mention && mentions && (
+        <MentionPicker onClose={() => setMention(null)} onPick={insertMention} query={mention.query} source={mentions} />
+      )}
       <div className="composer-shell overflow-hidden">
         {/* Inside the shell rather than floated above it: this is a condition of
             the input, not a passing alert, and it stays until it is fixed. */}
         {!ready && (
-          <div className="flex items-center gap-2 border-b border-[var(--glass-hairline)] px-3 py-2 text-thread">
+          <div className="flex items-center gap-2 border-b border-[var(--border-surface-strong)] px-3 py-2 text-thread">
             <Unplug className="size-3.5 shrink-0 text-warning" />
             <span className="min-w-0 flex-1 leading-[1.5] text-muted-foreground">
               <span className="font-medium text-foreground/90">No model provider connected.</span>{" "}
@@ -151,35 +207,69 @@ export function Composer({
             <Plus className="size-3.5" />
           </button>
         )}
-        <textarea
-          ref={field}
-          autoFocus={autoFocus}
-          // Vertical padding matches the 28px control height, so the first line
-          // sits on the same centre line as the attach button beside it.
-          className="app-scroll block w-full resize-none bg-transparent px-1.5 py-1 text-thread leading-[1.55] outline-none placeholder:text-muted-foreground/65"
-          onBlur={() => setFocused(false)}
-          onChange={(event) => onChange(event.target.value)}
-          onFocus={() => setFocused(true)}
-          onKeyDown={keydown}
-          placeholder={placeholder}
-          rows={1}
-          value={value}
-        />
+        {/* The field and its shadow, in that order on screen and the reverse in
+            the stack. The learner's own text stays in the textarea, where the
+            caret, the selection, undo and the input method all keep working; the
+            layer underneath carries nothing but the tag shapes, drawn from the
+            same characters at the same metrics so a tag sits exactly under the
+            words it belongs to however the draft wraps. */}
+        <div className="relative min-w-0 flex-1">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-1.5 py-1 text-thread leading-[1.55] text-transparent"
+            ref={mirror}
+          >
+            {tagged.map((piece, index) =>
+              piece.tag
+                ? (
+                  <span
+                    className="rounded-[5px] bg-[color-mix(in_oklab,var(--reference)_16%,transparent)] ring-[0.5px] ring-inset ring-[color-mix(in_oklab,var(--reference)_40%,transparent)] [box-decoration-break:clone]"
+                    key={index}
+                  >
+                    {piece.text}
+                  </span>
+                )
+                : <span key={index}>{piece.text}</span>,
+            )}
+            {/* A draft ending in a newline leaves the mirror a line short, and
+                the last tag would ride up with it. */}
+            {"\n"}
+          </div>
+          <textarea
+            ref={field}
+            autoFocus={autoFocus}
+            // Vertical padding matches the 28px control height, so the first line
+            // sits on the same centre line as the attach button beside it.
+            className="app-scroll relative block w-full resize-none bg-transparent px-1.5 py-1 text-thread leading-[1.55] outline-none placeholder:text-muted-foreground/65"
+            onBlur={() => { setFocused(false); setMention(null); }}
+            onChange={(event) => { onChange(event.target.value); queueMicrotask(syncMention); }}
+            onFocus={() => setFocused(true)}
+            onKeyDown={keydown}
+            onKeyUp={syncMention}
+            onClick={syncMention}
+            onScroll={(event) => { if (mirror.current) mirror.current.scrollTop = event.currentTarget.scrollTop; }}
+            onSelect={syncMention}
+            placeholder={placeholder}
+            rows={1}
+            value={value}
+          />
         </div>
+        </div>
+      </div>
       </div>
 
       <div className="mt-1.5 flex items-center gap-1 px-0.5">
         {leading}
         <div className="min-w-0 flex-1 truncate px-1 text-thread text-muted-foreground/65">
           {/* The notice above already says why nothing can be sent; a second
-              line about Return would be instructions for a key that does nothing. */}
-          {ready
-            ? hint ?? (busy && steerable && drafted
-              ? "Return to send — the agent picks this up at its next step"
-              : focused && !value
-                ? "Return to send · Shift + Return for a new line"
-                : null)
-            : null}
+              line about Return would be instructions for a key that does nothing.
+              Nothing is said on a plain empty focused composer either — Return
+              sends, which is what Return does in every composer the learner has
+              used, and a line of standing instructions under the field is one
+              more thing to read past on the way to typing. The steering line
+              stays, because that one is not obvious: the turn is already
+              running, and where the message lands is the question. */}
+          {ready ? hint ?? (busy && steerable && drafted ? "Return to send — the agent picks this up at its next step" : null) : null}
         </div>
         {trailing}
         {showStop && onStop ? (

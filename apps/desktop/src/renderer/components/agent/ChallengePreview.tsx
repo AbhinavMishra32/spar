@@ -126,13 +126,13 @@ export function ChallengePreview({ data, stop }: {
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-start gap-1.5">
-            {data.ordinal ? <span className="mt-px shrink-0 font-mono text-thread tabular-nums text-muted-foreground/60">#{data.ordinal}</span> : null}
+            {data.ordinal ? <span className="mt-px shrink-0 font-mono text-thread-tool tabular-nums text-muted-foreground/60">#{data.ordinal}</span> : null}
             <span className="min-w-0 flex-1 text-thread font-semibold leading-snug text-foreground">{data.title}</span>
             {stop && <ChallengeOutcomeTag outcome={stop.outcome} />}
           </div>
           {/* The three facts that place it: how hard, what in, who decides. Not
               repeated in the footer, which is about what happened instead. */}
-          <p className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-thread text-muted-foreground">
+          <p className="mt-0.5 flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-thread-tool text-muted-foreground">
             {data.level && <span className="font-medium text-foreground/70">{data.level}</span>}
             {data.language && <span>· {LANGUAGE_LABEL[data.language]}</span>}
             <span className="whitespace-nowrap">
@@ -152,7 +152,7 @@ export function ChallengePreview({ data, stop }: {
         <div className="flex flex-wrap gap-1">
           {data.concepts.slice(0, 4).map((concept) => (
             <span
-              className="max-w-full truncate rounded-md border border-border/70 bg-[var(--color-background-elevated-secondary)] px-1.5 py-px text-thread text-foreground/80"
+              className="max-w-full truncate rounded-md border border-border/70 bg-[var(--color-background-elevated-secondary)] px-1.5 py-px text-thread-tool text-foreground/80"
               key={concept}
             >
               {concept}
@@ -164,9 +164,9 @@ export function ChallengePreview({ data, stop }: {
       {data.starter && excerpt.code && (
         <div className="relative overflow-hidden rounded-lg bg-[var(--color-background-editor)] shadow-[inset_0_0_0_1px_var(--border)]">
           <div className="flex h-6 items-center gap-1.5 border-b border-border/70 px-2">
-            <span className="truncate font-mono text-thread text-muted-foreground/70">{fileName(data.starter.path)}</span>
+            <span className="truncate font-mono text-thread-tool text-muted-foreground/70">{fileName(data.starter.path)}</span>
             {excerpt.remaining > 0 && (
-              <span className="ml-auto shrink-0 font-mono text-thread tabular-nums text-muted-foreground/45">+{excerpt.remaining}</span>
+              <span className="ml-auto shrink-0 font-mono text-thread-tool tabular-nums text-muted-foreground/45">+{excerpt.remaining}</span>
             )}
           </div>
           <div className="relative">

@@ -8,6 +8,7 @@ import { message } from "@/lib/format";
 import { Sidebar, type Page, type SessionActions } from "./components/shell/Sidebar";
 import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
+import { pageChrome, type ShellPage } from "./components/shell/pageChrome";
 import { SearchPalette } from "./components/common/SearchPalette";
 import { HomePage } from "./components/pages/HomePage";
 import type { ChallengeTrail } from "./components/workspace/ChallengeStepper";
@@ -24,6 +25,7 @@ import { ChallengesPage } from "./components/pages/ChallengesPage";
 import { ConceptSheet } from "./components/concepts/ConceptSheet";
 import { LessonReader } from "./components/agent/LessonReader";
 import { MarkdownLinkProvider } from "./components/agent/MarkdownLinks";
+import { MentionProvider } from "./components/agent/Mentions";
 import { ChallengePage } from "./components/pages/ChallengePage";
 import { AuthPage } from "./components/pages/AuthPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
@@ -33,26 +35,13 @@ import { ChatView } from "./components/workspace/ChatView";
 import { reduceRunBatch, type AgentRun } from "./components/agent/agentRun";
 import { canGoBack, canGoForward, forget, step, visit, type History, type View } from "./hooks/navigation";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
+import { recordContextUsage } from "./hooks/use-context-usage";
 import { SparDots } from "@/components/common/SparDots";
 import { Toaster } from "@/components/common/Toaster";
 import { Button } from "@/components/ui/button";
 
 const api: SparApi | undefined = window.spar;
 
-/** Pages the shell puts a plain toolbar over. "workspace" and "challenge" draw
- *  their own, because both carry a back button and their own actions. */
-const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge" | "baseline">, string> = {
-  home: "Home",
-  tracks: "Tracks",
-  track: "Track",
-  history: "History",
-  problems: "Problems",
-  visualizer: "Visualize",
-  sessions: "Sessions",
-  ability: "Abilities",
-  challenges: "Challenges",
-  settings: "Settings",
-};
 
 export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
@@ -72,6 +61,10 @@ export function App() {
      challenge mounted behind the list. */
   const [challengeSeed, setChallengeSeed] = useState<ChallengeDetail | null>(null);
   const [challengeId, setChallengeId] = useState<string | null>(null);
+  /* Which submission the challenge page should open unfolded, when it was
+     reached by following a reference to one rather than by opening the
+     challenge itself. */
+  const [challengeSubmission, setChallengeSubmission] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   /* Every agent turn in flight, by the session it belongs to — not just the one
      the workspace is showing. A turn is started from a session and then survives
@@ -112,9 +105,81 @@ export function App() {
          while it is open — the two share a layout id. */
       openLessonId: lesson,
       onOpenUrl: (url: string) => { void api?.openExternal(url); },
+      onOpenChallenge: (challengeId: string) => { openChallengeRef.current?.(challengeId); },
+      /* Reading is safe to hand over unconditionally — it is a lookup by id that
+         answers null for anything that is not one. Opening goes through the
+         challenge the submission belongs to, which the record itself names, so
+         the transcript never has to know where a submission lives. */
+      readSubmission: (submissionId: string) =>
+        typeof api?.readSubmission === "function" ? api.readSubmission(submissionId) : Promise.resolve(null),
+      onOpenSubmission: (submissionId: string) => {
+        if (typeof api?.readSubmission !== "function") return;
+        void api.readSubmission(submissionId).then((found) => {
+          if (found) openChallengeRef.current?.(found.challengeId, found.id);
+        }).catch(() => undefined);
+      },
     }),
     [lesson],
   );
+
+  /**
+   * What `@` can reach, from any composer in the window.
+   *
+   * Everything the learner might point at is already in the bootstrap — the
+   * challenge library is read once and kept — so the picker's first level costs
+   * nothing to offer. Submissions are the level that needs a read, and it only
+   * happens once a challenge has actually been opened in the list.
+   *
+   * The open session leads, because the thing being referred to is nearly always
+   * in the conversation you are having; everything else in the library follows,
+   * so a reference back to last week's problem is still one keystroke away.
+   */
+  const mentionSource = useMemo(() => {
+    const open = detail?.summary.id;
+    const challenges = [...(data?.challenges ?? [])]
+      .sort((left, right) => {
+        const active = detail?.question?.id;
+        const live = Number(right.id === active) - Number(left.id === active);
+        const mine = Number(right.sessionId === open) - Number(left.sessionId === open);
+        return live || mine || right.createdAt.localeCompare(left.createdAt);
+      })
+      .map((challenge) => ({
+        id: challenge.id,
+        ordinal: challenge.ordinal,
+        title: challenge.title,
+        language: challenge.language,
+        outcome: challenge.lastOutcome,
+        sessionId: challenge.sessionId,
+        sessionTitle: challenge.sessionTitle,
+        difficulty: challenge.difficulty,
+        elapsedMs: challenge.elapsedMs,
+        passedCases: challenge.passedCases,
+        totalCases: challenge.totalCases,
+        testRunCount: challenge.testRunCount,
+        concepts: challenge.concepts.map((concept) => concept.title),
+      }));
+    return {
+      challenges,
+      concepts: (data?.concepts ?? []).map((concept) => ({
+        slug: concept.slug,
+        title: concept.title,
+        detail: concept.kind ?? "",
+      })),
+      ...(open ? { sessionId: open } : {}),
+      /* The challenge on screen right now, marked in the list. It is what "@"
+         means more often than everything else put together, and scanning a
+         library of forty to find the one you are looking at is the one search
+         the picker should never make anybody do. */
+      ...(detail?.question?.id ? { activeChallengeId: detail.question.id } : {}),
+      /* Called through, not held: a preload from before these channels existed
+         still answers every other call, and the picker losing its submissions is
+         a row that is missing rather than a window that is gone. */
+      listSubmissions: (challengeId: string) =>
+        typeof api?.listChallengeSubmissions === "function" ? api.listChallengeSubmissions(challengeId) : Promise.resolve([]),
+      listSessionSubmissions: (sessionId: string) =>
+        typeof api?.listSessionSubmissions === "function" ? api.listSessionSubmissions(sessionId) : Promise.resolve([]),
+    };
+  }, [data?.challenges, data?.concepts, detail?.question?.id, detail?.summary.id]);
 
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
   const { width: sidebarWidth, dragging, handleProps: sidebarHandle } = useSidebarWidth();
@@ -126,6 +191,11 @@ export function App() {
      editor that swallowed ⌘[ would make the buttons the only way back, which is
      the thing a shortcut exists to avoid. */
   const goRef = useRef<(direction: -1 | 1) => void>(() => {});
+  /* `markdownLinks` is memoised above the navigation helpers, and a submission
+     reference in the transcript has to be able to reach `openChallenge`. The ref
+     is the seam: the context value stays stable across renders and still calls
+     the current opener. */
+  const openChallengeRef = useRef<((id: string, submissionId?: string) => void) | null>(null);
   const detailRef = useRef<SessionDetail | null>(null);
   detailRef.current = detail;
 
@@ -297,6 +367,14 @@ export function App() {
          workspace transcript working rather than silently dropping the stream. */
       const sessionId = event.sessionId ?? detailRef.current?.summary.id;
       if (!sessionId) return;
+
+      /* Recorded straight from the listener rather than through the run
+         reducer: the reading has to outlive the run it came from, and the run
+         is dropped the moment its turn is done. */
+      if (event.context) {
+        recordContextUsage(sessionId, event.context);
+        return;
+      }
 
       if (event.type === "done") {
         /* The turn's own buffered deltas are dropped: the reply it produced is
@@ -509,6 +587,7 @@ export function App() {
     }
     if (view.page === "challenge") {
       setChallengeId(view.challengeId);
+      setChallengeSubmission(view.submissionId ?? null);
       show("challenge");
       return;
     }
@@ -639,7 +718,7 @@ export function App() {
   /* `from` is gone: a challenge is opened from two libraries, and where Back
      lands is now the history's business rather than a guess recorded at the
      door. */
-  const openChallenge = (id: string) => {
+  const openChallenge = (id: string, submissionId?: string) => {
     /* The destination is known before the local detail read starts, so move to
        the standalone page immediately. Waiting here left the session on screen
        after "Open question" and made a successful click look inert. The page
@@ -647,12 +726,14 @@ export function App() {
        the same detail without another visible transition. */
     setChallengeSeed(null);
     setChallengeId(id);
+    setChallengeSubmission(submissionId ?? null);
     show("challenge");
-    setHistory((current) => visit(current, { page: "challenge", challengeId: id }));
+    setHistory((current) => visit(current, { page: "challenge", challengeId: id, ...(submissionId ? { submissionId } : {}) }));
     if (api) void api.readChallenge(id).then((next) => {
       if (next?.summary.id === id) setChallengeSeed(next);
     }).catch(() => undefined);
   };
+  openChallengeRef.current = openChallenge;
 
   const openAbility = (id: string) => {
     show("ability");
@@ -738,6 +819,15 @@ export function App() {
       return !value;
     });
   const expandSidebar = sidebar ? undefined : toggleSidebar;
+  /* What the toolbar says over this page: a name only where the page does not
+     name itself, and the counts that page is about. Null for a page that draws
+     its own chrome, which leaves the row bare — see `pageChrome`. Computed on
+     each render rather than memoised because the hooks above it are behind the
+     boot guards, and the work is two filters over lists the pages below filter
+     again anyway. */
+  const chrome = page === "workspace" || page === "challenge" || page === "baseline"
+    ? null
+    : pageChrome(page as ShellPage, data, ability);
   const changeTheme = async (theme: ThemePreference) => {
     if (!api) return;
     await api.setTheme(theme);
@@ -799,6 +889,7 @@ export function App() {
        knows something extra, like the language its code is in, merges that on
        top of this. */
     <MarkdownLinkProvider value={markdownLinks}>
+      <MentionProvider value={mentionSource}>
       <div className="app-vibrant relative flex h-full">
         {/* The column, which is only ever a window onto the sidebar.
 
@@ -907,8 +998,17 @@ export function App() {
             (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
           )}
         >
+          {/* The row is drawn for every shell page, including the ones with
+              nothing to say in it: it is the window's own title bar, and on a
+              collapsed sidebar it is the only place the traffic lights and the
+              back control can go. What varies is whether it carries anything —
+              see `pageChrome`. */}
           {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
-            <Toolbar nav={nav} onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge" | "baseline">]} />
+            <Toolbar
+              nav={nav}
+              onExpandSidebar={expandSidebar}
+              {...(chrome ?? {})}
+            />
           )}
 
           {error && (
@@ -976,6 +1076,8 @@ export function App() {
             )}
             {page === "settings" && (
               <SettingsPage
+                // Same identity the sidebar row shows: the onboarding name, not the one derived from their email.
+                account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
                 api={api}
                 baseline={data.baseline}
                 language={data.profile.language}
@@ -1071,6 +1173,7 @@ export function App() {
                       challengeId={challengeId}
                       concepts={conceptContext}
                       dark={dark}
+                      focusSubmissionId={challengeSubmission}
                       learnerRating={data.progress.rating}
                       nav={nav}
                       onError={setError}
@@ -1116,6 +1219,7 @@ export function App() {
             says back is never about the pane it happened in. */}
         <Toaster />
       </div>
+      </MentionProvider>
     </MarkdownLinkProvider>
   );
 }

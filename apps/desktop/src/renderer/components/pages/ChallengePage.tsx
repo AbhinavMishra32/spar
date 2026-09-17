@@ -32,6 +32,7 @@ import type { ConceptContext } from "../concepts/ConceptChip";
 import { ChallengeRatingBadge } from "../workspace/ChallengeCalibration";
 import { PaneHandle } from "../workspace/PaneHandle";
 import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "../workspace/ResultPanel";
+import { ChallengeSubmissions } from "./ChallengeSubmissions";
 import { SparDots } from "@/components/common/SparDots";
 
 /**
@@ -81,15 +82,21 @@ function Verdict({ outcome }: { outcome: NonNullable<RunOutcome> }) {
 }
 
 function Brief({
+  api,
   concepts,
   detail,
+  focusSubmissionId,
   learnerRating,
   onOpenExternal,
   onOpenSession,
 }: {
+  api: SparApi | undefined;
   /** What the concept chips need to preview and open. */
   concepts?: ConceptContext | undefined;
   detail: ChallengeDetail;
+  /** A submission to open unfolded, when the page was reached by following a
+   *  reference to one. */
+  focusSubmissionId?: string | null | undefined;
   /** The learner's rating, for pitching this problem against them. */
   learnerRating?: RatingPoint | null | undefined;
   /** Opens the problem at its source in the real browser. */
@@ -186,6 +193,14 @@ function Brief({
           </Section>
         )}
 
+        {/* Before the timeline, because it answers the question the timeline
+            only contains. Coming back to a challenge, "what did I send, and what
+            did it fail on" is the whole of what is being asked; the log of saves
+            and runs is the long version, for when the short one is not enough. */}
+        <Section title="SUBMISSIONS">
+          <ChallengeSubmissions api={api} challengeId={summary.id} focusId={focusSubmissionId} />
+        </Section>
+
         {detail.timeline.length > 0 && (
           <Section title="WHAT HAPPENED">
             <ChallengeHistory entries={detail.timeline} />
@@ -209,6 +224,7 @@ export function ChallengePage({
   challengeId,
   concepts,
   dark,
+  focusSubmissionId,
   learnerRating,
   nav,
   onError,
@@ -222,6 +238,9 @@ export function ChallengePage({
   /** What the concept chips need to preview and open. */
   concepts?: ConceptContext | undefined;
   dark: boolean;
+  /** A submission to open unfolded and scroll to, when the page was reached by
+   *  following a reference to one from the transcript. */
+  focusSubmissionId?: string | null | undefined;
   /** The learner's rating, for pitching this problem against them. */
   learnerRating?: RatingPoint | null | undefined;
   /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
@@ -575,6 +594,10 @@ export function ChallengePage({
             </button>
           </>
         }
+        /* What the review page knows and the panes below do not say: how many
+           goes it took. Only once it took more than one — "1 attempt" over a
+           challenge is a fact about nothing. */
+        {...(detail.summary.attemptCount > 1 ? { facts: [{ value: `${detail.summary.attemptCount}`, label: "attempts" }] } : {})}
         nav={nav}
         onExpandSidebar={onExpandSidebar}
         /* No subtitle. The workspace dropped its grey session line from this row,
@@ -597,8 +620,10 @@ export function ChallengePage({
       <PanelGroup autoSaveId="spar-challenge-pane" className="min-h-0 flex-1" direction="horizontal">
         <Panel defaultSize={44} minSize={32} order={1}>
           <Brief
+            api={api}
             concepts={concepts}
             detail={detail}
+            focusSubmissionId={focusSubmissionId}
             learnerRating={learnerRating}
             onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSession={() => onOpenSession(detail.summary.sessionId)}

@@ -5,7 +5,7 @@ import { plainMath } from "@/lib/tex";
 import { Check, Code2, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
-import { parseReference, Reference, useMarkdownLinks } from "./MarkdownLinks";
+import { parseReference, Reference, REFERENCE_KINDS, useMarkdownLinks } from "./MarkdownLinks";
 import { parse, type Block } from "./markdownBlocks";
 
 /** Inline spans: `code`, **bold**, *italic*, and real links.
@@ -14,6 +14,13 @@ import { parse, type Block } from "./markdownBlocks";
  *  question the agent asks is written in the same language as the message
  *  before it, references and all, and rendering it as a bare string is what
  *  made `[[file:main.py|main.py]]` show up literally in the question card. */
+/* Everything the inline tokeniser matches after a reference, in one string so
+   the reference kinds can be interpolated in front of it. A double-quoted
+   string rather than a template literal because one of these rules is the code
+   span, and a backtick cannot be escaped into a template. */
+const INLINE_RULES =
+  "|(\\[[^\\]\\n]*\\]\\((?:https?:\\/\\/|mailto:)[^\\s)]+\\))|(`[^`]+`)|(\\*\\*[^*]+\\*\\*)|(\\*[^*]+\\*)|(_[^_]+_)|(https?:\\/\\/[^\\s<>()[\\]\"']+)";
+
 export function Inline({ text }: { text: string }) {
   const nodes = useMemo(() => {
     /* References first, so a `[[file:a_b.c|x]]` is not torn apart by the
@@ -27,8 +34,7 @@ export function Inline({ text }: { text: string }) {
        `[SolveWithPython version](https://…)` — which is the one thing a reader
        cannot use: the link is right there and unclickable, and the URL is
        spelled out in the middle of a sentence. */
-    const pattern =
-      /(\[\[(?:concept|file|lesson):[^\]]+\]\])|(\[[^\]\n]*\]\((?:https?:\/\/|mailto:)[^\s)]+\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)|(https?:\/\/[^\s<>()[\]"']+)/g;
+    const pattern = new RegExp(`(\\[\\[(?:${REFERENCE_KINDS.join("|")}):[^\\]]+\\]\\])${INLINE_RULES}`, "g");
     const result: Array<{ key: string; node: React.ReactNode }> = [];
     let cursor = 0;
     let match: RegExpExecArray | null;
