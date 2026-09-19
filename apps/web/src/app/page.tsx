@@ -16,6 +16,7 @@ import { NoCourse } from "@/components/sections/NoCourse";
 import { ProofRun } from "@/components/sections/Proof";
 import { Rating } from "@/components/sections/Rating";
 import { Sources } from "@/components/sections/Sources";
+import { StartHere } from "@/components/sections/StartHere";
 import { Submission } from "@/components/sections/Submission";
 import { TheAgent } from "@/components/sections/TheAgent";
 import { TheApp } from "@/components/sections/TheApp";
@@ -47,6 +48,7 @@ export default async function Home() {
         <NoCourse />
         <Sources />
         <TheApp />
+        <StartHere />
         <ProofRun />
         <Submission />
         <TheAgent />

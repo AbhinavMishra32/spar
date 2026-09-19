@@ -1,5 +1,6 @@
 import { Reveal } from "@/components/Reveal";
 import { Section, SectionHead } from "@/components/Section";
+import { Shot } from "@/components/Shot";
 
 /** The three tabs under the editor, and what each one is for. */
 const PANES = [
@@ -55,6 +56,41 @@ export function Workspace() {
             </p>
           </Reveal>
         </div>
+      </div>
+
+      <div className="mt-16">
+        <Reveal>
+          <Shot
+            shot="liveWorkspace"
+            alt="Spar's live workspace showing a generated TypeScript prefix-sum challenge, the real file editor, visible test cases, and the GPT-5.6 Luna model indicator."
+          />
+          <p className="mt-4 max-w-[72ch] text-[0.9rem] leading-relaxed text-muted">
+            This is the working surface: read the prompt, edit a real file, run the visible cases, ask the
+            agent for a hint, and submit only when you are ready. A challenge is an executable little project,
+            not a code block pasted into a chat.
+          </p>
+        </Reveal>
+      </div>
+
+      <div className="mt-10 grid gap-5 md:grid-cols-2">
+        <Reveal delay={90}>
+          <Shot
+            shot="liveHome"
+            alt="Spar Home showing Maya Chen's provisional rating, one solved challenge, one open session, and a baseline session ready to continue."
+          />
+          <p className="mt-4 text-[0.9rem] leading-relaxed text-muted">
+            Home answers: where am I, what is open, and what should I continue?
+          </p>
+        </Reveal>
+        <Reveal delay={150}>
+          <Shot
+            shot="liveHistory"
+            alt="Spar History showing two fictional Maya Chen challenges, one passed and one open, with their concepts and source files."
+          />
+          <p className="mt-4 text-[0.9rem] leading-relaxed text-muted">
+            History answers: what did I actually do, and what evidence did it leave?
+          </p>
+        </Reveal>
       </div>
     </Section>
   );

@@ -1,5 +1,6 @@
 import { Reveal } from "@/components/Reveal";
 import { Section, SectionHead } from "@/components/Section";
+import { Shot } from "@/components/Shot";
 import { AgentDemo } from "@/components/sections/AgentDemo";
 
 const POINTS = [
@@ -47,6 +48,20 @@ export function TheAgent() {
           ))}
         </div>
       </div>
+
+      <Reveal delay={260}>
+        <div className="mt-16">
+          <Shot
+            shot="liveAgent"
+            alt="A real Spar session with Maya Chen: the GPT-5.6 Luna agent explains the evidence from a first probe and writes a different second TypeScript challenge in the same workspace."
+          />
+          <p className="mt-4 max-w-[72ch] text-[0.9rem] leading-relaxed text-muted">
+            A live session, captured from the desktop app rather than a mockup. The agent reads the first
+            attempt, checks whether the next exercise would test transfer instead of repetition, and explains
+            when its exact target did not validate cleanly. The model shown here is ChatGPT&rsquo;s GPT-5.6 Luna.
+          </p>
+        </div>
+      </Reveal>
     </Section>
   );
 }
