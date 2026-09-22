@@ -47,7 +47,7 @@ export class AgentTraceExporter {
     if(!config||config.kind!=="langsmith")return;
     const spans=traceSpans(run,events,scores);
     const dotted=new Map<string,string>();
-    const ordered=(span:TraceSpan)=>`${compactTime(span.startTimeUnixNano)}${uuid(span.spanId)}`;
+    const ordered=(span:TraceSpan)=>`${compactTime(span.startTimeUnixNano)}${uuid(span.spanId).replaceAll("-","")}`;
     const rootSpan=spans.find((span)=>!span.parentSpanId)??spans[0];
     if(rootSpan)dotted.set(rootSpan.spanId,ordered(rootSpan));
     for(const span of spans){if(!dotted.has(span.spanId)){const parent=span.parentSpanId?dotted.get(span.parentSpanId):undefined;dotted.set(span.spanId,parent?`${parent}.${ordered(span)}`:ordered(span));}}
@@ -154,4 +154,4 @@ function json(value:unknown){try{return JSON.stringify(value);}catch{return JSON
 function nanos(value:Date){return String(BigInt(value.getTime())*1_000_000n);}
 function hex(seed:string,length:number){return createHash("sha256").update(seed).digest("hex").slice(0,length);}
 function uuid(value:string){const normalized=value.length>=32?value.slice(0,32):hex(value,32);return`${normalized.slice(0,8)}-${normalized.slice(8,12)}-4${normalized.slice(13,16)}-a${normalized.slice(17,20)}-${normalized.slice(20,32)}`;}
-function compactTime(nanoseconds:string){return new Date(Number(BigInt(nanoseconds)/1_000_000n)).toISOString().replace(/[-:.]/g,"");}
+function compactTime(nanoseconds:string){const iso=new Date(Number(BigInt(nanoseconds)/1_000_000n)).toISOString();return`${iso.slice(0,19).replace(/[-:]/g,"")}${iso.slice(20,23)}000Z`;}

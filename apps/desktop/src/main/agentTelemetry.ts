@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { LocalStore } from "./store.js";
+import { DevLangSmithTraceSink, type AgentTraceSink } from "./devLangSmith.js";
 
 export type AgentRunStart = {
   runId: string;
@@ -24,7 +25,7 @@ type RunState = AgentRunStart & { sequence: number; startedAt: string };
 export class AgentTelemetry {
   private readonly runs = new Map<string, RunState>();
 
-  constructor(private readonly store: LocalStore) {}
+  constructor(private readonly store: LocalStore, private readonly trace: AgentTraceSink = new DevLangSmithTraceSink()) {}
 
   start(value: AgentRunStart) {
     const state = { ...value, sequence: 0, startedAt: new Date().toISOString() };
@@ -44,6 +45,7 @@ export class AgentTelemetry {
       metadata: { runtime: "pi", transport: "spar-outbox" },
       startedAt: state.startedAt,
     });
+    this.trace.start({ ...value, startedAt: state.startedAt });
   }
 
   record(runId: string, event: Record<string, unknown>) {
@@ -62,7 +64,7 @@ export class AgentTelemetry {
     state.sequence += 1;
     const { type: _type, kind, name, phase, callId, level, occurredAt, ...rest } = source;
     const payload = { ...(typeof phase === "string" ? { state: phase } : {}), ...rest };
-    this.store.queueAgentTelemetry("agent-trace-event", {
+    const traceEvent = {
       id: randomUUID(),
       runId,
       sequence,
@@ -73,7 +75,9 @@ export class AgentTelemetry {
       level: typeof level === "string" ? level : "DEFAULT",
       payload,
       occurredAt: typeof occurredAt === "string" ? occurredAt : new Date().toISOString(),
-    });
+    };
+    this.store.queueAgentTelemetry("agent-trace-event", traceEvent);
+    this.trace.record(traceEvent);
   }
 
   finish(runId: string, value: Record<string, unknown>, error?: unknown) {
@@ -82,7 +86,7 @@ export class AgentTelemetry {
     this.runs.delete(runId);
     const usage = value.usage && typeof value.usage === "object" ? value.usage as Record<string, unknown> : {};
     const completedAt = new Date().toISOString();
-    this.store.queueAgentTelemetry("agent-run-finish", {
+    const finish = {
       id: runId,
       status: error ? "error" : value.finishReason === "stopped" ? "cancelled" : "completed",
       output: {
@@ -97,7 +101,9 @@ export class AgentTelemetry {
       latencyMs: Math.max(0, Date.parse(completedAt) - Date.parse(state.startedAt)),
       error: error instanceof Error ? error.message : error === undefined ? null : String(error),
       completedAt,
-    });
+    };
+    this.store.queueAgentTelemetry("agent-run-finish", finish);
+    this.trace.finish(finish);
   }
 }
 

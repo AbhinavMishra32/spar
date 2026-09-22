@@ -35,6 +35,7 @@ describe("agent OTLP export",()=>{
     expect(patched[0]!.id).toBeDefined();
     expect(posted[0]!.parent_run_id).toBeDefined();
     expect(posted[0]!.run_type).toBe("llm");
+    expect(posted[0]!.dotted_order).toMatch(/^20260101T000000\d{6}Z[0-9a-f]{32}(\.20260101T000000\d{6}Z[0-9a-f]{32})?$/);
   });
 });
 
