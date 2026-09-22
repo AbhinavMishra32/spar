@@ -26,9 +26,13 @@ export class AgentTraceExporter {
   constructor(environment:Env,private readonly request:typeof fetch=fetch){this.config=otlpConfig(environment);}
   configured(){return Boolean(this.config);}
 
+  async start(run:StoredAgentRun){
+    if(this.config?.kind==="langsmith")await this.exportLangSmith(run,[],[],true);
+  }
+
   async export(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEvalScore[]=[]){
     if(!this.config)return;
-    if(this.config.kind==="langsmith")return this.exportLangSmith(run,events,scores);
+    if(this.config.kind==="langsmith")return this.exportLangSmith(run,events,scores,false);
     const response=await this.request(this.config.url,{
       method:"POST",
       headers:{"content-type":"application/json",...this.config.headers},
@@ -38,17 +42,20 @@ export class AgentTraceExporter {
     if(!response.ok)throw new Error(`Telemetry export failed (${response.status})`);
   }
 
-  private async exportLangSmith(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEvalScore[]){
+  private async exportLangSmith(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEvalScore[],initial:boolean){
     const config=this.config;
     if(!config||config.kind!=="langsmith")return;
     const spans=traceSpans(run,events,scores);
     const dotted=new Map<string,string>();
     const ordered=(span:TraceSpan)=>`${compactTime(span.startTimeUnixNano)}${uuid(span.spanId)}`;
-    const root=spans.find((span)=>!span.parentSpanId)??spans[0];
-    if(root)dotted.set(root.spanId,ordered(root));
+    const rootSpan=spans.find((span)=>!span.parentSpanId)??spans[0];
+    if(rootSpan)dotted.set(rootSpan.spanId,ordered(rootSpan));
     for(const span of spans){if(!dotted.has(span.spanId)){const parent=span.parentSpanId?dotted.get(span.parentSpanId):undefined;dotted.set(span.spanId,parent?`${parent}.${ordered(span)}`:ordered(span));}}
-    const post=spans.map((span)=>langSmithRun(span,run,config.project,dotted.get(span.spanId)!));
-    const response=await this.request(`${config.url.replace(/\/$/,"")}/runs/batch`,{method:"POST",headers:{"content-type":"application/json","x-api-key":config.apiKey},body:JSON.stringify({post,patch:[]}),signal:AbortSignal.timeout(15_000)});
+    const runs=spans.map((span)=>langSmithRun(span,run,config.project,dotted.get(span.spanId)!));
+    const root=spans.find((span)=>!span.parentSpanId);
+    const post=initial?runs:runs.filter((span)=>span.id!== (root?uuid(root.spanId):""));
+    const patch=initial||!root?[]:[runs.find((span)=>span.id===uuid(root.spanId))!];
+    const response=await this.request(`${config.url.replace(/\/$/,"")}/runs/batch`,{method:"POST",headers:{"content-type":"application/json","x-api-key":config.apiKey},body:JSON.stringify({post,patch}),signal:AbortSignal.timeout(15_000)});
     if(!response.ok)throw new Error(`LangSmith telemetry export failed (${response.status})`);
   }
 }

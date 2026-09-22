@@ -136,6 +136,7 @@ export function installRoutes(app: FastifyInstance, db: Database, storage?: Obje
     if(sessionId){const owned=await db.select({id:sessions.id}).from(sessions).where(and(eq(sessions.id,sessionId),eq(sessions.userId,user.id))).limit(1);if(!owned[0])return reply.code(404).send({error:"Session not found"});}
     const startedAt=safeDate(body.startedAt);if(!startedAt)return reply.code(400).send({error:"Invalid start time"});
     await db.insert(agentRuns).values({id,userId:user.id,sessionId,origin,mode:limited(body.mode,"live",32),status:"running",turnKind:optionalText(body.turnKind,80),provider:limited(body.provider,"unknown",80),model:limited(body.model,"unknown",160),schemaVersion:integer(body.schemaVersion,1),appVersion:optionalText(body.appVersion,80),commitSha:optionalText(body.commitSha,80),input:plainRecord(body.input),metadata:plainRecord(body.metadata),startedAt}).onConflictDoNothing();
+    if(telemetry?.configured()){const [created]=await db.select().from(agentRuns).where(and(eq(agentRuns.id,id),eq(agentRuns.userId,user.id))).limit(1);if(created)await telemetry.start(created);}
     return reply.code(202).send({id});
   });
   app.post("/v1/telemetry/runs/:id/events",async(request,reply)=>{

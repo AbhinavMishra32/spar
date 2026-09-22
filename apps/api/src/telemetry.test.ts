@@ -28,10 +28,13 @@ describe("agent OTLP export",()=>{
     await exporter.export(run,[event(0,"generation","pi-phase-0","call-1","start",0),event(1,"generation","pi-phase-0","call-1","end",10,{model:"gpt-test",output:{content:"done"}})]);
     expect(request).toHaveBeenCalledWith("https://api.smith.langchain.com/runs/batch",expect.objectContaining({headers:expect.objectContaining({"x-api-key":"lsv2_test"})}));
     const posted=body?.post as Array<Record<string,unknown>>;
-    expect(posted).toHaveLength(2);
-    expect(posted[0]!.project_name).toBe("pr-memorable-acceptance-75");
-    expect(posted[1]!.parent_run_id).toBe(posted[0]!.id);
-    expect(posted[1]!.run_type).toBe("llm");
+    expect(posted).toHaveLength(1);
+    const patched=body?.patch as Array<Record<string,unknown>>;
+    expect(patched).toHaveLength(1);
+    expect(patched[0]!.project_name).toBe("pr-memorable-acceptance-75");
+    expect(patched[0]!.id).toBeDefined();
+    expect(posted[0]!.parent_run_id).toBeDefined();
+    expect(posted[0]!.run_type).toBe("llm");
   });
 });
 
