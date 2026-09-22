@@ -23,6 +23,7 @@ import { createMainWindow, fitWindowTo } from "./window.js";
 import { WorkspaceService } from "./workspaces.js";
 import { themePreferenceSchema } from "../shared/api.js";
 import { AgentQuestions } from "./agentQuestions.js";
+import { AgentTelemetry } from "./agentTelemetry.js";
 
 let mainWindow: BrowserWindow | null = null;
 let store: LocalStore;
@@ -43,6 +44,7 @@ else {
        its own request id, so the routing that lets an unopened session card show
        live work has to be held on this side and stamped on every event. */
     const agentRunSessions = new Map<string, string>();
+    const telemetry = new AgentTelemetry(store);
     /* The learner's own Exa key, read through the same keychain the provider keys
        live in. Held here rather than in the worker: the utility process has no
        keychain access, and a key that crossed into it would also cross into every
@@ -59,7 +61,7 @@ else {
        still between tool calls so a turn can ask several questions about it. */
     const visualizerTools = new VisualizerToolbox(visualizer, store, workspaces);
     const agentQuestions = new AgentQuestions(store);
-    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice, visualizerTools, agentQuestions));
+    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); telemetry.record(runId,value); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice, visualizerTools, agentQuestions));
     const sync=new CloudSyncService(store,auth,origin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
     /* Writes the checkpoints that make a session resumable on another machine.
        Nothing wrote them before, so `checkpoints` was empty on every install and
@@ -95,7 +97,7 @@ else {
     const signedIn = Boolean(await auth.account());
     const needsRestore = signedIn && !store.getProfile();
     const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : "app" as const;
-    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentQuestions, agentRunSessions, sync, checkpoints, restore, web, visualizer, window: () => mainWindow });
+    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentQuestions, agentRunSessions, telemetry, appVersion:app.getVersion(), sync, checkpoints, restore, web, visualizer, window: () => mainWindow });
     updates = new UpdateService(store, () => mainWindow, prepareToExit);
     updates.installIpc();
     installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); updates.start();

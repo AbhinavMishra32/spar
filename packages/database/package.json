@@ -1,6 +1,6 @@
 {
   "name": "@spar/database",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "type": "module",
   "exports": {
     ".": {

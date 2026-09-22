@@ -6,6 +6,7 @@ import { providerFromEnv } from "./live.js";
 import { renderComparison, renderGate, renderScorecard, renderSummary } from "./report.js";
 import { runSuite } from "./run.js";
 import { SCENARIOS } from "./scenarios.js";
+import { uploadEvalTelemetry } from "./telemetry.js";
 
 /**
  * The eval, from a terminal.
@@ -60,6 +61,8 @@ async function main(argv: string[]): Promise<number> {
       cassetteDir: flags.cassettes ?? join(repoRoot(), "apps/desktop/src/eval/cassettes"),
       ...(list(flags.scenario) ? { scenarios: list(flags.scenario)! } : {}),
     });
+    const telemetry=await uploadEvalTelemetry(result.traces,result.scorecards);
+    if(telemetry.configured)console.log(`Uploaded ${telemetry.uploaded} eval trace${telemetry.uploaded===1?"":"s"} to Spar telemetry.`);
     if (flags.json) { console.log(JSON.stringify(result.summary, null, 2)); return 0; }
     console.log(renderSummary(result.summary, { duplicates: result.duplicates }));
     console.log("");
@@ -75,6 +78,8 @@ async function main(argv: string[]): Promise<number> {
     const scenarios = list(flags.scenario);
 
     const candidate = await runSuite({ arm: "candidate", seeds: numbers(flags.seeds) ?? [1], outDir: out, ...(scenarios ? { scenarios } : {}) });
+    const telemetry=await uploadEvalTelemetry(candidate.traces,candidate.scorecards);
+    if(telemetry.configured)console.log(`Uploaded ${telemetry.uploaded} candidate trace${telemetry.uploaded===1?"":"s"} to Spar telemetry.`);
 
     console.log(`Preparing ${ref}…`);
     const worktree = prepareBaseline(ref);

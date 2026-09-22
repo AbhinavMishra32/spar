@@ -12,6 +12,13 @@ SPAR_EVAL_API_KEY=… SPAR_EVAL_MODEL=claude-opus-5 \
 pnpm --filter @spar/desktop eval run --mode replay
 ```
 
+When `SPAR_TELEMETRY_ORIGIN` and `SPAR_TELEMETRY_TOKEN` are set, `run` and the
+candidate side of `compare` upload every trace and deterministic score to Spar's
+backend. The premade observability UI groups them as one experiment while the
+JSON/JSONL artifacts here remain the reproducible source used by gates and
+diffs. The token is a normal bearer session for a dedicated eval account; model
+and observability provider secrets remain server-side.
+
 ## What it measures
 
 Spar's claim is not that it answers well. It is that it works out what a learner
@@ -135,12 +142,13 @@ simulation of a span of time and the store is supposed to believe it.
 
 ## What pi already gives us, and what it does not
 
-Spar runs on `@earendil-works/pi-agent-core`. It ships telemetry — OpenTelemetry
-spans for provider requests, with model, api, streaming, tokens — and a
+Spar runs on `@earendil-works/pi-agent-core`. It ships a vendor-neutral telemetry
+contract for provider requests, with model, API, streaming and token detail;
+Spar now adapts that contract into its durable OTLP trace alongside controller
+phases, host tools, retries and eval scores. Pi also ships a
 `harness/session/testing` entry point, which is storage conformance and storage
 benchmarks for pi's own session repository. Neither is an eval: there is no
 notion of a scenario, a verifier, a pass rate, a paired test or a regression
 gate, because those are claims about *your* product and pi has no way to know
-what yours is. The token counts here come from the provider's own reply via the
-cassette rather than from a second source, and if the run ever needs spans
-instead, pi's telemetry is the thing to read them from.
+what yours is. The token counts here and in observability come from the
+provider's own reply rather than from a second estimator.

@@ -1334,9 +1334,14 @@ export class LocalStore {
   setPreferredLanguage(language:Language){const current=this.getProfile();if(!current)return;this.saveProfile({...current,language});}
   getSetting<T>(key:string,fallback:T):T{const row=this.db.prepare("SELECT value FROM settings WHERE key=?").get(key) as {value:string}|undefined;return row?JSON.parse(row.value) as T:fallback;}
   setSetting(key:string,value:unknown){this.db.prepare("INSERT INTO settings VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").run(key,JSON.stringify(value),new Date().toISOString());}
-  pendingSync(limit=100){return this.db.prepare("SELECT id,kind,payload,attempts FROM sync_outbox ORDER BY created_at LIMIT ?").all(limit) as Array<{id:string;kind:string;payload:string;attempts:number}>;}
+  pendingSync(limit=100){return this.db.prepare("SELECT id,kind,payload,attempts FROM sync_outbox ORDER BY created_at,rowid LIMIT ?").all(limit) as Array<{id:string;kind:string;payload:string;attempts:number}>;}
   acknowledgeSync(ids:string[]){const remove=this.db.prepare("DELETE FROM sync_outbox WHERE id=?");this.db.transaction(()=>ids.forEach(id=>remove.run(id)))();}
   markSyncFailed(id:string){this.db.prepare("UPDATE sync_outbox SET attempts=attempts+1 WHERE id=?").run(id);}
+  /** Agent telemetry uses the same durable, authenticated outbox as learner
+   * state. Exposing only this narrow method keeps arbitrary callers from
+   * inventing sync kinds while still allowing the recorder to checkpoint a
+   * long run before the utility process or laptop can disappear. */
+  queueAgentTelemetry(kind:"agent-run-start"|"agent-trace-event"|"agent-run-finish",payload:unknown){this.enqueue(kind,payload);}
   /* ---- Restore ------------------------------------------------------------
      The pull half of sync. Everything here writes rows the cloud already has, so
      it differs from every other insert path in this class in two ways that

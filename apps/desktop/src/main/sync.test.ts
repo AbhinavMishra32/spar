@@ -120,6 +120,12 @@ describe("outbox routing", () => {
     });
   });
 
+  it("keeps telemetry start, events, and completion on one run resource",()=>{
+    expect(route("agent-run-start",{id:"r1"})).toEqual({path:"/v1/telemetry/runs/r1",method:"PUT",body:{id:"r1"}});
+    expect(route("agent-trace-event",{runId:"r1",sequence:2})).toEqual({path:"/v1/telemetry/runs/r1/events",method:"POST",body:{events:[{runId:"r1",sequence:2}]}});
+    expect(route("agent-run-finish",{id:"r1",status:"completed"})).toEqual({path:"/v1/telemetry/runs/r1",method:"PATCH",body:{id:"r1",status:"completed"}});
+  });
+
   /* A row left by an older build must drain rather than wedge the queue: `flush`
      acknowledges an unroutable item and moves on, and that depends on null here. */
   it("declines a kind it does not know", () => {

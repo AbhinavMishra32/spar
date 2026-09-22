@@ -5,6 +5,7 @@ import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { agentToolSchemas } from "./agentTools.js";
 import { piFastModeOptions, piModelFor, piReasoningSummaryForApi, piTransportForApi, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
 import type { NormalizedAgentStreamPart } from "./agentStream.js";
+import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 
 /**
  * Spar's agent loop, on pi's own runtime.
@@ -71,7 +72,7 @@ export function piAgentTools(
  * else is the request Spar was already making — the same transport pin for the
  * ChatGPT subscription route, the same reasoning directive, the same headers.
  */
-export function createTrainingAgent(input: PiProviderInput, systemPrompt: string, toolChoice: ToolChoiceRef): Agent {
+export function createTrainingAgent(input: PiProviderInput, systemPrompt: string, toolChoice: ToolChoiceRef, telemetryContext?:TelemetryContext): Agent {
   const transport = piTransportForApi(input.api);
   const reasoningSummary = piReasoningSummaryForApi(input.api);
   return new Agent({
@@ -81,6 +82,7 @@ export function createTrainingAgent(input: PiProviderInput, systemPrompt: string
     convertToLlm: (messages) => messages as Message[],
     streamFn: (model, context, options) => streamSimple(model, context, {
       ...options,
+      ...(telemetryContext?{telemetryContext}:{}),
       apiKey: input.apiKey,
       ...(transport ? { transport } : {}),
       ...(input.headers ? { headers: input.headers } : {}),

@@ -43,6 +43,13 @@
       "when": 1786025217867,
       "tag": "0005_stiff_paper_doll",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790076623609,
+      "tag": "0006_new_norman_osborn",
+      "breakpoints": true
     }
   ]
 }

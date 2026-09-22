@@ -13,6 +13,8 @@ import { syntheticChallengeAuthoringDoctrine } from "./challengeAuthoring.js";
 import { mergeQuestionChanges, objectRecord, parseRepairChanges } from "./challengeRepair.js";
 import { splitActionTitle, toolPayload } from "./toolPayload.js";
 import { sourceToolDefinitions, toolDefinitions, withActionTitle } from "./agentTools.js";
+import { telemetryValue } from "./telemetryPayload.js";
+import { WorkerTelemetryContext } from "./piTelemetry.js";
 
 const AGENT_MAX_STEPS = 96;
 const IDENTICAL_TOOL_CALL_LIMIT = 15;
@@ -283,6 +285,7 @@ async function callHostTool(
   const summary = summarizeToolInput(name, args);
   const payload = { input: toolPayload(name, args) };
   const titled = { ...summary, ...(actionTitle ? { actionTitle } : {}) };
+  parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "start", callId: id, actionTitle, input: telemetryValue(args) } });
   parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "start", callId: id, ...titled, ...payload } });
   try {
     let finalInput = args;
@@ -298,9 +301,11 @@ async function callHostTool(
     // challenge. Only a playable result reaches durable question storage.
     const published = !["create_question", "replace_current_question", "create_fallback_question", "assign_practice_problem"].includes(name) || isPlayableQuestion(value);
     const finalPayload = { input: toolPayload(name, finalInput) };
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok: published, input: telemetryValue(finalInput), output: telemetryValue(value) } });
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...titled, ...finalPayload, output: toolPayload(name, value) } });
     return value;
   } catch (error) {
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok: false, input: telemetryValue(args), error: error instanceof Error ? error.message : String(error), level: "ERROR" } });
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...titled, ...payload, output: toolPayload(name, { error: error instanceof Error ? error.message : String(error) }) } });
     throw error;
   }
@@ -586,6 +591,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       .replace(PUBLIC_CHALLENGE_RETRY_INSTRUCTION, PRIVATE_CHALLENGE_REPAIR_INSTRUCTION)
       .replaceAll("Training Agent", "Spar"),
     toolChoice,
+    new WorkerTelemetryContext(request.id),
   );
   try {
     const usage: unknown[] = [];
@@ -659,6 +665,9 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         ? stage.activeTools.slice(-1)
         : stage.activeTools;
       const prompt = orchestrationPrompt(request, outcomes, asked, step, protocolFailures.get(stageKey)?.detail, spent, evidenceBudget, interruptions);
+      const generationId = randomUUID();
+      const generationStartedAt = Date.now();
+      parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "generation", name: `pi-phase-${step}`, phase: step, callId: generationId, state: "start", model: request.payload.provider.model, provider: request.payload.provider.provider, toolChoice: stage.toolChoice, activeTools: asked, input: telemetryValue({ system: instructions(), prompt: prompt.text }) } });
       const phaseAbort = new AbortController();
       const timeout = () => phaseAbort.abort(new Error(`Spar's provider phase exceeded ${AGENT_PHASE_TIMEOUT_MS / 1_000} seconds.`));
       let phaseTimer = setTimeout(timeout, AGENT_PHASE_TIMEOUT_MS);
@@ -707,6 +716,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
           finishReason = piFinishReason(message.stopReason);
           const turn = piUsage(message.usage);
           usage.push(turn);
+          parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "generation", name: `pi-phase-${step}`, phase: step, callId: generationId, state: "end", model: request.payload.provider.model, provider: request.payload.provider.provider, finishReason, latencyMs: Date.now() - generationStartedAt, usage: turn, output: telemetryValue(message) } });
           /* pi's own total, not input plus output. Anthropic reports
              `input_tokens` with the cached prefix *taken out* — a 200k prompt
              served almost entirely from cache comes back as a few thousand

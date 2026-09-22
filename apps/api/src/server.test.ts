@@ -8,6 +8,7 @@ describe("API environment",()=>{
      no use for yet just to boot. */
   it("boots with neither Supabase nor S3 storage configured",()=>{const env=envSchema.parse({DATABASE_URL:"postgresql://localhost/db",AUTH_SECRET:"x".repeat(32)});expect(objectStorageConfigured(env)).toBe(false);});
   it("still refuses to boot in production without a mailer",()=>{expect(()=>envSchema.parse({NODE_ENV:"production",DATABASE_URL:"postgresql://localhost/db",AUTH_SECRET:"x".repeat(32)})).toThrow(/RESEND_API_KEY/);});
+  it("requires a complete Langfuse credential set",()=>{expect(()=>envSchema.parse({DATABASE_URL:"postgresql://localhost/db",AUTH_SECRET:"x".repeat(32),LANGFUSE_BASE_URL:"https://langfuse.example"})).toThrow(/LANGFUSE_PUBLIC_KEY/);});
   it("recognises either storage pair as configured",()=>{
     const supabase=envSchema.parse({DATABASE_URL:"postgresql://localhost/db",AUTH_SECRET:"x".repeat(32),SUPABASE_URL:"https://example.supabase.co",SUPABASE_SECRET_KEY:"x".repeat(20)});
     expect(objectStorageConfigured(supabase)).toBe(true);
