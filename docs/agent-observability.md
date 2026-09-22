@@ -34,6 +34,24 @@ The exporter uses the current OpenTelemetry ingestion endpoint and v4 ingestion
 header. Product runs appear under `production` (or the API's environment); eval
 runs appear under `experiment` and are grouped by suite, arm, scenario, and seed.
 
+## LangSmith
+
+Spar also supports LangSmith's native `/runs/batch` ingestion contract. Set the
+following on the API server; LangSmith becomes the exporter selected ahead of
+Langfuse and generic OTLP:
+
+```dotenv
+LANGSMITH_TRACING=true
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+LANGSMITH_API_KEY=lsv2_...
+LANGSMITH_PROJECT=pr-memorable-acceptance-75
+LANGSMITH_OTEL_ENABLED=true
+```
+
+The API converts the same root/child hierarchy into LangSmith chain, LLM, and
+tool runs with parent IDs, project, session, release, model, input/output,
+errors, and eval metadata. The key never reaches Electron or the worker.
+
 ## Phoenix or an OTEL collector
 
 Point the API at any OTLP/HTTP JSON traces endpoint instead:

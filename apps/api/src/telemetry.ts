@@ -16,7 +16,7 @@ export type StoredTraceEvent = {
 };
 export type StoredEvalScore = { id:string; name:string; source:string; value:unknown; comment:string|null; metadata:unknown; createdAt:Date };
 
-type OtlpConfig = { url:string; headers:Record<string,string> };
+type OtlpConfig = { kind:"otlp"; url:string; headers:Record<string,string> } | { kind:"langsmith"; url:string; apiKey:string; project:string };
 
 /** Exports a completed immutable trace. The database remains the durable source
  * of truth; OTLP is the presentation/analysis plane and may point at Langfuse,
@@ -28,6 +28,7 @@ export class AgentTraceExporter {
 
   async export(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEvalScore[]=[]){
     if(!this.config)return;
+    if(this.config.kind==="langsmith")return this.exportLangSmith(run,events,scores);
     const response=await this.request(this.config.url,{
       method:"POST",
       headers:{"content-type":"application/json",...this.config.headers},
@@ -36,9 +37,24 @@ export class AgentTraceExporter {
     });
     if(!response.ok)throw new Error(`Telemetry export failed (${response.status})`);
   }
+
+  private async exportLangSmith(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEvalScore[]){
+    const config=this.config;
+    if(!config||config.kind!=="langsmith")return;
+    const spans=traceSpans(run,events,scores);
+    const dotted=new Map<string,string>();
+    const ordered=(span:TraceSpan)=>`${compactTime(span.startTimeUnixNano)}${uuid(span.spanId)}`;
+    const root=spans.find((span)=>!span.parentSpanId)??spans[0];
+    if(root)dotted.set(root.spanId,ordered(root));
+    for(const span of spans){if(!dotted.has(span.spanId)){const parent=span.parentSpanId?dotted.get(span.parentSpanId):undefined;dotted.set(span.spanId,parent?`${parent}.${ordered(span)}`:ordered(span));}}
+    const post=spans.map((span)=>langSmithRun(span,run,config.project,dotted.get(span.spanId)!));
+    const response=await this.request(`${config.url.replace(/\/$/,"")}/runs/batch`,{method:"POST",headers:{"content-type":"application/json","x-api-key":config.apiKey},body:JSON.stringify({post,patch:[]}),signal:AbortSignal.timeout(15_000)});
+    if(!response.ok)throw new Error(`LangSmith telemetry export failed (${response.status})`);
+  }
 }
 
 function otlpConfig(env:Env):OtlpConfig|null{
+  if(env.LANGSMITH_API_KEY&&env.LANGSMITH_ENDPOINT&&env.LANGSMITH_PROJECT&&env.LANGSMITH_TRACING!=="false")return{kind:"langsmith",url:env.LANGSMITH_ENDPOINT,apiKey:env.LANGSMITH_API_KEY,project:env.LANGSMITH_PROJECT};
   if(env.TELEMETRY_OTLP_TRACES_URL){
     let headers:Record<string,string>={};
     if(env.TELEMETRY_OTLP_HEADERS){
@@ -46,16 +62,21 @@ function otlpConfig(env:Env):OtlpConfig|null{
       if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))throw new Error("TELEMETRY_OTLP_HEADERS must be a JSON object");
       headers=Object.fromEntries(Object.entries(parsed).map(([key,value])=>[key,String(value)]));
     }
-    return{url:env.TELEMETRY_OTLP_TRACES_URL,headers};
+    return{kind:"otlp",url:env.TELEMETRY_OTLP_TRACES_URL,headers};
   }
   if(env.LANGFUSE_BASE_URL&&env.LANGFUSE_PUBLIC_KEY&&env.LANGFUSE_SECRET_KEY){
     const auth=Buffer.from(`${env.LANGFUSE_PUBLIC_KEY}:${env.LANGFUSE_SECRET_KEY}`).toString("base64");
-    return{url:`${env.LANGFUSE_BASE_URL.replace(/\/$/,"")}/api/public/otel/v1/traces`,headers:{authorization:`Basic ${auth}`,"x-langfuse-ingestion-version":"4"}};
+    return{kind:"otlp",url:`${env.LANGFUSE_BASE_URL.replace(/\/$/,"")}/api/public/otel/v1/traces`,headers:{authorization:`Basic ${auth}`,"x-langfuse-ingestion-version":"4"}};
   }
   return null;
 }
 
 function otlpTrace(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEvalScore[]){
+  const spans=traceSpans(run,events,scores);
+  return{resourceSpans:[{resource:{attributes:attributes({"service.name":"spar-agent","service.version":run.appVersion??"unknown"})},scopeSpans:[{scope:{name:"ai.spar.agent-telemetry",version:"1"},spans}]}]};
+}
+type TraceSpan={traceId:string;spanId:string;parentSpanId?:string;name:string;startTimeUnixNano:string;endTimeUnixNano:string;attributes:Array<{key:string;value:Record<string,unknown>}>;status:{code:number;message?:string}};
+function traceSpans(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEvalScore[]):TraceSpan[]{
   const traceId=hex(run.id,32);
   const rootSpanId=hex(`${run.id}:root`,16);
   const shared=sharedAttributes(run);
@@ -82,8 +103,27 @@ function otlpTrace(run:StoredAgentRun,events:StoredTraceEvent[],scores:StoredEva
   }
   for(const event of singles)spans.push(childSpan(run,traceId,rootSpanId,`${event.kind}:${event.id}`,event,event,record(event.payload)));
   for(const score of scores)spans.push({traceId,spanId:hex(`${run.id}:score:${score.id}`,16),parentSpanId:rootSpanId,name:score.name,startTimeUnixNano:nanos(score.createdAt),endTimeUnixNano:nanos(score.createdAt),attributes:attributes({...shared,"langfuse.observation.type":"evaluator","langfuse.observation.input":json(run.output),"langfuse.observation.output":json({value:score.value,comment:score.comment}),"langfuse.observation.metadata.source":score.source,"langfuse.observation.metadata.score":json(score.metadata)}),status:{code:1}});
-  return{resourceSpans:[{resource:{attributes:attributes({"service.name":"spar-agent","service.version":run.appVersion??"unknown"})},scopeSpans:[{scope:{name:"ai.spar.agent-telemetry",version:"1"},spans}]}]};
+  return spans as TraceSpan[];
 }
+
+function langSmithRun(span:TraceSpan,run:StoredAgentRun,project:string,dottedOrder:string){
+  const type=attributeText(span,"langfuse.observation.type");
+  const input=attributeJson(span,"langfuse.observation.input");
+  const output=attributeJson(span,"langfuse.observation.output");
+  const metadata={sparRunId:run.id,sparOrigin:run.origin,sparMode:run.mode,provider:run.provider,model:run.model,release:run.commitSha??run.appVersion??"unknown",...(run.sessionId?{sessionId:run.sessionId}:{}),...(run.origin==="eval"?{experiment:true}:{}),...attributeMetadata(span)};
+  return{
+    id:uuid(span.spanId),name:span.name,run_type:type==="generation"?"llm":type==="tool"?"tool":"chain",
+    project_name:project,session_name:project,trace_id:uuid(span.traceId),dotted_order:dottedOrder,
+    ...(span.parentSpanId?{parent_run_id:uuid(span.parentSpanId)}:{}),
+    start_time:Number(BigInt(span.startTimeUnixNano)/1_000_000n),end_time:Number(BigInt(span.endTimeUnixNano)/1_000_000n),
+    inputs:{value:input},outputs:{value:output},extra:{metadata,invocation_params:type==="generation"?{model:attributeText(span,"langfuse.observation.model.name")}:{}},
+    ...(span.status.code===2?{error:span.status.message??"Trace operation failed"}:{}),tags:[run.origin,run.mode,run.provider],serialized:{name:span.name},
+  };
+}
+
+function attributeText(span:TraceSpan,key:string){const value=span.attributes.find((item)=>item.key===key)?.value;return typeof value?.stringValue==="string"?value.stringValue:"";}
+function attributeJson(span:TraceSpan,key:string){const value=attributeText(span,key);try{return value?JSON.parse(value):{}}catch{return{value};}}
+function attributeMetadata(span:TraceSpan){const metadata:Record<string,unknown>={};for(const item of span.attributes){if(item.key.startsWith("langfuse.observation.metadata.")){metadata[item.key.slice("langfuse.observation.metadata.".length)]=item.value.stringValue??item.value.intValue??item.value.doubleValue??item.value.boolValue;}}return metadata;}
 
 function childSpan(run:StoredAgentRun,traceId:string,parentSpanId:string,key:string,first:StoredTraceEvent,last:StoredTraceEvent,payload:Record<string,unknown>,suppliedSpanId?:string){
   const kind=first.kind==="generation"?"generation":first.kind==="tool"?"tool":first.kind==="span"?"span":"event";
@@ -105,3 +145,5 @@ function record(value:unknown):Record<string,unknown>{return value&&typeof value
 function json(value:unknown){try{return JSON.stringify(value);}catch{return JSON.stringify({serializationError:true});}}
 function nanos(value:Date){return String(BigInt(value.getTime())*1_000_000n);}
 function hex(seed:string,length:number){return createHash("sha256").update(seed).digest("hex").slice(0,length);}
+function uuid(value:string){const normalized=value.length>=32?value.slice(0,32):hex(value,32);return`${normalized.slice(0,8)}-${normalized.slice(8,12)}-4${normalized.slice(13,16)}-a${normalized.slice(17,20)}-${normalized.slice(20,32)}`;}
+function compactTime(nanoseconds:string){return new Date(Number(BigInt(nanoseconds)/1_000_000n)).toISOString().replace(/[-:.]/g,"");}

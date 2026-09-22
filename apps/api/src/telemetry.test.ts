@@ -19,6 +19,20 @@ describe("agent OTLP export",()=>{
     expect(spans[1]!.parentSpanId).toBe(spans[0]!.spanId);
     expect(spans[2]!.parentSpanId).toBe(spans[0]!.spanId);
   });
+
+  it("exports the same hierarchy as native LangSmith runs",async()=>{
+    let body:Record<string,unknown>|undefined;
+    const request=vi.fn(async(_url:unknown,init?:RequestInit)=>{body=JSON.parse(String(init?.body)) as Record<string,unknown>;return new Response(null,{status:204});}) as unknown as typeof fetch;
+    const env=envSchema.parse({DATABASE_URL:"postgresql://localhost/spar",AUTH_SECRET:"x".repeat(32),LANGSMITH_TRACING:"true",LANGSMITH_ENDPOINT:"https://api.smith.langchain.com",LANGSMITH_API_KEY:"lsv2_test",LANGSMITH_PROJECT:"pr-memorable-acceptance-75"});
+    const exporter=new AgentTraceExporter(env,request);
+    await exporter.export(run,[event(0,"generation","pi-phase-0","call-1","start",0),event(1,"generation","pi-phase-0","call-1","end",10,{model:"gpt-test",output:{content:"done"}})]);
+    expect(request).toHaveBeenCalledWith("https://api.smith.langchain.com/runs/batch",expect.objectContaining({headers:expect.objectContaining({"x-api-key":"lsv2_test"})}));
+    const posted=body?.post as Array<Record<string,unknown>>;
+    expect(posted).toHaveLength(2);
+    expect(posted[0]!.project_name).toBe("pr-memorable-acceptance-75");
+    expect(posted[1]!.parent_run_id).toBe(posted[0]!.id);
+    expect(posted[1]!.run_type).toBe("llm");
+  });
 });
 
 function event(sequence:number,kind:string,name:string,callId:string,state:string,ms:number,extra:Record<string,unknown>={}):StoredTraceEvent{return{id:`${sequence}`.padStart(8,"0")+"-0000-4000-a000-000000000000",sequence,kind,name,phase:0,callId,level:"DEFAULT",payload:{state,...extra},occurredAt:new Date(Date.parse("2026-01-01T00:00:00.000Z")+ms)};}
