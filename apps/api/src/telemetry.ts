@@ -110,14 +110,15 @@ function langSmithRun(span:TraceSpan,run:StoredAgentRun,project:string,dottedOrd
   const type=attributeText(span,"langfuse.observation.type");
   const input=attributeJson(span,"langfuse.observation.input");
   const output=attributeJson(span,"langfuse.observation.output");
-  const metadata={sparRunId:run.id,sparOrigin:run.origin,sparMode:run.mode,provider:run.provider,model:run.model,release:run.commitSha??run.appVersion??"unknown",...(run.sessionId?{sessionId:run.sessionId}:{}),...(run.origin==="eval"?{experiment:true}:{}),...attributeMetadata(span)};
+  const environment=process.env.NODE_ENV??"development";
+  const metadata={sparRunId:run.id,sparOrigin:run.origin,sparMode:run.mode,environment,provider:run.provider,model:run.model,release:run.commitSha??run.appVersion??"unknown",...(run.sessionId?{sessionId:run.sessionId}:{}),...(run.origin==="eval"?{experiment:true}:{}),...attributeMetadata(span)};
   return{
     id:uuid(span.spanId),name:span.name,run_type:type==="generation"?"llm":type==="tool"?"tool":"chain",
     project_name:project,session_name:project,trace_id:uuid(span.traceId),dotted_order:dottedOrder,
     ...(span.parentSpanId?{parent_run_id:uuid(span.parentSpanId)}:{}),
     start_time:Number(BigInt(span.startTimeUnixNano)/1_000_000n),end_time:Number(BigInt(span.endTimeUnixNano)/1_000_000n),
     inputs:{value:input},outputs:{value:output},extra:{metadata,invocation_params:type==="generation"?{model:attributeText(span,"langfuse.observation.model.name")}:{}},
-    ...(span.status.code===2?{error:span.status.message??"Trace operation failed"}:{}),tags:[run.origin,run.mode,run.provider],serialized:{name:span.name},
+    ...(span.status.code===2?{error:span.status.message??"Trace operation failed"}:{}),tags:[`spar-${environment}`,run.origin,run.mode,run.provider],serialized:{name:span.name},
   };
 }
 
