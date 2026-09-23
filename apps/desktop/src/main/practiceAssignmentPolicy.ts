@@ -1,4 +1,4 @@
-import { ESTABLISHED_DEVIATION, generatedDifficultyFor, generatedItemRating, itemRating, itemRatingFor, solveProbability, type AbilityStatus, type LearnerProfile, type Question, type Rating, seededConcept } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, itemRating, itemRatingFor, solveProbability, type AbilityStatus, type LearnerProfile, type Rating, seededConcept } from "@spar/domain";
 import type { PracticeDifficulty, PracticeSourceId } from "@spar/practice";
 import type { ConceptTagInput } from "./store.js";
 
@@ -26,14 +26,14 @@ export type PracticeCandidateSnapshot = {
 export type AssignmentCheck = { name: string; passed: boolean; detail: string };
 
 /**
- * Whether a problem the agent wants to set is one worth setting.
+ * Advisory evidence about a problem the agent wants to set.
  *
  * The level check used to read a difficulty word against a bucket keyed on the
  * ability's status, because a word was all Spar had: three provider labels
  * covering everything from a warm-up to a contest problem, matched against
  * "uncertain" or "developing". It is now the rating, against the problem's own
  * price on the same scale — see `trainingWindow`. The concept and rationale
- * checks are unchanged; they are about aim rather than level.
+ * comparisons are also advisory; the agent owns the teaching choice.
  */
 export function assessPracticeAssignment(input: {
   target: PracticeTargetSnapshot;
@@ -65,8 +65,7 @@ export function assessPracticeAssignment(input: {
       /* Stated in both currencies on purpose. The rating window is the actual
          rule and the agent has to be able to search against it, but "they would
          solve this about a third of the time" is the sentence that says what the
-         rule is for, and a refusal nobody can act on is a refusal that gets
-         worked around. */
+         comparison is for, while the agent remains free to choose this problem. */
       detail: levelPassed
         ? `Priced at ${price}, inside the ${window.minRating}-${window.maxRating} window for a ${target.abilityStatus} ability. They would solve it about ${chance}% of the time, which is the range a result is worth reading.`
         : `Priced at ${price}, outside the ${window.minRating}-${window.maxRating} window for a ${target.abilityStatus} ability — they would solve it about ${chance}% of the time, so ${price > window.maxRating ? "a failure would not say which gap it was" : "a pass would not say anything they have not already shown"}. Search that rating range instead.`,
@@ -93,66 +92,6 @@ export function assessPracticeAssignment(input: {
         : `The rationale does not connect this problem to "${target.specificGap}" or the desired evidence "${target.desiredEvidence}". Pick a better-fitting problem or explain the concrete connection.`,
     },
   ];
-}
-
-/**
- * Whether a challenge the agent wants to *write* is pitched at the learner.
- *
- * The sourced path has had this check since it existed; the generated one never
- * did, and the asymmetry was not a decision. A fetched problem was measured
- * against `trainingWindow` while a challenge Spar wrote itself was whatever word
- * the model felt like, which is how a learner rated 1635 ended up on a run of
- * 1200-priced drills — solving every one, teaching the rating nothing, and
- * staying provisional forever because a result you were always going to get
- * right carries no information.
- *
- * Two things keep this from flattening the nuance the window exists to provide:
- *
- * It only refuses when a better word is actually available. The four anchors are
- * absolute and stop at 1800, so above roughly 2000 the window sits entirely above
- * the top band and no word can satisfy it. Refusing there would be a gate nothing
- * can pass — the agent would rewrite forever and the learner would get nothing —
- * so the check stands down instead, and the nearest word is accepted.
- *
- * And it says which word to use rather than only that this one is wrong. A
- * refusal the agent cannot act on in one attempt is a refusal it works around.
- *
- * `graded` is the third, and it is the one that keeps a cold start a cold start.
- * Before the learner has finished anything there is no measurement here at all —
- * the window is computed off the seeded 1500 and a deviation that spans the whole
- * scale, and for an untested ability it lands at 1050-1200, which would refuse
- * exactly the accessible first rung the agent is told to open with. A window
- * inverted out of a rating nobody has earned is not evidence about the learner,
- * so it does not get to overrule the pedagogy. One graded result is enough to
- * change that: from then on the window is about them, and it is enforced.
- *
- * Deliberately not keyed on `provisional`. A learner stuck on under-priced drills
- * never becomes established — that is the failure this check exists to break —
- * so gating on establishment would make the fix wait on the bug it is fixing.
- */
-export function assessGeneratedLevel(input: {
-  difficulty: Question["difficulty"];
-  /** Whether Spar has graded this learner on anything yet. */
-  graded: boolean;
-  target: { rating: Rating; abilityStatus: AbilityStatus; experience?: LearnerProfile["experience"] };
-}): AssignmentCheck {
-  const window = trainingWindow(input.target);
-  if (!input.graded) {
-    return { name: "learner level", passed: true, detail: "Nothing has been graded yet, so the rating is the seeded one and carries no measurement to pitch against. Choose an accessible first rung on the goal's surface." };
-  }
-  const price = generatedItemRating(input.difficulty);
-  const chance = Math.round(solveProbability(input.target.rating, price) * 100);
-  const wanted = generatedDifficultyFor(window);
-  const reachable = generatedItemRating(wanted) >= window.minRating && generatedItemRating(wanted) <= window.maxRating;
-  const passed = (price >= window.minRating && price <= window.maxRating) || !reachable;
-
-  return {
-    name: "learner level",
-    passed,
-    detail: passed
-      ? `A ${input.difficulty} challenge is priced at ${price}, against a ${window.minRating}-${window.maxRating} window for a ${input.target.abilityStatus} ability. They would solve it about ${chance}% of the time.`
-      : `A ${input.difficulty} challenge is priced at ${price}, outside the ${window.minRating}-${window.maxRating} window for a ${input.target.abilityStatus} ability — they would solve it about ${chance}% of the time, so ${price > window.maxRating ? "a failure would not say which gap it was" : "a pass would not say anything they have not already shown"}. Write it as ${wanted} instead, which is priced at ${generatedItemRating(wanted)}.`,
-  };
 }
 
 /**
@@ -195,9 +134,8 @@ const EXPERIENCE_CEILING: Record<LearnerProfile["experience"], number> = {
 /**
  * The range of problem difficulty worth setting, in item-rating points.
  *
- * Inverted out of the same curve that scores the result afterwards, so the gate
- * and the rating cannot drift apart: a problem admitted here as "about even
- * money" is one the rating system will also treat as even money when it arrives.
+ * Inverted out of the same curve that scores the result afterwards, so the
+ * advisory comparison and the rating cannot drift apart.
  * It widens on its own while the rating is provisional, because `itemRatingFor`
  * flattens for an uncertain learner — when Spar does not know where somebody is,
  * more problems are plausibly the right one.
@@ -205,8 +143,8 @@ const EXPERIENCE_CEILING: Record<LearnerProfile["experience"], number> = {
  * The profile's experience caps the top of it, and only until the rating is
  * established. Every learner starts at the same provisional 1500 whatever they
  * said about themselves, and handing a beginner a 1500-rated problem on the
- * strength of an assumption Spar made about them is the one thing this check
- * exists to prevent. Once the deviation has come down the cap is gone: what they
+ * strength of an assumption Spar made about them is a reason to check the level
+ * carefully. Once the deviation has come down the cap is gone: what they
  * said they were stops mattering the moment there is evidence of what they are.
  */
 export function trainingWindow(input: { rating: Rating; abilityStatus: AbilityStatus; experience?: LearnerProfile["experience"] }) {

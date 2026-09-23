@@ -25,7 +25,7 @@ export type QuestionAnswer = {
 export class AgentQuestions {
   private readonly waiting = new Map<string, WaitingQuestion>();
 
-  constructor(private readonly store: LocalStore) {}
+  constructor(private readonly store: LocalStore, private readonly onPending?: (sessionId: string) => void) {}
 
   ask(sessionId: string, input: AskUserQuestionInput): Promise<QuestionAnswer> | QuestionAnswer {
     const asked = this.store.setPendingIntake(sessionId, input);
@@ -33,7 +33,9 @@ export class AgentQuestions {
       return { pending: false, status: "answered", request: asked.request, answer: asked.answer ?? "" };
     }
     if (this.waiting.has(sessionId)) throw new Error("This session is already waiting for an answer.");
-    return new Promise<QuestionAnswer>((resolve) => this.waiting.set(sessionId, { request: asked.request, resolve }));
+    const answer = new Promise<QuestionAnswer>((resolve) => this.waiting.set(sessionId, { request: asked.request, resolve }));
+    this.onPending?.(sessionId);
+    return answer;
   }
 
   answer(sessionId: string, answer: string): { resumed: boolean; request: AskUserQuestionRequest } {

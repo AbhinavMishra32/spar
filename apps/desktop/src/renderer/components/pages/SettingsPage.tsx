@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
+import { BrainCircuit, ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type BaselineState, type Language } from "@spar/domain";
 import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -30,21 +30,22 @@ import { SparWordmark } from "../common/SparWordmark";
 import { AboutSpar } from "../settings/AboutSpar";
 import { PracticeSourceGroup } from "../settings/PracticeSource";
 import { UpdateSettings } from "../settings/UpdateSettings";
+import { UsageSettings } from "../settings/UsageSettings";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
-type SettingsSection = "account" | "models" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
+type SettingsSection = "account" | "models" | "usage" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
 type NavItem = SidebarGroup<SettingsSection>["items"][number];
 
 /**
- * Seven destinations under three headings.
+ * Eight destinations under three headings.
  *
- * Seven unlabelled rows floating at the top of a tall empty column read as an
- * unfinished screen, and the fix is to say what the seven are rather than to
- * invent an eighth. The division is the honest one: two pages about this copy
- * of Spar and the person signed into it, three about the machinery that reads
- * and teaches, two about what is kept.
+ * Eight unlabelled rows floating at the top of a tall empty column read as an
+ * unfinished screen, and the fix is to say what the eight are rather than to
+ * invent a ninth. The division is the honest one: two pages about this copy of
+ * Spar and the person signed into it, four about the machinery that reads and
+ * teaches and what it spends, two about what is kept.
  */
 const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
   {
@@ -58,6 +59,7 @@ const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
     label: "Training",
     items: [
       { id: "models", label: "Models", icon: BrainCircuit, sections: ["Providers", "Agent", "Web search"] },
+      { id: "usage", label: "Usage", icon: ChartColumn, sections: ["Overview", "Plan limits", "Models", "Sessions"] },
       { id: "learning", label: "Learning", icon: Settings2, sections: ["Baseline", "Training preferences"] },
       { id: "connections", label: "Connections", icon: Link2, sections: ["Practice sources"] },
     ],
@@ -825,6 +827,8 @@ export function SettingsPage({
         <Group label="Web search">
           <WebSearchRow api={api} />
         </Group></>}
+
+        {section === "usage" && <UsageSettings api={api} providers={inventory?.providers ?? []} />}
 
         {section === "connections" && <Group label="Practice sources">
           <PracticeSourceGroup api={api} />

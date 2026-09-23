@@ -14,6 +14,7 @@ import { closeOff, FadedScroll, RawPayload } from "./ToolPayload";
 import { Snippet } from "./Snippet";
 import { readAttempt } from "./attemptReport";
 import { AttemptReadView } from "./AttemptRead";
+import { questionExchange } from "./questionExchange";
 
 /**
  * What a tool call actually did, drawn rather than dumped.
@@ -107,14 +108,12 @@ export function ToolDetail({
        Construct's own. */
     case "ask_user_question":
     case "ask-user-question": {
-      const question = text(args?.question);
-      if (!question) break;
+      const exchanges = questionExchange(input, output);
+      if (!exchanges.length) break;
       return (
-        <Exchange
-          answer={answerText(output)}
-          choices={Array.isArray(args?.choices) ? (args.choices as unknown[]).map(text).filter(Boolean) : []}
-          question={question}
-        />
+        <div className="space-y-4">
+          {exchanges.map((exchange, index) => <Exchange key={`${index}-${exchange.question}`} {...exchange} />)}
+        </div>
       );
     }
 
@@ -476,7 +475,7 @@ function Result({ row }: { row: Record<string, unknown> }) {
 /** A short aside in the detail panel: an Exa error, an unset key, an empty
  *  result. Said in a sentence, where the raw payload used to be. */
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pb-2 text-[length:inherit] leading-[1.5] text-muted-foreground/85">{children}</p>;
+  return <p className="px-2.5 py-2 text-[length:inherit] leading-[1.5] text-muted-foreground/85">{children}</p>;
 }
 
 /** The results out of a `WebSearchResult`, whichever shape the turn stored —
@@ -938,35 +937,19 @@ export function Exchange({ answer, choices, question }: { answer: string; choice
         </ul>
       )}
 
-      {/* The answer as a reply to the line above it: one turn glyph, then what
-          was said. A rule down its left made it a quotation of someone else's
-          text, which is exactly backwards — this is the only thing in the
-          transcript the reader wrote. */}
+      {/* The answer sits where a learner message sits in the thread. This is a
+          record of what they chose, so it should be readable without opening
+          JSON or mistaking the reply for another agent step. */}
       {answer ? (
-        <p className="mt-1 flex min-w-0 items-start gap-1.5 text-thread leading-[1.55] text-muted-foreground">
-          <CornerDownRight aria-hidden className="mt-[0.3em] size-3.5 shrink-0 text-muted-foreground/60" strokeWidth={2} />
-          <span className="min-w-0 whitespace-pre-wrap">
+        <div className="mt-2 flex min-w-0 justify-end">
+          <p className="max-w-[85%] min-w-0 rounded-[calc(1rem*1.4)] bg-secondary px-3 py-2 text-thread leading-[1.5] text-foreground whitespace-pre-wrap [corner-shape:superellipse(1.4)]">
             <Inline text={answer} />
-          </span>
-        </p>
+          </p>
+        </div>
       ) : (
         /* The row is open while the card below it is still waiting. */
         <p className="mt-1 text-thread text-muted-foreground/70">Waiting for your answer.</p>
       )}
     </div>
   );
-}
-
-/** The learner's answer as they typed it. The worker stores tool results as
- *  strings, and a string result arrives JSON-quoted; anything else is already
- *  the text. */
-function answerText(output: string): string {
-  const body = output.trim();
-  if (!body.startsWith('"')) return body;
-  try {
-    const parsed: unknown = JSON.parse(body);
-    return typeof parsed === "string" ? parsed : body;
-  } catch {
-    return body;
-  }
 }

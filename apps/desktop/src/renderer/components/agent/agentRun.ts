@@ -1,4 +1,5 @@
-import type { AgentActivityFile, AgentStreamEvent } from "../../../shared/api";
+import type { AgentActivityFile, AgentStreamEvent, ChallengeDraft, ToolStage } from "../../../shared/api";
+import { isAnsweredQuestion } from "./questionExchange";
 
 export type ToolPhase = "running" | "done" | "error";
 
@@ -22,9 +23,17 @@ export type RunPart =
        *  Redacted in the worker, so what is here is what may be shown. */
       input: string;
       output: string;
+      /** The observable stages of a multi-stage call — the private reviewer, each
+       *  compile, each repair — in the order they ran. Empty for every other tool. */
+      stages: ToolStage[];
       startedAt: number;
       endedAt?: number;
+      /** Took the place of a draft row that was already on screen, drawn to
+       *  the same geometry — so it arrives without an entrance of its own. */
+      handoff?: true;
     }
+  /** A challenge design the model is still writing, before its call exists. */
+  | { kind: "draft"; id: string; draft: ChallengeDraft; startedAt: number }
   | { kind: "status"; id: string; body: string }
   | { kind: "error"; id: string; body: string };
 
@@ -138,6 +147,19 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       return { ...run, parts, status: "streaming" };
     }
 
+    case "draft": {
+      if (!event.draft) return run;
+      const id = `${event.runId}-d${event.draft.key}`;
+      const index = parts.findIndex((part) => part.kind === "draft" && part.id === id);
+      if (index >= 0) {
+        parts[index] = { ...(parts[index] as Extract<RunPart, { kind: "draft" }>), draft: event.draft };
+        return { ...run, parts, status: "streaming" };
+      }
+      closeReasoning(parts, true);
+      parts.push({ kind: "draft", id, draft: event.draft, startedAt: Date.now() });
+      return { ...run, parts, status: "streaming" };
+    }
+
     case "tool": {
       const tool = event.tool ?? "tool";
       const id = event.callId ?? `${event.runId}-x${parts.length}`;
@@ -158,12 +180,28 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
           ...(event.actionTitle ? { actionTitle: event.actionTitle } : {}),
           ...(event.input ? { input: event.input } : {}),
           output: event.output ?? existing.output,
+          stages: event.stages ?? existing.stages,
           endedAt: Date.now(),
         };
         return { ...run, parts };
       }
 
+      if (event.phase === "progress") {
+        if (index < 0) return run;
+        const existing = parts[index] as Extract<RunPart, { kind: "tool" }>;
+        parts[index] = {
+          ...existing,
+          detail: event.detail ?? existing.detail,
+          ...(event.actionTitle ? { actionTitle: event.actionTitle } : {}),
+          ...(event.stage ? { stages: upsertStage(existing.stages, event.stage) } : {}),
+        };
+        return { ...run, parts, status: "streaming" };
+      }
+
       if (index >= 0) return run;
+      /* The call the draft was the arguments of. Its row takes the draft's
+         place: the same files, now under the stages that validate them. */
+      const drafted = tool === "create_question" || tool === "replace_current_question" ? dropDrafts(parts) : undefined;
       parts.push({
         kind: "tool",
         id,
@@ -175,13 +213,26 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
         files: event.files ?? [],
         input: event.input ?? "",
         output: event.output ?? "",
-        startedAt: Date.now(),
+        /* The draft row it replaces already showed the design being drafted,
+           so the call starts with that stage settled rather than empty: the
+           worker's own "Drafted" note is `stage-0` and lands on it in place. */
+        stages: drafted ? [draftedStage(drafted)] : [],
+        startedAt: drafted?.startedAt ?? Date.now(),
+        ...(drafted ? { handoff: true as const } : {}),
       });
       return { ...run, parts, status: "streaming" };
     }
 
     case "status": {
-      const body = event.detail ?? event.text ?? "";
+      let body = event.detail ?? event.text ?? "";
+      if (body.startsWith("tool-error:")) {
+        const [, tool, ...fault] = body.split(":");
+        const reason = fault.join(":").split("Receive a single")[0]!.replace(/\s+/g, " ").trim();
+        body = `${tool === "create_question" || tool === "replace_current_question" ? "Challenge draft rejected" : "Tool call rejected"}: ${reason.slice(0, 200)}`;
+        /* A design the schema refused never becomes a call, so its draft row
+           would otherwise stay on screen still claiming to be written. */
+        if (tool === "create_question" || tool === "replace_current_question") dropDrafts(parts);
+      }
       /* Read before the noise filter drops it. `active:none` is the phase that
          has no tools to call, which is the phase that answers. */
       const steered = /^steered:(\d+)$/.exec(body);
@@ -191,7 +242,20 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       }
       // Provider protocol chatter belongs in the raw trace, not the transcript.
       if (!body || isProtocolNoise(body)) return run;
-      if (last?.kind === "status") parts[parts.length - 1] = { ...last, body };
+      if (body.startsWith("Drafting challenge input")) {
+        let recentStatus = -1;
+        for (let index = parts.length - 1; index >= 0; index -= 1) {
+          if (parts[index]?.kind === "status") { recentStatus = index; break; }
+        }
+        if (recentStatus >= 0) {
+          const previous = parts[recentStatus];
+          if (previous?.kind === "status" && previous.body.startsWith("Drafting challenge input")) {
+            parts[recentStatus] = { ...previous, body };
+            return { ...run, parts, status: "streaming" };
+          }
+        }
+      }
+      if (last?.kind === "status" && !last.body.startsWith("Challenge draft rejected")) parts[parts.length - 1] = { ...last, body };
       else parts.push({ kind: "status", id: `${event.runId}-s${parts.length}`, body });
       return { ...run, parts, status: "streaming" };
     }
@@ -213,6 +277,32 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
  * the collapsed row can say how long it thought. Mutates in place when asked, for
  * the caller that is already building the next part onto the same array.
  */
+function upsertStage(stages: ToolStage[], stage: ToolStage): ToolStage[] {
+  const index = stages.findIndex((entry) => entry.id === stage.id);
+  if (index < 0) return [...stages, stage];
+  const next = [...stages];
+  next[index] = stage;
+  return next;
+}
+
+/** Removes the draft rows, returning the newest, whose place a call takes. */
+function dropDrafts(parts: RunPart[]): Extract<RunPart, { kind: "draft" }> | undefined {
+  let newest: Extract<RunPart, { kind: "draft" }> | undefined;
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (part?.kind !== "draft") continue;
+    newest ??= part;
+    parts.splice(index, 1);
+  }
+  return newest;
+}
+
+function draftedStage(part: Extract<RunPart, { kind: "draft" }>): ToolStage {
+  const lines = part.draft.files.reduce((total, file) => total + file.lines, 0);
+  const now = Date.now();
+  return { id: "stage-0", kind: "draft", verb: "Drafted", subject: part.draft.title ?? "challenge", state: "done", startedAt: part.startedAt, endedAt: now, ...(lines ? { badge: `+${lines}` } : {}) };
+}
+
 function closeReasoning(parts: RunPart[], inPlace = false): RunPart[] {
   const target = inPlace ? parts : [...parts];
   const index = target.length - 1;
@@ -237,7 +327,8 @@ export type GroupedPart =
    *  the same reason a published challenge is: it is something the learner is
    *  meant to look at, not a record of the agent having looked at something. */
   | { kind: "explained-trace"; id: string; part: ToolPart }
-  | { kind: "lesson"; id: string; part: ToolPart };
+  | { kind: "lesson"; id: string; part: ToolPart }
+  | { kind: "question-exchange"; id: string; part: ToolPart };
 
 /**
  * Rows, in the order everything happened.
@@ -296,7 +387,11 @@ function bindThinking(rows: GroupedPart[]): GroupedPart[] {
 
 export function groupParts(parts: RunPart[]): GroupedPart[] {
   const grouped: GroupedPart[] = [];
-  for (const part of parts) {
+  for (const [index, part] of parts.entries()) {
+    /* The provider announces a call while it is still writing its arguments.
+       Keep that status during the wait, then let the call itself take its place.
+       This also lets the thinking immediately before it bind to the actual call. */
+    if (part.kind === "status" && (isToolPreparationStatus(part.body, parts[index + 1]) || isDraftPreparation(part.body, parts[index + 1]))) continue;
     // A published challenge is the outcome of the turn rather than another step
     // toward it, and leaving it among the retrieval rows is what made it vanish.
     if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
@@ -311,6 +406,7 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
     /* A lesson is the turn's other handover, so it gets the other card. Only a
        filed one: a rejected lesson is a failed call and reads as one. */
     else if (part.kind === "tool" && isLessonPublished(part)) grouped.push({ kind: "lesson", id: `lesson-${part.id}`, part });
+    else if (part.kind === "tool" && isQuestionExchange(part)) grouped.push({ kind: "question-exchange", id: `question-${part.id}`, part });
     /* Every other call is its own row.
        Consecutive calls used to be folded into one collapsed group under a
        synthesized summary — "Reviewed past attempts, checked concept evidence, and
@@ -344,6 +440,17 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
     else grouped.push(part);
   }
   return bindThinking(grouped);
+}
+
+function isToolPreparationStatus(body: string, next: RunPart | undefined): boolean {
+  if (next?.kind !== "tool") return false;
+  if (body === `Preparing ${next.tool.replaceAll("_", " ")}`) return true;
+  return body.startsWith("Drafting challenge input")
+    && (next.tool === "create_question" || next.tool === "replace_current_question");
+}
+
+function isDraftPreparation(body: string, next: RunPart | undefined): boolean {
+  return next?.kind === "draft" && body.startsWith("Drafting challenge input");
 }
 
 function last(grouped: GroupedPart[]): GroupedPart | undefined {
@@ -493,6 +600,16 @@ export function isPublishedArtifact(part: RunPart): boolean {
   return isChallengePublished(part) || isLessonPublished(part);
 }
 
+export function isQuestionExchange(part: RunPart): boolean {
+  return part.kind === "tool" && part.phase === "done"
+    && (part.tool === "ask_user_question" || part.tool === "ask-user-question")
+    && isAnsweredQuestion(part.input, part.output);
+}
+
+export function isThreadOutcome(part: RunPart): boolean {
+  return isPublishedArtifact(part) || isQuestionExchange(part);
+}
+
 /** What a card away from the transcript says about a turn that is under way. */
 export type RunActivity = {
   state: "working" | "failed";
@@ -587,5 +704,5 @@ export function diffTotals(files: AgentActivityFile[]): { added: number; removed
 
 /** Keep successful artifacts outside the work fold, including older runs without a final phase. */
 export function publishedRunArtifacts(run: AgentRun): RunPart[] {
-  return run.parts.slice(0, run.finalFrom ?? run.parts.length).filter(isPublishedArtifact);
+  return run.parts.slice(0, run.finalFrom ?? run.parts.length).filter(isThreadOutcome);
 }

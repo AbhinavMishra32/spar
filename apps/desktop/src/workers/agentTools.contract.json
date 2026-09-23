@@ -73,7 +73,7 @@
     }
   },
   "assign_practice_problem": {
-    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Prefer this over create_question whenever a real problem genuinely lands on the target you chose: it carries the provider's judge, calibrated difficulty, and the learner's history when that provider is connected. Read it first, and check its rating against the context's learnerStanding.setProblemsRated — the host refuses a problem priced outside that range, and says what the range was. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe its contents in your reply because the learner is about to read it.",
+    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. Use learnerStanding.setProblemsRated as context, then decide what level serves this step. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
     "inputSchema": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
@@ -85,7 +85,7 @@
           "type": "string"
         },
         "concepts": {
-          "description": "What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and it must name the gap the target describes — not merely the topic the source files the problem under.",
+          "description": "What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and names what this problem actually exercises. A prerequisite or transfer problem can use a different concept from the current target; explain the connection in your reply.",
           "items": {
             "additionalProperties": false,
             "properties": {
@@ -170,7 +170,7 @@
           "type": "string"
         },
         "why": {
-          "description": "One or two sentences: why this specific problem discriminates what is still uncertain about this learner. This is stored with the challenge and is what a later turn reads to know what you were testing.",
+          "description": "One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns.",
           "maxLength": 400,
           "minLength": 20,
           "type": "string"
@@ -222,118 +222,66 @@
     }
   },
   "create_question": {
-    "description": "Compile and validate a complete question from the active target. All paths are relative and the reference implementation must replace starter implementation files.",
+    "description": "Review fit against recent solved work, then compile and validate a complete question. A new trainingTarget can be supplied with the candidate when the existing one is stale. The host repairs recoverable validation failures within this call. All paths are relative and the reference implementation must replace starter implementation files.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "accidentalDifficulty": {
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 3,
-          "type": "array"
-        },
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "concepts": {
-          "description": "What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at.",
+          "type": "array",
           "items": {
-            "additionalProperties": false,
+            "type": "object",
             "properties": {
+              "slug": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 60,
+                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "description": "only needed for a concept Spar has not seen before"
+              },
               "kind": {
+                "type": "string",
                 "enum": [
                   "dsa",
                   "engineering",
                   "craft"
-                ],
-                "type": "string"
+                ]
               },
               "parentSlug": {
-                "description": "the area a new sub-concept belongs under, e.g. sliding-window",
-                "maxLength": 60,
+                "type": "string",
                 "minLength": 2,
-                "type": "string"
+                "maxLength": 60,
+                "description": "the area a new sub-concept belongs under, e.g. sliding-window"
               },
               "role": {
-                "default": "supporting",
+                "type": "string",
                 "enum": [
                   "primary",
                   "supporting"
                 ],
-                "type": "string"
-              },
-              "slug": {
-                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation",
-                "maxLength": 60,
-                "minLength": 2,
-                "type": "string"
-              },
-              "title": {
-                "description": "only needed for a concept Spar has not seen before",
-                "maxLength": 80,
-                "minLength": 2,
-                "type": "string"
+                "default": "supporting"
               }
             },
             "required": [
               "slug"
             ],
-            "type": "object"
+            "additionalProperties": false
           },
+          "minItems": 1,
           "maxItems": 5,
-          "minItems": 1,
-          "type": "array"
+          "description": "What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."
         },
-        "difficulty": {
-          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Write to context.learnerStanding.writeProblemsAt, which is the word that lands in the window this ability's status calls for — the host checks this the same way it checks a problem you fetch, and rejects a challenge pitched outside it. A challenge they would almost certainly solve teaches nothing when they solve it.",
-          "enum": [
-            "foundation",
-            "developing",
-            "proficient",
-            "advanced"
-          ],
-          "type": "string"
-        },
-        "expectedFailureSignatures": {
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "hiddenTests": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "The grader. It must run at least twenty-four cases, which means a generated sweep and not a longer list typed out: loop over inputs from a seeded pseudo-random generator, compute each expected answer with a brute-force oracle written inside the test file itself, and emit one verdict line per case whose name contains the actual input. Keep your targeted cases for the known misconceptions alongside it. On failure every case must print its input, expected and actual — the learner cannot see this file, so a failure that does not say what it ran leaves them guessing.",
-          "type": "object"
-        },
-        "kind": {
-          "enum": [
-            "function",
-            "module",
-            "repair",
-            "extension",
-            "repository"
-          ],
-          "type": "string"
-        },
-        "knownIncorrectFiles": {
-          "items": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "minItems": 1,
-          "type": "array"
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "description": "A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."
         },
         "language": {
+          "type": "string",
           "enum": [
             "javascript",
             "typescript",
@@ -345,55 +293,144 @@
             "rust",
             "swift",
             "ruby"
-          ],
-          "type": "string"
+          ]
         },
-        "referenceFiles": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
+        "kind": {
+          "type": "string",
+          "enum": [
+            "function",
+            "module",
+            "repair",
+            "extension",
+            "repository"
+          ]
+        },
+        "difficulty": {
+          "type": "string",
+          "enum": [
+            "foundation",
+            "developing",
+            "proficient",
+            "advanced"
+          ],
+          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Use context.learnerStanding.writeProblemsAt as evidence, then choose the level that serves your teaching purpose. Explain a surprising choice when it matters."
         },
         "requiresComplexityAnalysis": {
-          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence.",
-          "type": "boolean"
-        },
-        "runCommand": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "solutionRequirements": {
-          "description": "How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely.",
-          "items": {
-            "maxLength": 160,
-            "minLength": 4,
-            "type": "string"
-          },
-          "maxItems": 4,
-          "type": "array"
-        },
-        "starterFiles": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
+          "type": "boolean",
+          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence."
         },
         "statement": {
-          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details.",
+          "type": "string",
           "minLength": 30,
-          "type": "string"
+          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details."
         },
-        "title": {
-          "description": "A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category.",
-          "minLength": 3,
-          "type": "string"
+        "starterFiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "referenceFiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "visibleTests": {
+          "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here.",
-          "type": "object"
+          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here."
+        },
+        "hiddenTests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The unseen grading contract. For a function, execute at least twenty-four cases, preferably a seeded sweep checked against a simple oracle. For a module, execute at least twelve cases. For a repair, extension, or repository task, execute at least eight meaningful scenarios covering the defect, boundaries, and interactions. Emit one verdict per case and show input, expected, and actual on failure. Choose the tests that prove this task, rather than padding case counts."
+        },
+        "knownIncorrectFiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "minItems": 1
+        },
+        "runCommand": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A descriptive command for the challenge. The host uses its fixed language runner for validation and learner tests; this value cannot select pytest or change execution. Python test files execute directly with python3 and must call any defined test functions themselves."
+        },
+        "accidentalDifficulty": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3
+        },
+        "expectedFailureSignatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "solutionRequirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 160
+          },
+          "maxItems": 4,
+          "description": "How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500,
+          "description": "Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."
+        },
+        "trainingTarget": {
+          "type": "object",
+          "properties": {
+            "ability": {
+              "type": "string",
+              "minLength": 2
+            },
+            "specificGap": {
+              "type": "string",
+              "minLength": 8
+            },
+            "desiredEvidence": {
+              "type": "string",
+              "minLength": 8
+            },
+            "avoidTesting": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "ability",
+            "specificGap",
+            "desiredEvidence",
+            "avoidTesting"
+          ],
+          "additionalProperties": false,
+          "description": "Only when this candidate changes what the learner is practicing: persist a corrected evidence target with the question. Use this when the previous target is stale or contradicted by a passed challenge. Omit it to retain the current target."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
@@ -412,9 +449,11 @@
         "runCommand",
         "accidentalDifficulty",
         "expectedFailureSignatures",
+        "why",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "open_visualizer": {
@@ -1078,118 +1117,66 @@
     }
   },
   "replace_current_question": {
-    "description": "Compile a validated replacement for the active challenge while preserving its attempt, tests, and replacement lineage in history.",
+    "description": "Review fit and compile a validated replacement for the active challenge while preserving its attempt and replacement lineage. Supply a corrected trainingTarget when the existing one no longer describes this task.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "accidentalDifficulty": {
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 3,
-          "type": "array"
-        },
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "concepts": {
-          "description": "What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at.",
+          "type": "array",
           "items": {
-            "additionalProperties": false,
+            "type": "object",
             "properties": {
+              "slug": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 60,
+                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "description": "only needed for a concept Spar has not seen before"
+              },
               "kind": {
+                "type": "string",
                 "enum": [
                   "dsa",
                   "engineering",
                   "craft"
-                ],
-                "type": "string"
+                ]
               },
               "parentSlug": {
-                "description": "the area a new sub-concept belongs under, e.g. sliding-window",
-                "maxLength": 60,
+                "type": "string",
                 "minLength": 2,
-                "type": "string"
+                "maxLength": 60,
+                "description": "the area a new sub-concept belongs under, e.g. sliding-window"
               },
               "role": {
-                "default": "supporting",
+                "type": "string",
                 "enum": [
                   "primary",
                   "supporting"
                 ],
-                "type": "string"
-              },
-              "slug": {
-                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation",
-                "maxLength": 60,
-                "minLength": 2,
-                "type": "string"
-              },
-              "title": {
-                "description": "only needed for a concept Spar has not seen before",
-                "maxLength": 80,
-                "minLength": 2,
-                "type": "string"
+                "default": "supporting"
               }
             },
             "required": [
               "slug"
             ],
-            "type": "object"
+            "additionalProperties": false
           },
+          "minItems": 1,
           "maxItems": 5,
-          "minItems": 1,
-          "type": "array"
+          "description": "What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."
         },
-        "difficulty": {
-          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Write to context.learnerStanding.writeProblemsAt, which is the word that lands in the window this ability's status calls for — the host checks this the same way it checks a problem you fetch, and rejects a challenge pitched outside it. A challenge they would almost certainly solve teaches nothing when they solve it.",
-          "enum": [
-            "foundation",
-            "developing",
-            "proficient",
-            "advanced"
-          ],
-          "type": "string"
-        },
-        "expectedFailureSignatures": {
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "hiddenTests": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "The grader. It must run at least twenty-four cases, which means a generated sweep and not a longer list typed out: loop over inputs from a seeded pseudo-random generator, compute each expected answer with a brute-force oracle written inside the test file itself, and emit one verdict line per case whose name contains the actual input. Keep your targeted cases for the known misconceptions alongside it. On failure every case must print its input, expected and actual — the learner cannot see this file, so a failure that does not say what it ran leaves them guessing.",
-          "type": "object"
-        },
-        "kind": {
-          "enum": [
-            "function",
-            "module",
-            "repair",
-            "extension",
-            "repository"
-          ],
-          "type": "string"
-        },
-        "knownIncorrectFiles": {
-          "items": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "minItems": 1,
-          "type": "array"
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "description": "A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."
         },
         "language": {
+          "type": "string",
           "enum": [
             "javascript",
             "typescript",
@@ -1201,60 +1188,149 @@
             "rust",
             "swift",
             "ruby"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "function",
+            "module",
+            "repair",
+            "extension",
+            "repository"
+          ]
+        },
+        "difficulty": {
+          "type": "string",
+          "enum": [
+            "foundation",
+            "developing",
+            "proficient",
+            "advanced"
           ],
-          "type": "string"
-        },
-        "reason": {
-          "maxLength": 500,
-          "minLength": 3,
-          "type": "string"
-        },
-        "referenceFiles": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
+          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Use context.learnerStanding.writeProblemsAt as evidence, then choose the level that serves your teaching purpose. Explain a surprising choice when it matters."
         },
         "requiresComplexityAnalysis": {
-          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence.",
-          "type": "boolean"
-        },
-        "runCommand": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "solutionRequirements": {
-          "description": "How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely.",
-          "items": {
-            "maxLength": 160,
-            "minLength": 4,
-            "type": "string"
-          },
-          "maxItems": 4,
-          "type": "array"
-        },
-        "starterFiles": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "type": "object"
+          "type": "boolean",
+          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence."
         },
         "statement": {
-          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details.",
+          "type": "string",
           "minLength": 30,
-          "type": "string"
+          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details."
         },
-        "title": {
-          "description": "A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category.",
-          "minLength": 3,
-          "type": "string"
+        "starterFiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "referenceFiles": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "visibleTests": {
+          "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here.",
-          "type": "object"
+          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here."
+        },
+        "hiddenTests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The unseen grading contract. For a function, execute at least twenty-four cases, preferably a seeded sweep checked against a simple oracle. For a module, execute at least twelve cases. For a repair, extension, or repository task, execute at least eight meaningful scenarios covering the defect, boundaries, and interactions. Emit one verdict per case and show input, expected, and actual on failure. Choose the tests that prove this task, rather than padding case counts."
+        },
+        "knownIncorrectFiles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "minItems": 1
+        },
+        "runCommand": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A descriptive command for the challenge. The host uses its fixed language runner for validation and learner tests; this value cannot select pytest or change execution. Python test files execute directly with python3 and must call any defined test functions themselves."
+        },
+        "accidentalDifficulty": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 3
+        },
+        "expectedFailureSignatures": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "solutionRequirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 160
+          },
+          "maxItems": 4,
+          "description": "How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500,
+          "description": "Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."
+        },
+        "trainingTarget": {
+          "type": "object",
+          "properties": {
+            "ability": {
+              "type": "string",
+              "minLength": 2
+            },
+            "specificGap": {
+              "type": "string",
+              "minLength": 8
+            },
+            "desiredEvidence": {
+              "type": "string",
+              "minLength": 8
+            },
+            "avoidTesting": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "ability",
+            "specificGap",
+            "desiredEvidence",
+            "avoidTesting"
+          ],
+          "additionalProperties": false,
+          "description": "Only when this candidate changes what the learner is practicing: persist a corrected evidence target with the question. Use this when the previous target is stale or contradicted by a passed challenge. Omit it to retain the current target."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 500
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
@@ -1273,10 +1349,12 @@
         "runCommand",
         "accidentalDifficulty",
         "expectedFailureSignatures",
+        "why",
         "reason",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "review_solution": {
@@ -1612,7 +1690,7 @@
     }
   },
   "teach_lesson": {
-    "description": "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem — the concept their attempt showed they are missing, a topic they asked about, the thing the next challenge is going to need — and prefer it over explaining at length in your reply, because a reply is gone by the next turn and this is not. Scale it to what is actually being taught: one or two pages for a single misconception, more only when the idea genuinely has that many parts, never pages that exist to round the number up. Each page is one thing, in their language, short enough to hold in mind at once; the body is markdown, may use fenced code, and may reference a concept as [[concept:slug|words]] or an earlier lesson as [[lesson:id|words]] exactly as a reply can. Every entry in `references` says why it is worth their time: use `url` only for a page you actually fetched this turn or know to exist, `reading` for a book or chapter you are naming from memory, and `concept`/`lesson` for Spar's own records. Tag `concepts` in the same vocabulary you tag challenges with, primary first — that is what files this beside what you have tested. The learner can see the lesson, so your reply must not restate its pages: say in a sentence what it is for and what to do with it, and point at it as [[lesson:<the id this returns>|its title]].",
+    "description": "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem — the concept their attempt showed they are missing, a topic they asked about, the thing the next challenge is going to need. A request to clarify an existing explanation can be answered directly in chat; do not create another lesson merely to repeat it. Scale a new lesson to what is actually being taught: one or two pages for a single misconception, more only when the idea genuinely has that many parts. For a new mechanism, start with a tiny input, show each state change and why it happens, then name the invariant; defer complexity until the mechanism is clear. Each page is one thing, in their language, short enough to hold in mind at once; the body is markdown, may use fenced code, and may reference a concept as [[concept:slug|words]] or an earlier lesson as [[lesson:id|words]] exactly as a reply can. Every entry in `references` says why it is worth their time: use `url` only for a page you actually fetched this turn or know to exist, `reading` for a book or chapter you are naming from memory, and `concept`/`lesson` for Spar's own records. Tag `concepts` in the same vocabulary you tag challenges with, primary first. When you make a lesson, point at it as [[lesson:<the id this returns>|its title]] and give a brief concrete starting point in your reply.",
     "inputSchema": {
       "type": "object",
       "properties": {

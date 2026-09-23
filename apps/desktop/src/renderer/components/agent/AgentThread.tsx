@@ -3,6 +3,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, Check, Copy, Pencil, ThumbsDown, ThumbsUp } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
+import type { ToolStage } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { FADE_SLACK, transcriptFadeStyle } from "@/hooks/use-transcript-fade";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -10,12 +11,13 @@ import { MESSAGE_ACTION_ROW, MessageAction, MessageActionButton } from "./Messag
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Markdown } from "./Markdown";
 import { parseReference, Reference, ReferenceCards, REFERENCE_PATTERN, type ReferenceKind } from "./MarkdownLinks";
-import { ChallengePublished, FINAL_GAP, PROSE_GAP, Reasoning, ROW_GLYPH, RunFailure, SolveRead, STEP_GAP, ToolRow } from "./ActivityRow";
+import { ChallengePublished, DraftRow, FINAL_GAP, PROSE_GAP, Reasoning, ROW_GLYPH, RunFailure, SolveRead, StatusRow, STEP_GAP, ToolRow } from "./ActivityRow";
 import { ExplainedTrace } from "./ExplainedTrace";
 import { LessonCard } from "./LessonCard";
 import { SystemEvent } from "./SystemEvent";
-import { groupParts, isPublishedArtifact, publishedRunArtifacts, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, isThreadOutcome, publishedRunArtifacts, type AgentRun, type RunPart } from "./agentRun";
 import { RunFold } from "./RunFold";
+import { ToolDetail } from "./ToolDetail";
 import { unreconciledOptimisticMessages, type OptimisticLearnerMessage } from "./optimisticMessages";
 import type { ChallengeTrail } from "../workspace/ChallengeStepper";
 
@@ -192,8 +194,16 @@ function FinalReply({ children, gap }: { children: React.ReactNode; gap: boolean
  * in the gutter, so joining one to the row above it would draw a line into the
  * side of a card.
  */
-function hasGutter(row: ReturnType<typeof groupParts>[number] | undefined): boolean {
-  return row?.kind === "tool-row";
+function hasGutter(row: ReturnType<typeof groupParts>[number] | undefined, compact = false): boolean {
+  return row?.kind === "tool-row" || row?.kind === "draft" || row?.kind === "status"
+    || (compact && row?.kind === "challenge" && row.part.stages.length > 0);
+}
+
+/** Cards need breathing room, but the gap belongs between rows so adjacent
+ *  cards receive it once instead of stacking their own margins. */
+const CARD_GAP = "0.5rem";
+function isCard(row: ReturnType<typeof groupParts>[number] | undefined): boolean {
+  return row?.kind === "solve-read" || row?.kind === "challenge" || row?.kind === "lesson" || row?.kind === "question-exchange" || row?.kind === "explained-trace" || row?.kind === "error";
 }
 
 function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { parts: RunPart[]; compactChallenges?: boolean; currentQuestionId?: string | undefined; trail?: ChallengeTrail | undefined }) {
@@ -208,11 +218,11 @@ function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { 
            Both rows have to be drawn as rows for that to be true: a published
            challenge is a card with no icon column for a rule to run down, so a
            cluster containing one is not a thread — see `hasGutter`. */
-        const linked = hasGutter(part) && hasGutter(previous);
+        const linked = hasGutter(part, compactChallenges) && hasGutter(previous, compactChallenges);
         /* And whether the run continues past this row. A step needs to know both:
            the line above its mark is only drawn when something came before, and
            the line below it only when something follows. */
-        const continues = hasGutter(part) && hasGutter(rows[index + 1]);
+        const continues = hasGutter(part, compactChallenges) && hasGutter(rows[index + 1], compactChallenges);
         /* No margin between two steps of the same run: that gap is padding
            inside the upper row, so the thread can run through it. Everything
            else is spaced from the outside as before. */
@@ -221,7 +231,7 @@ function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { 
            so a sentence looked attached to the work that came after it rather
            than to the turn it belongs to. */
         const prose = part.kind === "text" || previous?.kind === "text";
-        const gap = index === 0 || linked ? undefined : prose ? PROSE_GAP : STEP_GAP;
+        const gap = index === 0 || linked ? undefined : prose ? PROSE_GAP : isCard(part) || isCard(previous) ? CARD_GAP : STEP_GAP;
         const wrap = (node: React.ReactNode) => (
           <div key={part.id} className="min-w-0" {...(gap ? { style: { marginTop: gap } } : {})}>
             {node}
@@ -244,14 +254,21 @@ function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { 
              the tool is intentionally not rendered as another content surface. */
           return wrap(<ToolRow continues={continues} part={part.part} />);
         }
+        /* Inside the work fold a challenge that was built through stages is drawn
+           as the build — the full card is the turn's outcome, below the fold. */
+        if (part.kind === "challenge" && compactChallenges && part.part.stages.length > 0) return wrap(<ToolRow continues={continues} part={part.part} />);
+        if (part.kind === "draft") return wrap(<DraftRow continues={continues} draft={part.draft} startedAt={part.startedAt} />);
         if (part.kind === "challenge") return wrap(<ChallengePublished compact={compactChallenges} currentQuestionId={currentQuestionId} part={part.part} trail={trail} />);
+        if (part.kind === "question-exchange") return compactChallenges
+          ? wrap(<ToolRow part={part.part} />)
+          : wrap(<ToolDetail input={part.part.input} output={part.part.output} tool={part.part.tool} />);
         if (part.kind === "solve-read") return wrap(<SolveRead part={part.part} />);
         if (part.kind === "explained-trace") return wrap(<ExplainedTrace part={part.part} />);
         /* The turn's other handover. Same weight as a published challenge,
            because that is what it is. */
         if (part.kind === "lesson") return compactChallenges ? wrap(<ToolRow continues={continues} part={part.part} />) : wrap(<LessonCard part={part.part} />);
         if (part.kind === "error") return wrap(<RunFailure body={part.body} />);
-        return wrap(<div className="truncate text-thread text-[var(--transcript-step)]">{part.body}</div>);
+        return wrap(<StatusRow body={part.body} continues={continues} />);
       })}
     </>
   );
@@ -276,7 +293,7 @@ function Rows({ parts, compactChallenges = false, currentQuestionId, trail }: { 
  */
 function WaitingLine({ parts }: { parts: RunPart[] }) {
   const live = parts.some((part) =>
-    (part.kind === "tool" && part.phase === "running") || (part.kind === "reasoning" && part.open),
+    (part.kind === "tool" && part.phase === "running") || (part.kind === "reasoning" && part.open) || part.kind === "draft",
   );
   if (live) return null;
   /* Before anything has arrived the wait is the provider call itself, and saying
@@ -331,7 +348,7 @@ export function AgentMessage({ body, createdAt, activity, activityCount, message
   const [fetched, setFetched] = useState<AgentActivityStep[] | null>(null);
   const steps = fetched ?? activity;
   const parts = steps.map(storedPart);
-  const published = parts.filter(isPublishedArtifact);
+  const published = parts.filter(isThreadOutcome);
   /* Steps this turn has on disk but not in memory. The fold offers them and
      fetches them when it is opened, so an old turn reads as a turn that did
      work rather than one that did nothing. */
@@ -548,8 +565,16 @@ function storedPart(step: AgentActivityStep, index: number): RunPart {
     files: [],
     input: step.input,
     output: step.output,
+    stages: storedStages(step.stages),
     startedAt: 0,
   };
+}
+
+/** Stored stages, kept only where they still have the shape a row draws. */
+function storedStages(value: unknown): ToolStage[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((stage): stage is ToolStage => Boolean(stage) && typeof stage === "object"
+    && typeof (stage as ToolStage).id === "string" && typeof (stage as ToolStage).verb === "string" && typeof (stage as ToolStage).state === "string");
 }
 
 /**
@@ -667,7 +692,7 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
   }
 
   return (
-    <div className="group/said flex min-w-0 flex-col items-end" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
+    <div className="group/said relative flex min-w-0 flex-col items-end" onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
       {/* Held back until the turn picks it up: dimmed, with the reason on hover.
           The bubble is the learner's own words either way — what changes is
           whether the agent has them yet.
@@ -697,7 +722,7 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
       <div
         className={cn(
           MESSAGE_ACTION_ROW,
-          "mt-1 justify-end pr-1 opacity-0 transition-opacity group-hover/said:opacity-100 focus-within:opacity-100",
+          "absolute -bottom-6 right-0 justify-end pr-1 opacity-0 transition-opacity group-hover/said:opacity-100 focus-within:opacity-100",
         )}
       >
         {timestamp && <time className="mr-1.5" dateTime={new Date(createdAt!).toISOString()}>{timestamp}</time>}
@@ -912,7 +937,7 @@ export function AgentThread({
                     />
                   ) : item.role === "system" ? (
                     <SystemEvent key={item.id} body={item.body} />
-                  ) : (
+                  ) : !item.body.trim() && (item.activityCount ?? 0) === 0 && item.activity.length === 0 ? null : (
                     <AgentMessage activity={item.activity} activityCount={item.activityCount ?? 0} body={item.body} createdAt={item.createdAt} currentQuestionId={currentQuestionId} key={item.id} landing={landing(item.id)} latest={item.id === lastAgentMessage?.id && !visibleRun} messageId={item.id} rating={item.rating ?? null} trail={trail} workedMs={item.workedMs ?? 0} />
                   ),
                 )}

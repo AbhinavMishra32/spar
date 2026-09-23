@@ -3,24 +3,12 @@ import { completeSimple, streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, AssistantMessageEvent, Message, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { agentToolSchemas } from "./agentTools.js";
-import { piFastModeOptions, piModelFor, piReasoningSummaryForApi, piTransportForApi, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
+import { piFastModeOptions, piModelFor, piReasoningSummaryForApi, piTransportForApi, piUsage, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
 import type { NormalizedAgentStreamPart } from "./agentStream.js";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 
-/**
- * Spar's agent loop, on pi's own runtime.
- *
- * What was here before went out through Mastra, which went out through an
- * AI SDK `LanguageModelV2`, which went out through an adapter back into pi.
- * Three translations for a library Spar was already calling, and each one lost
- * something on the way: the forced tool choice never survived the last hop, so
- * the phase controller's twenty-one required calls were only ever requested in
- * prose.
- *
- * The controller itself does not move. It still decides each phase, and it
- * still hands the model one prompt at a time with one set of tools — see
- * `agent.ts`. This is the plumbing under it.
- */
+/** Pi owns the native assistant/tool conversation. Spar yields between model
+ * requests to enforce capability boundaries, cancellation and execution budgets. */
 
 /** What the model may do about tools on the next request. Kept as a live
  *  reference rather than a constructor argument because pi fixes the stream
@@ -97,14 +85,31 @@ export function createTrainingAgent(input: PiProviderInput, systemPrompt: string
        is keyed on the phase a call was made in, and two calls racing inside one
        phase would read that cache before either had written to it. */
     toolExecution: "sequential",
-    /* One turn per phase, which is what `maxSteps: 1` bought before.
-       pi's loop would otherwise keep going on its own after executing tool
-       calls, and the phase boundary is not a detail of the old runtime — it is
-       the controller: every phase re-plans which tools are open, re-checks the
-       stop signal, and restates the evidence. A loop that ran on past it would
-       be a different agent with the same prompts. */
-    shouldStopAfterTurn: () => true,
+    /* Yield after each model request so the host can update capabilities,
+       cancellation and budgets. agent.continue() resumes the same native
+       conversation, including every tool result, without replaying the prompt. */
+    finishTurn: () => ({ action: "end" }),
   });
+}
+
+/** Pi replays every system message cumulatively. Replace the phase message so
+ * the standing instructions appear once even across a long tool conversation. */
+export function setTrainingPhasePrompt(agent: Agent, baseInstructions: string, instruction: string): void {
+  agent.state.messages = [
+    { role: "system", content: `${baseInstructions}\n\nCurrent phase: ${instruction}`, timestamp: Date.now() },
+    ...agent.state.messages.filter((message) => message.role !== "system"),
+  ];
+}
+
+/** Advance the same conversation. A normal tool result needs no new user
+ * message; corrections and learner steering do. Only overflow recovery resets it. */
+export async function advanceTrainingConversation(agent: Agent, initialPrompt: string, instruction: string, intervention?: string): Promise<void> {
+  // The controller may prepend phase system guidance before the first model
+  // request. System messages are not a conversation with the learner: the first
+  // user message must still carry their request and the full session context.
+  if (!agent.state.messages.some((message) => message.role !== "system")) await agent.prompt(initialPrompt);
+  else if (intervention || agent.state.messages.at(-1)?.role !== "toolResult") await agent.prompt(intervention || instruction);
+  else await agent.continue();
 }
 
 /**
@@ -133,6 +138,18 @@ export function toolErrorText(result: unknown): string {
   return content.flatMap((part) => (part as { type?: string; text?: string }).type === "text" ? [(part as { text?: string }).text ?? ""] : []).join(" ").trim();
 }
 
+/** A provider sometimes prints a tool invocation into assistant prose instead
+ * of emitting a native tool call. This is protocol syntax, not learner intent. */
+export function toolCallSpill(text: string, toolNames: Iterable<string>): string | null {
+  const marker = text.indexOf("to=functions.");
+  if (marker < 0) return null;
+  const invocation = text.slice(marker);
+  for (const name of toolNames) {
+    if (invocation.startsWith(`to=functions.${name}`)) return name;
+  }
+  return "unknown";
+}
+
 /**
  * One provider event, in the vocabulary the transcript already speaks.
  *
@@ -148,7 +165,7 @@ export function normalizePiAgentEvent(event: AssistantMessageEvent): NormalizedA
     case "thinking_start": return { type: "reasoning", text: "", phase: "start" };
     case "thinking_delta": return { type: "reasoning", text: event.delta };
     case "thinking_end": return { type: "reasoning", text: "", phase: "end" };
-    case "toolcall_start": return { type: "status", text: "", detail: "tool-input-start" };
+    case "toolcall_start": return { type: "status", text: "", detail: draftingStatus(toolNameAt(event.partial, event.contentIndex)) };
     case "toolcall_end": return { type: "status", text: "", detail: "tool-input-end" };
     /* Not the tool failing — the turn failing. A tool that rejects its
        arguments is reported separately, by the loop, with the fault text the
@@ -156,6 +173,16 @@ export function normalizePiAgentEvent(event: AssistantMessageEvent): NormalizedA
     case "error": return { type: "error", text: providerError(event) };
     default: return null;
   }
+}
+
+function toolNameAt(message: AssistantMessage, index: number): string {
+  const content = message.content[index];
+  return content?.type === "toolCall" ? content.name : "";
+}
+
+function draftingStatus(toolName: string): string {
+  if (toolName === "create_question" || toolName === "replace_current_question") return "Drafting challenge input";
+  return toolName ? `Preparing ${toolName.replaceAll("_", " ")}` : "Preparing the next action";
 }
 
 function providerError(event: Extract<AssistantMessageEvent, { type: "error" }>): string {
@@ -171,19 +198,31 @@ function providerError(event: Extract<AssistantMessageEvent, { type: "error" }>)
  * one step, and a stream drained only for its final text. This is the same
  * request without the apparatus.
  */
-export async function piCompleteText(input: PiProviderInput, systemPrompt: string, message: string, signal: AbortSignal, timedOut: string): Promise<string> {
+export async function piCompleteText(input: PiProviderInput, systemPrompt: string, message: string, signal: AbortSignal, timedOut: string, recordUsage?: (usage: ReturnType<typeof piUsage>) => void, onText?: (delta: string) => void): Promise<string> {
   const transport = piTransportForApi(input.api);
-  const result = await completeSimple(piModelFor(input), {
+  const context = {
     systemPrompt,
-    messages: [{ role: "user", content: [{ type: "text", text: message }], timestamp: Date.now() }],
-  }, {
+    messages: [{ role: "user" as const, content: [{ type: "text" as const, text: message }], timestamp: Date.now() }],
+  };
+  const options = {
     apiKey: input.apiKey,
     signal,
     ...(transport ? { transport } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
     ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
     ...piFastModeOptions(input),
-  } as SimpleStreamOptions);
+  } as SimpleStreamOptions;
+  /* Streamed when someone is watching the answer arrive — the private challenge
+     reviewer and repairs draw it live — and a plain request otherwise. */
+  let result: AssistantMessage;
+  if (onText) {
+    const stream = streamSimple(piModelFor(input), context, options);
+    for await (const event of stream) if (event.type === "text_delta") onText(event.delta);
+    result = await stream.result();
+  } else {
+    result = await completeSimple(piModelFor(input), context, options);
+  }
+  recordUsage?.(piUsage(result.usage));
   /* pi reports a failed or cancelled request in the message rather than by
      throwing, so the caller's own timeout wording has to be raised here — the
      learner is told the check took too long, not that a stream stopped. */

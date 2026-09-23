@@ -1,4 +1,4 @@
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useCodeTheme } from "@/hooks/use-code-theme";
 import { highlight, type Span } from "@/lib/highlight";
 import { plainMath } from "@/lib/tex";
@@ -188,15 +188,32 @@ function InlineCode({ body }: { body: string }) {
  * elements rather than as HTML — there is no markup to inject, only text and a
  * colour.
  */
-function Colorized({ body, language }: { body: string; language: string }) {
+function Colorized({ body, language, follow = false, className }: { body: string; language: string; follow?: boolean; className?: string }) {
   const { theme } = useCodeTheme();
-  const [spans, setSpans] = useState<Span[] | null>(null);
+  const [colored, setColored] = useState<{ body: string; spans: Span[] } | null>(null);
+  const pre = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     let alive = true;
-    void highlight(body, language).then((next) => { if (alive) setSpans(next); });
+    void highlight(body, language).then((next) => { if (alive) setColored({ body, spans: next }); });
     return () => { alive = false; };
   }, [body, language]);
+
+  /* A block still being written keeps its colours while the next pass runs:
+     the part already highlighted stays as it was and only the new tail is plain,
+     so streaming code does not flash grey on every delta. */
+  const spans = useMemo(() => {
+    if (!colored) return null;
+    if (colored.body === body) return colored.spans;
+    if (body.startsWith(colored.body)) return [...colored.spans, { text: body.slice(colored.body.length), slot: null }];
+    return null;
+  }, [body, colored]);
+
+  useLayoutEffect(() => {
+    /* Glides to the newest line rather than snapping, so the eye can stay on
+       the line being written instead of refinding it after every delta. */
+    if (follow && pre.current) pre.current.scrollTo({ top: pre.current.scrollHeight, behavior: "smooth" });
+  }, [body, follow]);
 
   const lines = useMemo(() => {
     const result: Span[][] = [[]];
@@ -212,7 +229,7 @@ function Colorized({ body, language }: { body: string; language: string }) {
   }, [body, spans]);
 
   return (
-    <pre className="code-block-body app-scroll text-thread text-[var(--code-foreground)]" tabIndex={0} aria-label={`${language || "Plain text"} code`}>
+    <pre className={cn("code-block-body app-scroll text-thread text-[var(--code-foreground)]", className)} ref={pre} tabIndex={0} aria-label={`${language || "Plain text"} code`}>
       <code>
         {lines.map((line, index) => (
           <span className="code-block-line" key={index}>
@@ -260,6 +277,28 @@ function CodeBlock({ language, body }: { language: string; body: string }) {
       </div>
       <span className="sr-only" role="status">{copyError ? "Could not copy code. Try again." : copied ? "Code copied" : ""}</span>
       <Colorized body={body} language={language} />
+    </div>
+  );
+}
+
+/**
+ * A file, in the thread's own code block: its language's mark and its path in
+ * the header, line numbers, the editor's colours. `live` follows the newest line
+ * while the file is still being written.
+ */
+export function FileCodeBlock({ path, body, language, live = false, className }: { path: string; body: string; language: string; live?: boolean; className?: string }) {
+  const marked = languageOf(language);
+  const lines = body.replace(/\n$/, "").split("\n").length;
+  return (
+    <div className={cn("code-block !my-1", className)}>
+      <div className="code-block-header !h-7 !py-1">
+        <span className="code-block-language flex items-center gap-1.5">
+          {marked ? <LanguageGlyph className="size-3.5 shrink-0" language={marked} /> : <Code2 className="size-3.5 shrink-0" aria-hidden />}
+          <span className="truncate text-thread-tool">{path}</span>
+        </span>
+        <span className={cn("shrink-0 pr-1 text-thread-tool tabular-nums", live && "thinking-shimmer")}>{live ? "writing" : `${lines} lines`}</span>
+      </div>
+      <Colorized body={body} className={live ? "!max-h-[15rem]" : "!max-h-[20rem]"} follow={live} language={language} />
     </div>
   );
 }

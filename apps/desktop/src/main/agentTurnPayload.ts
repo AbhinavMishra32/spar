@@ -33,6 +33,8 @@ export type TurnPayloadInput = {
   practiceSource: boolean;
   practiceSummary: unknown;
   accountId: string;
+  /** Rehydrate a successful handoff if the provider failed while writing its reply. */
+  resumeSince?: string;
 };
 
 export type TurnPayload = {
@@ -61,6 +63,9 @@ export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
      language its challenges are written in. */
   const track = session.summary.trackId ? store.listTracks().find((item) => item.id === session.summary.trackId) ?? null : null;
 
+  const intake = (turnKind === "cold-start" || turnKind === "session-start") ? store.answeredIntake(sessionId) : undefined;
+  const lesson = input.resumeSince ? store.lessonPublishedSince(sessionId, input.resumeSince) : null;
+
   return {
     sessionId,
     message: input.message,
@@ -69,16 +74,20 @@ export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
     practiceSource: input.practiceSource,
     activeQuestion: openQuestion(session) ? { id: session.question!.id, attemptId: session.question!.attemptId } : null,
     resumeState: {
+      ...(intake ? { intake: { result: { status: "answered", answer: intake } } } : {}),
+      ...(lesson ? { lesson: { result: lesson } } : {}),
       ...(session.summary.objective !== DEFAULT_OBJECTIVE ? { objective: { committed: true, objective: session.summary.objective } } : {}),
-      ...(turnKind !== "challenge-revision" && target ? { target: { committed: true, ...target } } : {}),
+      ...((turnKind === "session-start" || turnKind === "cold-start") && !session.question && target ? { target: { committed: true, ...target } } : {}),
     },
     context: JSON.stringify({
       session: session.summary,
       activeQuestion: session.question,
       activeTrainingTarget: target,
       targetProgress: store.targetProgress(sessionId),
-      checkpoint: session.checkpoint,
-      recentConversation: session.messages.slice(-12),
+      /* The conversation is for continuity, not a second copy of every tool
+         payload behind it. Activity input/output can be tens of kilobytes per
+         reply and is already available through the tools that own it. */
+      recentConversation: session.messages.slice(-12).map(({ id, role, body, createdAt }) => ({ id, role, body, createdAt })),
       track,
       relevantAbilitySummary: store.searchLearner(session.summary.originalGoal, 4, session.summary.trackId),
       /* Carried unconditionally, unlike `relevantAbilitySummary`, which is

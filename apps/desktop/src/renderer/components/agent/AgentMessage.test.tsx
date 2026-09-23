@@ -12,7 +12,7 @@ vi.mock("./ActivityRow", () => ({
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AgentMessage, relativeMessageTime, responseTime } from "./AgentThread";
 
-const activity: AgentActivityStep[] = [{ kind: "tool", text: "", seconds: 0, tool: "create_question", label: "Count evens", actionTitle: "", detail: "", ok: true, input: "{}", output: "{}" }];
+const activity: AgentActivityStep[] = [{ kind: "tool", text: "", seconds: 0, tool: "create_question", label: "Count evens", actionTitle: "", detail: "", ok: true, input: "{}", output: "{}", stages: [] }];
 
 describe("completed message artifacts", () => {
   it("keeps the published card before the response when work is collapsed", () => {

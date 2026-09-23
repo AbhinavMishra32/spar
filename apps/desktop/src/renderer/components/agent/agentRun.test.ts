@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { groupParts, publishedRunArtifacts, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
 
 const tool = (name: string): Extract<RunPart, { kind: "tool" }> => ({
-  kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", startedAt: 0,
+  kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", stages: [], startedAt: 0,
 });
 
 const run = (parts: RunPart[], status: AgentRun["status"] = "streaming"): AgentRun => ({ runId: "run", parts, status, startedAt: 0, steersConsumed: 0 });
@@ -28,6 +28,33 @@ describe("what a tool row is called", () => {
 });
 
 describe("transcript rows", () => {
+  it("keeps an answered question visible after the work fold closes", () => {
+    const question = { ...tool("ask_user_question"), input: JSON.stringify({ questions: [{ header: "Focus", question: "What next?", options: [{ label: "Stacks" }] }] }), output: JSON.stringify({ status: "answered", answer: "Stacks" }) };
+    expect(groupParts([question]).map((row) => row.kind)).toEqual(["question-exchange"]);
+    expect(publishedRunArtifacts(run([question]))).toEqual([question]);
+    expect(publishedRunArtifacts(run([{ ...question, phase: "running", output: "" }]))).toEqual([]);
+  });
+
+  it("replaces a tool preparation line with the action when the call arrives", () => {
+    const preparing: RunPart = { kind: "status", id: "preparing", body: "Preparing ask user question" };
+    expect(groupParts([preparing]).map((row) => row.kind)).toEqual(["status"]);
+    expect(groupParts([preparing, tool("ask_user_question")]).map((row) => row.kind)).toEqual(["tool-row"]);
+    const draft: RunPart = { kind: "status", id: "draft", body: "Drafting challenge input · 1,024 characters received" };
+    expect(groupParts([draft, tool("create_question")]).map((row) => row.kind)).toEqual(["challenge"]);
+    expect(groupParts([preparing, tool("read_ability")]).map((row) => row.kind)).toEqual(["status", "tool-row"]);
+  });
+
+  it("updates one live challenge draft and shows why a rejected draft is retried", () => {
+    const status = (current: AgentRun, detail: string) => reduceRun(current, { runId: "run", type: "status", detail })!;
+    let current = status(run([]), "Drafting challenge input");
+    current = status(current, "Drafting challenge input · 1,024 characters received");
+    expect(current.parts).toHaveLength(1);
+    current = status(current, 'tool-error:create_question:Validation failed for tool "create_question":\n  - visibleTests: must have required properties visibleTests, hiddenTests');
+    expect(current.parts).toHaveLength(1);
+    expect(current.parts[0]).toMatchObject({ kind: "status", body: expect.stringContaining("visibleTests, hiddenTests") });
+    current = status(current, "Drafting challenge input");
+    expect(current.parts).toHaveLength(2);
+  });
   it("gives every tool call its own row rather than one synthesized summary", () => {
     const rows = groupParts([tool("search_learner_model"), tool("read_ability"), tool("read_concept_graph")]);
     expect(rows.map((row) => row.kind)).toEqual(["tool-row", "tool-row", "tool-row"]);
@@ -194,6 +221,24 @@ describe("streaming a turn", () => {
     expect(first.body).toBe("First I need the log.");
   });
 
+  it("updates a running tool row as validation moves through repair", () => {
+    const result = stream(
+      { type: "tool", tool: "create_question", callId: "challenge", phase: "start", detail: "Validating the reference and tests" },
+      { type: "tool", tool: "create_question", callId: "challenge", phase: "progress", detail: "Repairing one failed validation" },
+    );
+
+    expect(result?.parts).toHaveLength(1);
+    const challenge = result?.parts[0];
+    if (challenge?.kind !== "tool") throw new Error("expected tool");
+    expect(challenge.phase).toBe("running");
+    expect(challenge.detail).toBe("Repairing one failed validation");
+  });
+
+  it("does not invent a tool row when a late progress event has no start", () => {
+    const result = stream({ type: "tool", tool: "create_question", callId: "missing", phase: "progress", detail: "Repairing" });
+    expect(result?.parts).toEqual([]);
+  });
+
   it("settles the open thinking when the turn finishes", () => {
     const result = stream({ type: "reasoning", text: "Half a thought" }, { type: "done" });
     const thinking = result?.parts[0];
@@ -281,5 +326,31 @@ describe("published lessons", () => {
       expect(publishedRunArtifacts(run([part], "done"))).toEqual([]);
       expect(groupParts([part])[0]?.kind).not.toBe("lesson");
     }
+  });
+});
+
+describe("challenge stages", () => {
+  const stage = (id: string, state: "running" | "done") => ({ id, kind: "review" as const, verb: state === "running" ? "Reviewer checking" : "Reviewer accepted", subject: "fit", state, startedAt: 1 });
+
+  it("upserts stages under the running call and lets the call replace its draft", () => {
+    let current = reduceRun(null, { runId: "run", type: "draft", draft: { key: "0-0", files: [], received: 10 } });
+    expect(current?.parts.map((part) => part.kind)).toEqual(["draft"]);
+    current = reduceRun(current, { runId: "run", type: "tool", tool: "create_question", phase: "start", callId: "c" });
+    expect(current?.parts.map((part) => part.kind)).toEqual(["tool"]);
+    /* It opens with the draft already settled as its first stage, so the row
+       that replaces the draft draws what the draft drew. */
+    const opened = current?.parts[0];
+    expect(opened?.kind === "tool" ? [opened.handoff, opened.stages.map((entry) => `${entry.id}:${entry.verb}`)] : []).toEqual([true, ["stage-0:Drafted"]]);
+    current = reduceRun(current, { runId: "run", type: "tool", tool: "create_question", phase: "progress", callId: "c", stage: { ...stage("stage-0", "done"), kind: "draft", verb: "Drafted", subject: "Count evens" } });
+    current = reduceRun(current, { runId: "run", type: "tool", tool: "create_question", phase: "progress", callId: "c", stage: stage("s0", "running") });
+    current = reduceRun(current, { runId: "run", type: "tool", tool: "create_question", phase: "progress", callId: "c", stage: stage("s0", "done") });
+    const part = current?.parts[0];
+    expect(part?.kind === "tool" ? part.stages.map((entry) => `${entry.verb} ${entry.subject}`) : []).toEqual(["Drafted Count evens", "Reviewer accepted " + stage("s0", "done").subject]);
+  });
+
+  it("drops a draft the schema refused", () => {
+    let current = reduceRun(null, { runId: "run", type: "draft", draft: { key: "0-0", files: [], received: 10 } });
+    current = reduceRun(current, { runId: "run", type: "status", detail: "tool-error:create_question:accidentalDifficulty: required" });
+    expect(current?.parts.map((part) => part.kind)).toEqual(["status"]);
   });
 });

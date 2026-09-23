@@ -27,7 +27,6 @@ import type { CloudSyncService } from "./sync.js";
 import type { CheckpointService } from "./checkpoints.js";
 import type { RestoreService } from "./restore.js";
 import type { WebSearchService } from "./webSearch.js";
-import { requestsChallengeRevision } from "./agentIntent.js";
 import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 import type { AgentQuestions } from "./agentQuestions.js";
@@ -104,14 +103,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const id=zUuid(sessionId);let detail=deps.store.readSession(id);
     if(detail?.summary.trackId)deps.store.setActiveTrack(detail.summary.trackId);
     if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return ensureLiveWorkspace(id, detail);
-    if(deps.store.resetIncompletePlanning(id)){clearAutoResume(id);detail=deps.store.readSession(id);}
+    if(deps.store.settleLessonPlanning(id)){clearAutoResume(id);return deps.store.readSession(id);}
     if(!detail)return null;
     if(!mayAutoResume(id))return detail;
     const placementAnswer=deps.store.answeredIntake(id);
     countAutoResume(id);
-    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal,detail.summary.trackId)&&!placementAnswer){void startAgentTurn(id,`Resume placement for this learner goal inside its Track: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
-    if(placementAnswer){void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Commit one accessible target and create a validated question.`,"system","session-start");return detail;}
-    void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
+    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal,detail.summary.trackId)&&!placementAnswer){void startAgentTurn(id,`Resume placement for this learner goal inside its Track: ${detail.summary.originalGoal}. Use the supplied context and persisted decisions. Ask a prerequisite question only if its answer would change the next lesson or challenge.`,"system","cold-start");return detail;}
+    if(placementAnswer){void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Continue from any persisted objective and target; do not repeat completed planning. Create a validated question or teach a missing prerequisite.`,"system","session-start");return detail;}
+    void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Continue from the persisted objective and target. Use the supplied context and retrieve only missing evidence; do not repeat completed planning.` ,"system","session-start");
     return ensureLiveWorkspace(id, detail);
   });
   ipcMain.handle(ipc.workspaceStateSave, (_event, value) => { const { sessionId, ...state } = workspaceStateInput.parse(value); deps.checkpoints.remember(sessionId, state); });
@@ -212,7 +211,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
            leave the transcript with no trace that it ran at all. */
         if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity,Date.now()-startedAt);
         deps.telemetry.finish(request.id,value);
-        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);deps.telemetry.finish(request.id,{},error);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);beginTelemetry(retry.id,index+1);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
+        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);deps.telemetry.finish(request.id,{},error);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,resumeSince:new Date(startedAt).toISOString()}),provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);beginTelemetry(retry.id,index+1);return attempt(retry,index+1);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);
@@ -595,7 +594,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     clearAutoResume(sessionId);
     const result = deps.agentQuestions.answer(sessionId, answer);
     const runId = activeAgentRuns.get(sessionId);
-    if (result.resumed && runId) return { runId, resumed: true };
+    if (result.resumed && runId) {
+      deps.store.addMessage(sessionId, "learner", answer);
+      return { runId, resumed: true };
+    }
 
     /* A persisted question can outlive the process which asked it. There is no
        promise to resume after a relaunch, so recover with one new run while
@@ -629,9 +631,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     clearAutoResume(sessionId);
     const rewound = deps.store.rewindToMessage(sessionId, messageId);
     if (!rewound) throw new Error("That message is no longer in this conversation.");
-    const session = deps.store.readSession(sessionId);
-    const turnKind = session?.question && requestsChallengeRevision(input.message, session.messages) ? "challenge-revision" : "learner-message";
-    return startAgentTurn(sessionId, input.message.trim(), "learner", turnKind);
+    return startAgentTurn(sessionId, input.message.trim(), "learner", "learner-message");
   });
 
   /**
@@ -678,7 +678,12 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       return startAgentTurn(sessionId, body, "learner", turnKind);
     };
     if(deps.store.pendingIntake(sessionId)){
-      deps.store.answerIntake(sessionId,said);
+      const answeredQuestion = deps.agentQuestions.answer(sessionId, said);
+      const waitingRunId = activeAgentRuns.get(sessionId);
+      if (answeredQuestion.resumed && waitingRunId) {
+        deps.store.addMessage(sessionId, "learner", said);
+        return { runId: waitingRunId, resumed: true };
+      }
       /* An answer given while a challenge is open is context for that challenge,
          not the start of a session: the agent asked something about work in
          progress, and a session-start turn would try to publish a second
@@ -691,9 +696,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       if(answered?.summary.context==="baseline")return deliverIntake(`The learner answered the baseline context question: ${said}\nUse only what materially changes calibration. Set one diagnostic Training Target and create exactly one fair coding probe in their preferred language. Stay inside the dedicated baseline; do not create a Track, syllabus, or general chat.`);
       return deliverIntake(`The learner answered the cold-start placement question: ${said}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`);
     }
-    const session=deps.store.readSession(sessionId);
-    const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
-    return deliver(contextual,turnKind,said);
+    return deliver(contextual,"learner-message",said);
   });
   /**
    * A submission judged by the source that wrote the problem.
@@ -942,6 +945,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     deps.providers.setDefault(providerId(input.provider), input.model.trim());
   });
   ipcMain.handle(ipc.settingsProviderUsage, (_event, value) => deps.providers.subscriptionUsage(providerId(value)));
+  ipcMain.handle(ipc.settingsUsageReport, (_event, value) => deps.store.usageReport(typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(value, 3650) : null));
   ipcMain.handle(ipc.settingsProviderAccount, (_event, value) => deps.providers.subscriptionAccount(providerId(value)));
   ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
   ipcMain.handle(ipc.settingsFastMode, (_event, value) => deps.providers.setFastMode(z.boolean().parse(value)));

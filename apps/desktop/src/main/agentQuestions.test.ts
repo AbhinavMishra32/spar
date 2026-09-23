@@ -53,4 +53,22 @@ describe("AgentQuestions", () => {
       store.close();
     }
   });
+
+  it("notifies the UI only after the pending question can be answered", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise test design");
+      let notified = 0;
+      let questions: AgentQuestions;
+      questions = new AgentQuestions(store, (id) => {
+        notified += 1;
+        expect(store.pendingIntake(id)).toBeDefined();
+        expect(questions.answer(id, "Clearer failures").resumed).toBe(true);
+      });
+      await expect(questions.ask(sessionId, question)).resolves.toMatchObject({ status: "answered", answer: "Clearer failures" });
+      expect(notified).toBe(1);
+    } finally {
+      store.close();
+    }
+  });
 });

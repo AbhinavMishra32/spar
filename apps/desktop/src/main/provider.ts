@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { shell } from "electron";
 import type { AuthEvent, AuthPrompt, Api, Model, MutableModels, OAuthCredentials } from "@earendil-works/pi-ai";
-import { getModels } from "@earendil-works/pi-ai/compat";
 import { apiOrigin } from "./apiOrigin.js";
 import type { AuthService } from "./auth.js";
+import { LiveModels } from "./liveModels.js";
 import { createSparModels } from "./piModels.js";
 import type { LocalStore } from "./store.js";
 import { anthropicAccount, codexAccountFromToken, githubAccount, type ProviderAccount } from "./subscriptionAccount.js";
@@ -27,6 +27,7 @@ export type ResolvedProvider = {
   source: "spar-keychain" | "spar-oauth" | "gateway";
   reasoningEffort: ReasoningEffort;
   fastMode: boolean;
+  modelInfo?: Model<Api>;
 };
 
 type Descriptor = {
@@ -41,7 +42,7 @@ type Descriptor = {
 };
 
 const descriptors: Descriptor[] = [
-  { id: "openai-codex", runtimeId: "openai-codex", name: "ChatGPT", kind: "subscription", description: "Reuse your ChatGPT Plus or Pro subscription", defaultModel: "gpt-5.6-terra" },
+  { id: "openai-codex", runtimeId: "openai-codex", name: "ChatGPT", kind: "subscription", description: "Reuse your ChatGPT Plus or Pro subscription", defaultModel: "gpt-6-sol" },
   { id: "claude-code", runtimeId: "anthropic", name: "Claude", kind: "subscription", description: "Reuse your Claude Pro or Max subscription", defaultModel: "claude-sonnet-4-6" },
   { id: "github-copilot", runtimeId: "github-copilot", name: "GitHub Copilot", kind: "subscription", description: "Reuse your GitHub Copilot subscription", defaultModel: "gpt-5.4" },
   { id: "openai", runtimeId: "openai", name: "OpenAI", kind: "api-key", description: "OpenAI API models", defaultModel: "gpt-5.4-mini", keyUrl: "https://platform.openai.com/api-keys" },
@@ -81,22 +82,13 @@ const ACCOUNT_CACHE_MS = 12 * 60 * 60 * 1_000;
  *  release, so it is re-read through the day — but nowhere near as often as the
  *  composer re-reads the inventory that shows it. */
 const CLINE_TIERS_CACHE_MS = 6 * 60 * 60 * 1_000;
-/** The bundled catalog, which is a snapshot taken when pi was published. Spar
- *  used to overlay the current ChatGPT tiers on it by hand, because 0.73.1
- *  stopped at GPT-5.5 and the picker was offering a subscription less than it
- *  can run. 0.85 ships them — with the per-tier pricing the hand-written
- *  entries could only approximate — so the overlay is gone rather than
- *  standing in front of better data. */
-const modelsFor = (provider: string) => {
-  try { return (getModels as unknown as (id: string) => Model<Api>[])(provider); } catch { return []; }
-};
-
 export class ProviderService {
   private readonly flows = new Map<string, { providerId: ProviderId; controller: AbortController; prompt: { resolve(value: string): void; reject(error: Error): void } | undefined }>();
   /** pi's runtime collection, reading and writing the learner's tokens through
    *  Spar's own keychain — see piModels.ts. Holds no state of its own beyond
    *  the provider catalog, so one per service is enough. */
   private readonly models: MutableModels;
+  private readonly liveModels: LiveModels;
 
   constructor(
     private readonly auth: AuthService,
@@ -107,12 +99,13 @@ export class ProviderService {
     private readonly fetcher: typeof fetch = fetch,
   ) {
     this.models = createSparModels(auth);
+    this.liveModels = new LiveModels(fetcher);
   }
 
   /** Every provider's model catalog. pi-ai answers for the ones it ships;
    *  Cline's is assembled from its own tier list — see clineCatalog.ts. */
   private catalog(runtimeId: string): Model<Api>[] {
-    return runtimeId === "cline" ? clineModels(this.clineTiers()) : modelsFor(runtimeId);
+    return runtimeId === "cline" ? clineModels(this.clineTiers()) : this.liveModels.get(runtimeId);
   }
 
   private clineTiers(): ClineTiers {
@@ -133,6 +126,7 @@ export class ProviderService {
   }
 
   async inventory(): Promise<ProviderInventory> {
+    await this.liveModels.refresh();
     this.refreshClineTiers();
     const selectedProvider = this.store.getSetting<ProviderId>("provider-id", "openrouter");
     const selectedModel = this.store.getSetting("provider-model", descriptorById.get(selectedProvider)?.defaultModel ?? "openrouter/free");
@@ -409,6 +403,7 @@ export class ProviderService {
   }
 
   async resolve(_accountId: string, accessToken: string | null): Promise<ResolvedProvider[]> {
+    await this.liveModels.refresh();
     const values: ResolvedProvider[] = [];
     const selected = this.store.getSetting<ProviderId>("provider-id", "openrouter");
     const selectedDescriptor = descriptorById.get(selected);
@@ -436,7 +431,7 @@ export class ProviderService {
             const headers = Object.fromEntries(
               Object.entries({ ...model?.headers, ...resolved.auth.headers }).filter((entry): entry is [string, string] => entry[1] !== null),
             );
-            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: resolved.auth.baseUrl ?? model.baseUrl, apiKey: resolved.auth.apiKey, ...(Object.keys(headers).length ? { headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode() });
+            if (model) values.push({ provider: model.provider, model: model.id, api: model.api, baseUrl: resolved.auth.baseUrl ?? model.baseUrl, apiKey: resolved.auth.apiKey, ...(Object.keys(headers).length ? { headers } : {}), source: "spar-oauth", reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode(), modelInfo: model });
           } else {
             this.store.setSetting(`provider-auth-expired:${selected}`, true);
           }
@@ -451,7 +446,7 @@ export class ProviderService {
         const modelId = this.store.getSetting(`provider-model:${selected}`, selectedDescriptor.defaultModel);
         const model = this.catalog(selectedDescriptor.runtimeId).find((item) => item.id === modelId);
         const baseUrl = this.store.getSetting(`provider-base-url:${selected}`, selectedDescriptor.defaultBaseUrl ?? model?.baseUrl ?? "");
-        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain", reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode() });
+        values.push({ provider: model?.provider ?? selectedDescriptor.runtimeId, model: modelId, api: model?.api ?? "openai-completions", baseUrl: baseUrl || model?.baseUrl || "", apiKey: secret ?? "local", ...(model?.headers ? { headers: model.headers } : {}), source: "spar-keychain", reasoningEffort: this.reasoningEffort(), fastMode: this.fastMode(), ...(model ? { modelInfo: model } : {}) });
       }
     }
 

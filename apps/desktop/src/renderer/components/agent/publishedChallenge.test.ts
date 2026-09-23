@@ -14,6 +14,7 @@ function row(overrides: Partial<ToolPart>): ToolPart {
     files: [],
     input: "",
     output: "",
+    stages: [],
     startedAt: 0,
     ...overrides,
   };

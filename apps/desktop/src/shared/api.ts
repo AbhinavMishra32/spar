@@ -16,7 +16,7 @@ export const ipc = {
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentAnswer: "agent:answer", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
-  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderAccount: "settings:provider-account", settingsProviderOauthStart: "settings:provider-oauth-start",
+  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsUsageReport: "settings:usage-report", settingsProviderAccount: "settings:provider-account", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort", settingsFastMode: "settings:fast-mode",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
@@ -213,6 +213,18 @@ export type SubscriptionUsage = { windows: UsageWindow[]; capturedAt: number };
  *  provider would not give one — GitHub answers with a login for everybody who
  *  keeps their address private — and `label` is always something showable. */
 export type ProviderAccount = { email: string | null; label: string };
+/** One finished agent run's spend, as the main process records it locally. */
+export type AgentUsageRow = { runId: string; sessionId: string; provider: string; model: string; turnKind: string; status: string; inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number; latencyMs: number; startedAt: string; completedAt: string };
+/** Token counts are pi's: `inputTokens` excludes cache reads and writes. `costUsd`
+ *  is estimated from list prices, so on a subscription it is the API-equivalent. */
+export type UsageTotals = { runs: number; inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number };
+export type UsageReport = {
+  since: string | null;
+  totals: UsageTotals;
+  daily: Array<UsageTotals & { day: string }>;
+  models: Array<UsageTotals & { provider: string; model: string }>;
+  sessions: Array<UsageTotals & { sessionId: string; title: string | null; lastRunAt: string; models: string[] }>;
+};
 export type ProviderOAuthEvent = {
   flowId: string;
   provider: ProviderId;
@@ -402,7 +414,14 @@ export type BootstrapData ={ account: { id: string; displayName: string; email: 
   serverConfigured: boolean };
 export type RestoreState = "idle" | "pending" | "done" | "failed";
 /** One file a tool wrote, with the line counts the activity row reports. */
-export type AgentActivityFile = { path: string; added: number; removed: number };
+export type AgentActivityFile = {
+  path: string;
+  added: number;
+  removed: number;
+  /** Which part of a challenge design the file belongs to, when it is one: the
+   *  starter and the reference usually share a path. */
+  group?: "starter" | "reference" | "visible" | "hidden";
+};
 /** A saved explanation: the steps the agent chose, each with its caption and the
  *  two snapshots the canvas needs to draw what moved. The payload is produced by
  *  `sliceView` in `@spar/visualizer` and is passed through the store opaquely. */
@@ -413,19 +432,78 @@ export type VisualizerView = import("@spar/visualizer").TraceView & { setup: str
  *  second payload behind this one — but it is still fetched rather than carried
  *  in the transcript row, because eight pages of markdown is not a row. */
 export type StoredLesson = { id: string; sessionId: string; title: string; summary: string; createdAt: string } & import("@spar/domain").LessonInput;
+/**
+ * One observable stage of a multi-stage host tool call — the private fit
+ * reviewer, a compile, a repair — reported as it starts and again as it settles,
+ * under the one row the learner already sees. Runtime facts only: which stage,
+ * against what, which model, how long, and what came back. Never the model's own
+ * reasoning. Timestamps are the worker's wall clock, which is this machine's.
+ */
+export type ToolStage = {
+  id: string;
+  kind: "draft" | "review" | "revise" | "validate" | "repair" | "redraft" | "outcome";
+  /** Present tense while running, past tense once settled. */
+  verb: string;
+  subject: string;
+  state: "running" | "done" | "failed" | "skipped";
+  /** One line of what came back: a verdict's reason, the fields a patch changed. */
+  detail?: string;
+  /** Failed checks, each in full, for a validation that did not pass. */
+  findings?: string[];
+  /** A short count for the stage's corner, e.g. `4/6 checks`. */
+  badge?: string;
+  /** The model a private model stage ran on. */
+  model?: string;
+  provider?: string;
+  /** A learner-visible file the stage's model is writing right now — starter
+   *  code or a visible test, never the reference or a hidden test. */
+  writing?: { path: string; content: string };
+  /** The sandbox runs of a validation stage, as the compiler reports them. */
+  runs?: ToolStageRun[];
+  startedAt: number;
+  endedAt?: number;
+};
+/**
+ * A challenge being written, parsed from the model's streaming tool arguments.
+ * Only what the learner will be handed anyway carries content — the statement,
+ * the starter files and the visible tests. The reference, the hidden tests and
+ * the known-incorrect implementations are named and counted, never shown.
+ */
+export type ChallengeDraft = {
+  key: string;
+  title?: string;
+  language?: string;
+  statement?: string;
+  files: Array<{ group: "starter" | "visible" | "reference" | "hidden" | "incorrect"; path: string; lines: number; content?: string }>;
+  received: number;
+};
+/** One sandbox run inside a validation stage. Counts only, except for the
+ *  learner-visible cases, whose names the learner will read anyway. */
+export type ToolStageRun = {
+  id: string;
+  label: string;
+  expect: "pass" | "fail";
+  state: "running" | "passed" | "failed";
+  cases?: { total: number; passed: number; failed: number };
+  visibleCases?: Array<{ name: string; passed: boolean }>;
+  durationMs?: number;
+};
 export type AgentStreamEvent = {
   runId: string;
   /** Which session this turn is working on. Stamped in the main process, because
    *  the utility process only knows its own request id — and a card the learner
    *  is not looking at still has to be able to say "the agent is on this one". */
   sessionId?: string;
-  type: "text" | "reasoning" | "tool" | "status" | "error" | "done";
+  type: "text" | "reasoning" | "tool" | "status" | "question-pending" | "draft" | "error" | "done";
   text?: string;
   tool?: string;
   detail?: string;
   /** Correlates a tool's start and end events so a row updates in place. */
   callId?: string;
-  phase?: "start" | "end";
+  /** Progress keeps an existing tool row open while replacing its short live
+   *  detail. This is used for multi-stage host work such as compile, repair,
+   *  and revalidation. */
+  phase?: "start" | "progress" | "end";
   ok?: boolean;
   /** Short human summary of the tool's input, e.g. the challenge's own title.
    *  Host-generated, and distinct from `actionTitle`: a published challenge row
@@ -438,6 +516,14 @@ export type AgentStreamEvent = {
   input?: string;
   output?: string;
   files?: AgentActivityFile[];
+  /** A challenge design as the model is still writing it, before its call
+   *  exists. Redacted in the worker: see `ChallengeDraft`. */
+  draft?: ChallengeDraft;
+  /** A stage of the call that just started or settled, upserted by `stage.id`. */
+  stage?: ToolStage;
+  /** Every stage of the call, on its end event — the authoritative list, and the
+   *  one stored with the turn. */
+  stages?: ToolStage[];
   /** How full the model's context window got on this turn, reported once per
    *  provider turn so the composer's ring can move while the turn is running.
    *  Only ever grows within a run — see the note in `agent.ts`. */
@@ -615,6 +701,8 @@ export interface SparApi {
    *  provider does not say. Asked separately from the inventory for the same
    *  reason usage is: it can cost a network call, and only a hover wants it. */
   providerAccount(provider: ProviderId): Promise<ProviderAccount | null>;
+  /** Local agent spend over the last `days` days, or all of it for null. */
+  usageReport(days: number | null): Promise<UsageReport>;
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
   /** OpenAI's priority service tier, which is what ChatGPT calls fast mode. Set
    *  for every model; only the Responses providers can act on it. */

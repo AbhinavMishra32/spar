@@ -16,9 +16,31 @@ export type ValidationReport = {
   validatedAt: string;
 };
 
+/**
+ * One sandbox run of a candidate, reported as it starts and as it lands so the
+ * authoring row can show the tests being run rather than only their verdict.
+ *
+ * Counts only, except for the learner-visible file: its case names are already
+ * on the page the learner will read. Nothing here may carry a hidden case's name
+ * or input, or a line of the reference — those are the answer.
+ */
+export type CompileProgress = {
+  id: string;
+  label: string;
+  /** What this run is supposed to do: the reference passes, a known-incorrect
+   *  implementation is caught. */
+  expect: "pass" | "fail";
+  state: "running" | "passed" | "failed";
+  cases?: { total: number; passed: number; failed: number };
+  /** Named visible cases and whether each passed, for the visible-only run. */
+  visibleCases?: Array<{ name: string; passed: boolean }>;
+  durationMs?: number;
+};
+export type CompileObserver = (event: CompileProgress) => void;
+
 /** Cases the reference must actually pass before a challenge is publishable.
  *  Not reachable by hand, which is the point — see the `case volume` check. */
-const MIN_EXECUTED_CASES = 24;
+const MIN_EXECUTED_CASES = { function: 24, module: 12, repair: 8, extension: 8, repository: 8 } as const;
 /** Named, readable cases in the visible file: the contract the learner reads. */
 const MIN_VISIBLE_CASES = 4;
 
@@ -37,14 +59,33 @@ const MIN_VISIBLE_CASES = 4;
  */
 export type DesignOrigin = "authored" | "host";
 
-export async function compileQuestion(untrustedDesign: unknown, run: ValidationRunner, origin: DesignOrigin = "authored"): Promise<{ design: QuestionDesign; report: ValidationReport }> {
+export async function compileQuestion(untrustedDesign: unknown, execute: ValidationRunner, origin: DesignOrigin = "authored", observe?: CompileObserver): Promise<{ design: QuestionDesign; report: ValidationReport }> {
   let design = normalizeDesign(normalizeFileDescriptors(questionDesignSchema.parse(untrustedDesign)));
+  const run = execute;
+  let runs = 0;
+  /* A reported run. The oracle materialisation below uses the bare runner: it
+     is the compiler preparing the tests, not a verdict on the candidate. */
+  const observed = async (label: string, expect: "pass" | "fail", files: Record<string, string>, command: string, limits: { timeoutMs: number; memoryMb: number }, visible = false): Promise<ValidationRun> => {
+    const id = `run-${runs++}`;
+    observe?.({ id, label, expect, state: "running" });
+    const result = await execute(files, command, limits);
+    const output = `${result.stdout}\n${result.stderr}`;
+    const ok = expect === "pass" ? result.exitCode === 0 : result.exitCode !== 0;
+    observe?.({
+      id, label, expect, state: ok ? "passed" : "failed",
+      cases: structuredVerdicts(output),
+      ...(visible ? { visibleCases: namedVerdicts(output) } : {}),
+      durationMs: result.durationMs,
+    });
+    return result;
+  };
 
   // Shape is checked before anything is executed. A candidate whose tests can
   // never reach its implementation fails four sandbox runs and reports only
   // that the command exited non-zero; naming the structural fault directly is
   // both faster and the difference between a repairable rejection and a guess.
   const structural = preflight(design);
+  observe?.({ id: "preflight", label: "Structural checks", expect: "pass", state: structural.every((check) => check.passed) ? "passed" : "failed", cases: { total: structural.length, passed: structural.filter((check) => check.passed).length, failed: structural.filter((check) => !check.passed).length } });
   if (structural.some((check) => !check.passed)) {
     return { design, report: { id: randomUUID(), valid: false, contentHash: createHash("sha256").update(stableJson(design)).digest("hex"), checks: structural, validatedAt: new Date().toISOString() } };
   }
@@ -57,20 +98,21 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
     differentialDiagnostics = differential.diagnostics;
   }
   const checks: ValidationReport["checks"] = [...structural];
-  const reference = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
+  const reference = await observed("Reference solution against every test", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
   checks.push({ name: "reference solution", passed: reference.exitCode === 0, detail: summarize(reference) });
   checks.push(structuredResultCheck("reference case results", reference, "passed"));
   // Whether each misconception replaces the implementation was already settled
   // structurally, so this loop only measures behaviour.
   for (const [index, incorrect] of design.knownIncorrectFiles.entries()) {
-    const visibleResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language));
+    const which = design.knownIncorrectFiles.length > 1 ? ` ${index + 1}` : "";
+    const visibleResult = await observed(`Plausible wrong solution${which} passes the visible tests`, "pass", { ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language));
     checks.push({ name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : summarize(visibleResult) });
     checks.push(structuredResultCheck(`known incorrect ${index + 1} visible case results`, visibleResult, "passed"));
-    const hiddenResult = await run({ ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
+    const hiddenResult = await observed(`Hidden tests catch the wrong solution${which}`, "fail", { ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
     checks.push({ name: `known incorrect ${index + 1} fails hidden`, passed: hiddenResult.exitCode !== 0, detail: hiddenResult.exitCode !== 0 ? "Targeted hidden tests rejected the misconception" : differentialDiagnostics[index] ?? "Incorrect implementation passed visible and hidden tests" });
     checks.push(structuredResultCheck(`known incorrect ${index + 1} failure case results`, hiddenResult, "failed"));
   }
-  const visibleOnly = await run({ ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, runLimits(design.language));
+  const visibleOnly = await observed("Visible tests against the reference", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, runLimits(design.language), true);
   checks.push({ name: "visible test agreement", passed: visibleOnly.exitCode === 0, detail: summarize(visibleOnly) });
   checks.push(structuredResultCheck("visible case results", visibleOnly, "passed"));
   checks.push({ name: "targeted hidden coverage", passed: design.hiddenTests && Object.keys(design.hiddenTests).length > 0 && design.expectedFailureSignatures.length > 0, detail: `${Object.keys(design.hiddenTests).length} hidden files cover ${design.expectedFailureSignatures.length} expected signatures` });
@@ -91,12 +133,15 @@ export async function compileQuestion(untrustedDesign: unknown, run: ValidationR
    * generated inputs, which is the thing worth requiring.
    */
   const volume = structuredVerdicts(`${reference.stdout}\n${reference.stderr}`);
+  const requiredCases = MIN_EXECUTED_CASES[design.kind];
   checks.push({
     name: "case volume",
-    passed: origin === "host" || volume.total >= MIN_EXECUTED_CASES,
-    detail: volume.total >= MIN_EXECUTED_CASES
+    passed: origin === "host" || volume.total >= requiredCases,
+    detail: volume.total >= requiredCases
       ? `${volume.total} cases executed against the reference`
-      : `Only ${volume.total} cases ran; at least ${MIN_EXECUTED_CASES} are required. Add a generated sweep to hiddenTests: loop over inputs built from a seeded pseudo-random generator, compute the expected answer with a brute-force oracle written inside the test file, and emit one verdict line per case with the input in the case name. Keep the curated cases too — the sweep finds what you did not think of, the curated ones say what the problem means.`,
+      : design.kind === "function"
+        ? `Only ${volume.total} cases ran; at least ${requiredCases} are required. Add a generated sweep to hiddenTests: loop over inputs built from a seeded pseudo-random generator, compute the expected answer with a brute-force oracle written inside the test file, and emit one verdict line per case with the input in the case name. Keep the curated cases too — the sweep finds what you did not think of, the curated ones say what the problem means.`
+        : `Only ${volume.total} cases ran; at least ${requiredCases} are required for a ${design.kind} challenge. Add meaningful hidden scenarios that exercise the task's behavior, boundaries, and interactions, with one verdict per case.`,
   });
   /* Curated cases are a separate requirement from volume, and pointed the other
      way: a suite that is only a sweep tells the learner nothing about what the
@@ -163,6 +208,18 @@ function structuredVerdicts(output: string): { total: number; passed: number; fa
   }
   return { total: passed + failed, passed, failed };
 }
+/** Each `ok N - name` line as a named verdict. Only ever read off the visible
+ *  run, whose case names are the learner's own contract. */
+function namedVerdicts(output: string): Array<{ name: string; passed: boolean }> {
+  const named: Array<{ name: string; passed: boolean }> = [];
+  for (const line of output.replace(/\r\n/g, "\n").split("\n")) {
+    const point = /^(not ok|ok)(?:\s+\d+)?(?:\s*[-–]\s*(.*?))?(?:\s+#\s*(?:SKIP|TODO).*)?$/i.exec(line.trim());
+    if (!point) continue;
+    named.push({ name: (point[2] ?? "").trim().slice(0, 120) || `case ${named.length + 1}`, passed: point[1]?.toLowerCase() === "ok" });
+    if (named.length >= 40) break;
+  }
+  return named;
+}
 function summarize(run: ValidationRun) {
   if (run.exitCode === 0) return `Passed in ${run.durationMs}ms`;
   return `Exited ${run.exitCode} in ${run.durationMs}ms: ${diagnose(run)}`;
@@ -199,7 +256,8 @@ export function diagnose(run: ValidationRun): string {
     return `${stopped.trim()} The command was killed at the time limit, so no test result came back. That is either a program that does not terminate on some input, or a build slower than the limit — check for the non-terminating case first, and do not redesign a candidate whose logic the earlier runs already agreed with.`;
   }
 
-  const compiler = lines.filter((line) => /\b(?:fatal error|error):/i.test(line) || /^\s*(?:Undefined symbols|ld:|clang|duplicate symbol)/.test(line));
+  const tapFraming = (line: string) => /^\s*error:\s*(?:\|-|'\d+ subtests? failed')\s*$/.test(line);
+  const compiler = lines.filter((line) => !tapFraming(line) && (/\b(?:fatal error|error):/i.test(line) || /^\s*(?:Undefined symbols|ld:|clang|duplicate symbol)/.test(line)));
   if (compiler.length) {
     const duplicateMain = compiler.some((line) => /duplicate symbol .*\bmain\b/.test(line));
     const detail = clamp(compiler);
@@ -208,9 +266,16 @@ export function diagnose(run: ValidationRun): string {
       : detail;
   }
 
+  const failedAt = lines.findIndex((line) => /^not ok\b/.test(line.trim()));
+  if (failedAt >= 0) {
+    const caseName = lines.slice(0, failedAt).reverse().find((line) => /^#\s*Subtest:/.test(line)) ?? lines[failedAt] ?? "test failed";
+    const details = lines.slice(failedAt + 1, failedAt + 35).filter((line) => !tapFraming(line) && /^\s*(?:error|expected|actual|operator|code):/.test(line));
+    return clamp([caseName, ...details]);
+  }
+
   // node:test reports the failing case as a subtest header plus an assertion
   // body; both together are what identifies which expectation disagreed.
-  const failing = lines.filter((line) => /^#\s*Subtest:/.test(line) || /^\s*(?:error|expected|actual|operator|code):/.test(line));
+  const failing = lines.filter((line) => /^#\s*Subtest:/.test(line) || (!tapFraming(line) && /^\s*(?:error|expected|actual|operator|code):/.test(line)));
   if (failing.length) return clamp(failing);
 
   const assertion = lines.filter((line) => /Assertion failed|AssertionError|Error:|Exception|Segmentation fault|abort|terminate called/i.test(line));
@@ -309,10 +374,31 @@ function preflight(design: QuestionDesign): ValidationReport["checks"] {
 
   if (design.language === "cpp" || design.language === "c") checks.push(...preflightNative(design, testPaths));
   else checks.push(...preflightNode(design, testPaths, rules.test));
+  if (design.language === "python") checks.push(...preflightStandalonePythonTests(design));
 
   if (!design.expectedFailureSignatures.length) fail("expected failure signatures declared", "expectedFailureSignatures is empty. Name at least one observable way the targeted misconception fails.");
   else pass("expected failure signatures declared", `${design.expectedFailureSignatures.length} declared`);
 
+  return checks;
+}
+
+/** Spar runs each Python test file as `python3 <file>`. A pytest-style
+ * `def test_*` without an invocation silently executes zero cases: the process
+ * exits successfully, so the ordinary reference check is misleading. Name the
+ * actual runner contract before any expensive sandbox runs or model repairs. */
+function preflightStandalonePythonTests(design: QuestionDesign): ValidationReport["checks"] {
+  const checks: ValidationReport["checks"] = [];
+  for (const [path, source] of Object.entries({ ...design.visibleTests, ...design.hiddenTests })) {
+    const definitions = [...source.matchAll(/^\s*(?:async\s+)?def\s+(test_\w+)\s*\(/gm)].map((match) => match[1]!);
+    if (!definitions.length) continue;
+    const withoutDefinitions = source.replace(/^\s*(?:async\s+)?def\s+test_\w+\s*\([^\n]*/gm, "");
+    if (definitions.some((name) => new RegExp(`\\b${name}\\s*\\(`).test(withoutDefinitions))) continue;
+    checks.push({
+      name: `python test entrypoint: ${path}`,
+      passed: false,
+      detail: `Spar executes ${path} directly with python3; it does not invoke pytest or unittest, and the candidate's runCommand does not change that. The file defines ${definitions.join(", ")} but never calls it, so zero cases run. Call the test function from an if __name__ == "__main__": block, or execute the cases at module top level.`,
+    });
+  }
   return checks;
 }
 
@@ -350,12 +436,12 @@ function preflightNative(design: QuestionDesign, testPaths: string[]): Validatio
   return checks;
 }
 
-/** Node's runner discovers `*.test.js`/`*.test.ts`, and a test that imports nothing cannot exercise the implementation. */
+/** Validate each runner's test naming, then check Node tests for imports. */
 function preflightNode(design: QuestionDesign, testPaths: string[], testPattern: RegExp): ValidationReport["checks"] {
   const checks: ValidationReport["checks"] = [];
   const misnamed = testPaths.filter((file) => !testPattern.test(file));
   if (misnamed.length) {
-    checks.push({ name: "tests use the runner's naming", passed: false, detail: `${misnamed.join(", ")} will not be discovered. Node's test runner only collects files matching ${testPattern.source}; rename them.` });
+    checks.push({ name: "tests use the runner's naming", passed: false, detail: `${misnamed.join(", ")} will not be discovered for ${design.language}. Test files must match ${testPattern.source}; rename them.` });
   } else checks.push({ name: "tests use the runner's naming", passed: true, detail: `${testPaths.length} discoverable test files` });
 
   // Deliberately not checked here: whether each test imports the implementation
@@ -388,16 +474,25 @@ async function materializeJavascriptOracles(design: QuestionDesign, run: Validat
       const oracleSource = `globalThis.__sparOracle = (index, actual) => console.log("__SPAR_ORACLE__" + JSON.stringify({ index, actual }));\n${instrumented}`;
       const result = await run({ ...design.starterFiles, ...design.referenceFiles, [file]: oracleSource }, design.runCommand, runLimits(design.language));
       if (result.exitCode !== 0) return [file, source] as const;
-      const actualByIndex = new Map<number, unknown>();
+      const actualByIndex = new Map<number, unknown[]>();
       for (const match of result.stdout.matchAll(/__SPAR_ORACLE__(\{[^\r\n]*\})/g)) {
         try {
           const value = JSON.parse(match[1] ?? "") as { index?: unknown; actual?: unknown };
-          if (typeof value.index === "number") actualByIndex.set(value.index, value.actual);
+          if (typeof value.index === "number") {
+            const values = actualByIndex.get(value.index) ?? [];
+            values.push(value.actual);
+            actualByIndex.set(value.index, values);
+          }
         } catch {}
       }
       if (actualByIndex.size !== calls.length) return [file, source] as const;
       const replacements = calls.map((call, index) => {
-        const literal = JSON.stringify(actualByIndex.get(index));
+        // A call inside a loop executes once per case. Replacing its expected
+        // expression with the final observed value makes every earlier case
+        // fail, even when the reference and the original oracle agree.
+        const values = actualByIndex.get(index);
+        if (values?.length !== 1) return source.slice(call.start, call.end);
+        const literal = JSON.stringify(values[0]);
         if (literal === undefined) return source.slice(call.start, call.end);
         return `assert.${call.method}(${[call.arguments[0], literal, ...call.arguments.slice(2)].join(", ")})`;
       });

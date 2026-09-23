@@ -30,6 +30,7 @@ type RunFinish = {
   promptTokens?: number | undefined;
   completionTokens?: number | undefined;
   cachedInputTokens?: number | undefined;
+  estimatedCostMicros?: number | undefined;
   eventCount: number;
   latencyMs: number;
   error: string | null;
@@ -43,6 +44,8 @@ export type AgentTraceSink = {
 };
 
 type Config = { endpoint: string; apiKey: string; project: string };
+type ChildState = { id: string; parentId: string; dottedOrder: string; startedAt: string; executionOrder: number; childExecutionOrder: number };
+type RootState = { dottedOrder: string; start: RunStart & { startedAt: string }; children: Map<string, ChildState>; childrenById: Map<string, ChildState>; nextExecutionOrder: number };
 
 /**
  * Development traces go straight from Electron's main process to LangSmith.
@@ -54,8 +57,7 @@ type Config = { endpoint: string; apiKey: string; project: string };
  */
 export class DevLangSmithTraceSink implements AgentTraceSink {
   private readonly config: Config | null;
-  private readonly roots = new Map<string, { dottedOrder: string; start: RunStart & { startedAt: string } }>();
-  private readonly postedChildren = new Set<string>();
+  private readonly roots = new Map<string, RootState>();
   private pending = Promise.resolve();
 
   constructor(private readonly request: typeof fetch = fetch, environment: NodeJS.ProcessEnv = process.env) {
@@ -66,8 +68,8 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
 
   start(value: RunStart & { startedAt: string }) {
     if (!this.config) return;
-    const dottedOrder = order(value.startedAt, value.runId);
-    this.roots.set(value.runId, { dottedOrder, start: value });
+    const dottedOrder = order(value.startedAt, value.runId, 1);
+    this.roots.set(value.runId, { dottedOrder, start: value, children: new Map(), childrenById: new Map(), nextExecutionOrder: 1 });
     this.send({ post: [rootRun(value, this.config.project, dottedOrder)], patch: [] });
   }
 
@@ -75,15 +77,26 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
     if (!this.config) return;
     const root = this.roots.get(value.runId);
     if (!root) return;
-    const childId = stableUuid(`${value.runId}:${value.kind}:${value.callId ?? value.id}`);
+    const callId = value.callId ?? value.id;
+    let child = root.children.get(callId);
     const state = typeof value.payload.state === "string" ? value.payload.state : null;
-    const child = childRun(value, root.start, this.config.project, childId, `${root.dottedOrder}.${order(value.occurredAt, childId)}`);
-    if (state === "end" && this.postedChildren.has(childId)) {
-      this.send({ post: [], patch: [child] });
+    const alreadyStarted = Boolean(child);
+    if (!child) {
+      const parentCallId = typeof value.payload.parentCallId === "string" ? value.payload.parentCallId : null;
+      const parent = parentCallId ? root.children.get(parentCallId) : undefined;
+      const id = stableUuid(`${value.runId}:${value.kind}:${callId}`);
+      const executionOrder = ++root.nextExecutionOrder;
+      child = { id, parentId: parent?.id ?? value.runId, dottedOrder: `${parent?.dottedOrder ?? root.dottedOrder}.${order(value.occurredAt, id, executionOrder)}`, startedAt: value.occurredAt, executionOrder, childExecutionOrder: executionOrder };
+      root.children.set(callId, child);
+      root.childrenById.set(id, child);
+      for (let ancestor = parent; ancestor; ancestor = root.childrenById.get(ancestor.parentId)) ancestor.childExecutionOrder = Math.max(ancestor.childExecutionOrder, executionOrder);
+    }
+    const run = childRun(value, root.start, this.config.project, child);
+    if (state === "end" && alreadyStarted) {
+      this.send({ post: [], patch: [run] });
       return;
     }
-    this.postedChildren.add(childId);
-    this.send({ post: [child], patch: [] });
+    this.send({ post: [run], patch: [] });
   }
 
   finish(value: RunFinish) {
@@ -93,6 +106,7 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
     this.roots.delete(value.id);
     this.send({ post: [], patch: [{
       ...rootRun(root.start, this.config.project, root.dottedOrder),
+      child_execution_order: root.nextExecutionOrder,
       end_time: Date.parse(value.completedAt),
       outputs: value.output,
       error: value.error ?? undefined,
@@ -106,6 +120,7 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
           promptTokens: value.promptTokens,
           completionTokens: value.completionTokens,
           cachedInputTokens: value.cachedInputTokens,
+          estimatedCostUsd: value.estimatedCostMicros === undefined ? undefined : value.estimatedCostMicros / 1_000_000,
         },
       },
     }] });
@@ -148,6 +163,8 @@ function rootRun(value: RunStart & { startedAt: string }, project: string, dotte
     session_name: project,
     trace_id: value.runId,
     dotted_order: dottedOrder,
+    execution_order: 1,
+    child_execution_order: 1,
     start_time: Date.parse(value.startedAt),
     inputs: value.input,
     extra: metadata(value),
@@ -156,30 +173,52 @@ function rootRun(value: RunStart & { startedAt: string }, project: string, dotte
   };
 }
 
-function childRun(value: TraceEvent, start: RunStart, project: string, id: string, dottedOrder: string) {
+function childRun(value: TraceEvent, start: RunStart, project: string, child: ChildState) {
   const state = typeof value.payload.state === "string" ? value.payload.state : null;
   const error = value.level === "ERROR" || value.payload.ok === false ? String(value.payload.error ?? value.payload.detail ?? "Operation failed") : undefined;
   return {
-    id,
+    id: child.id,
     name: value.name,
     run_type: value.kind === "generation" ? "llm" : value.kind === "tool" ? "tool" : "chain",
     project_name: project,
     session_name: project,
     trace_id: value.runId,
-    parent_run_id: value.runId,
-    dotted_order: dottedOrder,
-    start_time: Date.parse(value.occurredAt),
+    parent_run_id: child.parentId,
+    dotted_order: child.dottedOrder,
+    execution_order: child.executionOrder,
+    child_execution_order: child.childExecutionOrder,
+    start_time: Date.parse(child.startedAt),
     ...(state === "start" ? {} : { end_time: Date.parse(value.occurredAt) }),
-    inputs: value.payload.input ?? {},
-    outputs: value.payload.output ?? value.payload,
+    ...(state === "end" ? {} : { inputs: value.payload.input ?? {} }),
+    ...(state === "start" ? {} : { outputs: withUsageMetadata(value.payload.output ?? value.payload, value.kind === "generation" ? value.payload.usage : undefined) }),
     error,
     extra: {
       ...metadata(start),
-      metadata: { ...metadata(start).metadata, sequence: value.sequence, phase: value.phase, callId: value.callId, state },
+      metadata: { ...metadata(start).metadata, sequence: value.sequence, phase: value.phase, callId: value.callId, state, ...(value.kind === "generation" ? { ls_provider: start.provider, ls_model_name: start.model } : {}) },
     },
     tags: ["spar-development", "development", "product", "live", start.provider, value.kind],
     serialized: { name: value.name },
   };
+}
+
+/* LangSmith's own shape for an llm run's tokens and cost, so its usage and cost
+   columns fill in instead of the numbers sitting unread in the output blob. */
+function withUsageMetadata(output: unknown, usage: unknown) {
+  if (!usage || typeof usage !== "object") return output;
+  const value = usage as Record<string, unknown>;
+  const count = (key: string) => typeof value[key] === "number" ? value[key] as number : 0;
+  const cacheRead = count("cachedInputTokens");
+  const cacheWrite = count("cacheWriteTokens");
+  const input = count("inputTokens") + cacheRead + cacheWrite;
+  const usageMetadata = {
+    input_tokens: input,
+    output_tokens: count("outputTokens"),
+    total_tokens: input + count("outputTokens"),
+    input_token_details: { cache_read: cacheRead, cache_creation: cacheWrite },
+    ...(typeof value.costUsd === "number" ? { total_cost: value.costUsd } : {}),
+  };
+  const base = output && typeof output === "object" && !Array.isArray(output) ? output as Record<string, unknown> : { output };
+  return { ...base, usage_metadata: usageMetadata };
 }
 
 function metadata(value: RunStart) {
@@ -199,10 +238,13 @@ function metadata(value: RunStart) {
   };
 }
 
-function order(occurredAt: string, id: string) {
+function order(occurredAt: string, id: string, executionOrder: number) {
   const iso = new Date(occurredAt).toISOString();
-  const timestamp = `${iso.slice(0, 19).replace(/[-:]/g, "")}${iso.slice(20, 23)}000Z`;
-  return `${timestamp}${id.replaceAll("-", "")}`;
+  const microseconds = String(Math.min(executionOrder, 999)).padStart(3, "0");
+  const timestamp = `${iso.slice(0, 19).replace(/[-:]/g, "")}${iso.slice(20, 23)}${microseconds}Z`;
+  // LangSmith's RunTree appends the canonical UUID. Its tree reader uses the
+  // final 36 characters of each segment to recover the corresponding run ID.
+  return `${timestamp}${id}`;
 }
 
 function stableUuid(seed: string) {

@@ -110,85 +110,71 @@ describe("reading back what the agent already worked out", () => {
   });
 });
 
-/* The learner-reported failure this covers: four unrelated goals in a row — a
-   Google interview, TypeScript, C++, and "hii" — each opened with another
-   off-by-one loop repair, because one ability in the ledger answered every
-   retrieval and the host only ever checked for repetition inside one session. */
-describe("challenge coverage across the whole library", () => {
-  const seedSaturated = (store: LocalStore, count: number) => {
-    for (let index = 0; index < count; index += 1) {
-      const { sessionId } = store.createSession(`Earlier goal ${index + 1}`);
-      store.setTrainingTarget(sessionId, { ability: "Loop boundary tracing", specificGap: "Stops one short", desiredEvidence: "Exact stop", avoidTesting: [] });
-      store.createQuestion(sessionId, design(`Stop the loop exactly ${index + 1}`), { valid: true }, { concepts: [{ slug: "loop-boundary-tracing", role: "primary" }] });
-    }
-  };
+describe("agent choice of challenge", () => {
+  it("records a corrected target only when the new challenge validates", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practice stack reasoning");
+      store.setTrainingTarget(sessionId, { ability: "Next greater positions", specificGap: "Untested index method", desiredEvidence: "Returns next greater indices", avoidTesting: [] });
+      const candidate = {
+        ...design("Repair streamed stack state"),
+        language: "python" as const,
+        kind: "repair" as const,
+        starterFiles: { "solution.py": "broken" },
+        referenceFiles: { "solution.py": "correct" },
+        visibleTests: { "test_visible.py": "visible" },
+        hiddenTests: { "test_hidden.py": "hidden" },
+        knownIncorrectFiles: [{ "solution.py": "incorrect" }],
+        why: "Transfer the known stack invariant into a streaming state repair.",
+        trainingTarget: { ability: "Streaming stack state", specificGap: "State across chunks is untested", desiredEvidence: "Preserves unresolved indices across chunks", avoidTesting: [] },
+      };
+      await executeTrainingTool("create_question", candidate, sessionId, store, workspaceStub(), passingRunner());
+      expect(store.latestTarget(sessionId)?.ability_title).toBe("Next greater positions");
 
-  it("refuses a title the learner has already been asked in another session", async () => {
+      const visible = Array.from({ length: 4 }, (_, index) => `ok - visible ${index}`).join("\n");
+      const hidden = Array.from({ length: 4 }, (_, index) => `ok - hidden ${index}`).join("\n");
+      const outputs = [
+        { exitCode: 0, stdout: `${visible}\n${hidden}\n`, stderr: "", durationMs: 1 },
+        { exitCode: 0, stdout: `${visible}\n`, stderr: "", durationMs: 1 },
+        { exitCode: 1, stdout: "not ok - retained across chunks\n    input: two chunks\n    expected: retained\n    actual: lost\n", stderr: "", durationMs: 1 },
+        { exitCode: 0, stdout: `${visible}\n`, stderr: "", durationMs: 1 },
+      ];
+      const runner = { request: () => ({ id: "run", promise: Promise.resolve(outputs.shift()!) }) } as unknown as UtilityClient;
+      const result = await executeTrainingTool("create_question", candidate, sessionId, store, workspaceStub(), runner) as { status: string };
+      expect(result.status).toBe("playable");
+      expect(store.latestTarget(sessionId)?.ability_title).toBe("Streaming stack state");
+      expect(store.readSession(sessionId)?.question?.abilityTitle).toBe("Streaming stack state");
+      expect(store.readSession(sessionId)?.question?.introductionReason).toBe("Transfer the known stack invariant into a streaming state repair.");
+    } finally { store.close(); }
+  });
+
+  it("lets a repeated title reach validation", async () => {
     const store = new LocalStore(":memory:");
     try {
       const first = store.createSession("Practise arrays");
       store.setTrainingTarget(first.sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts values", avoidTesting: [] });
       store.createQuestion(first.sessionId, design("Count values above a threshold"), { valid: true });
-
-      const second = store.createSession("i wanna pass a google interview");
+      const second = store.createSession("Compare my new approach");
       store.setTrainingTarget(second.sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts values", avoidTesting: [] });
-      const result = await executeTrainingTool("create_question", { title: "Count values above a threshold" }, second.sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; report: { checks: Array<{ name: string; detail: string }> } };
-
-      expect(result.status).toBe("invalid");
-      expect(result.report.checks[0]?.name).toBe("adaptive progression");
-    } finally {
-      store.close();
-    }
+      const result = await executeTrainingTool("create_question", design("Count values above a threshold"), second.sessionId, store, workspaceStub(), passingRunner()) as { report: { checks: Array<{ name: string }> } };
+      expect(result.report.checks[0]?.name).toBe("challenge file set");
+    } finally { store.close(); }
   });
 
-  it("refuses a first challenge on the concept the last three were about when the goal never named it", async () => {
+  it("lets a repeated concept reach validation even when the goal uses different words", async () => {
     const store = new LocalStore(":memory:");
     try {
-      seedSaturated(store, 3);
-      const { sessionId } = store.createSession("i wanna pass a google interview");
-      store.setTrainingTarget(sessionId, { ability: "Loop boundary tracing", specificGap: "Stops one short", desiredEvidence: "Exact stop", avoidTesting: [] });
-      const result = await executeTrainingTool("create_question", { title: "Fix the loop that skips the last multiple", concepts: [{ slug: "loop-boundary-tracing", role: "primary" }] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; report: { checks: Array<{ name: string; detail: string }> } };
-
-      expect(result.status).toBe("invalid");
-      expect(result.report.checks[0]?.name).toBe("goal coverage");
-      expect(result.report.checks[0]?.detail).toContain("does not name it");
-    } finally {
-      store.close();
-    }
-  });
-
-  it("still lets the learner drill the same concept when their goal asks for it", async () => {
-    const store = new LocalStore(":memory:");
-    try {
-      seedSaturated(store, 3);
-      // The wording a drill started from an ability card is created with.
-      const { sessionId } = store.createSession("I want to go deeper on loop boundary tracing.");
-      store.setTrainingTarget(sessionId, { ability: "Loop boundary tracing", specificGap: "Stops one short", desiredEvidence: "Exact stop", avoidTesting: [] });
-      const result = await executeTrainingTool("create_question", { title: "Hold the boundary under a shrinking window", concepts: [{ slug: "loop-boundary-tracing", role: "primary" }] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient).catch((error: Error) => error) as { report?: { checks: Array<{ name: string }> } };
-
-      // Whatever the compiler goes on to say about the candidate, coverage is not
-      // what stopped it.
-      expect(result.report?.checks?.[0]?.name).not.toBe("goal coverage");
-    } finally {
-      store.close();
-    }
-  });
-
-  it("leaves a session's later challenges alone, because staying on a concept is how teaching works", async () => {
-    const store = new LocalStore(":memory:");
-    try {
-      seedSaturated(store, 3);
-      const { sessionId } = store.createSession("i wanna pass a google interview");
-      store.setTrainingTarget(sessionId, { ability: "Loop boundary tracing", specificGap: "Stops one short", desiredEvidence: "Exact stop", avoidTesting: [] });
-      const opening = store.createQuestion(sessionId, design("Trace the window that never closes"), { valid: true }, { concepts: [{ slug: "loop-boundary-tracing", role: "primary" }] });
-      store.completeAttempt(opening.attemptId, "passed");
-
-      const result = await executeTrainingTool("create_question", { title: "Restore the boundary after a shrink", concepts: [{ slug: "loop-boundary-tracing", role: "primary" }] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient).catch((error: Error) => error) as { report?: { checks: Array<{ name: string }> } };
-
-      expect(result.report?.checks?.[0]?.name).not.toBe("goal coverage");
-    } finally {
-      store.close();
-    }
+      for (let index = 0; index < 3; index += 1) {
+        const earlier = store.createSession(`Earlier goal ${index}`);
+        store.setTrainingTarget(earlier.sessionId, { ability: "Loop boundary tracing", specificGap: "Stops one short", desiredEvidence: "Exact stop", avoidTesting: [] });
+        store.createQuestion(earlier.sessionId, design(`Boundary ${index}`), { valid: true }, { concepts: [{ slug: "loop-boundary-tracing", role: "primary" }] });
+      }
+      const current = store.createSession("i wanna pass a google interview");
+      store.setTrainingTarget(current.sessionId, { ability: "Loop boundary tracing", specificGap: "Stops one short", desiredEvidence: "Exact stop", avoidTesting: [] });
+      const candidate = { ...design("Transfer the boundary"), concepts: [{ slug: "loop-boundary-tracing", role: "primary" }] };
+      const result = await executeTrainingTool("create_question", candidate, current.sessionId, store, workspaceStub(), passingRunner()) as { report: { checks: Array<{ name: string }> } };
+      expect(result.report.checks[0]?.name).toBe("challenge file set");
+    } finally { store.close(); }
   });
 });
 

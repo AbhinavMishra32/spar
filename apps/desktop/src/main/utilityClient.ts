@@ -8,7 +8,7 @@ type EventSink = (value: Record<string, unknown>) => void;
 export class UtilityClient {
   private child: UtilityProcess | null = null;
   private readonly pending = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
-  constructor(private readonly workerFile: string, private readonly onEvent: EventSink, private readonly onTool?: (name: string, input: unknown, context: { requestId: string; sessionId?: string }) => Promise<unknown>) {}
+  constructor(private readonly workerFile: string, private readonly onEvent: EventSink, private readonly onTool?: (name: string, input: unknown, context: { requestId: string; sessionId?: string; progress(value: unknown): void }) => Promise<unknown>) {}
   request(method: string, payload: unknown) {
     const id = randomUUID();
     const promise = new Promise<unknown>((resolve, reject) => this.pending.set(id, { resolve, reject }));
@@ -30,7 +30,10 @@ export class UtilityClient {
       const requestId = String(message.requestId ?? "");
       const name = String(message.name);
       try {
-        const value = await this.onTool(name, message.input, { requestId, ...(typeof message.sessionId === "string" ? {sessionId:message.sessionId}: {}) });
+        /* Progress goes back to the worker that asked, keyed by the call, so it
+           lands on the stage that is waiting for it. */
+        const progress = (value: unknown) => this.child?.postMessage({ kind: "tool-progress", id: message.id, value });
+        const value = await this.onTool(name, message.input, { requestId, progress, ...(typeof message.sessionId === "string" ? {sessionId:message.sessionId}: {}) });
         this.child?.postMessage({ kind: "tool-result", id: message.id, ok: true, value });
       }
       catch (error) {

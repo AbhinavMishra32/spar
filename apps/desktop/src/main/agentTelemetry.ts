@@ -97,12 +97,29 @@ export class AgentTelemetry {
       promptTokens: numberOrUndefined(usage.inputTokens),
       completionTokens: numberOrUndefined(usage.outputTokens),
       cachedInputTokens: numberOrUndefined(usage.cachedInputTokens),
+      estimatedCostMicros: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? Math.max(0, Math.round(usage.costUsd * 1_000_000)) : undefined,
       eventCount: state.sequence,
       latencyMs: Math.max(0, Date.parse(completedAt) - Date.parse(state.startedAt)),
       error: error instanceof Error ? error.message : error === undefined ? null : String(error),
       completedAt,
     };
     this.store.queueAgentTelemetry("agent-run-finish", finish);
+    this.store.recordAgentUsage({
+      runId,
+      sessionId: state.sessionId,
+      provider: state.provider,
+      model: state.model,
+      turnKind: state.turnKind,
+      status: finish.status,
+      inputTokens: finish.promptTokens ?? 0,
+      outputTokens: finish.completionTokens ?? 0,
+      cachedInputTokens: finish.cachedInputTokens ?? 0,
+      cacheWriteTokens: numberOrUndefined(usage.cacheWriteTokens) ?? 0,
+      costUsd: (finish.estimatedCostMicros ?? 0) / 1_000_000,
+      latencyMs: finish.latencyMs,
+      startedAt: state.startedAt,
+      completedAt,
+    });
     this.trace.finish(finish);
   }
 }

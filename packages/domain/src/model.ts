@@ -187,6 +187,7 @@ export type ChallengeSource = z.infer<typeof challengeSourceSchema>;
 
 export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visibleTests: true }).extend({
   replacesQuestionId: id.nullable(),
+  introductionReason: z.string().default(""),
   abilityId: id,
   abilityTitle: z.string().min(1),
   specificGap: z.string().min(1),
@@ -276,6 +277,7 @@ export const challengeHistorySummarySchema = z.object({
   sessionTitle: z.string().min(1),
   ordinal: z.number().int().positive(),
   title: z.string().min(1),
+  introductionReason: z.string().default(""),
   language: languageSchema,
   difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]),
   status: questionStatusSchema,
@@ -607,6 +609,10 @@ export const agentActivityStepSchema = z.object({
    *  the turn that wrote the challenge. Empty for rows written before this. */
   input: z.string().default(""),
   output: z.string().default(""),
+  /** The observable stages of a multi-stage call — fit review, compiles,
+   *  repairs — as the worker reported them. Loose on purpose: the renderer owns
+   *  their shape and drops what it cannot draw. Empty for rows before this. */
+  stages: z.array(z.record(z.unknown())).default([]),
 });
 export type AgentActivityStep = z.infer<typeof agentActivityStepSchema>;
 

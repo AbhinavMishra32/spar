@@ -105,11 +105,11 @@ describe("assign_practice_problem", () => {
     try {
       const sessionId = targetedSession(store);
       await assign(store, sessionId, service, workspaces);
-      expect(store.readSession(sessionId)?.messages.at(-1)?.body).toContain("discriminates whether they can hold the seen-map");
+      expect(store.readSession(sessionId)?.question?.introductionReason).toContain("discriminates whether they can hold the seen-map");
     } finally { store.close(); }
   });
 
-  it("rejects a provider problem outside both the target ability and demonstrated level", async () => {
+  it("reports a surprising provider choice without vetoing the agent", async () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub({
       mount: vi.fn(async () => ({
@@ -121,11 +121,11 @@ describe("assign_practice_problem", () => {
     });
     try {
       const result = await assign(store, targetedSession(store), service, workspaces, { why: "This is a generally useful contest problem." });
-      const report = result.report as { checks: Array<{ name: string; passed: boolean }> };
-      expect(result.status).toBe("invalid");
-      expect(report.checks.filter((check) => !check.passed).map((check) => check.name))
+      const notes = result.selectionNotes as Array<{ name: string; passed: boolean }>;
+      expect(result.status).toBe("playable");
+      expect(notes.filter((check) => !check.passed).map((check) => check.name))
         .toEqual(expect.arrayContaining(["learner level", "provider concept", "target rationale"]));
-      expect(workspaces.writeAll).not.toHaveBeenCalled();
+      expect(workspaces.writeAll).toHaveBeenCalled();
     } finally { store.close(); }
   });
 
@@ -185,21 +185,19 @@ describe("assign_practice_problem", () => {
     } finally { store.close(); }
   });
 
-  it("refuses to swap in the problem they are already on", async () => {
+  it("lets the agent deliberately restart the same sourced problem", async () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub();
     try {
       const sessionId = targetedSession(store);
-      await assign(store, sessionId, service, workspaces);
-      const again = await assign(store, sessionId, service, workspaces, { replaceReason: "They asked for something else." });
-      expect(again.status).toBe("invalid");
-      expect(JSON.stringify(again.report)).toContain("already on");
+      const first = await assign(store, sessionId, service, workspaces);
+      const again = await assign(store, sessionId, service, workspaces, { replaceReason: "Compare a fresh solve with the first attempt." });
+      expect(again.status).toBe("playable");
+      expect(again.replacedQuestionId).toBe((first.question as { id: string }).id);
     } finally { store.close(); }
   });
 
-  it("refuses a problem the learner has already been set", async () => {
-    // The library is one library to the learner; a session boundary is an
-    // implementation detail, and the same problem twice reads as repetition.
+  it("lets the agent assign a previous problem again in another session", async () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub();
     try {
@@ -208,8 +206,8 @@ describe("assign_practice_problem", () => {
       store.completeAttempt((assigned.question as { attemptId: string }).attemptId, "passed");
       const second = targetedSession(store);
       const result = await assign(store, second, service, workspaces);
-      expect(result.status).toBe("invalid");
-      expect(JSON.stringify(result.report)).toContain("already been set");
+      expect(result.status).toBe("playable");
+      expect(store.readSession(second)?.question?.title).toBe("Two Sum");
     } finally { store.close(); }
   });
 

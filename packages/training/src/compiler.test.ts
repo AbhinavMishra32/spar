@@ -20,6 +20,23 @@ it("rejects a silent assert-only suite even when every exit code is correct",asy
   expect(report.checks.find(check=>check.name==="known incorrect 1 failure case results")?.passed).toBe(false);
 });
 
+it("catches pytest functions that a standalone Python run would never execute",async()=>{
+  const python={...design,language:"python",starterFiles:{"solution.py":"pass"},referenceFiles:{"solution.py":"def solve(x): return x"},visibleTests:{"test_visible.py":"def test_cases():\n    assert True\n    print('ok - visible')\n"},hiddenTests:{"test_hidden.py":"print('ok - hidden')"},knownIncorrectFiles:[{"solution.py":"def solve(x): return None"}],runCommand:"python -m pytest -q"};
+  let runs=0;
+  const {report}=await compileQuestion(python,async()=>{runs+=1;return{exitCode:0,stdout:"ok - case\n",stderr:"",durationMs:1};});
+  expect(report.valid).toBe(false);
+  expect(report.checks.find(check=>check.name==="python test entrypoint: test_visible.py")?.detail).toContain("runCommand does not change that");
+  expect(runs).toBe(0);
+});
+
+it("allows a standalone Python test function with an explicit entrypoint",async()=>{
+  const python={...design,language:"python",starterFiles:{"solution.py":"pass"},referenceFiles:{"solution.py":"def solve(x): return x"},visibleTests:{"test_visible.py":"def test_cases():\n    print('ok - visible')\n\nif __name__ == '__main__':\n    test_cases()\n"},hiddenTests:{"test_hidden.py":"print('ok - hidden')"},knownIncorrectFiles:[{"solution.py":"def solve(x): return None"}],runCommand:"python3 test_visible.py"};
+  let runs=0;
+  const {report}=await compileQuestion(python,async()=>{runs+=1;return{exitCode:0,stdout:"ok - case\n",stderr:"",durationMs:1};});
+  expect(report.checks.find(check=>check.name==="python test entrypoint: test_visible.py")).toBeUndefined();
+  expect(runs).toBeGreaterThan(0);
+});
+
 it("rejects misconception files that do not replace the reference implementation without executing anything",async()=>{
   let runs=0;
   const {report}=await compileQuestion({...design,knownIncorrectFiles:[{"wrong-path.ts":"incorrect"}]},async()=>{runs+=1;return{exitCode:0,stdout:"",stderr:"",durationMs:1};});
@@ -35,6 +52,17 @@ it("materializes JavaScript assertion oracles from the isolated reference soluti
   const compiled=await compileQuestion(wrongExpected,run,"host");
   expect(compiled.report.valid, JSON.stringify(compiled.report.checks.filter((check)=>!check.passed))).toBe(true);
   expect(compiled.design.hiddenTests["tests/hidden.test.js"]).toContain("[3,3]");
+});
+
+it("preserves case-specific expectations when one assertion runs in a loop",async()=>{
+  const looped={...actual,
+    visibleTests:{"tests/visible.test.js":"import test from 'node:test'; import assert from 'node:assert/strict'; import {firstStableBatch} from '../src/batch.js'; test('visible cases', async t => { for (const [name, events, threshold, expected] of [['first', [2,3], 5, [2,3]], ['second', [5], 5, [5]]]) await t.test(name, () => assert.deepEqual(firstStableBatch(events, threshold), expected)); });"},
+    hiddenTests:{"tests/hidden.test.js":"import test from 'node:test'; import assert from 'node:assert/strict'; import {firstStableBatch} from '../src/batch.js'; test('hidden cases', async t => { for (const [name, events, threshold, expected] of [['first', [3,3,9], 5, [3,3]], ['second', [4,4,1], 5, [4,4]]]) await t.test(name, () => assert.deepEqual(firstStableBatch(events, threshold), expected)); });"},
+  };
+  const compiled=await compileQuestion(looped,run,"host");
+  expect(compiled.report.valid,JSON.stringify(compiled.report.checks.filter((check)=>!check.passed))).toBe(true);
+  expect(compiled.design.visibleTests).toEqual(looped.visibleTests);
+  expect(compiled.design.hiddenTests).toEqual(looped.hiddenTests);
 });
 
 it("materializes a bounded differential hidden counterexample",async()=>{
@@ -75,6 +103,17 @@ it("keeps validation failures concise and strips runner paths and stacks",async(
   expect(detail).not.toContain("stack");
 });
 
+it("reports assertion details instead of Node TAP block framing",async()=>{
+  const passed=Array.from({length:20},(_,index)=>`# Subtest: passing case ${index}\nok ${index+1} - passing case ${index}`).join("\n");
+  const output=`${passed}\n# Subtest: wrong answer\nnot ok 21 - wrong answer\n  error: |-\n    Expected values to be strictly deep-equal:\n    actual: [1,2]\n    expected: [2,1]\n  error: '4 subtests failed'\n`;
+  const {report}=await compileQuestion(design,async()=>({exitCode:1,stdout:output,stderr:"",durationMs:5}),"host");
+  const detail=report.checks.find((check)=>check.name==="reference solution")?.detail??"";
+  expect(detail).toContain("actual: [1,2]");
+  expect(detail).toContain("expected: [2,1]");
+  expect(detail).not.toContain("error: |-");
+  expect(detail).not.toContain("passing case 0");
+});
+
 it("reports a CommonJS target whose return contract hides the misconception",async()=>{
   const commonjs={title:"Longest typed stream",language:"javascript" as const,kind:"function" as const,statement:"Return the longest contiguous event stream containing at most k distinct event types.",starterFiles:{"src/window.js":"function solve(){throw new Error('implement')} module.exports={solve};"},referenceFiles:{"src/window.js":"function solve(events,k){const counts=new Map();let left=0,best=0;for(let right=0;right<events.length;right++){counts.set(events[right],(counts.get(events[right])||0)+1);while(counts.size>k){const value=events[left++];counts.set(value,counts.get(value)-1);if(counts.get(value)===0)counts.delete(value)}best=Math.max(best,right-left+1)}return best} module.exports={solve};"},visibleTests:{"test/visible.test.js":"const test=require('node:test');const assert=require('node:assert/strict');const {solve}=require('../src/window.js');test('simple',()=>assert.equal(solve('ab',1),1));"},hiddenTests:{"test/hidden.test.js":"const test=require('node:test');const assert=require('node:assert/strict');const {solve}=require('../src/window.js');test('repeat',()=>assert.equal(solve('abc',1),1));"},knownIncorrectFiles:[{"path":"src/window.js","content":"function solve(events,k){const counts=new Map();let left=0,best=0;for(let right=0;right<events.length;right++){counts.set(events[right],(counts.get(events[right])||0)+1);if(counts.size>k){const value=events[left++];counts.set(value,counts.get(value)-1);if(counts.get(value)===0)counts.delete(value)}best=Math.max(best,right-left+1)}return best} module.exports={solve};"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["shrinks only once"]};
   const compiled=await compileQuestion(commonjs,run,"host");
@@ -101,7 +140,19 @@ it("rejects an authored challenge that grades with a handful of cases",async()=>
   });
   expect(report.valid).toBe(false);
   expect(report.checks.find(check=>check.name==="case volume")?.passed).toBe(false);
-  expect(report.checks.find(check=>check.name==="case volume")?.detail).toContain("brute-force oracle");
+  expect(report.checks.find(check=>check.name==="case volume")?.detail).toContain("meaningful hidden scenarios");
+});
+
+it("accepts an authored repair with eight focused executed scenarios",async()=>{
+  const visible=Array.from({length:4},(_,index)=>`ok - visible behavior ${index}`).join("\n");
+  const hidden=Array.from({length:4},(_,index)=>`ok - hidden interaction ${index}`).join("\n");
+  const {report}=await compileQuestion(design,async(files)=>{
+    const failed=files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files;
+    if(failed)return{exitCode:1,stdout:"not ok - queue retains later work\n    input: nested enqueue\n    expected: retained\n    actual: lost\n",stderr:"",durationMs:5};
+    return{exitCode:0,stdout:"hidden.test.ts" in files?`${visible}\n${hidden}\n`:`${visible}\n`,stderr:"",durationMs:5};
+  });
+  expect(report.checks.find(check=>check.name==="case volume")?.passed).toBe(true);
+  expect(report.valid).toBe(true);
 });
 
 it("accepts an authored challenge whose hidden suite actually sweeps",async()=>{

@@ -1,14 +1,14 @@
 import { normalizeStatementText } from "../shared/statementText.js";
 import { randomUUID } from "node:crypto";
 import { compileQuestion, fallbackDesign, type DesignOrigin } from "@spar/training";
-import { abilityStatusSchema, GENERATED_DIFFICULTIES, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput, type Question } from "@spar/domain";
+import { abilityStatusSchema, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
-import { assessGeneratedLevel, assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
+import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 import { practiceSourceName } from "./practiceChoice.js";
 import { SOURCE_READ_TOOLS, VISUALIZER_TOOLS } from "../workers/agentPolicy.js";
 import type { VisualizerToolbox } from "./visualizerTools.js";
@@ -35,6 +35,15 @@ function rememberTrackLanguage(local: LocalStore, trackId: string | null | undef
   local.updateTrack(trackId, { language: language.data });
 }
 
+/** The agent may correct a stale target in the same call that publishes its
+ * revised challenge. Nothing is changed until the candidate has compiled. */
+function commitCandidateTarget(local: LocalStore, sessionId: string, trackId: string | null | undefined, value: Record<string, unknown>) {
+  if (!value.trainingTarget || typeof value.trainingTarget !== "object") return;
+  const target = local.setTrainingTarget(sessionId, value.trainingTarget as { ability: string; specificGap: string; desiredEvidence: string; avoidTesting: string[] });
+  local.ensureAbility(target.abilityId, target.abilityTitle, trackId);
+  local.queueAbilitySync(target.abilityId);
+}
+
 /**
  * The lesson this challenge is testing, handed back with it.
  *
@@ -50,7 +59,7 @@ function followsLesson(local: LocalStore, concepts: ConceptTagInput[], trackId: 
   if (!found) return {};
   return {
     followsLesson: { id: found.id, title: found.title, taughtAt: found.taughtAt },
-    followsLessonNote: `This challenge is on ground you already taught in "${found.title}". Say so in your reply and point at it as [[lesson:${found.id}|${found.title}]], so they can reread the idea they are now being asked to use — and make sure what you have set actually exercises what that lesson taught rather than a neighbouring idea.`,
+    followsLessonNote: `This challenge shares a concept tag with "${found.title}". Decide whether the lesson helps with this step; if it does, explain the connection and point to [[lesson:${found.id}|${found.title}]].`,
   };
 }
 
@@ -68,6 +77,8 @@ export async function executeTrainingTool(
      an ability would be a fixture with no bearing on the thing under test. */
   visualizer?: VisualizerToolbox,
   questions?: AgentQuestions,
+  /** Live compile runs for an authoring call, back to the worker that asked. */
+  progress?: (value: unknown) => void,
 ) {
   if (!sessionId) throw new Error("Training tool call is missing its session context");
   const value = input as Record<string, unknown>;
@@ -206,41 +217,15 @@ export async function executeTrainingTool(
     if (activeQuestion) {
       return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${activeQuestion.title}) is already active for this session. End this agent turn instead of publishing another challenge.` }] } };
     }
-    const proposedTitle = String(value.title ?? "").trim();
-    /* Checked against the whole library, not this session. A session boundary is
-       an implementation detail to the learner: the same challenge arriving under
-       a new goal is the same challenge. */
-    if (local.challengeTitleUsed(proposedTitle,trackId)) return { status: "invalid", report: { valid: false, checks: [{ name: "adaptive progression", passed: false, detail: `This Track has already used a challenge titled "${proposedTitle}". Use a different representation and a title that names it.` }] } };
-    const saturation = saturatedConcept(local, sessionId, value.concepts);
-    if (saturation) return { status: "invalid", report: { valid: false, checks: [{ name: "goal coverage", passed: false, detail: saturation }] } };
-    /* The same level check the sourced path has always run, before the compile
-       rather than after it: a challenge pitched at the wrong learner is wrong
-       whether or not it builds, and building it first spends a toolchain round
-       trip to find that out. */
-    const levelTarget = local.latestTarget(sessionId);
-    if (levelTarget) {
-      const level = assessGeneratedLevel({
-        difficulty: (GENERATED_DIFFICULTIES as readonly string[]).includes(String(value.difficulty)) ? (value.difficulty as Question["difficulty"]) : "developing",
-        /* More than the point every profile is seeded with means at least one
-           challenge has been graded, which is the whole of what this needs to
-           know: whether the window is a measurement or an assumption. */
-        graded: local.ratingHistory().length > 1,
-        target: {
-          rating: local.currentRating(),
-          abilityStatus: local.readAbilityDetail(String(levelTarget.ability_id))?.ability.status ?? "uncertain",
-          experience: local.getProfile()?.experience ?? "new",
-        },
-      });
-      if (!level.passed) return { status: "invalid", report: { valid: false, checks: [level] } };
-    }
-    const compiled = await compileCandidate(input, sessionId, workspaces, runner);
+    const compiled = await compileCandidate(input, sessionId, workspaces, runner, "authored", progress);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
     const questionCreatedWhileCompiling = openChallenge(local, sessionId);
     if (questionCreatedWhileCompiling) {
       return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${questionCreatedWhileCompiling.title}) was published while this candidate compiled. This candidate was discarded.` }] } };
     }
     await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
-    const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: conceptTags(value.concepts) });
+    commitCandidateTarget(local, sessionId, trackId, value);
+    const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: conceptTags(value.concepts), introductionReason: String(value.why ?? "").trim() });
     rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
   }
@@ -261,18 +246,19 @@ export async function executeTrainingTool(
        than for the target it failed to hit. An untagged challenge is invisible to
        every concept rollup, and a fallback the learner attempted is still
        evidence about them — just evidence about tracing a running total. */
-    const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: [{ slug: "tracing-execution", role: "primary" }, { slug: "prefix-sums", role: "supporting" }] });
+    const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: [{ slug: "tracing-execution", role: "primary" }, { slug: "prefix-sums", role: "supporting" }], introductionReason: "A validated tracing exercise while a tailored challenge could not be published." });
     return { status: "playable", question, report: compiled.report, fallback: true };
   }
   if (name === "replace_current_question") {
     const activeQuestion = openChallenge(local, sessionId);
     if (!activeQuestion) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "There is no active challenge to replace." }] } };
-    const compiled = await compileCandidate(input, sessionId, workspaces, runner);
+    const compiled = await compileCandidate(input, sessionId, workspaces, runner, "authored", progress);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
     const stillActive = local.readSession(sessionId)?.question;
     if (!stillActive || stillActive.id !== activeQuestion.id) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "The active challenge changed while this replacement compiled. The candidate was discarded." }] } };
     await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
-    const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."), conceptTags(value.concepts));
+    commitCandidateTarget(local, sessionId, trackId, value);
+    const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."), conceptTags(value.concepts), undefined, String(value.why ?? "").trim());
     rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
   }
@@ -357,12 +343,6 @@ async function assignPracticeProblem(
   }
 
   const { design, source } = mounted;
-  if (activeQuestion && design.title === activeQuestion.title) {
-    return refuse("adaptive progression", `"${design.title}" is the challenge they are already on, so there is nothing to swap. Choose a different problem.`);
-  }
-  if (local.challengeTitleUsed(design.title,local.trackIdForSession(sessionId))) {
-    return refuse("adaptive progression", `The learner has already been set "${design.title}". Choose a different problem, or write a challenge that approaches the same gap from another direction.`);
-  }
   /* Nothing can grade it: no judge at the source, and no case Spar could recover
      from the statement. Assigning it would mean asking someone to solve something
      with no way to find out whether they had. */
@@ -370,10 +350,8 @@ async function assignPracticeProblem(
     return refuse("grading", `${practiceSourceName(provider)} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
   }
 
-  /* The model proposes; the host admits. Availability and a real judge say a
-     problem can be assigned, not that it should be. Check the source's own
-     concept metadata against the persisted target, then check the problem's own
-     price against the rating window that exact ability's status calls for. */
+  /* Keep the rating and concept comparison as evidence, without letting its
+     heuristic override the agent's choice of a transfer or repeat problem. */
   const target = local.latestTarget(sessionId);
   if (!target) return refuse("training target", "A persisted training target is required before assigning a provider problem.");
   const ability = local.readAbilityDetail(String(target.ability_id));
@@ -391,7 +369,6 @@ async function assignPracticeProblem(
     proposedConcepts: conceptTags(value.concepts),
     why: String(value.why ?? ""),
   });
-  if (adaptiveChecks.some((check) => !check.passed)) return { status: "invalid" as const, report: { valid: false, checks: adaptiveChecks } };
 
   /* Mounting went to the source, which takes as long as a network call takes. The
      challenge underneath can have changed in that time — the learner may have
@@ -405,7 +382,7 @@ async function assignPracticeProblem(
     return refuse("session lifecycle", `A playable challenge (${stillActive.title}) was published while this problem was being read from the source. This assignment was discarded.`);
   }
 
-  const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }, ...adaptiveChecks] };
+  const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }] };
   const concepts = conceptTags(value.concepts);
   await (activeQuestion ? workspaces.replaceAll(sessionId, mounted.files) : workspaces.writeAll(sessionId, mounted.files));
   const question = activeQuestion
@@ -413,19 +390,15 @@ async function assignPracticeProblem(
        its events and the new challenge keeps a pointer to what it superseded, so a
        later turn can see that they were moved off something rather than that they
        walked away from it. */
-    ? local.replaceQuestion(sessionId, design, report, replaceReason, concepts, source)
-    : local.createQuestion(sessionId, design, report, { concepts, source });
-  /* The aim is recorded as a system message rather than dropped: `why` is the
-     agent's statement of what this problem is supposed to discriminate, and a
-     later turn reading the session has to be able to find it. */
-  const why = String(value.why ?? "").trim();
-  if (why) local.addMessage(sessionId, "system", `Set ${practiceSourceName(provider)} ${source.displayId} — ${design.title}. ${why}`);
+    ? local.replaceQuestion(sessionId, design, report, replaceReason, concepts, source, String(value.why ?? "").trim())
+    : local.createQuestion(sessionId, design, report, { concepts, source, introductionReason: String(value.why ?? "").trim() });
   return {
     status: "playable",
     question,
     source: { slug: source.slug, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
     judge: source.judge,
     localCases: source.localCaseCount,
+    selectionNotes: adaptiveChecks,
     ...followsLesson(local, concepts, local.trackIdForSession(sessionId)),
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
@@ -584,50 +557,6 @@ function caseFilter(value: unknown): CaseFilter {
   return value === "failed-ever" || value === "still-failing" || value === "fixed" ? value : "all";
 }
 
-/**
- * Refuses a session's *first* challenge when it lands on the concept the last
- * three challenges were already about and the learner's own goal never named it.
- *
- * This is the failure the learner actually reported: four unrelated goals — a
- * Google interview, TypeScript, C++, "hii" — each produced another off-by-one
- * loop repair, because the ability ledger held exactly one ability and every
- * retrieval returned it. Retrieval is supposed to calibrate difficulty; here it
- * was replacing the goal.
- *
- * Narrow on purpose, so legitimate repetition survives. It only applies to the
- * first challenge of a session — staying on a concept after an attempt is how
- * teaching works, and this must not touch that. And it yields whenever the goal
- * names the concept, which is what a drill started from an ability or concept
- * card does: those goals read "I want to go deeper on <that ability>", so the
- * learner asking for more of the same is always honoured.
- */
-function saturatedConcept(local: LocalStore, sessionId: string, concepts: unknown): string | null {
-  const primary = primaryConceptSlug(concepts);
-  if (!primary) return null;
-  const summary = local.readSession(sessionId)?.summary;
-  if (!summary || summary.questionTitles.length > 0) return null;
-  const recent = local.recentChallengeCoverage(3,local.trackIdForSession(sessionId));
-  if (recent.length < 3 || !recent.every((row) => row.primaryConcept === primary)) return null;
-  if (goalNames(summary.originalGoal, primary)) return null;
-  return `The learner's last ${recent.length} challenges were all aimed at "${primary}" (${recent.map((row) => `"${row.title}"`).join(", ")}), and this session's goal — "${summary.originalGoal}" — does not name it. Retrieved history calibrates difficulty; it does not choose the topic. Set a target inside the surface this goal actually describes and aim this first challenge at a concept the learner has no recent evidence under.`;
-}
-
-function primaryConceptSlug(concepts: unknown): string | null {
-  const tags = conceptTags(concepts);
-  if (!tags.length) return null;
-  return (tags.find((tag) => tag.role === "primary") ?? tags[0])?.slug?.trim().toLocaleLowerCase() ?? null;
-}
-
-/** Whether the goal itself asks for this concept. Slug words rather than the
- *  whole slug, so "loop-boundary-tracing" is named by "go deeper on loop
- *  boundary tracing" — the wording a drill session is created with. */
-function goalNames(goal: string, slug: string): boolean {
-  const words = slug.split(/[^a-z0-9]+/i).filter((word) => word.length > 2);
-  if (!words.length) return false;
-  const haystack = goal.toLocaleLowerCase();
-  return words.every((word) => haystack.includes(word.toLocaleLowerCase()));
-}
-
 /** Concept tags off a tool call. Shape is already checked by the tool schema, so
  *  this only narrows it — the store owns slug normalization and creation. */
 function conceptTags(value: unknown): ConceptTagInput[] {
@@ -686,7 +615,7 @@ function withRequirements(value: Record<string, unknown>): Record<string, unknow
   return { ...value, solutionRequirements: requirements, statement: `${value.statement.trimEnd()}\n${section}\n` };
 }
 
-async function compileCandidate(input:unknown,sessionId:string,workspaces:WorkspaceService,runner:UtilityClient,origin:DesignOrigin="authored"){
+async function compileCandidate(input:unknown,sessionId:string,workspaces:WorkspaceService,runner:UtilityClient,origin:DesignOrigin="authored",progress?:(value:unknown)=>void){
   const candidate = input as Record<string, unknown>;
   const value=withRequirements(typeof candidate.statement === "string" ? { ...candidate, statement: normalizeStatementText(candidate.statement) } : candidate);
   return compileQuestion(value,async(files,_command,limits)=>{
@@ -694,7 +623,7 @@ async function compileCandidate(input:unknown,sessionId:string,workspaces:Worksp
     const root=await workspaces.writeValidation(sessionId,validationId,files);
     try{return await runner.request("run",{root,language:String(value.language),command:"test",timeoutMs:limits.timeoutMs}).promise as {exitCode:number;stdout:string;stderr:string;durationMs:number};}
     finally{await workspaces.removeValidation(sessionId,validationId);}
-  },origin);
+  },origin,progress);
 }
 
 /** The opening of the learner's solve, as `read_attempt` carries it. A screen

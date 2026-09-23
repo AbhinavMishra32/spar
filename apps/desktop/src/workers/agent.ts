@@ -1,16 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { z } from "zod";
-import { languageSchema, type Language } from "@spar/domain";
 import { piFinishReason, piModelFor, piUsage, type PiProviderInput } from "./piProvider.js";
-import { createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentTools, piCompleteText, toolErrorText, turnOverflowed, type ToolChoiceRef } from "./piAgent.js";
+import { advanceTrainingConversation, createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentTools, piCompleteText, setTrainingPhasePrompt, toolCallSpill, toolErrorText, turnOverflowed, type ToolChoiceRef } from "./piAgent.js";
 import { fitEvidence, nextEvidenceBudget, stableJson } from "./evidence.js";
 import { clampSteer, steeringSection } from "./steering.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
-import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, turnExecutionKey, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, VISUALIZER_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 import { normalizeAgentStreamPart } from "./agentStream.js";
 import { syntheticChallengeAuthoringDoctrine } from "./challengeAuthoring.js";
-import { mergeQuestionChanges, objectRecord, parseRepairChanges } from "./challengeRepair.js";
+import { mergeQuestionChanges, parseRepairChanges, repairQuestionUntilValid } from "./challengeRepair.js";
+import { reviewChallengeFit } from "./challengeFit.js";
+import { challengeDraft } from "./challengeDraft.js";
+import { checkBadge, describeChanges, stageLog, streamInto, type StageLog } from "./challengeStages.js";
+import type { AgentActivityFile, ToolStageRun } from "../shared/api.js";
 import { splitActionTitle, toolPayload } from "./toolPayload.js";
 import { sourceToolDefinitions, toolDefinitions, withActionTitle } from "./agentTools.js";
 import { telemetryValue } from "./telemetryPayload.js";
@@ -36,15 +39,19 @@ const IDENTICAL_TOOL_CALL_LIMIT = 15;
  */
 const REPEATED_CALL_LIMIT = 2;
 const AGENT_PHASE_TIMEOUT_MS = 180_000;
-/* One public authoring call. Its compiler failures get four private, incremental
- * repairs below; repeating the public call would restart the rebuild loop. */
+/* A single public authoring call owns its private review, repair, and redraft.
+ * The model can change the task inside that call; compiler iterations never
+ * become separate rejected rows in the learner's thread. */
 const CHALLENGE_COMPILATION_LIMIT = 1;
 /** Repairs happen inside the original challenge tool call. Four targeted edits
  *  are enough to fix an ordinary compiler/test mismatch without turning the
  *  validator into an unbounded second agent loop. */
 const CHALLENGE_REPAIR_LIMIT = 4;
-const PUBLIC_CHALLENGE_RETRY_INSTRUCTION = "When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run.";
-const PRIVATE_CHALLENGE_REPAIR_INSTRUCTION = "Propose exactly one challenge candidate per turn. If it is invalid, the host retains that candidate and applies bounded compiler-directed field and file tweaks inside the same tool call. Never call create_question or replace_current_question again in that turn; the host either publishes the repaired candidate or selects its validated fallback.";
+const CHALLENGE_REPAIRS_PER_DRAFT = 2;
+/** Shared by the private candidates inside one authoring call. Review happens
+ * once; repairs and one reconsideration spend a fixed budget before the host
+ * returns a result to the conversation model. */
+type PrivateChallengeBudget = { fitReviewAvailable: boolean; repairRemaining: number; redraftRemaining: number };
 /**
  * How many times one stage may fail to produce a valid call before the loop
  * stops asking it the same way.
@@ -96,10 +103,10 @@ const SKIPPABLE_PHASES = new Set([
      was a review at all. It is never skippable into a wrong state. */
   "review_solution",
 ]);
-type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { objective?: unknown; target?: unknown }; webSearch?: boolean; practiceSource?: boolean; provider: PiProviderInput } };
+type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { objective?: unknown; target?: unknown; intake?: unknown; lesson?: unknown }; webSearch?: boolean; practiceSource?: boolean; provider: PiProviderInput } };
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error("Spar must run inside an Electron utility process");
-const pendingTools = new Map<string, { resolve(value: unknown): void; reject(error: Error): void }>();
+const pendingTools = new Map<string, { resolve(value: unknown): void; reject(error: Error): void; progress?(value: unknown): void }>();
 /* Not tied to a run: the headers belong to the subscription, not to the turn
    that happened to reveal them, and the main process files them that way. */
 captureCodexRateLimits((headers) => parentPort.postMessage({ kind: "event", event: { type: "provider-usage", provider: "openai-codex", headers } }));
@@ -156,6 +163,7 @@ parentPort.on("message", (event) => {
   if (message.kind === "request" && message.method === "complexity-review") { void reviewComplexity(message as unknown as ComplexityReviewRequest); return; }
   if (message.kind === "request") void run(message as unknown as Request);
   if (message.kind === "tool-result") settle(message);
+  if (message.kind === "tool-progress") pendingTools.get(String(message.id))?.progress?.(message.value);
 });
 
 const SUGGEST_TIMEOUT_MS = 45_000;
@@ -272,7 +280,7 @@ async function callHostTool(
   name: string,
   input: unknown,
   record?: (name: string, input: unknown, value: unknown) => void,
-  repair?: { provider: PiProviderInput; signal: AbortSignal },
+  repair?: { provider: PiProviderInput; signal: AbortSignal; context: string; learnerMessage: string; currentTarget?: unknown; budget: PrivateChallengeBudget; recordUsage(usage: unknown): void },
 ) {
   const id = randomUUID();
   /* Split before anything else happens to it. The title is for the transcript and
@@ -285,15 +293,67 @@ async function callHostTool(
   const summary = summarizeToolInput(name, args);
   const payload = { input: toolPayload(name, args) };
   const titled = { ...summary, ...(actionTitle ? { actionTitle } : {}) };
+  const challengeAuthoring = name === "create_question" || name === "replace_current_question";
+  const progress = (detail: string) => parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "progress", callId: id, detail } });
+  /* The stages of the private review, compile and repair, each reported as it
+     starts and as it settles so the row can draw them as they happen. */
+  const stages = challengeAuthoring ? stageLog((stage) => parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "progress", callId: id, stage } })) : undefined;
+  const staged = stages ? () => ({ stages: stages.all.map((stage) => ({ ...stage })) }) : () => ({});
+  const model = repair ? { model: repair.provider.model, provider: repair.provider.provider } : undefined;
   parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "start", callId: id, actionTitle, input: telemetryValue(args) } });
-  parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "start", callId: id, ...titled, ...payload } });
+  parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "start", callId: id, ...(challengeAuthoring ? { detail: "Validating the reference and tests" } : {}), ...titled, ...payload } });
+  if (stages) {
+    const files = summary.files ?? [];
+    const lines = files.reduce((total, file) => total + file.added, 0);
+    stages.note("draft", "done", "Drafted", summary.label ?? "challenge", { badge: lines ? `+${lines}` : undefined });
+  }
   try {
     let finalInput = args;
-    let value = await requestHostTool(id, runId, sessionId, name, finalInput);
-    if (repair && (name === "create_question" || name === "replace_current_question") && !isPlayableQuestion(value)) {
-      const repaired = await repairRejectedChallenge(runId, sessionId, name, finalInput, value, repair);
+    if (repair && challengeAuthoring && repair.budget.fitReviewAvailable) {
+      repair.budget.fitReviewAvailable = false;
+      const reviewed = await reviewChallengeFit({
+        candidate: args as Record<string, unknown>,
+        context: repair.context,
+        learnerMessage: repair.learnerMessage,
+        currentTarget: repair.currentTarget,
+        signal: repair.signal,
+        complete: (system, message, onText) => completePrivateChallenge(runId, id, "challenge-fit-review", repair.provider, system, message, AbortSignal.any([repair.signal, AbortSignal.timeout(AGENT_PHASE_TIMEOUT_MS)]), "Challenge fit review timed out.", repair.recordUsage, onText),
+        progress,
+        ...(stages ? { stages } : {}),
+        ...(model ? { model } : {}),
+        observe: (assessment) => parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "event", name: "challenge-fit-verdict", callId: randomUUID(), parentCallId: id, attributes: assessment } }),
+      });
+      finalInput = reviewed.candidate;
+      if (reviewed.feedback) {
+        const value = { status: "invalid", report: { valid: false, checks: [{ name: "challenge fit", passed: false, detail: reviewed.feedback }] } };
+        record?.(name, finalInput, value);
+        stages?.note("outcome", "failed", "Not published", "the reviewer still had concerns");
+        parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok: false, input: telemetryValue(finalInput), output: telemetryValue(value) } });
+        parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: reviewed.feedback, ...titled, ...staged(), input: toolPayload(name, finalInput), output: toolPayload(name, value) } });
+        return value;
+      }
+    }
+    let value = await validateStaged(stages, "reference, tests and known-incorrect solution", (onRun) => requestHostTool(id, runId, sessionId, name, finalInput, onRun));
+    if (repair && challengeAuthoring && !isPlayableQuestion(value) && repair.budget.repairRemaining > 0) {
+      const repaired = await repairRejectedChallenge(runId, id, sessionId, name, finalInput, value, repair, progress, CHALLENGE_REPAIRS_PER_DRAFT, stages);
       finalInput = repaired.input;
       value = repaired.value;
+    }
+    if (repair && challengeAuthoring && !isPlayableQuestion(value) && repair.budget.redraftRemaining > 0 && !failedChecks(value).some((failure) => failure.startsWith("session lifecycle:"))) {
+      repair.budget.redraftRemaining -= 1;
+      const redrafted = await redraftRejectedChallenge(runId, id, sessionId, name, finalInput, value, repair, progress, stages);
+      finalInput = redrafted.input;
+      value = redrafted.value;
+      if (!isPlayableQuestion(value) && repair.budget.repairRemaining > 0) {
+        const repaired = await repairRejectedChallenge(runId, id, sessionId, name, finalInput, value, repair, progress, CHALLENGE_REPAIRS_PER_DRAFT, stages);
+        finalInput = repaired.input;
+        value = repaired.value;
+      }
+    }
+    if (stages) {
+      const title = typeof (finalInput as Record<string, unknown>)?.title === "string" ? String((finalInput as Record<string, unknown>).title) : summary.label ?? "challenge";
+      if (isPlayableQuestion(value)) stages.note("outcome", "done", "Published", title);
+      else stages.note("outcome", "failed", "Not published", failedChecks(value).length ? `${failedChecks(value).length} checks still failing` : title);
     }
     record?.(name, finalInput, value);
     // Compilation rejection is an expected tool result rather than an IPC
@@ -302,21 +362,96 @@ async function callHostTool(
     const published = !["create_question", "replace_current_question", "create_fallback_question", "assign_practice_problem"].includes(name) || isPlayableQuestion(value);
     const finalPayload = { input: toolPayload(name, finalInput) };
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok: published, input: telemetryValue(finalInput), output: telemetryValue(value) } });
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...titled, ...finalPayload, output: toolPayload(name, value) } });
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: published, detail: describeToolResult(name, value), ...titled, ...staged(), ...finalPayload, output: toolPayload(name, value) } });
     return value;
   } catch (error) {
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok: false, input: telemetryValue(args), error: error instanceof Error ? error.message : String(error), level: "ERROR" } });
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...titled, ...payload, output: toolPayload(name, { error: error instanceof Error ? error.message : String(error) }) } });
+    for (const stage of stages?.all ?? []) if (stage.state === "running") { stage.state = "failed"; stage.endedAt = Date.now(); }
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: error instanceof Error ? error.message : String(error), ...titled, ...staged(), ...payload, output: toolPayload(name, { error: error instanceof Error ? error.message : String(error) }) } });
     throw error;
   }
 }
 
 /** Send a host call without creating another transcript row. Challenge repair
  *  uses this under the one create/replace row the learner already sees. */
-function requestHostTool(id: string, runId: string, sessionId: string, name: string, input: unknown): Promise<unknown> {
-  const result = new Promise<unknown>((resolve, reject) => pendingTools.set(id, { resolve, reject }));
+function requestHostTool(id: string, runId: string, sessionId: string, name: string, input: unknown, progress?: (value: unknown) => void): Promise<unknown> {
+  const result = new Promise<unknown>((resolve, reject) => pendingTools.set(id, { resolve, reject, ...(progress ? { progress } : {}) }));
   parentPort.postMessage({ kind: "tool-call", id, requestId: runId, sessionId, name, input });
   return result;
+}
+
+/** One compile of a candidate, as a stage of its own: what it ran against while
+ *  it runs, and how many checks passed and which failed once it lands. */
+async function validateStaged(stages: StageLog | undefined, subject: string, run: (progress?: (value: unknown) => void) => Promise<unknown>, verb = "Validating"): Promise<unknown> {
+  const stage = stages?.begin("validate", verb, subject);
+  const runs: ToolStageRun[] = [];
+  /* Each sandbox run the compiler starts or finishes, upserted by id, so the row
+     shows the tests being run rather than a spinner followed by a verdict. */
+  const onRun = (value: unknown) => {
+    const run = compileRun(value);
+    if (!run || !stage) return;
+    const index = runs.findIndex((entry) => entry.id === run.id);
+    if (index >= 0) runs[index] = run; else runs.push(run);
+    stage.update({ runs: [...runs] });
+  };
+  try {
+    const value = await run(onRun);
+    const failures = failedChecks(value);
+    if (isPlayableQuestion(value)) stage?.end("done", { verb: "Validation passed", badge: checkBadge(value) });
+    else stage?.end("failed", { verb: "Validation failed", badge: checkBadge(value), detail: failures[0], findings: failures });
+    return value;
+  } catch (error) {
+    stage?.end("failed", { verb: "Validation errored", detail: error instanceof Error ? error.message : String(error) });
+    throw error;
+  }
+}
+
+/** A compile progress event, trusted only for the fields a stage row draws. */
+function compileRun(value: unknown): ToolStageRun | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.label !== "string") return null;
+  const state = record.state === "passed" || record.state === "failed" ? record.state : "running";
+  const cases = record.cases && typeof record.cases === "object" ? record.cases as ToolStageRun["cases"] : undefined;
+  const visibleCases = Array.isArray(record.visibleCases) ? (record.visibleCases as ToolStageRun["visibleCases"]) : undefined;
+  return {
+    id: record.id,
+    label: record.label,
+    expect: record.expect === "fail" ? "fail" : "pass",
+    state,
+    ...(cases ? { cases } : {}),
+    ...(visibleCases ? { visibleCases } : {}),
+    ...(typeof record.durationMs === "number" ? { durationMs: record.durationMs } : {}),
+  };
+}
+
+/** The reviewer and compiler-repair models are part of the same public tool
+ * call. Record their actual prompts, answers, usage and duration as LLM runs
+ * under that tool, instead of leaving only a final verdict in the trace. */
+async function completePrivateChallenge(
+  runId: string,
+  parentCallId: string,
+  name: string,
+  provider: PiProviderInput,
+  system: string,
+  message: string,
+  signal: AbortSignal,
+  timedOut: string,
+  recordUsage: (usage: unknown) => void,
+  onText?: (delta: string) => void,
+): Promise<string> {
+  const callId = randomUUID();
+  const started = Date.now();
+  let usage: unknown;
+  parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "start", model: provider.model, provider: provider.provider, input: telemetryValue({ system, message }) } });
+  try {
+    const answer = await piCompleteText(provider, system, message, signal, timedOut, (value) => { usage = value; recordUsage(value); }, onText);
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "end", model: provider.model, provider: provider.provider, latencyMs: Date.now() - started, usage, output: telemetryValue({ text: answer }) } });
+    return answer;
+  } catch (error) {
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "end", model: provider.model, provider: provider.provider, latencyMs: Date.now() - started, usage, error: error instanceof Error ? error.message : String(error), level: "ERROR" } });
+    throw error;
+  }
 }
 
 /**
@@ -329,59 +464,139 @@ function requestHostTool(id: string, runId: string, sessionId: string, name: str
  */
 async function repairRejectedChallenge(
   runId: string,
+  parentCallId: string,
   sessionId: string,
   name: "create_question" | "replace_current_question",
   initialInput: unknown,
   initialResult: unknown,
-  repair: { provider: PiProviderInput; signal: AbortSignal },
+  repair: { provider: PiProviderInput; signal: AbortSignal; budget: PrivateChallengeBudget; recordUsage(usage: unknown): void },
+  progress: (detail: string) => void,
+  maxAttempts = CHALLENGE_REPAIRS_PER_DRAFT,
+  stages?: StageLog,
 ): Promise<{ input: unknown; value: unknown }> {
-  let candidate = objectRecord(initialInput);
-  let value = initialResult;
-  let attempts = 0;
-  for (; attempts < CHALLENGE_REPAIR_LIMIT && !isPlayableQuestion(value); attempts += 1) {
-    const failures = failedChecks(value);
-    if (!failures.length || failures.some((failure) => failure.startsWith("session lifecycle:"))) break;
-    const timeout = AbortSignal.timeout(AGENT_PHASE_TIMEOUT_MS);
-    const signal = AbortSignal.any([repair.signal, timeout]);
-    try {
-      const answer = await piCompleteText(
+  let round = 0;
+  const repaired = await repairQuestionUntilValid(initialInput, initialResult, {
+    limit: Math.min(maxAttempts, repair.budget.repairRemaining),
+    signal: repair.signal,
+    failedChecks,
+    playable: isPlayableQuestion,
+    progress,
+    complete: async (candidate, failures, responseFeedback) => {
+      const timeout = AbortSignal.timeout(AGENT_PHASE_TIMEOUT_MS);
+      const signal = AbortSignal.any([repair.signal, timeout]);
+      round += 1;
+      const stage = stages?.begin("repair", round === 1 ? "Repairing" : `Repairing (attempt ${round})`, failures[0]?.split(":")[0] ?? "the failed checks", {
+        model: repair.provider.model,
+        provider: repair.provider.provider,
+        badge: `${failures.length} ${failures.length === 1 ? "issue" : "issues"}`,
+      });
+      let answer: string;
+      try {
+        answer = await completePrivateChallenge(
+        runId,
+        parentCallId,
+        "challenge-compiler-repair-model",
         repair.provider,
-        "You repair one rejected coding challenge. Return one JSON object containing only the top-level fields that must change. Preserve every omitted field exactly. For starterFiles, referenceFiles, visibleTests, and hiddenTests, include only changed paths; the host merges them into the retained candidate. Never return markdown fences, commentary, actionTitle, or a whole rebuilt candidate unless every field is genuinely implicated by the diagnostic.",
-        `Compiler failures:\n${failures.map((failure, index) => `${index + 1}. ${failure}`).join("\n")}\n\nRetained candidate:\n${stableJson(candidate)}`,
+        "You repair one rejected coding challenge. Serve the learner's request; prefer preserving the candidate's concept, but change its design when the diagnostics require it. The reference must pass visible and hidden tests; a plausible known-incorrect implementation must pass visible tests and fail hidden tests. If the incorrect implementation fails visible tests, revise that implementation or the visible tests so the intended misconception remains plausible. Python test files run directly with python3, without pytest discovery; call any defined test functions or run cases at module top level. Changing runCommand has no effect on the host runner. Return one JSON object containing only the top-level fields that must change. Preserve every omitted field exactly. For starterFiles, referenceFiles, visibleTests, and hiddenTests, include only changed paths; the host merges them into the retained candidate. Set an obsolete file path to null when renaming or deleting it. Never return markdown fences, commentary, actionTitle, or a whole rebuilt candidate unless every field is genuinely implicated by the diagnostic.",
+        `Compiler failures:\n${failures.map((failure, index) => `${index + 1}. ${failure}`).join("\n")}${responseFeedback ? `\n\nYour previous repair reply could not be applied: ${responseFeedback}. Return a smaller valid JSON object with actual changed fields.` : ""}\n\nRetained candidate:\n${stableJson(candidate)}`,
         signal,
         "Challenge repair timed out.",
-      );
-      const changes = parseRepairChanges(answer);
-      if (!changes || !Object.keys(changes).length) break;
-      candidate = mergeQuestionChanges(candidate, changes);
-      value = await requestHostTool(randomUUID(), runId, sessionId, name, candidate);
-    } catch (error) {
-      /* Stopping belongs to the learner and must end the turn. A failed private
-         repair, however, leaves the compiler's original rejection intact so the
-         outer bounded controller can still choose its existing fallback. */
-      if (repair.signal.aborted) throw error;
-      break;
-    }
-  }
+        repair.recordUsage,
+        streamInto(stage, "patch"),
+        );
+      } catch (error) {
+        stage?.end("failed", { verb: "Repair failed", detail: error instanceof Error ? error.message : String(error) });
+        throw error;
+      }
+      const described = describeChanges(parseRepairChanges(answer));
+      if (described) stage?.end("done", { verb: "Repaired", detail: described });
+      else stage?.end("failed", { verb: "Repair unusable", detail: "No usable changes in the reply" });
+      return answer;
+    },
+    validate: async (candidate) => {
+      const result = await validateStaged(stages, "the repaired challenge", (onRun) => requestHostTool(randomUUID(), runId, sessionId, name, candidate, onRun), "Revalidating");
+      parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "event", name: "challenge-compiler-repair", callId: randomUUID(), parentCallId, attributes: { playable: isPlayableQuestion(result), failures: failedChecks(result) } } });
+      return result;
+    },
+  });
+  repair.budget.repairRemaining -= repaired.attempts;
+  let value = repaired.value;
   if (value && typeof value === "object") {
-    value = { ...(value as Record<string, unknown>), repairAttempts: attempts };
+    value = { ...(value as Record<string, unknown>), repairAttempts: repaired.attempts, ...(repaired.repairError ? { repairError: repaired.repairError } : {}) };
   }
-  return { input: candidate, value };
+  return { input: repaired.input, value };
+}
+
+/** One fresh reconsideration, still inside the original authoring call. The
+ * model may repair the harness or choose a different task; the host only checks
+ * its schema and executes the result. */
+async function redraftRejectedChallenge(
+  runId: string,
+  parentCallId: string,
+  sessionId: string,
+  name: "create_question" | "replace_current_question",
+  initialInput: unknown,
+  initialResult: unknown,
+  repair: { provider: PiProviderInput; signal: AbortSignal; recordUsage(usage: unknown): void },
+  progress: (detail: string) => void,
+  stages?: StageLog,
+): Promise<{ input: unknown; value: unknown }> {
+  const failures = failedChecks(initialResult);
+  if (!failures.length) return { input: initialInput, value: initialResult };
+  progress("Reconsidering the challenge from validation feedback");
+  const stage = stages?.begin("redraft", "Reconsidering", "the design from validation feedback", {
+    model: repair.provider.model,
+    provider: repair.provider.provider,
+    badge: `${failures.length} ${failures.length === 1 ? "issue" : "issues"}`,
+  });
+  try {
+    const answer = await completePrivateChallenge(
+      runId,
+      parentCallId,
+      "challenge-redraft",
+      repair.provider,
+      "You are continuing one private challenge-creation call after focused repairs did not validate. Diagnose the actual host failures, then return one JSON patch of changed top-level fields. You own the teaching choice: retain the useful task or choose a better one for the learner. Keep statement, starter, reference, visible tests, hidden tests, trainingTarget, and why consistent. For file maps include changed paths only and use null to delete paths. The host executes Python tests as standalone scripts with python3, not pytest; runCommand cannot change that. Return JSON only, without commentary or a wrapper.",
+      `Remaining compiler failures:\n${failures.map((failure, index) => `${index + 1}. ${failure}`).join("\n")}\n\nRetained candidate:\n${stableJson(initialInput)}`,
+      AbortSignal.any([repair.signal, AbortSignal.timeout(AGENT_PHASE_TIMEOUT_MS)]),
+      "Challenge reconsideration timed out.",
+      repair.recordUsage,
+      streamInto(stage, "patch"),
+    );
+    const changes = parseRepairChanges(answer);
+    if (!changes || !Object.keys(changes).length) {
+      stage?.end("failed", { verb: "Reconsideration unusable", detail: "No usable changes in the reply" });
+      return { input: initialInput, value: initialResult };
+    }
+    const revised = mergeQuestionChanges(initialInput as Record<string, unknown>, changes);
+    if (stableJson(revised) === stableJson(initialInput)) {
+      stage?.end("failed", { verb: "Reconsideration unusable", detail: "Left the challenge unchanged" });
+      return { input: initialInput, value: initialResult };
+    }
+    toolDefinitions[name][1].parse(revised);
+    stage?.end("done", { verb: "Reconsidered", detail: describeChanges(changes) });
+    progress("Validating the reconsidered challenge");
+    const value = await validateStaged(stages, "the reconsidered challenge", (onRun) => requestHostTool(randomUUID(), runId, sessionId, name, revised, onRun), "Revalidating");
+    return { input: revised, value };
+  } catch (error) {
+    stage?.end("failed", { verb: "Reconsideration failed", detail: error instanceof Error ? error.message : String(error) });
+    if (repair.signal.aborted) throw error;
+    return { input: initialInput, value: { ...(initialResult as Record<string, unknown>), redraftError: error instanceof Error ? error.message : String(error) } };
+  }
 }
 
 /** Files a tool writes, counted so the renderer can show real `+N -N` stats. */
-function summarizeToolInput(name: string, input: unknown): { label?: string; files?: Array<{ path: string; added: number; removed: number }> } {
+function summarizeToolInput(name: string, input: unknown): { label?: string; files?: AgentActivityFile[] } {
   const record = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const text = (key: string) => (typeof record[key] === "string" ? (record[key] as string) : undefined);
 
   if (name === "create_question" || name === "replace_current_question") {
-    const files: Array<{ path: string; added: number; removed: number }> = [];
-    for (const group of ["starterFiles", "referenceFiles", "visibleTests", "hiddenTests"]) {
-      const entries = record[group];
+    const files: AgentActivityFile[] = [];
+    for (const [field, group] of [["starterFiles", "starter"], ["referenceFiles", "reference"], ["visibleTests", "visible"], ["hiddenTests", "hidden"]] as const) {
+      const entries = record[field];
       if (!entries || typeof entries !== "object") continue;
       for (const [path, content] of Object.entries(entries as Record<string, unknown>)) {
         if (typeof content !== "string") continue;
-        files.push({ path, added: countLines(content), removed: 0 });
+        files.push({ path, added: countLines(content), removed: 0, group });
       }
     }
     const label = text("title");
@@ -460,7 +675,23 @@ function describeReplay(value: unknown): string {
 function describeToolResult(name: string, value: unknown): string {
   if (name === "read_attempt") return describeReplay(value);
   const record = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-  if ((name === "create_question" || name === "replace_current_question" || name === "assign_practice_problem") && typeof record.status === "string") {
+  if ((name === "create_question" || name === "replace_current_question") && typeof record.status === "string") {
+    const report = record.report && typeof record.report === "object" ? record.report as Record<string, unknown> : {};
+    const counts = report.caseCounts && typeof report.caseCounts === "object" ? report.caseCounts as Record<string, unknown> : {};
+    const visible = typeof counts.visible === "number" ? counts.visible : 0;
+    const hidden = typeof counts.hidden === "number" ? counts.hidden : 0;
+    const repairs = typeof record.repairAttempts === "number" ? record.repairAttempts : 0;
+    if (record.status === "playable") {
+      const cases = visible + hidden;
+      return [
+        "playable",
+        repairs ? `${repairs} repair${repairs === 1 ? "" : "s"}` : "",
+        cases ? `${cases} cases (${visible} visible, ${hidden} hidden)` : "",
+      ].filter(Boolean).join(" · ");
+    }
+    return [`status ${record.status}`, ...failedChecks(value)].join(" · ").slice(0, 320);
+  }
+  if (name === "assign_practice_problem" && typeof record.status === "string") {
     // The transcript row only has one line to spare; the agent's own repair
     // feedback is built separately and is not clipped to fit a UI label.
     return [`status ${record.status}`, ...failedChecks(value)].join(" · ").slice(0, 320);
@@ -532,13 +763,14 @@ async function runTurn(request: Request, stopped: AbortSignal) {
   const allowed = allowedTools(request.payload.turnKind,hasActiveQuestion,webSearch,practiceSource);
   const outcomes = new Map<string, unknown[]>();
   if (request.payload.resumeState?.objective) outcomes.set("set_session_objective", [request.payload.resumeState.objective]);
-  if (request.payload.resumeState?.target && request.payload.turnKind !== "challenge-revision") outcomes.set("set_training_target", [request.payload.resumeState.target]);
+  if (request.payload.resumeState?.target) outcomes.set("set_training_target", [request.payload.resumeState.target]);
+  if (request.payload.resumeState?.intake) outcomes.set("ask_user_question", [request.payload.resumeState.intake]);
+  if (request.payload.resumeState?.lesson) outcomes.set("teach_lesson", [request.payload.resumeState.lesson]);
   const callSignatures: string[] = [];
   /* How many times each exact call has been made this turn, so a tool that has
      already answered can be taken off the table — see `REPEATED_CALL_LIMIT`. */
   const callCounts = new Map<string, number>();
   const phaseExecutions = new Map<string, { phase: number; promise: Promise<unknown> }>();
-  const turnExecutions = new Map<string, Promise<unknown>>();
   let currentPhase = -1;
   let controlPhaseTimeout: ((waiting: boolean) => void) | null = null;
   const protocolFailures = new Map<string, { count: number; detail: string }>();
@@ -554,13 +786,15 @@ async function runTurn(request: Request, stopped: AbortSignal) {
      it into the signature would make two identical calls that were merely
      described differently look like two different pieces of work — which is
      exactly what this cache exists to collapse. */
+  const privateChallengeBudget: PrivateChallengeBudget = { fitReviewAvailable: true, repairRemaining: CHALLENGE_REPAIR_LIMIT, redraftRemaining: 1 };
+  const privateUsage: unknown[] = [];
   const invoke = (name: string, input: unknown) => {
-    const turnKey = turnExecutionKey(name);
-    if (turnKey) {
-      const prior = turnExecutions.get(turnKey);
-      if (prior) return prior;
-    }
+    const permitted = nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT, { hasActiveQuestion, webSearch, practiceSource });
+    if (!permitted.activeTools.includes(name)) return Promise.reject(new Error(`Tool ${name} is not available after the preceding results. Continue from the existing evidence.`));
     const signature = phaseExecutionKey(name, stableJson(splitActionTitle(input).arguments));
+    if (!RECALLABLE.has(name) && (callCounts.get(signature) ?? 0) >= REPEATED_CALL_LIMIT) {
+      return Promise.reject(new Error(`This exact ${name} call already returned twice. Use different arguments if you need new evidence, or continue from its result.`));
+    }
     const cached = phaseExecutions.get(signature);
     if (cached?.phase === currentPhase) return cached.promise;
     const promise = name === "ask_user_question"
@@ -576,31 +810,24 @@ async function runTurn(request: Request, stopped: AbortSignal) {
           input,
           record,
           name === "create_question" || name === "replace_current_question"
-            ? { provider: request.payload.provider, signal: stopped }
+            ? { provider: request.payload.provider, signal: stopped, context: request.payload.context, learnerMessage: request.payload.message, currentTarget: (outcomes.get("set_training_target")?.at(-1) as { result?: unknown } | undefined)?.result, budget: privateChallengeBudget, recordUsage: (value: unknown) => privateUsage.push(value) }
             : undefined,
         );
-    if (turnKey) turnExecutions.set(turnKey, promise);
     phaseExecutions.set(signature, { phase: currentPhase, promise });
     return promise;
   };
   const tools = piAgentTools((name) => allowed.has(name), invoke);
   const toolChoice: ToolChoiceRef = { current: undefined };
+  const baseInstructions = instructions();
   const agent = createTrainingAgent(
     request.payload.provider,
-    instructions()
-      .replace(PUBLIC_CHALLENGE_RETRY_INSTRUCTION, PRIVATE_CHALLENGE_REPAIR_INSTRUCTION)
-      .replaceAll("Training Agent", "Spar"),
+    baseInstructions,
     toolChoice,
     new WorkerTelemetryContext(request.id),
   );
   try {
-    const usage: unknown[] = [];
-    /* The high-water mark of the prompt across this turn's phases, which is what
-       the composer's ring reports. Spar rebuilds the transcript for every phase,
-       so there is no single conversation whose length could be read off — the
-       honest answer to "how full is the window" is the fullest any one phase got
-       it, and a reading that fell back as a later, shorter phase ran would say
-       the turn had freed room it never freed. */
+    const usage: unknown[] = privateUsage;
+    // Keep the largest observed context usage, including provider cache reads.
     let contextPeak = 0;
     const contextWindow = piModelFor(request.payload.provider).contextWindow;
     let finalText = "";
@@ -610,6 +837,11 @@ async function runTurn(request: Request, stopped: AbortSignal) {
        that by overflowing again would cost a round trip per phase. */
     let evidenceBudget = Number.POSITIVE_INFINITY;
     let overflowRetries = 0;
+    /* Some providers occasionally repeat an earlier function call as assistant
+       text after a successful write has closed the tool set. Give the final
+       answer one clean, tool-free retry before falling back to a truthful short
+       handoff instead of failing a turn whose artifact was already published. */
+    let closedToolRetries = 0;
     /* Kept for the rest of the turn rather than shown to one phase and dropped.
        A learner who says "in Python, not Java" three phases before the challenge
        is written meant it for the challenge. */
@@ -630,7 +862,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       /* Drained here and nowhere else. The learner types at a keyboard while a
          phase is mid-stream, and cutting into a half-written tool call to insert
          it would produce a request the provider rejects — so it lands at the
-         seam between phases, where the transcript is rebuilt anyway. */
+         seam between phases, where tool capabilities are refreshed. */
       const arrived = steering.get(request.id) ?? [];
       if (arrived.length) {
         steering.set(request.id, []);
@@ -643,12 +875,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
          repeat there is already impossible; an `auto` stage is the one place the
          model picks for itself, and the one place it can pick the same thing
          forever. */
-      const stage = withdraw(nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT,{hasActiveQuestion,webSearch,practiceSource}), spent);
-      if (stage.exhausted) {
-        const value = await publishFallbackChallenge(request, outcomes, stage.exhausted);
-        parentPort.postMessage({ kind: "result", id: request.id, ok: value.ok, ...(value.ok ? { value: { text: value.text, usage: sumUsage(usage), finishReason: "fallback-challenge", phaseSteps: step + 1 } } : { error: value.error }) });
-        return;
-      }
+      const stage = nextToolStage(request.payload.turnKind, outcomes, CHALLENGE_COMPILATION_LIMIT,{hasActiveQuestion,webSearch,practiceSource});
       const callsBefore = callSignatures.length;
       let streamError = "";
       /* The last schema complaint this phase produced, so the retry can quote it.
@@ -667,7 +894,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       const prompt = orchestrationPrompt(request, outcomes, asked, step, protocolFailures.get(stageKey)?.detail, spent, evidenceBudget, interruptions);
       const generationId = randomUUID();
       const generationStartedAt = Date.now();
-      parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "generation", name: `pi-phase-${step}`, phase: step, callId: generationId, state: "start", model: request.payload.provider.model, provider: request.payload.provider.provider, toolChoice: stage.toolChoice, activeTools: asked, input: telemetryValue({ system: instructions(), prompt: prompt.text }) } });
+
       const phaseAbort = new AbortController();
       const timeout = () => phaseAbort.abort(new Error(`Spar's provider phase exceeded ${AGENT_PHASE_TIMEOUT_MS / 1_000} seconds.`));
       let phaseTimer = setTimeout(timeout, AGENT_PHASE_TIMEOUT_MS);
@@ -686,18 +913,44 @@ async function runTurn(request: Request, stopped: AbortSignal) {
          prompt fit — some providers report that as an error, some as usage past
          the window, one as a length stop with nothing in it. */
       let lastMessage: AssistantMessage | null = null;
-      /* The transcript is rebuilt for every phase rather than grown across them.
-         This is the shape the controller has always had — each phase states its
-         own evidence and asks for one call — and keeping it is what makes this
-         change a change of runtime and not a change of agent. */
-      agent.state.messages = [];
+      // Replace phase guidance in the system prompt instead of appending the
+      // entire doctrine to history on every model request.
+      setTrainingPhasePrompt(agent, baseInstructions, prompt.instruction);
       agent.state.tools = tools.filter((tool) => asked.includes(tool.name));
       toolChoice.current = asked.length ? phaseToolChoice(request.payload.provider.api, stage.toolChoice) : undefined;
+      const intervention = arrived.length || protocolFailures.has(stageKey)
+        ? `${arrived.length ? steeringSection(arrived.map(clampSteer)) : ""}\n${prompt.instruction}` : undefined;
+      const nextPrompt = !agent.state.messages.some((message) => message.role !== "system") ? prompt.text
+        : intervention || (agent.state.messages.at(-1)?.role !== "toolResult" ? prompt.instruction : undefined);
+      parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "generation", name: `pi-phase-${step}`, phase: step, callId: generationId, state: "start", model: request.payload.provider.model, provider: request.payload.provider.provider, toolChoice: stage.toolChoice, activeTools: asked, input: telemetryValue({ system: agent.state.systemPrompt, messages: agent.state.messages, ...(nextPrompt ? { prompt: nextPrompt } : {}) }) } });
+      const draftProgress = new Map<number, { json: string; reported: number; at: number }>();
       const unsubscribe = agent.subscribe((event) => {
         if (event.type === "message_update") {
+          if (event.assistantMessageEvent.type === "toolcall_delta") {
+            const draft = event.assistantMessageEvent;
+            const draftCall = draft.partial.content[draft.contentIndex];
+            const name = draftCall?.type === "toolCall" ? draftCall.name : "";
+            if (name === "create_question" || name === "replace_current_question") {
+              const progress = draftProgress.get(draft.contentIndex) ?? { json: "", reported: 0, at: 0 };
+              progress.json += draft.delta;
+              /* The design as it is being written, re-parsed a few times a second
+                 rather than per token: a design is tens of kilobytes and each
+                 parse reads all of it. */
+              const now = Date.now();
+              if (progress.json.length - progress.reported >= 240 && now - progress.at >= 120) {
+                progress.reported = progress.json.length;
+                progress.at = now;
+                parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "draft", draft: challengeDraft(`${step}-${draft.contentIndex}`, progress.json) } });
+              }
+              draftProgress.set(draft.contentIndex, progress);
+            }
+          }
           const part = normalizePiAgentEvent(event.assistantMessageEvent);
           if (!part) return;
           if (part.type === "error") streamError = part.text;
+          // Hold prose until the phase ends. A provider can print a fake tool
+          // call as text; streaming it first would leak the invalid payload.
+          if (part.type === "text") return;
           parentPort.postMessage({ kind: "event", requestId: request.id, event: part });
           return;
         }
@@ -732,19 +985,15 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         }
       });
       try {
-        await agent.prompt(prompt.text);
-        if (text.trim()) finalText = text;
+        await advanceTrainingConversation(agent, prompt.text, prompt.instruction, intervention);
       } finally {
         controlPhaseTimeout = null;
         unsubscribe();
         endPhase.removeEventListener("abort", abortAgent);
         clearTimeout(phaseTimer);
       }
-      /* The prompt did not fit. Nothing here can be summarised — the transcript
-         is one message and it is this phase's own instruction — so what gets cut
-         is the restated evidence, and the phase is asked again. The alternative
-         is failing a turn the learner is waiting on over a block that was only
-         ever a convenience copy of results the agent can re-read with a tool. */
+      /* Only overflow rebuilds the conversation from durable outcomes. The
+         normal path retains the complete native history without replay copies. */
       if (!stopped.aborted && turnOverflowed(lastMessage, request.payload.provider)) {
         const next = overflowRetries < OVERFLOW_RETRY_LIMIT
           ? nextEvidenceBudget(prompt.evidenceChars, evidenceBudget, prompt.evidenceEntries)
@@ -752,6 +1001,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         if (next === null) throw new Error(prompt.evidenceEntries === 0
           ? `This turn does not fit in ${request.payload.provider.model}'s context window before Spar has gathered anything — the session's own history is already too long for this model.`
           : `Spar's turn did not fit in ${request.payload.provider.model}'s context window, and trimming what earlier phases found did not make it fit.`);
+        agent.state.messages = []; // Exceptional overflow recovery, not the normal loop.
         evidenceBudget = next;
         overflowRetries += 1;
         parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: `context-overflow:${stageKey}:${next}` } });
@@ -765,7 +1015,21 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         return;
       }
       if (phaseAbort.signal.aborted) throw new Error(`Spar's provider phase exceeded ${AGENT_PHASE_TIMEOUT_MS / 1_000} seconds.`);
-      if (stage.activeTools.length > 0 && callSignatures.length === callsBefore && stage.toolChoice === "required") {
+      const spilledTool = callSignatures.length === callsBefore ? toolCallSpill(text, allowed) : null;
+      if (spilledTool && agent.state.messages.at(-1)?.role === "assistant") agent.state.messages.pop();
+      if (spilledTool && !stage.activeTools.length) {
+        if (closedToolRetries === 0) {
+          closedToolRetries += 1;
+          protocolFailures.set(stageKey, { count: closedToolRetries, detail: `The previous response repeated ${spilledTool} as text after the successful results had closed all tools.` });
+          parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: "Retrying the final answer without tools" } });
+          continue;
+        }
+        finalText = closedToolFallback(outcomes);
+        parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "text", text: finalText } });
+        parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text: finalText, usage: sumUsage(usage), finishReason: "stop", phaseSteps: step + 1 } });
+        return;
+      }
+      if (stage.activeTools.length > 0 && callSignatures.length === callsBefore && (stage.toolChoice === "required" || toolFault || spilledTool)) {
         if (streamError) throw new Error(`Provider ${request.payload.provider.provider} failed during ${stageKey}: ${streamError}`);
         const previous = protocolFailures.get(stageKey);
         const count = (previous?.count ?? 0) + 1;
@@ -773,7 +1037,9 @@ async function runTurn(request: Request, stopped: AbortSignal) {
            one field — a uuid the model did not have, an enum spelled its own
            way — and a retry that names it is answered on the next attempt,
            where a retry that says "invalid" is answered with the same call. */
-        const detail = toolFault
+        const detail = spilledTool
+          ? `You wrote ${spilledTool} as text. That did not execute. Use the native tool call from the available tools; do not claim the change happened in prose.`
+          : toolFault
           ? `Your last call to ${asked.join(" or ")} was rejected: ${toolFault} Fix exactly that and call it again. Omit any optional field you do not have real data for rather than inventing a value for it.`
           : `The provider ended without a valid call to one of: ${asked.join(", ")}.`;
         if (count > PROTOCOL_RETRY_LIMIT) {
@@ -797,12 +1063,14 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       }
       if (stage.toolChoice === "auto" && callSignatures.length === callsBefore) {
         finalText = text;
+        if (text) parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "text", text } });
         parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text: finalText, usage: sumUsage(usage), finishReason, phaseSteps: step + 1 } });
         return;
       }
       protocolFailures.delete(stageKey);
       if (stage.activeTools.length === 0) {
         finalText = text;
+        if (text) parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "text", text } });
         parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text: finalText, usage: sumUsage(usage), finishReason, phaseSteps: step + 1 } });
         return;
       }
@@ -810,41 +1078,6 @@ async function runTurn(request: Request, stopped: AbortSignal) {
     throw new Error(`Spar exceeded ${AGENT_MAX_STEPS} phase steps.`);
   } catch (error) { parentPort.postMessage({ kind: "result", id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) }); }
 }
-/**
- * Every model-authored candidate was rejected. Publishing a host-authored
- * challenge is strictly better than ending the turn with a compiler error and
- * nothing to attempt — but the learner is told plainly that this one is a
- * standard exercise rather than one written for their stated gap, because a
- * fallback presented as bespoke would misrepresent the evidence it produces.
- */
-async function publishFallbackChallenge(request: Request, outcomes: Map<string, unknown[]>, exhausted: { attempts: number; failure: string }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
-  /* A rejected replacement leaves a valid current challenge in place. Do not
-     overwrite learner work with the generic creation fallback. */
-  if ((outcomes.get("replace_current_question")?.length ?? 0) > 0) {
-    return { ok: true, text: `I could not get that revision through validation after repairing the retained candidate, so I left your current challenge unchanged.${exhausted.failure ? ` The remaining validation issue was: ${exhausted.failure}` : ""}` };
-  }
-  const language = requestedLanguage(outcomes);
-  try {
-    const value = await callHostTool(request.id, request.payload.sessionId, "create_fallback_question", { language });
-    if (!isPlayableQuestion(value)) {
-      return { ok: false, error: `Challenge generation stopped after ${exhausted.attempts} rejected compilation attempts, and the standard fallback challenge could not be published either.${exhausted.failure ? ` Latest failure: ${exhausted.failure}` : ""}` };
-    }
-    return { ok: true, text: `I could not get a challenge written for your exact target past validation, so I've set a standard ${language === "cpp" ? "C++" : language} exercise instead — tracing when a running total first crosses a threshold. It still shows me whether you follow state step by step or pattern-match, and I'll use what it shows to aim the next one properly.` };
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
-/** The language the agent was actually authoring in, taken from its own attempts. */
-function requestedLanguage(outcomes: Map<string, unknown[]>): Language {
-  const attempts = [...(outcomes.get("create_question") ?? []), ...(outcomes.get("replace_current_question") ?? [])];
-  for (const attempt of attempts.reverse()) {
-    const input = (attempt && typeof attempt === "object" ? (attempt as { input?: unknown }).input : undefined) as { language?: unknown } | undefined;
-    const parsed=languageSchema.safeParse(input?.language);if(parsed.success)return parsed.data;
-  }
-  return "javascript";
-}
-
 /** The tools that have already been called this turn with the same arguments as
  *  often as they are going to be. Keyed off the signature `record` builds, whose
  *  name half never contains a colon. */
@@ -854,19 +1087,6 @@ function spentTools(callCounts: Map<string, number>): Set<string> {
     if (count >= REPEATED_CALL_LIMIT) spent.add(signature.slice(0, signature.indexOf(":")));
   }
   return spent;
-}
-
-/**
- * The stage with its spent tools taken out.
- *
- * A stage left with nothing becomes the tool-free stage, which is how the turn
- * ends in an answer rather than in the loop guard.
- */
-function withdraw(stage: ReturnType<typeof nextToolStage>, spent: Set<string>): ReturnType<typeof nextToolStage> {
-  const removable = stage.activeTools.filter((name) => spent.has(name) && !RECALLABLE.has(name));
-  if (stage.toolChoice !== "auto" || !removable.length) return stage;
-  const open = stage.activeTools.filter((name) => !removable.includes(name));
-  return open.length ? { ...stage, activeTools: open } : { activeTools: [], toolChoice: "none" };
 }
 
 /**
@@ -910,20 +1130,36 @@ const ACCUMULATED_LIMIT = 6;
  * session, the conversation and the active challenge are already in front of the
  * agent, and a call spent reading them back is a round trip that learns nothing.
  */
-const ONE_READ_OF_THE_SOLVE = "The context above already holds this session, the recent conversation, and the active challenge with its target, so never spend a call reading those back. One call to read_attempt returns their code exactly as it stands, the runner's verdict on it, and the history of edits, runs and case results. Work from that evidence rather than reading it again. ";
+const ONE_READ_OF_THE_SOLVE = "The context above already holds this session, the recent conversation, and the active challenge with its target, so never spend a call reading those back. Use read_attempt when the learner's code, tests, or solve history matters; it returns those together in one call. For a question about what two challenges ask, use their designs in recentChallenges or read_challenge instead. ";
 
 function orchestrationPrompt(request: Request, outcomes: Map<string, unknown[]>, activeTools: string[], step: number, protocolFailure?: string, spent: Set<string> = new Set(), evidenceBudget = Number.POSITIVE_INFINITY, interruptions: string[] = []) {
   const evidence = fitEvidence(Object.fromEntries([...outcomes.entries()].map(([name, values]) => [name, ACCUMULATING_TOOLS.has(name) ? values.slice(-ACCUMULATED_LIMIT) : values.at(-1)])), evidenceBudget);
-  const compilationFeedback = activeTools.some((tool)=>tool==="create_question"||tool==="replace_current_question"||tool==="assign_practice_problem") ? latestRejectedCompilationFeedback(outcomes) : "";
-  const phaseInstruction=protocolFailure
-    ? `Your previous response did not produce a schema-valid host tool call: ${protocolFailure}. Call exactly one tool from ${activeTools.join(", ")} now. Correct only the tool-call JSON shape; do not answer in prose.`
-    : activeTools.length?(request.payload.turnKind==="learner-message"?`${compilationFeedback?`The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Fix that exact failure before trying again. `:""}${request.payload.activeQuestion?`An active challenge exists (question ${request.payload.activeQuestion.id}, attempt ${request.payload.activeQuestion.attemptId}). create_question is intentionally unavailable. If the learner says the challenge is too difficult, asks to change it, or confirms "do it", inspect the current attempt if needed, adjust the target if needed, then call replace_current_question. Never answer that a replacement cannot be launched merely because a challenge is active; replacement is the supported operation. ${ONE_READ_OF_THE_SOLVE}`:"No active challenge exists, so create_question is the supported creation operation. "}Respond to the learner's actual request. Use a tool whenever they ask you to inspect or change real tests, challenges, account history, or abilities. Call every tool you need in one response rather than one per reply — independent reads belong together — or answer concisely if no tool is needed. Never claim a state change without its successful tool result.`:`${compilationFeedback ? `The previous challenge candidate was rejected by deterministic compilation: ${compilationFeedback} Revise the candidate to fix that exact failure. A known-incorrect implementation must pass every visible test and fail a hidden test; do not submit a placeholder or deliberately visible-failing implementation. ` : ""}Before the call, write one short sentence addressed to the learner saying what you are about to do and why it follows from what you just found — one sentence, present tense, no preamble and no restating this instruction. Then call the single best required next tool from this allowlist: ${activeTools.join(", ")}. Do not write anything else: the sentence and the call, nothing more.`):`${spent.size?`You have already called ${[...spent].join(", ")} this turn and the results are in the evidence above; calling again returns the same thing. Answer the learner now from what you have. `:""}${completionInstruction(request.payload.turnKind,outcomes)}`;
+  const compilationFeedback = latestRejectedCompilationFeedback(outcomes);
+  const published = ["create_question", "replace_current_question", "assign_practice_problem"].some((name) =>
+    (outcomes.get(name) ?? []).some((entry) => Boolean(entry && typeof entry === "object" && (entry as { result?: { status?: unknown } }).result?.status === "playable")),
+  );
+  const challengeState = published
+    ? `A challenge is now playable; its result is in the durable outcomes. You may use other available tools or finish. When you finish: ${completionInstruction(request.payload.turnKind, outcomes)} `
+    : (outcomes.get("teach_lesson") ?? []).some((entry) => Boolean(entry && typeof entry === "object" && (entry as { result?: { status?: unknown } }).result?.status === "taught"))
+      ? `A lesson is now available. You may continue with another useful action or finish. When you finish: ${completionInstruction(request.payload.turnKind, outcomes)} `
+    : request.payload.activeQuestion
+      ? `An active challenge exists (question ${request.payload.activeQuestion.id}, attempt ${request.payload.activeQuestion.attemptId}). Use replace_current_question if a different challenge is needed and that tool is available. ${ONE_READ_OF_THE_SOLVE}`
+      : activeTools.includes("create_question")
+        ? "No active challenge exists; create_question can publish one. "
+        : "No authored challenge tool remains this turn. You can use the remaining tools or explain the validation result. ";
+  const phaseInstruction = protocolFailure
+    ? activeTools.length
+      ? `Your previous response did not produce a schema-valid host tool call: ${protocolFailure}. Correct the call shape and choose a useful available tool.`
+      : `Your previous response repeated a tool call as text after successful results closed every tool: ${protocolFailure} No tools are available or needed now. Do not write or imitate tool-call syntax. Give the learner the concise final response requested by the completed results.`
+    : activeTools.length
+      ? `${compilationFeedback ? `The previous challenge candidate failed validation: ${compilationFeedback} ` : ""}${challengeState}Follow the learner's latest instruction, including corrections to their goal or context. The context already contains the current session; read other evidence only if it can change your decision. Choose the useful tools and their order yourself. Independent calls may be made together. If the current target or challenge no longer fits, update it through the appropriate tools before claiming it changed. When the requested work is done, answer concisely. Never claim a state change without a successful tool result.`
+      : `${spent.size ? `You already called ${[...spent].join(", ")} this turn. ` : ""}${completionInstruction(request.payload.turnKind, outcomes)}`;
   const rendered = stableJson(evidence);
   /* Placed after the evidence and before the phase instruction, which is where
      its authority belongs: newer than everything above it, and not a licence to
      abandon what the phase was told to do. */
   const interrupted = steeringSection(interruptions);
-  return { text: `${request.payload.context}\n\nLatest learner action:\n${request.payload.message}\n\nDurable results from earlier phases of this same Spar turn:\n${rendered}${interrupted}\n\nPhase ${step + 1}. ${phaseInstruction}`, evidenceChars: rendered.length, evidenceEntries: Object.keys(evidence).length };
+  return { instruction: phaseInstruction, text: `${request.payload.context}\n\nLatest learner action:\n${request.payload.message}\n\nDurable results from earlier phases of this same Spar turn:\n${rendered}${interrupted}\n\nPhase ${step + 1}. ${phaseInstruction}`, evidenceChars: rendered.length, evidenceEntries: Object.keys(evidence).length };
 }
 
 /**
@@ -938,8 +1174,21 @@ function latestRejectedCompilationFeedback(outcomes: Map<string, unknown[]>): st
   if (!result || typeof result !== "object" || (result as { status?: unknown }).status === "playable") return "";
   const failures = failedChecks(result);
   if (!failures.length) return "";
-  return failures.map((failure, index) => `(${index + 1}) ${failure}`).join(" ").slice(0, 2_400);
+  return failures.map((failure, index) => `(${index + 1}) ${failure}`).join(" ");
 }
+
+/** A published artifact is durable even if the provider fails to narrate it. */
+function closedToolFallback(outcomes: Map<string, unknown[]>): string {
+  const playable = ["create_question", "replace_current_question", "assign_practice_problem"].some((name) =>
+    (outcomes.get(name) ?? []).some((value) => Boolean(value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "playable")),
+  );
+  if (playable) return "Your challenge is ready. Start by reading the prompt and working through its smallest example by hand.";
+  if ((outcomes.get("teach_lesson") ?? []).some((value) => Boolean(value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "taught"))) {
+    return "The lesson is ready. Read it, then try the practice step it introduces.";
+  }
+  return "I finished the available work, but could not produce a reliable final explanation. The recorded results are preserved.";
+}
+
 function sumUsage(values: unknown[]) {
   const totals: Record<string, number> = {};
   for (const value of values) for (const [key, amount] of Object.entries((value && typeof value === "object" ? value : {}) as Record<string, unknown>)) if (typeof amount === "number") totals[key] = (totals[key] ?? 0) + amount;
@@ -965,7 +1214,7 @@ function languageContracts() {
     `Every synthetic test harness must report cases, not merely exit correctly. Emit TAP or print exactly one line beginning \"ok - \" or \"not ok - \" for every named case. On failure also print indented \"expected: \" and \"actual: \" lines, continue checking the remaining cases where the language permits it, and exit non-zero after reporting all failures. A bare assert, raise, precondition, t.Fatal, or equivalent is invalid because successful checks are silent and cannot populate the structured Test Result UI. The compiler executes both the reference and a known-incorrect implementation and rejects a candidate unless both passing and failing case verdicts are observed.`,
     `A JavaScript question uses Node's built-in test runner, .js files, no dependencies, and runCommand "node --test". Visible and hidden tests are separate *.test.js files that import the implementation relatively.`,
     `A TypeScript question follows the same contract with .ts files and *.test.ts tests.`,
-    `A Python question uses dependency-free .py files and standalone test_*.py or *_test.py scripts with assertions; tests import the implementation from the workspace root.`,
+    `A Python question uses dependency-free .py files and standalone test_*.py or *_test.py scripts with assertions; tests import the implementation from the workspace root. The host executes each test file directly with python3, without pytest discovery. Call any defined test functions under if __name__ == "__main__" or run the cases at module top level. runCommand does not alter this runner.`,
     `A Java question uses dependency-free .java files in the default package. Put implementation classes under src/ and standalone assertion-enabled test classes in files ending Test.java, each with public static void main(String[] args).`,
     `A C question declares functions in a header, defines them in a .c implementation without main, and puts each standalone int main(void) test in its own *.test.c file. Code must build under clang -std=c17 -Wall -Wextra -pedantic.`,
     `A C++ question has no test framework available. The implementation is a library: declare its functions in a header (for example src/window.h) and define them in a matching .cpp (src/window.cpp) that must not define main. Every test is a separate standalone program under tests/ (for example tests/visible.test.cpp and tests/hidden.test.cpp), each with its own int main() that includes the header by its bare name, reports every comparison with the case protocol above, and returns 0 only when they all hold. The host compiles each test file into its own binary against the implementation, so never define main in the implementation and never put two tests in one file. Ship every header you include in both starterFiles and referenceFiles. Code must build under clang++ -std=c++20 -Wall -Wextra -pedantic.`,
@@ -976,7 +1225,13 @@ function languageContracts() {
   ].join(" ");
 }
 
-function instructions() { return `You are the single Training Agent for a personalized coding gym. Own pedagogical decisions, not persistence, execution, or correctness verification. On a cold-start turn, retrieve learner and attempt evidence once, then ask exactly one short, plain-language question establishing prerequisite experience and confidence for the stated goal; wait for their answer before setting a target or creating a challenge, then continue in this same turn and finish with a personal explanation of why this challenge fits. For a new broad goal with existing evidence or a completed cold-start answer: call search_learner_model once and search_attempt_history once using focused queries, then stop retrieving, set a concise session objective, set exactly one Training Target, and create one complete validated question. Retrieved history calibrates difficulty but must never replace the learner's current goal: use prior evidence only when it is materially relevant, and otherwise choose an accessible foundation diagnostic from the goal and placement answer. A goal names a surface, and a broad goal names a wide one — "pass a Google interview" is arrays, hashing, two pointers, recursion, trees, graphs, and complexity, not whichever narrow gap the ledger already happens to hold. Before setting the first target of a session, name the surface this goal describes and choose inside it; a search hit is only relevant if it sits on that surface, and a ledger holding one or two abilities will return them for almost any query, which is a property of the search and not evidence about this goal. The context's recentChallenges is the record of what you have already asked, across every session, most recent first. Read it as a coverage constraint: do not aim a session's first target at a primary concept that already dominates that list unless the goal itself names that concept or the learner's most recent attempt on it failed, and never repeat a challenge's operation under a new title. Foundation difficulty means an accessible first rung on this goal's surface, never a retreat to the same off-by-one loop repair for every goal. When retrieved evidence contains an existing ability that genuinely sits on this goal's surface, reuse its exact title so evidence updates the same durable Ability Ledger identity; when nothing retrieved belongs to this goal, open a new ability for it rather than bending the goal to fit the ledger. Treat a cold-start answer as evidence about accessibility and never infer advanced readiness merely because the learner named an advanced topic. Write every question in the context's preferredLanguage. That is the Track's language when the Track names one, and it outranks any language you infer from the goal text, the ledger, or a previous session. The one thing that outranks it is the learner asking for a different language in this session: honour that immediately and pass it as create_question's language, which is what makes it the Track's language from then on. Never leave the language to be inferred when the goal names one -- a goal that says Python and a question that arrives in TypeScript is the learner's request being ignored. When the context carries a learnerProfile, treat its stated experience and weakness as self-reported evidence that calibrates the first target before any attempt exists — weaker than a recorded attempt, and never a reason to skip retrieval. ${languageContracts()} Starter and reference maps must use the same implementation path, so the reference replaces the exact file the learner edits. A repair challenge ships a starter that already runs and is wrong, so its statement must name the intended contract and the observable failure, then ask the learner to correct the implementation without changing its public API. Only a challenge whose starter is a stub asks the learner to implement the operation from scratch. Every reference solution must pass all tests. Every known incorrect implementation must represent the targeted misconception, pass all visible tests, and fail when hidden tests are included. The question's observable return contract must expose the targeted misconception: for repeated invariant restoration, do not rely only on a monotone maximum if a one-step shrink can return the same maximum; prefer counting valid windows, returning restored state, or another output where incomplete restoration is behaviorally distinguishable. Before calling create_question, ensure its title, statement, function contract, examples, reference code, visible tests, hidden tests, and expected failure signatures all describe the same exact operation and constraints. The model only proposes candidate designs; it must never declare a candidate or learner submission correct. The deterministic host compiler and runner are the sole verification authority. When create_question returns status invalid, read its failed checks, revise the candidate to address those exact failures, and call create_question again; continue until the host publishes a playable candidate or stops the bounded run. There is no reviewer or judge model. Every tool call takes an actionTitle, and it is the row the learner sees for that step in the transcript. Write it about this specific call, in their language: name what you are looking for or deciding, not what the tool is called. "Checking whether arrays have ever been tested" and "Reading how you solved the window repair" are titles; "Searched attempt history" and "read_ability" are not. Keep it under about eight words, sentence case, no trailing period, and phrased as the action in progress. It is a caption and never an instruction to yourself. Use tools as reality and never claim a write, test, evaluation, or update without its tool result. After a completed attempt: read the attempt once — one call returns their code, the runner's already-recorded deterministic verdict, and the whole log of how they solved it — review how it was written, read the active ability once — which returns the mistake patterns open under it and its recent behavioural evidence alongside the document — propose one evidence-backed markdown update, commit exactly one action (diagnose, teach, practise, transfer, advance, or retain), call search_learner_model once for wider context, then either ask the learner about a specific moment the log could not explain or create the next target and validated question. The next question must discriminate what remains uncertain from the attempt in a meaningfully different representation while avoiding unrelated difficulty. Its persisted Training Target and generated task must name the same transfer context and constraint. The context's targetProgress counts what the active target has cost so far: challenges set against it, how they went, and how many of them have been set since the ability document last changed. Read it as the evidence position on this target. Evidence for the target's own desiredEvidence is what releases it: while that evidence is missing the target stands and you keep working the ability, and once it is there the target is met and the next one is a different ability rather than another instance of this one. A run of challenges with a flat ability document is not evidence of anything except that the current approach has not produced any — so when challengesSinceAbilityChanged keeps climbing, the thing to reconsider is how you are testing this ability, not whether to keep testing it. None of this is a quota: a fifth challenge on an unsettled target is a legitimate call, and it should be a call. Every ability update carries interpreted evidence: one entry per durable event that says what the learner actually did, at the resolution the replay supports. "Failed the window question" is a verdict and interprets nothing; "restored the invariant on the first shrink and stopped, so the two cases needing a second shrink failed" is an interpretation, and it is the only kind worth writing down. A finding that could recur is a pattern rather than a remark: propose it as an observation the first time you see it, and when the context's openPatterns or a search already holds your earlier hypothesis and this attempt shows it again, propose the same title with both events so it is promoted rather than written twice. The host refuses to promote a pattern whose evidence does not span two attempts, so a pattern that survives is one the learner has actually repeated. A stale ability is one Spar has not verified in a long time, not one the learner has lost — when you pick one up, the action is retain and the question is a re-check in a new representation, not a re-teach. The context's learnerStanding says where the learner is rated and, in setProblemsRated, the range of problem difficulty worth setting them right now: a minRating and a maxRating on the scale Codeforces publishes its problem ratings on, narrowed by what the active ability's status calls for — near even money to diagnose an untested one, a stretch to re-check one they have already shown. It is the rule the host enforces rather than a suggestion, so choose inside it. It governs a challenge you write exactly as it governs a problem you fetch: learnerStanding.writeProblemsAt is that same window said in create_question's own vocabulary — the one difficulty word whose absolute price lands inside it — and the host rejects a created challenge pitched outside the range just as it rejects an assigned one. Spar's four words are absolute prices on that scale and not a judgement about this learner: foundation 900, developing 1200, proficient 1500, advanced 1800. A strong learner therefore needs a higher word, not the same word applied more strictly. A problem below the range is one they would walk through, and a problem above it fails for reasons that say nothing about the gap you were aiming at. The range widens on its own while the standing is provisional, because when Spar has not measured them yet more problems are plausibly the right one. Prefer evidence over scores and never overreact to one attempt. Keep chat concise.
+function instructions() { return `You are Spar, a generalist coding coach. Understand the learner's latest request in context and choose the useful tools yourself. The learner's current goal and corrections take priority over old targets or retrieved history. Use supplied session, profile, recent challenges, and lessons first; retrieve only evidence that can change your decision. Never repeat a read or a progress announcement when you already have its answer. Independent calls can be made together. A clear request to change an active challenge can be handled by updating its objective or target and replacing it; it does not require research or re-reading the current session. If the user asks a question, answer it directly when no tool is needed. When asked how two challenges differ, compare their tasks and required methods using recentChallenges or read_challenge. Say plainly when they are effectively the same; changed names or examples alone are not a new skill. Answer that comparison before suggesting any next action, and do not mistake it for a request for a hint or a menu of choices.
+
+For a new Track, choose one next training intent and a matching challenge, or teach the missing prerequisite when practice would be premature. Do not write a permanent syllabus. Ask one concise question only when its answer would materially change that choice. On a completed attempt, inspect the solve before judging it, record evidence-backed learning updates, then decide whether to explain, ask, teach, practise, transfer, advance, or retain. A new challenge should test what remains uncertain in a distinct but appropriate context. Compare its actual output contract and required method with recently passed challenges before publishing. If those are the same, choose a meaningful variation or deliberately explain why repeating that exercise serves the learner's stated goal. A renamed function, different examples, or a fresh title do not create a new challenge by themselves. Treat difficulty and history as calibration, not as a substitute for the learner's goal. Use the Track's preferred language unless the learner asks to change it.
+
+Use tools as the authority for persistence, execution, and correctness. Never claim a write, verdict, or published challenge without a successful result. The host reviews a proposed challenge against recent solved work and validates its implementation. A reference solution must pass all tests; the deliberately incorrect one must pass visible tests and fail a hidden test. Keep the starter, reference, statement, examples, and tests consistent. The host privately revises a candidate against fit feedback and compiler diagnostics within the tool call. If it still rejects the candidate, use the concrete feedback to reconsider the task and try again when the tool remains available. If the current target rests on a stale claim, supply a corrected trainingTarget with the question so its recorded purpose matches the exercise. Every tool call's actionTitle appears in the learner's thread: make it a short, specific description of the work in progress. After a challenge or lesson is delivered, tell the learner why it fits now and give one concrete first step without giving away the open challenge's solution. Keep the conversation concise.
+
+${languageContracts()}
 
 ${syntheticChallengeAuthoringDoctrine()}
 
@@ -1034,9 +1289,9 @@ function solutionContract() {
  * about a verdict depends on the agent knowing which judge answered.
  */
 function sourceDoctrine() {
-  return `Problem providers form one catalogue, not a platform preference. Search fans out across every available provider and every result carries a source identity; preserve that source with its slug when you read and assign it. Choose the best-fitting problem regardless of provider. A real problem is usually the better instrument: it was written and calibrated by people, its hidden cases are ones you did not write, its verdict comes from its provider, and—when that provider is connected—the learner's own solved, attempted, and abandoned history is evidence you cannot get another way. Search before you set a challenge: you are made to once per turn and it costs almost nothing. Read any candidate with read_practice_problem before assigning it, using the result's exact source and slug, because tags say where a problem is filed and only the statement says what it actually asks.
+  return `Problem providers form one catalogue, not a platform preference. Search fans out across every available provider and every result carries a source identity; preserve that source with its slug when you read and assign it. Choose the best-fitting problem regardless of provider. A real problem can be a strong instrument: it was written and calibrated by people, its hidden cases are ones you did not write, its verdict comes from its provider, and—when that provider is connected—the learner's own solved, attempted, and abandoned history is evidence you cannot get another way. Search the connected source when it can materially improve the challenge choice; a source lookup is optional and should not delay a clear next action. Read any candidate with read_practice_problem before assigning it, using the result's exact source and slug, because tags say where a problem is filed and only the statement says what it actually asks.
 
-Assign one when it genuinely lands on your target. That means the problem exercises the specific gap the target names, not merely the same topic: "arrays" is not a target and a problem tagged Array is not evidence about index arithmetic. Set the primary concept to the gap you are testing rather than to the source's own tag, or the challenge will be filed under a shelf and disappear from the evidence for the thing you were actually checking. Prefer a problem they have not solved; assigning one they have solved is defensible only when the point is to compare against how they solved it before, and you must say so. Never assign a problem you have not read, and never describe its contents in your reply — they are about to read it themselves.
+Choose a problem for the step you think will help now: direct practice, a prerequisite, transfer, or a deliberate repeat can all be useful. Tag the concept the problem actually exercises and explain how that step serves the learner's goal, especially when it differs from the current target. If the learner has solved it before, use that history rather than hiding it. Read a sourced problem before assigning it, and let its statement and judge provenance support what you tell the learner.
 
 Write your own instead whenever the source has nothing that fits. That is not a failure: a target aimed at a specific misconception, a repair challenge, a transfer into an unusual representation, or anything in a language or a shape the source does not carry is exactly what create_question is for. The source is a library, not a syllabus, and a challenge written for one learner's gap will often beat anything in it.
 
@@ -1092,7 +1347,7 @@ Spar can hand the learner two kinds of thing: a challenge to attempt, and a less
 
 Teach when the obstacle is knowledge rather than practice, and only when you can name the evidence: their attempt shows they have not met the idea at all, they asked you a question that is genuinely about an idea, or the next challenge depends on something the record says they have never been taught. Do not teach what they have already shown they can do — a lesson about an idea someone has already used is a lecture, and they will read it as one. When the obstacle is practice, set a challenge; that is still the ordinary case.
 
-The clearest case of all is ground the learner has never stood on. A Track opening on a subject they have told you they are new to, or a target whose gap names an idea the record holds nothing about, is not a gap in practice — there is nothing there to practise yet. Teach it first. Setting someone's first problem in a subject they have just said they do not know is asking them to reinvent it, and finding that they cannot is not evidence about them. So on a turn where the concept graph and the history both come back empty for what you are about to test, the lesson is the move, and the challenge that tests it comes after — this turn if it follows directly from what you taught, otherwise next turn, once they have read it.
+The clearest case of all is ground the learner has never stood on. A Track opening on a subject they have told you they are new to, or a target whose gap names an idea the record holds nothing about, is not a gap in practice — there is nothing there to practise yet. Teach it first. Setting someone's first problem in a subject they have just said they do not know is asking them to reinvent it, and finding that they cannot is not evidence about them. When the concept graph and history are empty, consider whether a short lesson, an accessible diagnostic challenge, or a prerequisite exercise would help most. Choose from the learner's request and the available evidence, then explain the choice.
 
 A lesson is sized to the gap, not to the topic. Most of what is worth teaching is not a subject — it is one edge case, one invariant, one reason a thing that looks right is wrong, and those are exactly the lessons that land, because the learner has just been bitten by the thing. When the evidence is narrow, teach the narrow thing: title it as what it is and where it lives ("Empty window: when the sliding window has nothing to restore"), spend the pages on the case rather than on a tour of the topic around it, and tag it at that resolution — window-invariant-restoration, not sliding-window — so it files against the evidence that prompted it. One page about the case they actually failed beats six pages about the family it belongs to. Teaching the whole topic is for a learner who has genuinely never met it.
 
@@ -1100,11 +1355,13 @@ A delivered lesson is not evidence that the learner has read, understood, or mas
 
 Check first. Your context carries recentLessons, and search_lessons finds the rest. If you have taught this before, read it with read_lesson and either build on it or point at it — teaching the same idea twice under a new title is how a learner stops reading any of it.
 
-Write it for them, not for the record. One page is one idea, short enough to hold in mind at once. Use their own code and their own failure where you have it — the page that names the case they never reached is the page that lands. Fenced code is welcome; a wall of prose is not. Stop when the idea is covered: pages added to make it look substantial are the thing that makes nobody open the second one.
+Write it for them, not for the record. One page is one idea, short enough to hold in mind at once. For a new mechanism, begin with a tiny concrete input and the question being answered. Show every change in the relevant state and its immediate reason before naming the abstraction or invariant; do not skip the step that makes the mechanism work. Distinguish values from positions when that matters, and explain how equal or unresolved items behave. Add complexity reasoning only after the learner can follow the mechanism. Use their own code and their own failure where you have it. Fenced code and a compact trace are welcome; a wall of prose is not. Stop when the idea is covered: pages added to make it look substantial are the thing that makes nobody open the second one.
+
+If the learner says an explanation was confusing, respond to that feedback in the conversation itself: acknowledge the specific unclear step, explain it once on a smaller concrete example with visible state changes, and ask one small check that reveals whether it clicked. Read the old lesson only if needed to find the unclear step. Do not make a second lesson and point back to it as the entire answer; use a new lesson only when it adds genuinely useful material that should be kept.
 
 Every reference says why it is worth the click. Give a url only for a page you actually fetched this turn or genuinely know exists — a plausible-looking link that 404s costs you more than no link at all — and use reading for a book or chapter you are naming from memory, which is honest and is not dressed up as something checked.
 
-A turn that teaches does not also have to set a challenge, and usually should not: you have just given them something to do. Your reply then points at the lesson and says why it is for them now. Do not restate what is on its pages.`;
+A turn that teaches does not also have to set a challenge, and usually should not: you have just given them something to do. Your reply then points at the lesson and says why it is for them now. Include a brief concrete starting point in the reply so the learner is not forced to open a card before the explanation begins.`;
 }
 
 /**
@@ -1117,7 +1374,7 @@ A turn that teaches does not also have to set a challenge, and usually should no
  * do something, so the bar has to be evidence rather than encouragement.
  */
 function conceptDoctrine() {
-  return `Concepts are Spar's shared vocabulary for what a challenge is about, and they are how the learner and every later turn find their own history. Every create_question and replace_current_question call must carry concepts. Tag at the resolution a decision could be made from: window-invariant-restoration rather than sliding-window, aliasing rather than references-and-mutation, state-definition rather than dynamic-programming. Exactly one tag has role primary and it must name what the challenge is actually aimed at — the same thing the Training Target's specificGap describes — with the rest supporting. Call read_concept_graph before tagging a topic you have not tagged before, and reuse the slugs it returns rather than inventing a near-duplicate; introduce a new slug only when nothing returned covers what you are really testing, and give it a title, kind and parentSlug when you do. Concept evidence is the sharpest instrument you have for aiming the next question: before choosing a target on a session-start or attempt-complete turn, call search_concept_evidence for the area in question and read its subConcepts before its totals, because an area that averages out fine routinely hides one sub-concept the learner has never once passed. A concept with several failures and no passes is where to teach; one with a single pass is not yet learned; one the learner has never met is not a weakness. Note replacedUnderThisConcept as evidence about your own aim rather than about them. Every authored challenge must also classify requiresComplexityAnalysis explicitly: true only when asymptotic time and auxiliary-space reasoning is useful evidence for this task, not merely because it contains code or uses a function.
+  return `Concepts are Spar's shared vocabulary for what a challenge is about, and they are how the learner and every later turn find their own history. Every create_question and replace_current_question call must carry concepts. Tag at the resolution a decision could be made from: window-invariant-restoration rather than sliding-window, aliasing rather than references-and-mutation, state-definition rather than dynamic-programming. Exactly one tag has role primary and names what this challenge actually exercises, with the rest supporting. A prerequisite or transfer challenge can differ from the current Training Target; explain why it is the useful next step. Call read_concept_graph before tagging a topic you have not tagged before, and reuse the slugs it returns rather than inventing a near-duplicate; introduce a new slug only when nothing returned covers what you are really testing, and give it a title, kind and parentSlug when you do. Concept evidence is the sharpest instrument you have for aiming the next question: when the supplied evidence leaves uncertainty that could change the next target, use search_concept_evidence for that area and read its subConcepts before its totals, because an area that averages out fine routinely hides one sub-concept the learner has never once passed. A concept with several failures and no passes is where to teach; one with a single pass is not yet learned; one the learner has never met is not a weakness. Note replacedUnderThisConcept as evidence about your own aim rather than about them. Every authored challenge must also classify requiresComplexityAnalysis explicitly: true only when asymptotic time and auxiliary-space reasoning is useful evidence for this task, not merely because it contains code or uses a function.
 
 An Ability is what the learner is told they can now do, so treat it as something granted on evidence rather than as a document you keep. Introduce one with upsert_ability when you set a target — that is the hypothesis, and it is correctly uncertain with no evidence behind it. Then, once deterministic outcomes actually support it, call it again with the evidence event ids and give it the three things that make it an ability rather than notes: a summary of one sentence, addressed to the learner, naming what they can do and under what conditions; the concepts it covers, using slugs you have tagged challenges with, so they can reach the evidence themselves; and up to four practice drills, each phrased as the learner's own first-person goal because each one starts a session. Make the drills genuinely different from each other — a new transfer context, a harsher constraint, a larger scale, a repair instead of a build — and never merely "the same thing but harder". Do not grant an ability from one passing attempt, do not grant one from a challenge the learner walked away from, and never write a summary that claims more than the recorded outcomes support.`;
 }

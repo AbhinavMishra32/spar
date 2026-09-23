@@ -59,6 +59,7 @@ const part = {
   files: [],
   input: JSON.stringify({ sections: ["log", "cases", "runs", "timings"], cases: "all", scope: "all", caseDetail: "full", maxLines: 2000 }, null, 2),
   output,
+  stages: [],
   startedAt: START,
   endedAt: START + 1000,
 };

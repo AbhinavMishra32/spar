@@ -376,6 +376,14 @@ export function App() {
         return;
       }
 
+      if (event.type === "question-pending") {
+        if (detailRef.current?.summary.id === sessionId) {
+          void api.openSession(sessionId).then((next) => { if (next && detailRef.current?.summary.id === sessionId) setDetail(next); })
+            .catch((cause) => setError(message(cause)));
+        }
+        return;
+      }
+
       if (event.type === "done") {
         /* The turn's own buffered deltas are dropped: the reply it produced is
            about to be re-read from storage, and replaying a partial stream over

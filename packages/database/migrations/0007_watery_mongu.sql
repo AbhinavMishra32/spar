@@ -1,0 +1,1 @@
+ALTER TABLE "questions" ADD COLUMN "introduction_reason" text DEFAULT '' NOT NULL;

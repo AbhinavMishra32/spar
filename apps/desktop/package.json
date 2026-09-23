@@ -1,6 +1,6 @@
 {
   "name": "@spar/desktop",
-  "version": "0.6.10",
+  "version": "0.6.11",
   "private": true,
   "type": "module",
   "description": "An adaptive coding gym that writes your next exercise from your own attempt history.",
@@ -22,9 +22,9 @@
     "eval": "ELECTRON_RUN_AS_NODE=1 NODE_OPTIONS=--conditions=development electron node_modules/tsx/dist/cli.mjs src/eval/cli.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-telemetry": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.87.1",
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-telemetry": "0.87.1",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource/poppins": "^5.3.0",
     "@mariozechner/pi-ai": "^0.73.1",

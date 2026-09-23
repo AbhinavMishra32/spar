@@ -30,6 +30,8 @@ const MAX_STEPS = 80;
 const MAX_REASONING = 4_000;
 /** A phase narration is one sentence. This is a guard, not a budget. */
 const MAX_NOTE = 600;
+/** A challenge call that exhausted every repair runs a dozen stages. */
+const MAX_STAGES = 40;
 
 export function recordAgentActivity(runId: string, event: Record<string, unknown>) {
   if (event.type === "reasoning") return recordReasoning(runId, event);
@@ -51,6 +53,7 @@ export function recordAgentActivity(runId: string, event: Record<string, unknown
        worker, which is the only place that sees the unredacted design. */
     input: typeof event.input === "string" ? event.input : "",
     output: typeof event.output === "string" ? event.output : "",
+    stages: Array.isArray(event.stages) ? (event.stages as unknown[]).filter((stage): stage is Record<string, unknown> => Boolean(stage) && typeof stage === "object").slice(0, MAX_STAGES) : [],
   });
   thinkingSince.delete(runId);
 }
@@ -77,7 +80,7 @@ function recordReasoning(runId: string, event: Record<string, unknown>) {
     return;
   }
   thinkingSince.set(runId, Date.now());
-  push(runId, { kind: "reasoning", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0, input: "", output: "" });
+  push(runId, { kind: "reasoning", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0, input: "", output: "", stages: [] });
 }
 
 /**
@@ -118,7 +121,7 @@ function recordNote(runId: string, event: Record<string, unknown>) {
     return;
   }
   thinkingSince.delete(runId);
-  push(runId, { kind: "note", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_NOTE), seconds: 0, input: "", output: "" });
+  push(runId, { kind: "note", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_NOTE), seconds: 0, input: "", output: "", stages: [] });
 }
 
 function push(runId: string, step: AgentActivityStep) {

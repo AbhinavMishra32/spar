@@ -20,13 +20,9 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  *
  * Deliberate changes so far: `read_ability` and `search_learner_model` now
  * return the learner's patterns and behavioural evidence beside the documents,
- * `propose_ability_update` requires at least one interpreted evidence entry, and
- * `assign_practice_problem` points at the rating window the host admits against
- * rather than leaving the agent to discover it from a refusal, `create_question`
- * and `replace_current_question` now state what each difficulty word is actually
- * priced at and which word to write to, for the same reason — the host checks a
- * challenge the agent writes the way it checks one the agent fetches, and a bare
- * enum gave it nothing to aim at — and the four
+ * `propose_ability_update` requires at least one interpreted evidence entry.
+ * Challenge tools state the difficulty prices while leaving the teaching choice
+ * with the agent, and the four
  * tools that read an attempt became one — `inspect_current_attempt` and the old
  * `read_attempt` were the same host handler under two names, `evaluate_attempt`
  * was that handler with the files left off, and `replay_attempt` was the same

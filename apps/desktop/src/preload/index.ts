@@ -78,6 +78,7 @@ const api: SparApi = {
   disconnectProvider: (provider) => ipcRenderer.invoke(ipc.settingsProviderDisconnect, provider),
   setDefaultProvider: (provider, model) => ipcRenderer.invoke(ipc.settingsProviderDefault, { provider, model }),
   providerUsage: (provider) => ipcRenderer.invoke(ipc.settingsProviderUsage, provider),
+  usageReport: (days) => ipcRenderer.invoke(ipc.settingsUsageReport, days),
   providerAccount: (provider) => ipcRenderer.invoke(ipc.settingsProviderAccount, provider),
   setReasoningEffort: (effort) => ipcRenderer.invoke(ipc.settingsReasoningEffort, effort),
   setFastMode: (enabled) => ipcRenderer.invoke(ipc.settingsFastMode, enabled),

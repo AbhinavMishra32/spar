@@ -23,6 +23,7 @@ export type PiProviderInput = {
   headers?: Record<string, string>;
   reasoningEffort?: ReasoningEffort;
   fastMode?: boolean;
+  modelInfo?: Model<Api>;
 };
 
 /** What the phase controller can ask for. Kept in the AI SDK's spelling because
@@ -31,7 +32,9 @@ export type PiProviderInput = {
 export type ToolChoiceRequest = { type: "auto" | "none" | "required" } | { type: "tool"; toolName: string } | undefined;
 
 /** Token counts in the field names the rest of Spar reads. */
-export type SparUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedInputTokens: number };
+/* `costUsd` is pi's estimate from the model's list price. On a subscription it
+   is what the same tokens would have cost on the API, not a bill. */
+export type SparUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number };
 
 /** What the bundled catalog knows about this model, which is where everything
  *  the request shape depends on comes from — cache and reasoning compatibility
@@ -43,11 +46,13 @@ const lookupModel = (provider: string, id: string): Model<Api> | undefined => {
 
 /**
  * The model descriptor pi is asked to run, assembled from what Spar resolved
- * plus whatever the bundled catalog knows about it.
+ * plus the current catalog's complete metadata when it is available.
  */
 export function piModelFor(input: PiProviderInput): Model<Api> {
-  const registered = lookupModel(input.provider, input.model);
+  const registered = input.modelInfo?.id === input.model && input.modelInfo.provider === input.provider
+    ? input.modelInfo : lookupModel(input.provider, input.model);
   return {
+    ...registered,
     id: input.model,
     name: registered?.name ?? input.model,
     api: input.api,
@@ -124,7 +129,7 @@ export function piReasoningSummaryForApi(api: string): "detailed" | undefined {
  *  agent loop reports the same numbers from the same source, so a turn's cost
  *  does not change shape depending on which path ran it. */
 export function piUsage(value: Usage): SparUsage {
-  return { inputTokens: value.input, outputTokens: value.output, totalTokens: value.totalTokens, cachedInputTokens: value.cacheRead };
+  return { inputTokens: value.input, outputTokens: value.output, totalTokens: value.totalTokens, cachedInputTokens: value.cacheRead, cacheWriteTokens: value.cacheWrite ?? 0, costUsd: Number.isFinite(value.cost?.total) ? value.cost.total : 0 };
 }
 
 /** pi's stop reason, in the words the turn result already uses. */

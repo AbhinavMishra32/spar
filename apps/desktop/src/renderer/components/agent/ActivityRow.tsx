@@ -21,6 +21,8 @@ import { readPublishedChallenge } from "./publishedChallenge";
 import { useRevealOnExpand } from "./useRevealOnExpand";
 import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
 import { solveStats, spentOn, type SolveStats } from "./solveStats";
+import { Clock, DraftTree, Reveal, StageTree, draftFromCall } from "./StageTree";
+import type { ChallengeDraft } from "../../../shared/api";
 import type { ChallengeStop, ChallengeTrail } from "../workspace/ChallengeStepper";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
@@ -354,43 +356,59 @@ function oneLine(value: string, limit = 72): string {
 export function ToolRow({ part, after, continues = false, thinking }: { part: ToolPart; after?: ReasoningPart | undefined; continues?: boolean; thinking?: ReasoningPart | undefined }) {
   const [open, setOpen] = useState(false);
   const block = useRevealOnExpand<HTMLDivElement>(open);
+  /* A call that took over a draft row is already on screen, drawn to the
+     same geometry, so it has no entrance: an arrival here would blink the whole
+     block out and back in at the moment the design starts being checked. */
+  const handoff = part.handoff === true;
   const arrival = useThreadArrival();
   const mark = useMarkArrival();
   const reduced = useReducedMotion();
+  const still = handoff || reduced;
   const reasons = thinking ? thoughts(thinking.body) : [];
   const concluded = after ? thoughts(after.body) : [];
   const hasCall = Boolean(part.input.trim() || part.output.trim());
   const hasPayload = hasCall || reasons.length > 0 || concluded.length > 0;
   const totals = diffTotals(part.files);
   const running = part.phase === "running";
+  const detail = running && part.tool === "ask_user_question" ? "Waiting for your answer" : part.detail;
   /* A failed call falls back to the raw payload, and a raw payload needs the
      panel it is drawn in — so the bare shape is only for a call that landed. */
   const bare = baresDetail(part.tool) && part.phase !== "error" && hasCall;
+  /* A call with stages draws them as its children, live, and the one line of
+     detail that used to overwrite itself beside the title would only repeat the
+     newest of them. */
+  const staged = part.stages.length > 0;
+  const design = useMemo(() => (staged ? draftFromCall(part.input, part.files) : null), [staged, part.input, part.files]);
+  /* A staged call's row folds its stages, not a panel of JSON: the tree is the
+     account of what the call did, and its arguments and result are already
+     drawn in it — the design as files, the result as the checks. */
+  const panel = hasPayload && !staged;
+  const [treeOpen, setTreeOpen] = useState(true);
 
   const label = (
     <>
       <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
         <ToolTitle part={part} />
-        {/* What the call came back with, beside what it was for.
-            The worker has always written this — `23 steps`, `w_sum: 6 → 10 at
-            step 14`, `status invalid` — and the row threw it away, so a turn
-            spent looking for something read as a list of intentions with no
-            findings: eight rows saying what the agent was about to do and not
-            one saying what it learned. It is the agent's own summary of its
-            result, so it is as specific as the result was.
+        {/* What the call is doing or came back with, beside what it was for.
+            While a multi-stage call runs this moves from validation to repair
+            and revalidation. Once it settles the worker replaces that with the
+            result — `23 steps`, `w_sum: 6 → 10 at step 14`, `1 repair · 36
+            cases` — so the thread accounts for both the wait and its outcome.
 
             Dimmer than the title and after it, because the title is the question
             and this is the answer to that one question, not a headline. */}
-        {part.phase === "done" && part.detail.trim() && (
-          <span className="ml-1.5 text-[var(--transcript-step-mark)]">{oneLine(part.detail)}</span>
+        {!staged && part.phase !== "error" && detail.trim() && (
+          <span className="ml-1.5 text-[var(--transcript-step-mark)]">{oneLine(detail)}</span>
         )}
         {took(part) && <span className="ml-1.5 tabular-nums text-[var(--transcript-step-mark)]">{took(part)}</span>}
       </span>
+      {staged && running && <Clock since={part.startedAt} />}
       <DiffStat added={totals.added} removed={totals.removed} />
       {/* Only when it did not simply work. A row of green "Success" badges down a
           transcript is noise; the one that says Error is the one worth seeing. */}
       {part.phase === "error" && <StatusPill part={part} />}
-      {hasPayload && <Caret open={open} />}
+      {panel && <Caret open={open} />}
+      {staged && <Caret open={treeOpen} />}
     </>
   );
 
@@ -411,7 +429,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           asymmetry read as the rows being attached to the wrong paragraph. An
           open row keeps it: there the padding is what the thread's line runs
           through to reach the panel. */}
-      <motion.div {...arrival} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", (continues || open) && "pb-2")} ref={block}>
+      <motion.div {...arrival} {...(handoff ? { initial: false } : {})} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", continues && !open && "-mb-0.5", open && "pb-0.5")} ref={block}>
         <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
           {/* One element, not three. The line starts below this row's mark and
               runs to the foot of its block — which grows when the panel opens,
@@ -426,11 +444,11 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
             animate={{ scaleY: 1 }}
             className={cn(RAIL, !continues && RAIL_LAST)}
             data-line
-            initial={reduced ? false : { scaleY: 0 }}
+            initial={still ? false : { scaleY: 0 }}
             style={{ transformOrigin: "top" }}
             transition={{ duration: reduced ? 0 : 0.34, ease: [0.22, 0.61, 0.36, 1], delay: reduced ? 0 : 0.08 }}
           />
-          <motion.span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")} {...mark}>
+          <motion.span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")} {...mark} {...(handoff ? { initial: false } : {})}>
             {/* The mark changes when the call lands — an orb while it runs, the
                 tool's own glyph once it has. Crossing them on a scale rather
                 than cutting is what makes the finish of a step something you
@@ -456,7 +474,9 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
         </div>
 
         <div className="min-w-0 flex-1">
-          {hasPayload ? (
+          {staged ? (
+            <button className={cn(LABEL_ROW, TRIGGER)} onClick={() => setTreeOpen((value) => !value)} type="button">{label}</button>
+          ) : panel ? (
             <CollapsibleTrigger className={cn(LABEL_ROW, TRIGGER)}>{label}</CollapsibleTrigger>
           ) : (
             /* Same hover as a row that opens. Whether a step happens to have a
@@ -464,13 +484,14 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
                line. */
             <div className={cn(LABEL_ROW, "text-[var(--transcript-step)] transition-colors hover:text-[var(--transcript-step-strong)]")}>{label}</div>
           )}
+          {staged && <Reveal show={treeOpen}><StageTree draft={design} language={design?.language} stages={part.stages} /></Reveal>}
           {/* One rounded box, not two. The surface lives on the element that
               clips, because that element is also the one animating the height —
               and a bordered panel nested inside a clip of exactly its own radius
               loses half its stroke to the curve at every corner, which is what
               ate the top-left. The clip owns the corner, the border, the
               background and the lift; what is inside it is only content. */}
-          {hasPayload && (
+          {panel && (
             /* A conversational row drops the panel: no border, no fill, no
                pinned payload type size — just the question and the answer in
                the column the rest of the turn is written in. The thinking above
@@ -531,6 +552,83 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
         </div>
       </motion.div>
     </Collapsible>
+  );
+}
+
+/**
+ * A row that is not a call but still sits on the thread: same gutter, same
+ * rail, so a status line or a design being written lines up with the steps
+ * around it instead of starting at the prose edge between them.
+ */
+function GutterRow({ mark, continues, children, markKey }: { mark: React.ReactNode; continues: boolean; children: React.ReactNode; markKey: string }) {
+  const arrival = useThreadArrival();
+  const reduced = useReducedMotion();
+  return (
+    <motion.div {...arrival} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", continues && "-mb-0.5")}>
+      <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
+        {continues && <span aria-hidden className={RAIL} />}
+        <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}>
+          <AnimatePresence initial={false}>
+            <motion.span
+              animate={{ opacity: 1, scale: 1 }}
+              className="absolute inset-0 grid place-items-center [&>svg]:size-4"
+              exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.6 }}
+              initial={reduced ? false : { opacity: 0, scale: 0.6 }}
+              key={markKey}
+              transition={reduced ? { duration: 0 } : { type: "spring", visualDuration: 0.3, bounce: 0.3 }}
+            >{mark}</motion.span>
+          </AnimatePresence>
+        </span>
+      </div>
+      <div className="min-w-0 flex-1">{children}</div>
+    </motion.div>
+  );
+}
+
+/** A line the host said about the turn — a rejected draft, a retry — on the
+ *  thread, with the reason one click away rather than cut off mid-word. */
+export function StatusRow({ body, continues = false }: { body: string; continues?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const rejected = /rejected/i.test(body);
+  const [head, ...rest] = body.split(/:\s(.*)/s);
+  const reason = rest.join("").trim();
+  return (
+    <GutterRow continues={continues} mark={rejected ? <IconAlert className={cn(MARK, "text-[var(--warning)]")} /> : <IconDot />} markKey={rejected ? "alert" : "dot"}>
+      <button className={cn(LABEL_ROW, TRIGGER, "w-full")} onClick={() => reason && setOpen((value) => !value)} type="button">
+        <span className="min-w-0 truncate">
+          {head}
+          {reason && !open ? <span className="ml-1.5 text-[var(--transcript-step-mark)]">{oneLine(reason, 90)}</span> : null}
+        </span>
+        {reason ? <Caret open={open} /> : null}
+      </button>
+      {open && reason ? <p className="pb-1 text-thread leading-[1.55] break-words text-[var(--transcript-step-mark)]">{reason}</p> : null}
+    </GutterRow>
+  );
+}
+
+/**
+ * A challenge being written, before its call exists.
+ *
+ * The model streams a design as the arguments of `create_question`, which used
+ * to show as "Drafting challenge input · 14,000 characters received" — a byte
+ * counter. This is the same stream parsed as it arrives: the title once it is
+ * written, then each file as a child, the one being written open and following
+ * its own last line. The worker sends the starter code and visible tests only;
+ * the reference, hidden tests and wrong solutions arrive as names and sizes.
+ */
+export function DraftRow({ draft, startedAt, continues = false }: { draft: ChallengeDraft; startedAt: number; continues?: boolean }) {
+  const lines = draft.files.reduce((total, file) => total + file.lines, 0);
+  return (
+    <GutterRow continues={continues} mark={<ThinkingOrb aria-label="Writing" size={20} state={orbFor("create_question")} style={{ width: 15, height: 15 }} />} markKey="writing">
+      {/* The call's own row, before the call: same title, same clock, same
+          diff, so the row that replaces it changes nothing you can see. */}
+      <div className={cn(LABEL_ROW, "text-[var(--transcript-step)]")}>
+        <span className="thinking-shimmer min-w-0 truncate">Build challenge</span>
+        <Clock since={startedAt} />
+        <DiffStat added={lines} removed={0} />
+      </div>
+      <DraftTree draft={draft} startedAt={startedAt} />
+    </GutterRow>
   );
 }
 
@@ -612,7 +710,7 @@ export const LINKED_GAP = "0rem";
 /** A step that opens a new run of work, and a paragraph of prose. Prose gets the
  *  most room of anything in a turn: the contrast between a tight cluster of steps
  *  and a sentence with air around it is what makes a long turn scannable. */
-export const STEP_GAP = "0.25rem";
+export const STEP_GAP = "0rem";
 /* Set from the prose side and applied on both, so a paragraph has the same room
    above it and below it. It was equal to STEP_GAP, which meant a sentence sat as
    close to the tool row under it as two tool calls sit to each other — the
@@ -646,14 +744,14 @@ function orbForThought(id: string): OrbState {
   return THOUGHT_ORBS[Math.abs(hash) % THOUGHT_ORBS.length] ?? "solving";
 }
 
-/** The thread, as one absolutely positioned line per row: it hangs from the
- *  bottom of this row's mark (`top-6`) to 16px short of the block's foot, and
- *  the block's foot moves when the panel opens. */
-const RAIL = "bg-[var(--transcript-rail)] absolute top-6 left-1/2 h-[calc(100%-16px)] min-h-2 w-px -translate-x-1/2";
+/** The compact linked rows overlap by 2px. Each 16px icon sits inside a 24px
+ *  mark; the connector leaves the same 1px clearance below this icon and above
+ *  the next, while retaining a short visible segment at the tighter spacing. */
+const RAIL = "bg-[var(--transcript-rail)] absolute top-[21px] -bottom-px left-1/2 w-[0.5px] -translate-x-1/2";
 /** The last step of a run draws no line — there is nothing under it to reach.
  *  Except when its own panel is open, where the line is what ties the panel to
  *  the row that opened it. */
-const RAIL_LAST = "hidden h-[calc(100%-32px)] group-data-[state=open]/step:block";
+const RAIL_LAST = "hidden bottom-2 group-data-[state=open]/step:block";
 
 /** A row's words: everything except the mark, which is now a column of its own.
  *  Keeps the row's height at exactly the mark's, so the two line up without
@@ -1382,9 +1480,12 @@ export function ChallengePublished({
     </ArtifactCard>
   );
 
+  /* Rows owns vertical rhythm. The old 16px margins here were added on top
+     of the row gap, leaving a visibly oversized hole around a published
+     challenge (especially before a run-failure card). */
   return (
     <div
-      className="relative isolate my-4 min-w-0"
+      className="relative isolate min-w-0"
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           event.stopPropagation();

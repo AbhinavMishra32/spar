@@ -27,6 +27,7 @@ function challenge(over: Partial<ChallengeHistorySummary> & { id: string; title:
   return {
     sessionId: "s-1",
     sessionTitle: "A session",
+    introductionReason: "Practice the target concept.",
     ordinal: 1,
     language: "typescript",
     difficulty: "developing",

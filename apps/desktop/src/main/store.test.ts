@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { agentTurnPayload } from "./agentTurnPayload.js";
 import { ABILITY_STALE_AFTER_DAYS, LocalStore, validatedHiddenCaseCount } from "./store.js";
 import type { QuestionDesign } from "@spar/domain";
 
@@ -41,6 +42,23 @@ it("persists the authored complexity capability with the challenge",()=>{
     const question=store.createQuestion(sessionId,{...design("Bound the scan"),requiresComplexityAnalysis:true},{valid:true});
     expect(store.submissionBundle(question.attemptId)?.design.requiresComplexityAnalysis).toBe(true);
     expect(store.readChallenge(question.id)?.design.requiresComplexityAnalysis).toBe(true);
+  }finally{store.close();}
+});
+
+it("stores why each question was introduced across replacement, history, and sync",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const {sessionId}=store.createSession("Practise stack problems");
+    store.setTrainingTarget(sessionId,{ability:"Stack transfer",specificGap:"Apply the pattern in a new setting",desiredEvidence:"Solves an unfamiliar stack task",avoidTesting:[]});
+    const first=store.createQuestion(sessionId,design("Next Greater Positions"),{valid:true},{introductionReason:"Check whether unresolved positions are understood."});
+    expect(store.readSession(sessionId)?.question?.introductionReason).toBe("Check whether unresolved positions are understood.");
+    const second=store.replaceQuestion(sessionId,design("Histogram Area"),{valid:true},"The learner asked for a different application.",undefined,undefined,"Transfer the stack invariant to area rather than another position lookup.");
+    expect(store.readChallenge(first.id)?.introduction_reason).toBe("Check whether unresolved positions are understood.");
+    expect(store.readSession(sessionId)?.question?.introductionReason).toBe("Transfer the stack invariant to area rather than another position lookup.");
+    expect(store.listChallenges().find((row)=>row.id===second.id)?.introductionReason).toBe("Transfer the stack invariant to area rather than another position lookup.");
+    expect(store.recentChallengeCoverage().find((row)=>row.id===first.id)?.introductionReason).toBe("Check whether unresolved positions are understood.");
+    const synced=store.pendingSync().filter((item)=>item.kind==="question-create").map((item)=>JSON.parse(item.payload) as {introductionReason:string});
+    expect(synced.map((item)=>item.introductionReason)).toEqual(["Check whether unresolved positions are understood.","Transfer the stack invariant to area rather than another position lookup."]);
   }finally{store.close();}
 });
 
@@ -182,7 +200,26 @@ it("routes cold start from topical evidence rather than language or named prereq
 
 it("makes an unconsumed training target idempotent",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Learn model evaluation");const input={ability:"Model evaluation",specificGap:"Separate ranking from calibration",desiredEvidence:"Chooses the metric matching the decision",avoidTesting:["framework syntax"]};const first=store.setTrainingTarget(sessionId,input);const second=store.setTrainingTarget(sessionId,input);expect(second.id).toBe(first.id);expect(store.readSession(sessionId)?.summary.currentFocus).toEqual(["Model evaluation"]);}finally{store.close();}});
 
-it("rolls back an incomplete planning draft without touching messages",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Prepare for an AI engineer interview");store.addMessage(sessionId,"learner","I have five days.");store.setObjective(sessionId,"Draft objective that never reached a playable question");store.setTrainingTarget(sessionId,{ability:"Unrelated stale target",specificGap:"Draft gap",desiredEvidence:"Draft evidence",avoidTesting:[]});expect(store.resetIncompletePlanning(sessionId)).toBe(true);const detail=store.readSession(sessionId);expect(detail?.summary.objective).toBe("Investigating your prior evidence and defining the first training target.");expect(detail?.summary.currentFocus).toEqual([]);expect(detail?.messages).toHaveLength(1);expect(store.latestTarget(sessionId)).toBeUndefined();}finally{store.close();}});
+it("preserves unfinished planning and pauses a published lesson across reopen",()=>{
+  const store=new LocalStore(":memory:");
+  try {
+    const {sessionId}=store.createSession("Learn trees");
+    store.setObjective(sessionId,"Link nodes and understand preorder");
+    store.setTrainingTarget(sessionId,{ability:"Tree nodes",specificGap:"Node links",desiredEvidence:"Build a tree",avoidTesting:[]});
+    const target=store.latestTarget(sessionId);
+    expect(store.settleLessonPlanning(sessionId)).toBe(false);
+    expect(store.latestTarget(sessionId)).toEqual(target);
+    store.saveLesson({id:randomUUID(),sessionId,title:"Binary trees",summary:"Node links",concepts:["binary-trees"],payload:{pages:[]}});
+    expect(store.readSession(sessionId)?.summary.status).toBe("paused");
+    expect(store.latestTarget(sessionId)).toEqual(target);
+    expect(store.readSession(sessionId)?.summary.objective).toBe("Link nodes and understand preorder");
+    expect(store.settleLessonPlanning(sessionId)).toBe(false);
+    // Repair the old version's planning state without destroying its decisions.
+    store.setSessionStatus(sessionId,"planning");
+    expect(store.settleLessonPlanning(sessionId)).toBe(true);
+    expect(store.latestTarget(sessionId)).toEqual(target);
+  } finally {store.close();}
+});
 
 it("preserves challenge test history and links an adaptive replacement",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Practise loops");store.setTrainingTarget(sessionId,{ability:"Loop control",specificGap:"Count matching values",desiredEvidence:"Uses one direct loop",avoidTesting:[]});const first=store.createQuestion(sessionId,design("Count values"),{valid:true});store.appendNextEvent({id:randomUUID(),attemptId:first.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",passed:false,exitCode:1},source:"runner",schemaVersion:1});store.setTrainingTarget(sessionId,{ability:"Loop control",specificGap:"Count positive values",desiredEvidence:"Uses one condition inside a loop",avoidTesting:[]});const second=store.replaceQuestion(sessionId,design("Count positive values"),{valid:true},"The first challenge was too difficult.");const history=store.listChallenges();expect(second.ordinal).toBe(2);expect(history).toEqual(expect.arrayContaining([expect.objectContaining({id:first.id,testRunCount:1,replacedByQuestionId:second.id,lastOutcome:"replaced"}),expect.objectContaining({id:second.id,replacesQuestionId:first.id})]));expect(store.readChallenge(first.id)).toMatchObject({design:{title:"Count values"},attempts:[{events:expect.arrayContaining([expect.objectContaining({type:"test_run"})])}]});}finally{store.close();}});
 
@@ -305,9 +342,9 @@ it("carries a challenge's concepts on its history row, primary first",()=>{const
    answer was a challenge rather than a sentence. */
 it("keeps a turn's activity with the reply it produced",()=>{const store=new LocalStore(":memory:");try{
   const{sessionId}=store.createSession("Practise sliding windows");
-  const tool=(tool:string,label:string,detail:string)=>({kind:"tool" as const,tool,label,actionTitle:"",detail,ok:true,text:"",seconds:0,input:"",output:""});
+  const tool=(tool:string,label:string,detail:string)=>({kind:"tool" as const,tool,label,actionTitle:"",detail,ok:true,text:"",seconds:0,input:"",output:"",stages:[]});
   store.addMessage(sessionId,"agent","Here is what I found.",[
-    {kind:"reasoning",tool:"",label:"",actionTitle:"",detail:"",ok:true,text:"The shrink case is the one that keeps breaking.",seconds:7,input:"",output:""},
+    {kind:"reasoning",tool:"",label:"",actionTitle:"",detail:"",ok:true,text:"The shrink case is the one that keeps breaking.",seconds:7,input:"",output:"",stages:[]},
     tool("replay_attempt","full log · case history","34m on it · 5 runs"),
     tool("search_concept_evidence","window-invariant-restoration","1 result"),
   ]);
@@ -790,7 +827,7 @@ it("keeps published lesson cards available outside an older turn's deferred work
   const store = new LocalStore(":memory:");
   try {
     const { sessionId } = store.createSession("Learn Python");
-    const step = { kind: "tool" as const, tool: "teach_lesson", label: "First lesson", actionTitle: "", detail: "", ok: true, text: "", seconds: 0, input: "{}", output: '{"status":"taught","lessonId":"lesson-1"}' };
+    const step = { kind: "tool" as const, tool: "teach_lesson", label: "First lesson", actionTitle: "", detail: "", ok: true, text: "", seconds: 0, input: "{}", output: '{"status":"taught","lessonId":"lesson-1"}', stages: [] };
     const message = store.addMessage(sessionId, "agent", "Read this lesson.", [
       { ...step, tool: "search_lessons", output: "{}" }, step,
       { ...step, ok: false, output: '{"status":"invalid"}' },
@@ -870,4 +907,84 @@ describe("submissions",()=>{
       expect(store.submissionsForSession(sessionId)[0]?.id).toBe(latest);
     }finally{store.close();}
   });
+});
+
+
+it("rehydrates unfinished planning and a failed provider's lesson without restarting placement",()=>{
+  const store=new LocalStore(":memory:");
+  try {
+    const {sessionId}=store.createSession("Learn trees");
+    store.setObjective(sessionId,"Link nodes");
+    store.setTrainingTarget(sessionId,{ability:"Tree nodes",specificGap:"Links",desiredEvidence:"Build a tree",avoidTesting:[]});
+    const input={store,sessionId,message:"Continue",turnKind:"session-start" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
+    store.setPendingIntake(sessionId,{questions:[{header:"Experience",question:"Have you built a tree?",options:[{label:"New"},{label:"Some experience"}],multiple:false,custom:true}]});
+    store.answerIntake(sessionId,"New to trees");
+    expect(agentTurnPayload({...input,turnKind:"cold-start"}).resumeState).toMatchObject({intake:{result:{status:"answered",answer:"New to trees"}}});
+    expect(agentTurnPayload({...input,turnKind:"attempt-complete"}).resumeState).not.toHaveProperty("intake");
+    expect(agentTurnPayload(input).resumeState).toMatchObject({objective:{committed:true},target:{committed:true}});
+    const lessonId=randomUUID();
+    store.saveLesson({id:lessonId,sessionId,title:"Trees",summary:"Links",concepts:[],payload:{}});
+    expect(agentTurnPayload(input).resumeState).not.toHaveProperty("lesson");
+    expect(agentTurnPayload({...input,resumeSince:"2000-01-01T00:00:00.000Z"}).resumeState)
+      .toMatchObject({lesson:{result:{status:"taught",lessonId}}});
+    expect(agentTurnPayload({...input,resumeSince:"2999-01-01T00:00:00.000Z"}).resumeState).not.toHaveProperty("lesson");
+    // An old target must not satisfy the next attempt's obligation to choose one.
+    expect(agentTurnPayload({...input,turnKind:"attempt-complete"}).resumeState).not.toHaveProperty("target");
+    store.createQuestion(sessionId,design("First tree"),{});
+    expect(agentTurnPayload(input).resumeState).not.toHaveProperty("target");
+  } finally {store.close();}
+});
+
+it("keeps stored tool payloads and workspace checkpoints out of the agent prompt",()=>{
+  const store=new LocalStore(":memory:");
+  try {
+    const {sessionId}=store.createSession("Learn graphics programming");
+    store.addMessage(sessionId,"agent","I checked the prior challenge.",[{
+      kind:"tool",tool:"read_concept_graph",label:"graphics",actionTitle:"Checking concepts",detail:"",ok:true,text:"",seconds:0,
+      input:"PRIVATE LARGE TOOL INPUT ".repeat(500),output:"PRIVATE LARGE TOOL OUTPUT ".repeat(500),stages:[],
+    }]);
+    const payload=agentTurnPayload({store,sessionId,message:"Use actual renderer code",turnKind:"learner-message",webSearch:true,practiceSource:false,practiceSummary:null,accountId:"test"});
+    const context=JSON.parse(payload.context) as Record<string,unknown>;
+    expect(context).not.toHaveProperty("checkpoint");
+    expect(context.recentConversation).toEqual([expect.objectContaining({role:"agent",body:"I checked the prior challenge."})]);
+    expect(payload.context).not.toContain("PRIVATE LARGE TOOL");
+  } finally {store.close();}
+});
+
+it("gives the agent enough recent challenge detail to compare two exercises",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const {sessionId}=store.createSession("Practice monotonic stacks");
+    store.setTrainingTarget(sessionId,{ability:"Monotonic stacks",specificGap:"Return positions",desiredEvidence:"Uses unresolved indices",avoidTesting:[]});
+    const previous=store.createQuestion(sessionId,{...design("Next Greater Positions"),statement:"Return the index of the first strictly greater value to the right.\n\n**Examples**\nInput: [2, 1, 3]",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},{valid:true});
+    store.appendNextEvent({id:randomUUID(),attemptId:previous.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+    store.completeAttempt(previous.attemptId,"passed");
+    const current=store.createQuestion(sessionId,{...design("Next Greater Positions"),statement:"For each item, return the position of the first later greater value.\n\n**Examples**\nInput: [2, 1, 4]",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},{valid:true});
+    const payload=agentTurnPayload({store,sessionId,message:"What is different from the one I solved?",turnKind:"learner-message",webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"});
+    const context=JSON.parse(payload.context) as {recentChallenges:Array<Record<string,unknown>>};
+    expect(context.recentChallenges.slice(0,2)).toMatchObject([
+      {id:current.id,ordinal:2,title:"Next Greater Positions",task:"For each item, return the position of the first later greater value.",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},
+      {id:previous.id,ordinal:1,title:"Next Greater Positions",task:"Return the index of the first strictly greater value to the right.",solutionRequirements:["Scan left to right with a stack of unresolved indices."],outcome:"passed"},
+    ]);
+    expect(JSON.stringify(context.recentChallenges)).not.toContain("Input: [2, 1, 4]");
+  }finally{store.close();}
+});
+
+it("rolls agent usage up by session and model, keeping spend for deleted sessions",()=>{
+  const store=new LocalStore(":memory:");
+  const { sessionId }=store.createSession("Graphs");
+  const now=new Date().toISOString();
+  const row={provider:"openai-codex",turnKind:"learner-message",status:"completed",cacheWriteTokens:0,latencyMs:10,startedAt:now,completedAt:now};
+  store.recordAgentUsage({...row,runId:"r1",sessionId,model:"gpt-5.5",inputTokens:100,outputTokens:20,cachedInputTokens:50,costUsd:0.5});
+  store.recordAgentUsage({...row,runId:"r2",sessionId,model:"gpt-5.6-luna",inputTokens:10,outputTokens:2,cachedInputTokens:0,costUsd:0.01});
+  store.recordAgentUsage({...row,runId:"r3",sessionId:"gone",model:"gpt-5.5",inputTokens:1,outputTokens:1,cachedInputTokens:0,costUsd:0.25,completedAt:"2020-01-01T00:00:00.000Z"});
+  const all=store.usageReport(null);
+  expect(all.totals).toMatchObject({runs:3,inputTokens:111,outputTokens:23,cachedInputTokens:50});
+  expect(all.totals.costUsd).toBeCloseTo(0.76);
+  expect(all.models[0]).toMatchObject({model:"gpt-5.5",runs:2});
+  expect(all.sessions.find((item)=>item.sessionId===sessionId)).toMatchObject({title:"Graphs",runs:2});
+  expect(all.sessions.find((item)=>item.sessionId==="gone")?.title).toBeNull();
+  const recent=store.usageReport(30);
+  expect(recent.totals.runs).toBe(2);
+  expect(recent.daily).toHaveLength(1);
 });

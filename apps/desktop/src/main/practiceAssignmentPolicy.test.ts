@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ESTABLISHED_DEVIATION, GENERATED_DIFFICULTIES, UNRATED } from "@spar/domain";
-import { assessGeneratedLevel, assessPracticeAssignment, trainingWindow } from "./practiceAssignmentPolicy.js";
+import { ESTABLISHED_DEVIATION, UNRATED } from "@spar/domain";
+import { assessPracticeAssignment, trainingWindow } from "./practiceAssignmentPolicy.js";
 
 /** An established learner sitting mid-scale, so a window computed around them is
  *  a window and not the wide band a provisional rating produces. */
@@ -101,64 +101,5 @@ describe("practice assignment policy", () => {
       why: "This requires repeated shrinking until the window is valid, which discriminates the persisted gap.",
     });
     expect(checks.find((check) => check.name === "learner level")!.detail).toMatch(/Priced at \d+/);
-  });
-});
-
-/**
- * The generated path, which until now had no level check at all while the
- * sourced one beside it did. The bug that produced these tests: a learner rated
- * 1635 was set a run of `developing` challenges priced at 1200, solved every one,
- * and stayed provisional forever — because a result you were always going to get
- * right carries no information for Glicko-2 to narrow a deviation with.
- */
-describe("the level check on a challenge Spar writes itself", () => {
-  const strong = { rating: 1635, deviation: 90, volatility: 0.06 };
-
-  it("refuses the word that produced the bug, and names the one to use", () => {
-    const check = assessGeneratedLevel({ graded: true, difficulty: "developing", target: { rating: strong, abilityStatus: "developing", experience: "working" } });
-
-    expect(check.passed).toBe(false);
-    expect(check.detail).toContain("Write it as proficient");
-  });
-
-  it("admits the word that lands in the window", () => {
-    const check = assessGeneratedLevel({ graded: true, difficulty: "proficient", target: { rating: strong, abilityStatus: "developing", experience: "working" } });
-
-    expect(check.passed).toBe(true);
-  });
-
-  it("follows the ability's status rather than one range per learner", () => {
-    /* Monitoring a settled ability wants a stretch, so the same learner takes a
-       harder word — which is the nuance the window exists to carry. */
-    const monitoring = assessGeneratedLevel({ graded: true, difficulty: "advanced", target: { rating: strong, abilityStatus: "independent", experience: "working" } });
-    const practising = assessGeneratedLevel({ graded: true, difficulty: "advanced", target: { rating: strong, abilityStatus: "developing", experience: "working" } });
-
-    expect(monitoring.passed).toBe(true);
-    expect(practising.passed).toBe(false);
-  });
-
-  it("stands down rather than becoming a gate nothing can pass", () => {
-    /* Spar's four anchors stop at 1800, so a learner far above that has a window
-       no word can satisfy. Refusing there would loop the agent forever and leave
-       the learner with nothing, so the nearest word is accepted instead. */
-    const outgrown = { rating: 2300, deviation: 70, volatility: 0.06 };
-    for (const difficulty of GENERATED_DIFFICULTIES) {
-      expect(assessGeneratedLevel({ graded: true, difficulty, target: { rating: outgrown, abilityStatus: "developing", experience: "senior" } }).passed).toBe(true);
-    }
-  });
-
-  it("still pitches a barely-measured learner low, because the window has not been earned", () => {
-    const check = assessGeneratedLevel({ graded: true, difficulty: "advanced", target: { rating: UNRATED, abilityStatus: "uncertain", experience: "new" } });
-
-    expect(check.passed).toBe(false);
-  });
-
-  it("leaves a cold start to the pedagogy, because there is nothing measured to pitch against", () => {
-    /* The window off a seeded rating lands at 1050-1200 for an untested ability,
-       which would refuse the accessible first rung the agent is told to open
-       with. Nothing has been graded, so that window is an assumption. */
-    const check = assessGeneratedLevel({ graded: false, difficulty: "foundation", target: { rating: UNRATED, abilityStatus: "uncertain", experience: "new" } });
-
-    expect(check.passed).toBe(true);
   });
 });

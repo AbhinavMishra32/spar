@@ -209,6 +209,11 @@ const GLYPHS: Partial<Record<ProviderId, (props: GlyphProps) => ReactElement>> =
 };
 
 /** The provider's own mark, or a neutral plug for a hand-rolled endpoint. */
+/** Whether a provider id has its own mark, for a caller holding a bare string. */
+export function hasProviderGlyph(provider: string): provider is ProviderId {
+  return provider in GLYPHS;
+}
+
 export function ProviderGlyph({ className, provider }: { className?: string; provider: ProviderId }) {
   const Glyph = GLYPHS[provider];
   const color = PROVIDER_BRAND_COLOR[provider];
