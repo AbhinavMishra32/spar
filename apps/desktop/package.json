@@ -1,6 +1,6 @@
 {
   "name": "@spar/desktop",
-  "version": "0.6.0",
+  "version": "0.6.11",
   "private": true,
   "type": "module",
   "description": "An adaptive coding gym that writes your next exercise from your own attempt history.",
@@ -8,9 +8,9 @@
   "author": "Abhinav Mishra <AbhinavMishra32@users.noreply.github.com>",
   "main": "dist/main/main.js",
   "scripts": {
-    "dev": "concurrently -k --names renderer,main,electron --prefix-colors cyan,magenta,green \"vite\" \"node scripts/dev-main.mjs\" \"wait-on tcp:5173 file:dist/.main-ready file:../../packages/domain/dist/index.js file:../../packages/practice/dist/index.js file:../../packages/visualizer/dist/languages/python/tracer.py && node scripts/dev-electron.mjs\"",
+    "dev": "concurrently -k --names renderer,main,electron --prefix-colors cyan,magenta,green \"vite\" \"node scripts/dev-main.mjs\" \"wait-on tcp:5173 file:dist/.main-ready file:../../packages/domain/dist/index.js file:../../packages/practice/dist/index.js file:../../packages/visualizer/dist/languages/python/tracer.py && node scripts/wait-for-visualizer.mjs && node scripts/dev-electron.mjs\"",
     "rebuild:native": "electron-builder install-app-deps",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.main.json && tsc --noEmit -p tsconfig.eval.json",
     "test": "vitest run --passWithNoTests && ELECTRON_RUN_AS_NODE=1 electron node_modules/vitest/vitest.mjs run --config vitest.main.config.ts",
     "lint": "tsc --noEmit -p tsconfig.json",
     "build": "vite build && tsc -p tsconfig.main.json && node scripts/build-preload.mjs",
@@ -18,11 +18,13 @@
     "icons": "node scripts/icon/generate-icons.mjs",
     "package": "electron-builder --mac",
     "package:win": "electron-builder --win",
-    "package:linux": "electron-builder --linux"
+    "package:linux": "electron-builder --linux",
+    "eval": "ELECTRON_RUN_AS_NODE=1 NODE_OPTIONS=--conditions=development electron node_modules/tsx/dist/cli.mjs src/eval/cli.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.87.1",
+    "@earendil-works/pi-ai": "0.87.1",
+    "@earendil-works/pi-telemetry": "0.87.1",
     "@fontsource-variable/geist": "^5.3.0",
     "@fontsource/poppins": "^5.3.0",
     "@mariozechner/pi-ai": "^0.73.1",
@@ -60,6 +62,7 @@
     "zod-to-json-schema": "3.25.2"
   },
   "devDependencies": {
+    "@spar/eval": "workspace:*",
     "@tailwindcss/vite": "^4.1.11",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.15.30",

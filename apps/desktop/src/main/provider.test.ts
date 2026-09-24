@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthService } from "./auth.js";
 import { ProviderService } from "./provider.js";
 import { LocalStore } from "./store.js";
+import { piModelFor } from "../workers/piProvider.js";
 
 class MemoryCredentials {
   readonly secrets = new Map<string, string>();
@@ -59,12 +60,50 @@ describe("provider service", () => {
     try {
       const models = (await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.models ?? [];
       const offered = models.map((model) => model.id);
-      expect(offered).toEqual(expect.arrayContaining(["gpt-5.5", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]));
+      expect(offered).toEqual(expect.arrayContaining(["gpt-5.6-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]));
       // The default a fresh install lands on has to be one of them.
-      expect(offered).toContain("gpt-5.6-terra");
+      expect(offered).toContain("gpt-6-sol");
       expect(models.find((model) => model.id === "gpt-5.6-luna")).toMatchObject({ name: "GPT-5.6 Luna", reasoning: true });
       service.setDefault("openai-codex", "gpt-5.6-luna");
       expect((await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.selectedModel).toBe("gpt-5.6-luna");
+    } finally { store.close(); }
+  });
+
+  it("selects a newly published ChatGPT model", async () => {
+    const store = new LocalStore(":memory:");
+    const credentials = new MemoryCredentials();
+    const fresh = {
+      id: "gpt-99-sol", name: "GPT-99 Sol", provider: "openai-codex", api: "openai-codex-responses",
+      baseUrl: "https://chatgpt.com/backend-api", reasoning: true, input: ["text"],
+      cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: 987654, maxTokens: 123456,
+    };
+    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined,
+      async () => new Response(JSON.stringify({ "openai-codex": { [fresh.id]: fresh } })));
+    try {
+      await credentials.saveProviderOAuth("openai-codex", { access: "test", refresh: "test", expires: Date.now() + 60_000 });
+      const models = (await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.models ?? [];
+      expect(models.some((model) => model.id === fresh.id)).toBe(true);
+      service.setDefault("openai-codex", fresh.id);
+      expect((await service.inventory()).providers.find((provider) => provider.id === "openai-codex")?.selectedModel).toBe(fresh.id);
+    } finally { store.close(); }
+  });
+
+  it("passes fresh API model metadata through resolve to the worker", async () => {
+    const store = new LocalStore(":memory:");
+    const credentials = new MemoryCredentials();
+    const fresh = {
+      id: "gpt-99-sol", name: "GPT-99 Sol", provider: "openai", api: "openai-responses",
+      baseUrl: "https://api.openai.com/v1", reasoning: true, input: ["text"],
+      cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: 987654, maxTokens: 123456,
+      inputLimits: { maxRequestBytes: 4096 },
+    };
+    const service = new ProviderService(credentials as unknown as AuthService, store, () => undefined,
+      async () => new Response(JSON.stringify({ openai: { [fresh.id]: fresh } })));
+    try {
+      await service.saveCredential({ provider: "openai", model: fresh.id, secret: "test-key" });
+      const [resolved] = await service.resolve("account", null);
+      expect(resolved?.modelInfo).toMatchObject({ id: fresh.id, contextWindow: 987654 });
+      expect(piModelFor(resolved!)).toMatchObject({ id: fresh.id, contextWindow: 987654, maxTokens: 123456, inputLimits: { maxRequestBytes: 4096 } });
     } finally { store.close(); }
   });
 
@@ -89,7 +128,7 @@ describe("provider service", () => {
       await service.saveCredential({ provider: "cline", model: "deepseek/deepseek-v4-flash", baseUrl: "https://api.cline.bot/api/v1", secret: "cline-secret" });
       service.setDefault("cline", "deepseek/deepseek-v4-flash");
       const resolved = await service.resolve("account", null);
-      expect(resolved).toEqual([{
+      expect(resolved).toMatchObject([{
         provider: "cline",
         model: "deepseek/deepseek-v4-flash",
         api: "openai-completions",
@@ -97,6 +136,8 @@ describe("provider service", () => {
         apiKey: "cline-secret",
         source: "spar-keychain",
         reasoningEffort: "off",
+        fastMode: false,
+        modelInfo: { id: "deepseek/deepseek-v4-flash", provider: "cline" },
       }]);
     } finally { store.close(); }
   });

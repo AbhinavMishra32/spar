@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { LocalStore, validatedHiddenCaseCount } from "./store.js";
+import { agentTurnPayload } from "./agentTurnPayload.js";
+import { ABILITY_STALE_AFTER_DAYS, LocalStore, validatedHiddenCaseCount } from "./store.js";
 import type { QuestionDesign } from "@spar/domain";
 
 const design=(title:string):QuestionDesign=>({title,language:"javascript",kind:"function",statement:"Implement the target behavior while preserving the declared invariant through every transition.",starterFiles:{"src/index.js":"export function solve(){ throw new Error(\"implement\") }"},referenceFiles:{"src/index.js":"export function solve(){ return true }"},visibleTests:{"tests/visible.test.js":"// visible"},hiddenTests:{"tests/hidden.test.js":"// hidden"},knownIncorrectFiles:[{"src/index.js":"export function solve(){ return false }"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["returns before restoring the invariant"]});
@@ -31,6 +32,34 @@ describe("validated hidden case count",()=>{
       expect(store.challengeRecord(question.id)?.hiddenTestCount).toBe(30);
     }finally{store.close();}
   });
+});
+
+it("persists the authored complexity capability with the challenge",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const{sessionId}=store.createSession("Practise array traversal");
+    store.setTrainingTarget(sessionId,{ability:"Array traversal",specificGap:"Bound the scan",desiredEvidence:"Uses one bounded pass",avoidTesting:[]});
+    const question=store.createQuestion(sessionId,{...design("Bound the scan"),requiresComplexityAnalysis:true},{valid:true});
+    expect(store.submissionBundle(question.attemptId)?.design.requiresComplexityAnalysis).toBe(true);
+    expect(store.readChallenge(question.id)?.design.requiresComplexityAnalysis).toBe(true);
+  }finally{store.close();}
+});
+
+it("stores why each question was introduced across replacement, history, and sync",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const {sessionId}=store.createSession("Practise stack problems");
+    store.setTrainingTarget(sessionId,{ability:"Stack transfer",specificGap:"Apply the pattern in a new setting",desiredEvidence:"Solves an unfamiliar stack task",avoidTesting:[]});
+    const first=store.createQuestion(sessionId,design("Next Greater Positions"),{valid:true},{introductionReason:"Check whether unresolved positions are understood."});
+    expect(store.readSession(sessionId)?.question?.introductionReason).toBe("Check whether unresolved positions are understood.");
+    const second=store.replaceQuestion(sessionId,design("Histogram Area"),{valid:true},"The learner asked for a different application.",undefined,undefined,"Transfer the stack invariant to area rather than another position lookup.");
+    expect(store.readChallenge(first.id)?.introduction_reason).toBe("Check whether unresolved positions are understood.");
+    expect(store.readSession(sessionId)?.question?.introductionReason).toBe("Transfer the stack invariant to area rather than another position lookup.");
+    expect(store.listChallenges().find((row)=>row.id===second.id)?.introductionReason).toBe("Transfer the stack invariant to area rather than another position lookup.");
+    expect(store.recentChallengeCoverage().find((row)=>row.id===first.id)?.introductionReason).toBe("Check whether unresolved positions are understood.");
+    const synced=store.pendingSync().filter((item)=>item.kind==="question-create").map((item)=>JSON.parse(item.payload) as {introductionReason:string});
+    expect(synced.map((item)=>item.introductionReason)).toEqual(["Check whether unresolved positions are understood.","Transfer the stack invariant to area rather than another position lookup."]);
+  }finally{store.close();}
 });
 
 it("persists the device theme across store reloads",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-theme-"));const database=path.join(directory,"state.sqlite3");try{const first=new LocalStore(database);first.setSetting("theme","dark");first.close();const reopened=new LocalStore(database);try{expect(reopened.getSetting("theme","system")).toBe("dark");}finally{reopened.close();}}finally{rmSync(directory,{recursive:true,force:true});}});
@@ -91,10 +120,14 @@ describe("target progress",()=>{
 });
 
 describe("local learning state",()=>{it("persists an evidence-bearing two-question adaptive chain",()=>{const store=new LocalStore(":memory:");try{const {sessionId}=store.createSession("Learn invariant-driven algorithms deeply");store.setObjective(sessionId,"Distinguish recognizing an invariant from restoring it repeatedly.");const first=store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Repeated restoration after one mutation",desiredEvidence:"Uses a loop until validity returns",avoidTesting:["parsing"]});const q1=store.createQuestion(sessionId,design("Restore the window"),{valid:true});const remark=randomUUID();store.appendEvent({id:remark,attemptId:q1.attemptId,sequence:1,type:"learner_remark",occurredAt:new Date().toISOString(),payload:{body:"I know the invariant but I only repaired it once."},source:"learner",schemaVersion:1});
-/* Cited, not merely written beside: confidence follows the number of linked
-   evidence events, so an update with nothing behind it correctly stays
-   uncertain. This chain claims to be evidence-bearing, so it cites the remark. */
-store.updateAbility({abilityId:first.abilityId,markdown:"# Invariant restoration\n\nRecognizes the invariant; repeated restoration remains uncertain.",evidenceEventIds:[remark]});store.completeAttempt(q1.attemptId,"passed");store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Transfer repeated restoration to an event stream",desiredEvidence:"Restores validity independently in a new representation",avoidTesting:["advanced syntax"]});store.createQuestion(sessionId,design("Repair the event stream"),{valid:true});const detail=store.readSession(sessionId);expect(detail?.summary.questionTitles).toHaveLength(2);expect(detail?.summary.completedQuestions).toBe(1);expect(detail?.question?.title).toBe("Repair the event stream");expect(store.readAbility(first.abilityId)).toMatchObject({version:1,status:"developing"});expect(store.readAttempt(q1.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({type:"learner_remark"})]));}finally{store.close();}});});
+/* Cited, not merely written beside: confidence follows the linked evidence, so
+   an update with nothing behind it has nothing to be confident about. This
+   chain claims to be evidence-bearing, so it cites the remark — and the remark
+   is a learner saying something, which grades nothing either way. The status
+   stays `uncertain` because that is exactly what one neutral observation
+   supports; under the old count-of-events rule it read as `developing`, which
+   was the ledger promoting a sentence about a feeling. */
+store.updateAbility({abilityId:first.abilityId,markdown:"# Invariant restoration\n\nRecognizes the invariant; repeated restoration remains uncertain.",evidenceEventIds:[remark]});store.completeAttempt(q1.attemptId,"passed");store.setTrainingTarget(sessionId,{ability:"Invariant restoration",specificGap:"Transfer repeated restoration to an event stream",desiredEvidence:"Restores validity independently in a new representation",avoidTesting:["advanced syntax"]});store.createQuestion(sessionId,design("Repair the event stream"),{valid:true});const detail=store.readSession(sessionId);expect(detail?.summary.questionTitles).toHaveLength(2);expect(detail?.summary.completedQuestions).toBe(1);expect(detail?.question?.title).toBe("Repair the event stream");expect(store.readAbility(first.abilityId)).toMatchObject({version:1,status:"uncertain"});expect(store.readAttempt(q1.attemptId)).toEqual(expect.arrayContaining([expect.objectContaining({type:"learner_remark"})]));}finally{store.close();}});});
 
 /* One intake row per session, and the answered branch used to win for any later
    question — so the second thing a session ever asked was swallowed and the
@@ -167,7 +200,26 @@ it("routes cold start from topical evidence rather than language or named prereq
 
 it("makes an unconsumed training target idempotent",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Learn model evaluation");const input={ability:"Model evaluation",specificGap:"Separate ranking from calibration",desiredEvidence:"Chooses the metric matching the decision",avoidTesting:["framework syntax"]};const first=store.setTrainingTarget(sessionId,input);const second=store.setTrainingTarget(sessionId,input);expect(second.id).toBe(first.id);expect(store.readSession(sessionId)?.summary.currentFocus).toEqual(["Model evaluation"]);}finally{store.close();}});
 
-it("rolls back an incomplete planning draft without touching messages",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Prepare for an AI engineer interview");store.addMessage(sessionId,"learner","I have five days.");store.setObjective(sessionId,"Draft objective that never reached a playable question");store.setTrainingTarget(sessionId,{ability:"Unrelated stale target",specificGap:"Draft gap",desiredEvidence:"Draft evidence",avoidTesting:[]});expect(store.resetIncompletePlanning(sessionId)).toBe(true);const detail=store.readSession(sessionId);expect(detail?.summary.objective).toBe("Investigating your prior evidence and defining the first training target.");expect(detail?.summary.currentFocus).toEqual([]);expect(detail?.messages).toHaveLength(1);expect(store.latestTarget(sessionId)).toBeUndefined();}finally{store.close();}});
+it("preserves unfinished planning and pauses a published lesson across reopen",()=>{
+  const store=new LocalStore(":memory:");
+  try {
+    const {sessionId}=store.createSession("Learn trees");
+    store.setObjective(sessionId,"Link nodes and understand preorder");
+    store.setTrainingTarget(sessionId,{ability:"Tree nodes",specificGap:"Node links",desiredEvidence:"Build a tree",avoidTesting:[]});
+    const target=store.latestTarget(sessionId);
+    expect(store.settleLessonPlanning(sessionId)).toBe(false);
+    expect(store.latestTarget(sessionId)).toEqual(target);
+    store.saveLesson({id:randomUUID(),sessionId,title:"Binary trees",summary:"Node links",concepts:["binary-trees"],payload:{pages:[]}});
+    expect(store.readSession(sessionId)?.summary.status).toBe("paused");
+    expect(store.latestTarget(sessionId)).toEqual(target);
+    expect(store.readSession(sessionId)?.summary.objective).toBe("Link nodes and understand preorder");
+    expect(store.settleLessonPlanning(sessionId)).toBe(false);
+    // Repair the old version's planning state without destroying its decisions.
+    store.setSessionStatus(sessionId,"planning");
+    expect(store.settleLessonPlanning(sessionId)).toBe(true);
+    expect(store.latestTarget(sessionId)).toEqual(target);
+  } finally {store.close();}
+});
 
 it("preserves challenge test history and links an adaptive replacement",()=>{const store=new LocalStore(":memory:");try{const{sessionId}=store.createSession("Practise loops");store.setTrainingTarget(sessionId,{ability:"Loop control",specificGap:"Count matching values",desiredEvidence:"Uses one direct loop",avoidTesting:[]});const first=store.createQuestion(sessionId,design("Count values"),{valid:true});store.appendNextEvent({id:randomUUID(),attemptId:first.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",passed:false,exitCode:1},source:"runner",schemaVersion:1});store.setTrainingTarget(sessionId,{ability:"Loop control",specificGap:"Count positive values",desiredEvidence:"Uses one condition inside a loop",avoidTesting:[]});const second=store.replaceQuestion(sessionId,design("Count positive values"),{valid:true},"The first challenge was too difficult.");const history=store.listChallenges();expect(second.ordinal).toBe(2);expect(history).toEqual(expect.arrayContaining([expect.objectContaining({id:first.id,testRunCount:1,replacedByQuestionId:second.id,lastOutcome:"replaced"}),expect.objectContaining({id:second.id,replacesQuestionId:first.id})]));expect(store.readChallenge(first.id)).toMatchObject({design:{title:"Count values"},attempts:[{events:expect.arrayContaining([expect.objectContaining({type:"test_run"})])}]});}finally{store.close();}});
 
@@ -290,9 +342,9 @@ it("carries a challenge's concepts on its history row, primary first",()=>{const
    answer was a challenge rather than a sentence. */
 it("keeps a turn's activity with the reply it produced",()=>{const store=new LocalStore(":memory:");try{
   const{sessionId}=store.createSession("Practise sliding windows");
-  const tool=(tool:string,label:string,detail:string)=>({kind:"tool" as const,tool,label,actionTitle:"",detail,ok:true,text:"",seconds:0,input:"",output:""});
+  const tool=(tool:string,label:string,detail:string)=>({kind:"tool" as const,tool,label,actionTitle:"",detail,ok:true,text:"",seconds:0,input:"",output:"",stages:[]});
   store.addMessage(sessionId,"agent","Here is what I found.",[
-    {kind:"reasoning",tool:"",label:"",actionTitle:"",detail:"",ok:true,text:"The shrink case is the one that keeps breaking.",seconds:7,input:"",output:""},
+    {kind:"reasoning",tool:"",label:"",actionTitle:"",detail:"",ok:true,text:"The shrink case is the one that keeps breaking.",seconds:7,input:"",output:"",stages:[]},
     tool("replay_attempt","full log · case history","34m on it · 5 runs"),
     tool("search_concept_evidence","window-invariant-restoration","1 result"),
   ]);
@@ -445,10 +497,74 @@ describe("adaptive product state",()=>{
     const question=store.createQuestion(sessionId,design("Restore repeatedly"),{valid:true});
     const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
     store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nDirect execution worked once; transfer is untested.",summary:"Direct execution worked once; transfer is untested.",status:"developing",evidenceEventIds:[event.id]});
-    expect(store.abilityStates()[0]).toMatchObject({evidenceCount:1,trainingStatus:"training",proficiency:0.55});
+    /* `developing` is the agent's word and `proficiency` is no longer a lookup
+       on it — one clean pass reads well but reads thinly, and the confidence
+       beside it is what says so. Asserted as a band rather than a pinned float:
+       the claim is "one event is not mastery", not a particular decimal. */
+    expect(store.abilityStates()[0]).toMatchObject({evidenceCount:1,trainingStatus:"training"});
+    expect(store.abilityStates()[0]!.proficiency).toBeGreaterThan(0.6);
+    expect(store.abilityStates()[0]!.proficiency).toBeLessThan(0.75);
     expect(store.abilityStates()[0]!.confidence).toBeLessThan(0.5);
     expect(store.learnerProgress().rating.provisional).toBe(true);
   }finally{store.close();}});
+
+  /* The rating, as a rating: earned against challenges of known difficulty
+     rather than recomputed from what the ledger believes. These three properties
+     are the ones the previous scheme could not hold. */
+  describe("the rating a challenge moves",()=>{
+    const graded=(store:LocalStore,sessionId:string,title:string,outcome:"passed"|"abandoned")=>{
+      const question=store.createQuestion(sessionId,design(title),{valid:true});
+      if(outcome==="passed"){store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});store.completeAttempt(question.attemptId,"passed");}
+      else store.abandonAttempt(question.attemptId,"Out of ideas");
+      return question;
+    };
+    const rated=(store:LocalStore)=>{const {sessionId}=store.createSession("Get good at windows");store.setTrainingTarget(sessionId,{ability:"Windows",specificGap:"Shrinking until valid",desiredEvidence:"Shrinks repeatedly",avoidTesting:[]});return sessionId;};
+
+    it("rises on a solve and falls when the learner gives up",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      const start=store.learnerProgress().rating.rating;
+      graded(store,sessionId,"Shrink until valid","passed");
+      const afterSolve=store.learnerProgress().rating.rating;
+      expect(afterSolve).toBeGreaterThan(start);
+      graded(store,sessionId,"Shrink again","abandoned");
+      expect(store.learnerProgress().rating.rating).toBeLessThan(afterSolve);
+    }finally{store.close();}});
+
+    /* The number the user caught: fourteen solves of Spar's own drills read as a
+       2044, because the item was priced from the learner's rating and so rose
+       with it. A run of identical challenges has to converge. */
+    it("converges over a long run of identical challenges instead of climbing without bound",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      for(let solve=0;solve<25;solve+=1)graded(store,sessionId,`Shrink ${solve}`,"passed");
+      const history=store.learnerProgress().ratingHistory;
+      expect(store.learnerProgress().rating.rating).toBeLessThan(2000);
+      /* The tail of an unbroken run moves far less than its head: that is the
+         deviation narrowing, and it is what a bounded estimate looks like. */
+      const early=history[2]!.rating-history[1]!.rating;
+      const late=history[history.length-1]!.rating-history[history.length-2]!.rating;
+      expect(late).toBeLessThan(early/4);
+    }finally{store.close();}});
+
+    it("pays for a challenge once, however many times it is finished",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      const question=graded(store,sessionId,"Shrink until valid","passed");
+      const paid=store.learnerProgress().ratingHistory.length;
+      /* The review rejected the solve and sent it back. The pass that closed it
+         has already moved the rating; solving it again is the same challenge. */
+      store.reopenAttempt(question.attemptId,"Solved by scanning rather than by window");
+      store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+      store.completeAttempt(question.attemptId,"passed");
+      expect(store.learnerProgress().ratingHistory).toHaveLength(paid);
+    }finally{store.close();}});
+
+    it("does not rate a challenge the agent replaced",()=>{const store=new LocalStore(":memory:");try{
+      const sessionId=rated(store);
+      const question=store.createQuestion(sessionId,design("Shrink until valid"),{valid:true});
+      const before=store.learnerProgress().ratingHistory.length;
+      store.abandonAttempt(question.attemptId,"Mispitched","agent","replaced");
+      expect(store.learnerProgress().ratingHistory).toHaveLength(before);
+    }finally{store.close();}});
+  });
 
   it("persists baseline, training mode and an inspectable Today decision",()=>{const store=new LocalStore(":memory:");try{
     const created=store.createTrack("Climb Codeforces while keeping practice targeted","Codeforces Climb");
@@ -477,6 +593,86 @@ describe("adaptive product state",()=>{
     const secondEvidence=store.appendNextEvent({id:randomUUID(),attemptId:second.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
     store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nThe same assumption appeared in a different structure.",evidenceEventIds:[secondEvidence.id],evidence:[{eventId:secondEvidence.id,statement:"The empty stream repeated the non-empty initialization assumption.",polarity:"contradictory",independence:"independent",strength:0.8}],pattern:{title:"Boundary assumptions",description:"Initialization repeatedly assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id,secondEvidence.id]}});
     expect(store.listPatterns()[0]).toMatchObject({status:"pattern",evidenceCount:2});
+    /* The half of the loop that was missing: what was written down has to be
+       findable again, or the second attempt can never be joined to the first. */
+    expect(store.patternsForAbility(target.abilityId)).toMatchObject([{title:"Boundary assumptions",status:"pattern",evidenceCount:2}]);
+    const memory=store.searchLearnerMemory("boundary initialization assumptions",4);
+    expect(memory.patterns.map((item)=>item.title)).toEqual(["Boundary assumptions"]);
+    expect(memory.evidence.map((item)=>item.eventId)).toEqual([secondEvidence.id,firstEvidence.id]);
+    expect(memory.evidence[0]).toMatchObject({polarity:"contradictory",abilityTitle:"Boundary-case reasoning"});
+    /* A query about something else must not drag the ledger's only pattern in.
+       An almost-empty memory answers nearly any search if the search is loose. */
+    expect(store.searchLearnerMemory("graph traversal",4).patterns).toEqual([]);
+  }finally{store.close();}});
+
+  /* The rule this replaces counted linked events and promoted on three of them,
+     whichever way they had gone — so a learner could fail the same thing four
+     times and the ledger would call it independent, then a rating built on that
+     word would report it as a number somebody had measured. */
+  it("does not promote an ability on the volume of evidence against it",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores across several shrinks",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const failures=[0,1,2,3].map(()=>{const question=store.createQuestion(sessionId,design(`Shrink until valid ${randomUUID().slice(0,8)}`),{valid:true});const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});store.completeAttempt(question.attemptId,"failed");return event.id;});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nFour attempts, none of them restoring more than once.",evidenceEventIds:failures});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"developing"});
+    const state=store.abilityStates()[0]!;
+    expect(state.evidenceCount).toBe(4);
+    /* Plenty of observation, all of it pointing the other way: confident, and
+       confidently low. Those two numbers moving independently is the point. */
+    expect(state.confidence).toBeGreaterThan(0.6);
+    expect(state.proficiency).toBeLessThan(0.3);
+  }finally{store.close();}});
+
+  it("says so when the document claims more than the evidence under it supports",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores across several shrinks",avoidTesting:[]});
+    store.ensureAbility(target.abilityId,target.abilityTitle);
+    const graded=(outcome:"passed"|"failed")=>{const question=store.createQuestion(sessionId,design(`Shrink ${randomUUID().slice(0,8)}`),{valid:true});const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome},source:"system",schemaVersion:1});store.completeAttempt(question.attemptId,outcome);return event.id;};
+    /* The agent's word, and it is honoured: three clean passes and it says
+       independent, so independent is what the document says. */
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nRestores repeatedly and unaided.",status:"independent",evidenceEventIds:[graded("passed"),graded("passed"),graded("passed")]});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"independent"});
+    expect(store.abilityStates()[0]!.proficiency).toBeGreaterThan(0.6);
+    expect(store.listNotices().some((notice)=>notice.title.includes("stopped backing"))).toBe(false);
+
+    /* Now the evidence turns and the agent keeps its position. Spar does not
+       overrule it — the status still reads independent — it files the
+       disagreement, which is the thing that used to be unrepresentable. */
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nStill filed as reliable.",status:"independent",evidenceEventIds:[graded("failed"),graded("failed"),graded("failed"),graded("failed"),graded("failed")]});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"independent"});
+    expect(store.abilityStates()[0]!.proficiency).toBeLessThan(0.6);
+    expect(store.listNotices().map((notice)=>notice.title)).toContain("The evidence for Variable-window restoration has stopped backing it");
+    /* Filed on the crossing, not on every write, so it is a change of state
+       rather than a standing complaint. */
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nUnchanged.",status:"independent",evidenceEventIds:[]});
+    expect(store.listNotices().filter((notice)=>notice.title.includes("stopped backing"))).toHaveLength(1);
+  }finally{store.close();}});
+
+  it("lets an earned ability go stale when nothing has checked it for a long time",()=>{const store=new LocalStore(":memory:");try{
+    const {sessionId}=store.createSession("Practise variable windows");
+    const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores the invariant across several shrinks",avoidTesting:[]});
+    const question=store.createQuestion(sessionId,design("Shrink until valid"),{valid:true});
+    const events=[0,1,2].map(()=>store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1}));
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nShrinks until the property holds again.",evidenceEventIds:events.map((event)=>event.id)});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"independent"});
+    /* Today changes nothing; the cutoff is what changes something. Passing the
+       clock in beats waiting 45 days for the test to be meaningful. */
+    expect(store.decayAbilities()).toEqual([]);
+    const later=new Date(Date.now()+(ABILITY_STALE_AFTER_DAYS+1)*86_400_000);
+    const before=store.readAbility(target.abilityId) as {updated_at:string};
+    expect(store.decayAbilities(later)).toEqual([target.abilityId]);
+    const after=store.readAbility(target.abilityId) as {status:string;version:number;updated_at:string;earned_at:string|null};
+    expect(after.status).toBe("stale");
+    /* Nobody wrote anything, so nothing about the document moved. `updated_at`
+       especially: targetProgress counts challenges set since it last changed. */
+    expect(after.version).toBe(1);
+    expect(after.updated_at).toBe(before.updated_at);
+    expect(after.earned_at).not.toBeNull();
+    expect(store.listNotices().map((notice)=>notice.title)).toContain("Variable-window restoration has not been checked recently");
+    /* Idempotent: the ability is no longer independent, so a second pass finds
+       nothing and the learner is not told again on every launch. */
+    expect(store.decayAbilities(later)).toEqual([]);
   }finally{store.close();}});
 
   it("compacts and restores Track-owned adaptive projections",()=>{const source=new LocalStore(":memory:");const restored=new LocalStore(":memory:");try{
@@ -541,4 +737,254 @@ describe("target progress with a clock that does not move",()=>{
       expect(store.targetProgress(sessionId)?.challengesSinceAbilityChanged).toBe(1);
     }finally{store.close();}
   });
+});
+
+describe("the shelf",()=>{
+  const hit={title:"Two Sum",source:"leetcode" as const,slug:"two-sum",difficulty:"easy" as const,displayId:"1",sourceRating:null,concepts:["hashing"],sourceName:"LeetCode"};
+
+  it("keeps the moment a problem was first put aside",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const first=store.setProblemSaved("leetcode:two-sum",true,hit);
+      expect(first).toHaveLength(1);
+      /* Pressing the bookmark on something already saved must not quietly move it
+         to the top of a shelf ordered by when things were filed. */
+      const again=store.setProblemSaved("leetcode:two-sum",true,hit);
+      expect(again).toHaveLength(1);
+      expect(again[0]!.savedAt).toBe(first[0]!.savedAt);
+    }finally{store.close();}
+  });
+
+  it("newest first, and empty once everything is taken off",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      store.setProblemSaved("spar:one",true);
+      store.setProblemSaved("leetcode:two-sum",true,hit);
+      expect(store.listSavedProblems().map((row)=>row.key)).toEqual(["leetcode:two-sum","spar:one"]);
+      expect(store.setProblemSaved("leetcode:two-sum",false)).toEqual([{key:"spar:one",savedAt:expect.any(String),snapshot:null}]);
+      expect(store.setProblemSaved("spar:one",false)).toEqual([]);
+    }finally{store.close();}
+  });
+
+  /* A challenge Spar wrote is already in `questions`, so a copy of it here could
+     only ever disagree with the row every other surface reads. */
+  it("keeps no copy of a challenge the device already holds",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      expect(store.setProblemSaved("spar:one",true)[0]!.snapshot).toBeNull();
+    }finally{store.close();}
+  });
+
+  /* Filing, and a shelf that will not open because one card on it is unreadable
+     is worse than a shelf missing that card. */
+  it("drops a row it can no longer read rather than failing the whole shelf",()=>{
+    const file=path.join(mkdtempSync(path.join(tmpdir(),"spar-shelf-")),"spar.db");
+    const store=new LocalStore(file);
+    try{
+      store.setProblemSaved("leetcode:two-sum",true,hit);
+      store.setProblemSaved("spar:one",true);
+      const raw=new Database(file);
+      raw.prepare("UPDATE saved_problems SET snapshot=? WHERE key=?").run('{"title":"Two Sum"}',"leetcode:two-sum");
+      raw.close();
+      const reopened=new LocalStore(file);
+      try{
+        expect(reopened.listSavedProblems().map((row)=>row.key)).toEqual(["spar:one"]);
+      }finally{reopened.close();}
+    }finally{store.close();rmSync(path.dirname(file),{recursive:true,force:true});}
+  });
+});
+
+it("deletes a Track and its owned history while preserving other Tracks and baseline", () => {
+  const store = new LocalStore(":memory:");
+  try {
+    const keep = store.createTrack("Practise graph algorithms");
+    const baseline = store.createBaselineSession();
+    const removed = store.createTrack("Practise recursive algorithms");
+    const extra = store.createSession("More recursion practice", removed.track.id);
+    const target = store.setTrainingTarget(removed.sessionId, { ability: "Recursion", specificGap: "Base cases", desiredEvidence: "States the base case", avoidTesting: [] });
+    store.updateAbility({ abilityId: target.abilityId, markdown: "# Recursion\n\nPractise base cases.", evidenceEventIds: [] });
+    const question = store.createQuestion(removed.sessionId, design("Sum a tree"), { valid: true });
+    expect(store.deleteTrack(removed.track.id)).toBe(true);
+    expect(store.listTracks().map((track) => track.id)).toEqual([keep.track.id]);
+    expect(store.activeTrack()?.id).toBe(keep.track.id);
+    expect(store.readSession(removed.sessionId)).toBeNull();
+    expect(store.readSession(extra.sessionId)).toBeNull();
+    expect(store.readAttempt(question.attemptId)).toEqual([]);
+    expect(store.listAbilities(removed.track.id)).toEqual([]);
+    expect(store.readSession(keep.sessionId)).not.toBeNull();
+    expect(store.readSession(baseline.sessionId)).not.toBeNull();
+    expect(store.cloudLearningState().tracks.map((track) => track.id)).toEqual([keep.track.id]);
+    expect(store.pendingSync().filter((item) => item.kind === "session-delete")).toHaveLength(2);
+    expect(store.deleteTrack(removed.track.id)).toBe(false);
+    expect(store.deleteTrack(keep.track.id)).toBe(true);
+    expect(store.activeTrack()).toBeNull();
+    expect(store.listTracks()).toEqual([]);
+    expect(store.readSession(baseline.sessionId)).not.toBeNull();
+  } finally { store.close(); }
+});
+
+it("keeps published lesson cards available outside an older turn's deferred work log", () => {
+  const store = new LocalStore(":memory:");
+  try {
+    const { sessionId } = store.createSession("Learn Python");
+    const step = { kind: "tool" as const, tool: "teach_lesson", label: "First lesson", actionTitle: "", detail: "", ok: true, text: "", seconds: 0, input: "{}", output: '{"status":"taught","lessonId":"lesson-1"}', stages: [] };
+    const message = store.addMessage(sessionId, "agent", "Read this lesson.", [
+      { ...step, tool: "search_lessons", output: "{}" }, step,
+      { ...step, ok: false, output: '{"status":"invalid"}' },
+    ]);
+    for (let index = 0; index < 14; index += 1) store.addMessage(sessionId, "learner", `Follow-up ${index}`);
+    const saved = store.readSession(sessionId)?.messages.find((item) => item.id === message?.id);
+    expect(saved?.activity).toEqual([step]);
+    expect(saved?.activityCount).toBe(3);
+  } finally { store.close(); }
+});
+
+describe("submissions",()=>{
+  const submit=(store:LocalStore,attemptId:string,outcome:"passed"|"failed",cases:Array<{name:string;status:"passed"|"failed"}>,code:string)=>{
+    const append=(type:string,payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>store.appendNextEvent({id:randomUUID(),attemptId,type:type as never,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});
+    const created=append("submission_created",{questionId:"q",code:{path:"src/index.js",text:code,truncated:false}},"learner");
+    append("test_run",{scope:"visible-and-hidden",cases,passedCases:cases.filter((item)=>item.status==="passed").length,failedCases:cases.filter((item)=>item.status==="failed").length,durationMs:90},"runner");
+    append("submission_evaluated",{outcome,exitCode:outcome==="passed"?0:1},"system");
+    return created.id;
+  };
+  const seed=(store:LocalStore)=>{
+    const{sessionId}=store.createSession("Practise arrays");
+    store.setTrainingTarget(sessionId,{ability:"Array traversal",specificGap:"Stop at the boundary",desiredEvidence:"Stops at the first invalid value",avoidTesting:[]});
+    const question=store.createQuestion(sessionId,design("Stop at the boundary"),{valid:true});
+    return{sessionId,question};
+  };
+
+  it("keeps every submission at a challenge, in order, with where it came from",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{sessionId,question}=seed(store);
+      const first=submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      const second=submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+
+      const rows=store.submissionsForQuestion(question.id);
+      expect(rows.map((row)=>[row.id,row.ordinal,row.outcome])).toEqual([[first,1,"failed"],[second,2,"passed"]]);
+      expect(rows[0]).toMatchObject({challengeId:question.id,challengeTitle:"Stop at the boundary",language:"javascript",sessionId,attemptOrdinal:1,totalCases:1});
+    }finally{store.close();}
+  });
+
+  it("reads one submission back with the code that was actually sent",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{question}=seed(store);
+      submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      const id=submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+
+      const record=store.readSubmission(id);
+      expect(record).toMatchObject({id,ordinal:2,outcome:"passed",challengeTitle:"Stop at the boundary"});
+      expect(record?.code).toEqual({path:"src/index.js",text:"return true",truncated:false});
+      expect(record?.cases).toEqual([{name:"empty",status:"passed"}]);
+      expect(store.readSubmission(randomUUID())).toBeNull();
+    }finally{store.close();}
+  });
+
+  /* A reset is a hard visibility boundary for evidence, and deliberately not one
+     here: the learner made those submissions and this is the surface that says
+     so. */
+  it("keeps submissions made before a reset",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{sessionId,question}=seed(store);
+      submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      store.resetAttempt(sessionId,question.attemptId);
+      submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+
+      expect(store.readAttempt(question.attemptId).filter((event)=>event.type==="submission_created")).toHaveLength(1);
+      expect(store.submissionsForQuestion(question.id).map((row)=>row.outcome)).toEqual(["failed","passed"]);
+    }finally{store.close();}
+  });
+
+  it("gathers a whole session's submissions newest first",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const{sessionId,question}=seed(store);
+      submit(store,question.attemptId,"failed",[{name:"empty",status:"failed"}],"return false");
+      const latest=submit(store,question.attemptId,"passed",[{name:"empty",status:"passed"}],"return true");
+      expect(store.submissionsForSession(sessionId)[0]?.id).toBe(latest);
+    }finally{store.close();}
+  });
+});
+
+
+it("rehydrates unfinished planning and a failed provider's lesson without restarting placement",()=>{
+  const store=new LocalStore(":memory:");
+  try {
+    const {sessionId}=store.createSession("Learn trees");
+    store.setObjective(sessionId,"Link nodes");
+    store.setTrainingTarget(sessionId,{ability:"Tree nodes",specificGap:"Links",desiredEvidence:"Build a tree",avoidTesting:[]});
+    const input={store,sessionId,message:"Continue",turnKind:"session-start" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
+    store.setPendingIntake(sessionId,{questions:[{header:"Experience",question:"Have you built a tree?",options:[{label:"New"},{label:"Some experience"}],multiple:false,custom:true}]});
+    store.answerIntake(sessionId,"New to trees");
+    expect(agentTurnPayload({...input,turnKind:"cold-start"}).resumeState).toMatchObject({intake:{result:{status:"answered",answer:"New to trees"}}});
+    expect(agentTurnPayload({...input,turnKind:"attempt-complete"}).resumeState).not.toHaveProperty("intake");
+    expect(agentTurnPayload(input).resumeState).toMatchObject({objective:{committed:true},target:{committed:true}});
+    const lessonId=randomUUID();
+    store.saveLesson({id:lessonId,sessionId,title:"Trees",summary:"Links",concepts:[],payload:{}});
+    expect(agentTurnPayload(input).resumeState).not.toHaveProperty("lesson");
+    expect(agentTurnPayload({...input,resumeSince:"2000-01-01T00:00:00.000Z"}).resumeState)
+      .toMatchObject({lesson:{result:{status:"taught",lessonId}}});
+    expect(agentTurnPayload({...input,resumeSince:"2999-01-01T00:00:00.000Z"}).resumeState).not.toHaveProperty("lesson");
+    // An old target must not satisfy the next attempt's obligation to choose one.
+    expect(agentTurnPayload({...input,turnKind:"attempt-complete"}).resumeState).not.toHaveProperty("target");
+    store.createQuestion(sessionId,design("First tree"),{});
+    expect(agentTurnPayload(input).resumeState).not.toHaveProperty("target");
+  } finally {store.close();}
+});
+
+it("keeps stored tool payloads and workspace checkpoints out of the agent prompt",()=>{
+  const store=new LocalStore(":memory:");
+  try {
+    const {sessionId}=store.createSession("Learn graphics programming");
+    store.addMessage(sessionId,"agent","I checked the prior challenge.",[{
+      kind:"tool",tool:"read_concept_graph",label:"graphics",actionTitle:"Checking concepts",detail:"",ok:true,text:"",seconds:0,
+      input:"PRIVATE LARGE TOOL INPUT ".repeat(500),output:"PRIVATE LARGE TOOL OUTPUT ".repeat(500),stages:[],
+    }]);
+    const payload=agentTurnPayload({store,sessionId,message:"Use actual renderer code",turnKind:"learner-message",webSearch:true,practiceSource:false,practiceSummary:null,accountId:"test"});
+    const context=JSON.parse(payload.context) as Record<string,unknown>;
+    expect(context).not.toHaveProperty("checkpoint");
+    expect(context.recentConversation).toEqual([expect.objectContaining({role:"agent",body:"I checked the prior challenge."})]);
+    expect(payload.context).not.toContain("PRIVATE LARGE TOOL");
+  } finally {store.close();}
+});
+
+it("gives the agent enough recent challenge detail to compare two exercises",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const {sessionId}=store.createSession("Practice monotonic stacks");
+    store.setTrainingTarget(sessionId,{ability:"Monotonic stacks",specificGap:"Return positions",desiredEvidence:"Uses unresolved indices",avoidTesting:[]});
+    const previous=store.createQuestion(sessionId,{...design("Next Greater Positions"),statement:"Return the index of the first strictly greater value to the right.\n\n**Examples**\nInput: [2, 1, 3]",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},{valid:true});
+    store.appendNextEvent({id:randomUUID(),attemptId:previous.attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1});
+    store.completeAttempt(previous.attemptId,"passed");
+    const current=store.createQuestion(sessionId,{...design("Next Greater Positions"),statement:"For each item, return the position of the first later greater value.\n\n**Examples**\nInput: [2, 1, 4]",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},{valid:true});
+    const payload=agentTurnPayload({store,sessionId,message:"What is different from the one I solved?",turnKind:"learner-message",webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"});
+    const context=JSON.parse(payload.context) as {recentChallenges:Array<Record<string,unknown>>};
+    expect(context.recentChallenges.slice(0,2)).toMatchObject([
+      {id:current.id,ordinal:2,title:"Next Greater Positions",task:"For each item, return the position of the first later greater value.",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},
+      {id:previous.id,ordinal:1,title:"Next Greater Positions",task:"Return the index of the first strictly greater value to the right.",solutionRequirements:["Scan left to right with a stack of unresolved indices."],outcome:"passed"},
+    ]);
+    expect(JSON.stringify(context.recentChallenges)).not.toContain("Input: [2, 1, 4]");
+  }finally{store.close();}
+});
+
+it("rolls agent usage up by session and model, keeping spend for deleted sessions",()=>{
+  const store=new LocalStore(":memory:");
+  const { sessionId }=store.createSession("Graphs");
+  const now=new Date().toISOString();
+  const row={provider:"openai-codex",turnKind:"learner-message",status:"completed",cacheWriteTokens:0,latencyMs:10,startedAt:now,completedAt:now};
+  store.recordAgentUsage({...row,runId:"r1",sessionId,model:"gpt-5.5",inputTokens:100,outputTokens:20,cachedInputTokens:50,costUsd:0.5});
+  store.recordAgentUsage({...row,runId:"r2",sessionId,model:"gpt-5.6-luna",inputTokens:10,outputTokens:2,cachedInputTokens:0,costUsd:0.01});
+  store.recordAgentUsage({...row,runId:"r3",sessionId:"gone",model:"gpt-5.5",inputTokens:1,outputTokens:1,cachedInputTokens:0,costUsd:0.25,completedAt:"2020-01-01T00:00:00.000Z"});
+  const all=store.usageReport(null);
+  expect(all.totals).toMatchObject({runs:3,inputTokens:111,outputTokens:23,cachedInputTokens:50});
+  expect(all.totals.costUsd).toBeCloseTo(0.76);
+  expect(all.models[0]).toMatchObject({model:"gpt-5.5",runs:2});
+  expect(all.sessions.find((item)=>item.sessionId===sessionId)).toMatchObject({title:"Graphs",runs:2});
+  expect(all.sessions.find((item)=>item.sessionId==="gone")?.title).toBeNull();
+  const recent=store.usageReport(30);
+  expect(recent.totals.runs).toBe(2);
+  expect(recent.daily).toHaveLength(1);
 });

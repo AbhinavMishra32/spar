@@ -22,6 +22,8 @@ export type PiProviderInput = {
   apiKey: string;
   headers?: Record<string, string>;
   reasoningEffort?: ReasoningEffort;
+  fastMode?: boolean;
+  modelInfo?: Model<Api>;
 };
 
 /** What the phase controller can ask for. Kept in the AI SDK's spelling because
@@ -30,7 +32,9 @@ export type PiProviderInput = {
 export type ToolChoiceRequest = { type: "auto" | "none" | "required" } | { type: "tool"; toolName: string } | undefined;
 
 /** Token counts in the field names the rest of Spar reads. */
-export type SparUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedInputTokens: number };
+/* `costUsd` is pi's estimate from the model's list price. On a subscription it
+   is what the same tokens would have cost on the API, not a bill. */
+export type SparUsage = { inputTokens: number; outputTokens: number; totalTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number };
 
 /** What the bundled catalog knows about this model, which is where everything
  *  the request shape depends on comes from — cache and reasoning compatibility
@@ -42,11 +46,13 @@ const lookupModel = (provider: string, id: string): Model<Api> | undefined => {
 
 /**
  * The model descriptor pi is asked to run, assembled from what Spar resolved
- * plus whatever the bundled catalog knows about it.
+ * plus the current catalog's complete metadata when it is available.
  */
 export function piModelFor(input: PiProviderInput): Model<Api> {
-  const registered = lookupModel(input.provider, input.model);
+  const registered = input.modelInfo?.id === input.model && input.modelInfo.provider === input.provider
+    ? input.modelInfo : lookupModel(input.provider, input.model);
   return {
+    ...registered,
     id: input.model,
     name: registered?.name ?? input.model,
     api: input.api,
@@ -101,12 +107,50 @@ export function piTransportForApi(api: string): "sse" | undefined {
   return api === "openai-codex-responses" ? "sse" : undefined;
 }
 
+/**
+ * How much of its own reasoning the provider is asked to write out.
+ *
+ * OpenAI's default summary is titles and nothing else — "**Designing the test
+ * harness**", block after block, with no prose under any of them. Spar was
+ * storing those and drawing a row for each, which is a list of chapter headings
+ * presented as a transcript of the thinking. Asked for a detailed summary, the
+ * same request comes back with the working underneath the heading, which is the
+ * part worth keeping and the only part worth opening a row to read.
+ *
+ * Only the Responses families take the option. Everything else — Anthropic,
+ * Bedrock, the completions APIs — either streams its thinking whole or does not
+ * offer it, and neither needs asking.
+ */
+export function piReasoningSummaryForApi(api: string): "detailed" | undefined {
+  return api === "openai-responses" || api === "openai-codex-responses" || api === "azure-openai-responses" ? "detailed" : undefined;
+}
+
 /** pi's token counts, in the field names the rest of Spar already reads. The
  *  agent loop reports the same numbers from the same source, so a turn's cost
  *  does not change shape depending on which path ran it. */
 export function piUsage(value: Usage): SparUsage {
-  return { inputTokens: value.input, outputTokens: value.output, totalTokens: value.totalTokens, cachedInputTokens: value.cacheRead };
+  return { inputTokens: value.input, outputTokens: value.output, totalTokens: value.totalTokens, cachedInputTokens: value.cacheRead, cacheWriteTokens: value.cacheWrite ?? 0, costUsd: Number.isFinite(value.cost?.total) ? value.cost.total : 0 };
 }
 
 /** pi's stop reason, in the words the turn result already uses. */
 export function piFinishReason(reason: string): string { return reason === "toolUse" ? "tool-calls" : reason === "length" ? "length" : reason === "error" ? "error" : reason === "stop" ? "stop" : "other"; }
+
+/* OpenAI's priority service tier — what ChatGPT calls fast mode — reaches the
+   wire through `onPayload` rather than through an option.
+ *
+ * pi's per-API `stream` takes a `serviceTier`, but Spar goes through
+ * `streamSimple`, and the simple wrapper rebuilds its options from a fixed list
+ * that does not carry it. `onPayload` *is* on that list: it is handed the
+ * request body just before it is sent and may return a replacement. So the tier
+ * goes on the body directly, on the two request shapes that have a field for it
+ * — both Responses APIs — and nowhere else, because a body key an endpoint does
+ * not know is a rejected request, not an ignored preference. */
+const RESPONSES_APIS = new Set(["openai-responses", "openai-codex-responses", "azure-openai-responses"]);
+
+export function piFastModeOptions(input: PiProviderInput) {
+  if (!input.fastMode || !RESPONSES_APIS.has(input.api)) return {};
+  return {
+    onPayload: (payload: unknown) =>
+      payload && typeof payload === "object" ? { ...(payload as Record<string, unknown>), service_tier: "priority" } : payload,
+  };
+}

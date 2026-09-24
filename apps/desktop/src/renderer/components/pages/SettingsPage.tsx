@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { BrainCircuit, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BrainCircuit, ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type BaselineState, type Language } from "@spar/domain";
-import type { SparApi, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
+import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -17,10 +17,12 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Input } from "@/components/ui/input";
 import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
-import { message } from "@/lib/format";
+import { initials, message } from "@/lib/format";
 import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsHeader, SettingsRow, SettingsSection } from "../settings/layout";
+import { SectionRail } from "../settings/SectionRail";
+import { SettingsSidebar, type SidebarGroup } from "../settings/SettingsSidebar";
 import { refreshProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
@@ -28,54 +30,51 @@ import { SparWordmark } from "../common/SparWordmark";
 import { AboutSpar } from "../settings/AboutSpar";
 import { PracticeSourceGroup } from "../settings/PracticeSource";
 import { UpdateSettings } from "../settings/UpdateSettings";
+import { UsageSettings } from "../settings/UsageSettings";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
-type SettingsSection = "account" | "models" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
-type NavItem = { id: SettingsSection; label: string; icon: React.ComponentType<{ className?: string }> };
+type SettingsSection = "account" | "models" | "usage" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
+type NavItem = SidebarGroup<SettingsSection>["items"][number];
 
 /**
- * Seven destinations under three headings.
+ * Eight destinations under three headings.
  *
- * Seven unlabelled rows floating at the top of a tall empty column read as an
- * unfinished screen, and the fix is to say what the seven are rather than to
- * invent an eighth. The division is the honest one: two pages about this copy
- * of Spar and the person signed into it, three about the machinery that reads
- * and teaches, two about what is kept.
+ * Eight unlabelled rows floating at the top of a tall empty column read as an
+ * unfinished screen, and the fix is to say what the eight are rather than to
+ * invent a ninth. The division is the honest one: two pages about this copy of
+ * Spar and the person signed into it, four about the machinery that reads and
+ * teaches and what it spends, two about what is kept.
  */
-const SETTINGS_NAV: Array<{ label: string; items: NavItem[] }> = [
+const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
   {
     label: "Spar",
     items: [
-      { id: "account", label: "Account", icon: UserRound },
-      { id: "appearance", label: "Appearance", icon: Palette },
+      { id: "account", label: "Account", icon: UserRound, sections: ["Account", "About"] },
+      { id: "appearance", label: "Appearance", icon: Palette, sections: ["Appearance", "Updates"] },
     ],
   },
   {
     label: "Training",
     items: [
-      { id: "models", label: "Models", icon: BrainCircuit },
-      { id: "learning", label: "Learning", icon: Settings2 },
-      { id: "connections", label: "Connections", icon: Link2 },
+      { id: "models", label: "Models", icon: BrainCircuit, sections: ["Providers", "Agent", "Web search"] },
+      { id: "usage", label: "Usage", icon: ChartColumn, sections: ["Overview", "Plan limits", "Models", "Sessions"] },
+      { id: "learning", label: "Learning", icon: Settings2, sections: ["Baseline", "Training preferences"] },
+      { id: "connections", label: "Connections", icon: Link2, sections: ["Practice sources"] },
     ],
   },
   {
     label: "Your record",
     items: [
-      { id: "privacy", label: "Data & Privacy", icon: Eye },
-      { id: "advanced", label: "Learning Engine", icon: Globe },
+      { id: "privacy", label: "Data & Privacy", icon: Eye, sections: ["Data & Privacy"] },
+      { id: "advanced", label: "Learning Engine", icon: Globe, sections: ["Learning Engine", "Raw snapshot"] },
     ],
   },
 ];
 
 /** Flat, for the one question the groups cannot answer: what this page is called. */
 const SETTINGS_PAGES: NavItem[] = SETTINGS_NAV.flatMap((group) => group.items);
-
-/* One string, because every row in the list has to agree about its height, its
-   resting colour, and what selection does to it — a row that disagrees is
-   visible immediately. */
-const NAV_ITEM = "flex h-8 w-full items-center gap-2 rounded-lg px-2.5 text-left text-ui outline-none transition-colors";
 
 /** Resolved in the main process before the window paints, so it is already here. */
 const buildInfo = window.spar?.build;
@@ -228,7 +227,7 @@ function ComplexityCheckRow({api}:{api:SparApi|undefined}){
   return <Row className="items-center gap-4 py-3">
     <div className="min-w-0 flex-1">
       <p className="text-content font-medium">Complexity check after a solve</p>
-      <p className="mt-0.5 max-w-[28rem] text-ui leading-[1.55] text-muted-foreground">Before the full post-solve review, ask for time and space complexity and compare both with the submitted code.</p>
+      <p className="mt-0.5 max-w-[28rem] text-ui leading-[1.55] text-muted-foreground">For challenges that explicitly train algorithmic efficiency, ask for time and space complexity before the full post-solve review.</p>
       {failure&&<p className="mt-1 text-ui text-destructive">{failure}</p>}
     </div>
     <Switch aria-label="Complexity check after a solve" checked={enabled} disabled={busy||!api} onCheckedChange={change}/>
@@ -367,6 +366,56 @@ function describeWindow(entry: UsageWindow) {
   return `resets ${new Date(entry.resetsAt * 1_000).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
 }
 
+/** Which account the subscription on this row is signed in as. Asked once per
+ *  mount and answered from the main process's own cache, so the hover it feeds
+ *  opens on a value that is already there rather than on a spinner. */
+function useProviderAccount(api: SparApi | undefined, provider: Provider) {
+  const [account, setAccount] = useState<ProviderAccount | null>(null);
+  const wanted = provider.kind === "subscription" && provider.state !== "disconnected";
+
+  useEffect(() => {
+    if (!api || !wanted) return;
+    let live = true;
+    void api.providerAccount(provider.id)
+      .then((value) => { if (live) setAccount(value); })
+      .catch(() => undefined);
+    return () => { live = false; };
+  }, [api, provider.id, wanted]);
+
+  return wanted ? account : null;
+}
+
+/** The row's name and kind, with the signed-in account behind a hover.
+ *
+ *  Behind a hover rather than on the row: three subscriptions each showing an
+ *  address would put a line of small grey text under every provider, and which
+ *  account is a thing you check occasionally, not something you read every time
+ *  the page opens. A provider that never answered simply has no hover — the
+ *  name is plain text then, and nothing invites a pointer that gets nothing. */
+function ProviderIdentity({ account, name }: { account: ProviderAccount | null; name: string }) {
+  const label = <span className="block truncate text-content font-medium">{name}</span>;
+  if (!account) return label;
+
+  return (
+    <HoverCard closeDelay={80} openDelay={180}>
+      {/* A button, not the bare text: the card has to open on focus too, or the
+          only way to read which account this is would be to own a pointer. */}
+      <HoverCardTrigger asChild>
+        <button
+          className="min-w-0 cursor-default rounded-[var(--radius-sm)] text-left decoration-muted-foreground/40 underline-offset-4 outline-none hover:underline hover:decoration-dotted focus-visible:underline focus-visible:decoration-dotted"
+          type="button"
+        >
+          {label}
+        </button>
+      </HoverCardTrigger>
+      <HoverCardContent align="start" className="w-auto max-w-[18rem] px-3 py-2">
+        <p className="text-ui text-muted-foreground">Signed in as</p>
+        <p className="mt-0.5 truncate text-content text-foreground">{account.label}</p>
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
 function ProviderRow({
   provider,
   api,
@@ -387,13 +436,14 @@ function ProviderRow({
   onKeyUrl(): void;
 }) {
   const expired = provider.state === "auth-expired";
+  const account = useProviderAccount(api, provider);
 
   return (
     <Row>
       <Mark provider={provider.id} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <p className="truncate text-content font-medium">{provider.name}</p>
+          <ProviderIdentity account={account} name={provider.name} />
           {isDefault && (
             <span className="shrink-0 rounded-full bg-success/12 px-1.5 py-px text-ui-sm font-medium text-success">Default</span>
           )}
@@ -454,9 +504,11 @@ function ConnectRow({ available, onPick }: { available: Provider[]; onPick(provi
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="flex w-full items-center gap-2 px-3.5 py-2.5 text-ui text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground">
+      {/* Carries the row surface, not a bare trigger: it is the last row of the
+          card, and without the background it floated below one. */}
+      <DropdownMenuTrigger className="flex min-h-[3.25rem] w-full items-center gap-3 bg-[var(--surface-secondary)] p-2.5 text-content text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground">
         <span className="grid size-6 shrink-0 place-items-center">
-          <Plus className="size-4" />
+          <Plus className="size-[1.15rem]" />
         </span>
         Connect a provider
       </DropdownMenuTrigger>
@@ -492,6 +544,7 @@ function LearningEngineInspector({ api }: { api: SparApi | undefined }) {
 }
 
 export function SettingsPage({
+  account,
   api,
   language,
   onLanguageChange,
@@ -501,6 +554,7 @@ export function SettingsPage({
   onBaseline,
   theme,
 }: {
+  account: { displayName: string; email: string };
   api: SparApi | undefined;
   language: Language;
   onLanguageChange(language: Language): void;
@@ -518,6 +572,44 @@ export function SettingsPage({
   const [languageBusy, setLanguageBusy] = useState(false);
   const [accountAction, setAccountAction] = useState<"sign-out" | "delete" | null>(null);
   const [section, setSection] = useState<SettingsSection>("account");
+  /* Both the rail in the margin and the sidebar's search read the rendered
+     tree, so the page has to hand them the two nodes it owns: the thing that
+     scrolls, and the thing inside it the sections live in. */
+  const viewport = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLElement>(null);
+
+  /**
+   * Going to a page, and optionally to a heading on it.
+   *
+   * The heading cannot be scrolled to in the tick that asks for the page — it
+   * does not exist yet — and it may not exist in the next one either, since a
+   * section can be waiting on its own data. So this polls for it briefly and
+   * gives up rather than scrolling to whatever happens to be there. Landing is
+   * a flash, not just a scroll: on a page that is nothing but headings,
+   * arriving silently at one is indistinguishable from not having moved.
+   */
+  const goto = useCallback((next: SettingsSection, heading?: string) => {
+    setSection(next);
+    if (!heading) return;
+    let tries = 0;
+    const find = () => {
+      const node = content.current?.querySelector<HTMLElement>(`[data-settings-section="${CSS.escape(heading)}"] h2`);
+      if (!node) {
+        if (++tries < 40) setTimeout(find, 50);
+        return;
+      }
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      node.classList.remove("settings-search-focus");
+      void node.offsetWidth;
+      node.classList.add("settings-search-focus");
+      setTimeout(() => node.classList.remove("settings-search-focus"), 2_250);
+    };
+    setTimeout(find, 0);
+  }, []);
+
+  /* A page you arrive at is a page you start at the top of. Without this,
+     switching from a long page to a short one lands you in its footer. */
+  useEffect(() => { if (viewport.current) viewport.current.scrollTop = 0; }, [section]);
 
   /* Through the shared store, not the bridge directly: connecting here has to
      retire the "no model provider" notice on the composer waiting behind this
@@ -580,61 +672,38 @@ export function SettingsPage({
        a sheet laid on top, the same card every other content pane gets. A
        settings screen drawn as one flat field reads as a web page that happened
        to open here rather than as a place in the app. */
-    <div className="flex h-full min-h-0 gap-1.5 py-1.5 pr-1.5">
-      {/* Narrow, and padded only on the leading edge: the rows are the column,
-          so the space between them and the page belongs to the page. */}
-      <aside className="relative flex h-full w-[12.5rem] shrink-0 flex-col pl-2 pt-1">
-        {/* No search field. Seven destinations is a list you read, not one you
-            query. */}
-        <nav aria-label="Settings sections" className="app-scroll flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-1">
-          {SETTINGS_NAV.map((group) => (
-            <section key={group.label}>
-              {/* The same heading the page's own sections wear, one step
-                  quieter, and inset to the rows rather than spaced away from
-                  them — a 28px band on the same left edge as the glyphs, so the
-                  column reads as one ruled list instead of headings floating
-                  above groups of buttons. */}
-              <h2 className="flex h-7 items-center pl-2.5 text-ui-sm font-medium text-muted-foreground/70">{group.label}</h2>
-              <ul className="flex flex-col gap-0.5">
-                {group.items.map(({ id, label, icon: Icon }) => (
-                  <li key={id}>
-                    <button
-                      className={cn(NAV_ITEM, section === id ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}
-                      onClick={() => setSection(id)}
-                      type="button"
-                    >
-                      <Icon className="size-4" />
-                      {label}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </nav>
+    <div className="flex h-full min-h-0">
+      <SettingsSidebar
+        active={section}
+        footer={
+          /* The bottom of the column, and the reason it no longer reads as
+             empty: a list that ends in mid-air looks unfinished, one that ends
+             on a line of type looks placed. It also answers from anywhere in
+             Settings the question the About panel answers only from Account. */
+          buildInfo ? (
+            <p className="mt-auto shrink-0 px-2.5 pt-3 pb-1 text-xs font-medium text-muted-foreground/60">
+              Spar {buildInfo.version}
+              {!buildInfo.packaged && " · dev"}
+            </p>
+          ) : null
+        }
+        groups={SETTINGS_NAV}
+        onSelect={goto}
+      />
 
-        {/* The bottom of the column, and the reason it no longer reads as empty:
-            a list that ends in mid-air looks unfinished, one that ends on a line
-            of type looks placed. It also answers from anywhere in Settings the
-            question the About panel answers only from Account. */}
-        {buildInfo && (
-          <p className="shrink-0 pb-1 pl-2.5 pt-3 text-ui-sm text-muted-foreground/60">
-            Spar {buildInfo.version}
-            {!buildInfo.packaged && " · dev"}
-          </p>
-        )}
-      </aside>
-      {/* The sheet is the ground, not the material. Everything on it — the
-          provider cards, the rows, the switches — is a raised surface, so the
-          sheet has to sit *under* card level or the stack inverts and the cards
-          read as holes cut into a lighter page. `surface-under` is the app's
-          recessed step: a hair grey in light, a step darker than the window in
-          dark, and in both cases the thing a card can be lifted off. */}
-      <div className="app-scroll min-w-0 flex-1 overflow-y-auto rounded-[var(--radius-2xl)] border border-border bg-[var(--color-background-surface-under)] shadow-[inset_0_1px_2px_oklch(0%_0_0/4%)]">
-      {/* Wide top padding rather than a title bar: the heading sits in air, which
-          is what makes it read as the page's name rather than as the first row
-          of the list under it. */}
-      <div className="mx-auto w-full max-w-[42rem] px-8 pb-32 pt-16">
+
+      {/* The sheet: the window's own paper, lifted off the chrome by a hairline
+          and a contact shadow rather than by a fill. Everything you operate sits
+          on it as a bordered card, so the sheet itself has to stay quiet — a
+          tinted page under tinted cards is two materials competing to be the
+          background. */}
+      <div className="min-w-0 min-h-0 flex-1 p-1.5">
+        <div className="settings-sheet relative size-full @container">
+          <div className="app-scroll size-full overflow-y-auto rounded-[inherit]" ref={viewport}>
+            {/* Wide top padding rather than a title bar: the heading sits in air,
+                which is what makes it read as the page's name rather than as the
+                first row of the list under it. */}
+            <main className="mx-auto w-full max-w-2xl px-8 pt-16 pb-40 text-left" ref={content}>
         <SettingsHeader>
           <h1>{SETTINGS_PAGES.find((item) => item.id === section)?.label ?? "Settings"}</h1>
         </SettingsHeader>
@@ -759,6 +828,8 @@ export function SettingsPage({
           <WebSearchRow api={api} />
         </Group></>}
 
+        {section === "usage" && <UsageSettings api={api} providers={inventory?.providers ?? []} />}
+
         {section === "connections" && <Group label="Practice sources">
           <PracticeSourceGroup api={api} />
         </Group>}
@@ -770,6 +841,18 @@ export function SettingsPage({
         </Group>}
 
         {section === "account" && <><Group label="Account">
+          {/* Who you are signed in as, before anything you can do about it. The
+              sidebar's row says the name and hides the address in a tooltip;
+              Settings is the one place that owes you both in plain sight. */}
+          <Row className="gap-3">
+            <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-background-elevated-secondary)] text-content font-semibold text-foreground">
+              {initials(account.displayName)}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-content font-medium">{account.displayName}</p>
+              <p className="mt-0.5 truncate text-ui text-muted-foreground">{account.email}</p>
+            </div>
+          </Row>
           <Row>
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Sign out</p>
@@ -790,8 +873,11 @@ export function SettingsPage({
         </Group>}
 
         {section === "advanced" && <LearningEngineInspector api={api} />}
+            </div>
+            </main>
+          </div>
+          <SectionRail contentRef={content} viewportRef={viewport} />
         </div>
-      </div>
       </div>
 
       <ProviderConnectDialog api={api} onClose={() => setSelected(null)} onConnected={refresh} provider={selected} />

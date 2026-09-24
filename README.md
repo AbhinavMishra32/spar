@@ -23,13 +23,13 @@ what finally passed — and writes your next exercise against the specific thing
 thinks you can't do yet.
 
 <p align="center">
-  <img src="docs/assets/screenshots/workspace.png" alt="A Spar challenge open: the problem statement and sample cases on the left, the file being repaired in the editor, and the declared test cases below it." width="900">
+  <img src="docs/assets/screenshots/live-adaptive-workspace-luna.png" alt="A live Spar workspace: a generated TypeScript challenge, the real file editor, visible test cases, and the GPT-5.6 Luna model indicator." width="900">
 </p>
 
 <p align="center">
-  <sub>A challenge Spar wrote after watching four earlier attempts. The bug is real,
-  the tests are committed, and the clock top-right has been running since the
-  attempt opened.</sub>
+  <sub>A live Maya Chen session: Spar has written a second TypeScript probe after
+  reading the first attempt. The workspace is a real executable challenge, not a
+  marketing mockup.</sub>
 </p>
 
 ## Getting Spar
@@ -64,6 +64,202 @@ work, and the attempt is recorded as it happens — edits, runs, what the tests
 said, how long you sat on each part. You submit, the tests decide, and Spar tells
 you what your attempt was evidence of and what it wants to check next. That
 becomes the target for the next one.
+
+## Spar in one minute
+
+Spar is a coding gym that builds a private practice loop around your actual
+behaviour. It is not a course with a fixed chapter order, a chatbot that hands
+you random exercises, or a leaderboard that only counts accepted answers.
+
+The useful distinction is this:
+
+- A normal practice site stores whether you got an answer right.
+- Spar stores what happened while you got there: the edits, test runs, pauses,
+  questions, failed cases, recovery, and final submission.
+- The training agent turns that trajectory into a hypothesis about what to test
+  next.
+- Deterministic code, not the agent, runs the tests and decides correctness.
+
+That gives Spar two jobs with a hard boundary between them. The agent is a
+coach and a curriculum planner: it chooses a useful next question, explains
+what the evidence means, and can help you inspect your own code. The host is the
+measurement system: it owns permissions, challenge validation, execution,
+submission state, persistence, limits, and the pass/fail verdict.
+
+## The learning loop
+
+Every session follows the same basic loop, even when the challenge comes from
+LeetCode or Codeforces instead of Spar's generator.
+
+1. **Profile.** Tell Spar your language, experience, goals, and the thing that
+   currently surprises you. Specific observations are more useful than a label:
+   “I lose the loop invariant when the window shrinks” gives the agent something
+   to investigate.
+2. **Target.** Spar reads the ability map, recent history, open sessions, and
+   the last failure. It chooses whether to reinforce, isolate, transfer, or move
+   on from an ability.
+3. **Set the challenge.** The agent searches a connected source when one fits;
+   otherwise Spar generates an exercise. Generated challenges are mechanically
+   validated before they reach you.
+4. **Work.** You edit real files in the workspace. Every edit, run, question,
+   and response becomes part of the attempt trajectory.
+5. **Inspect.** Run visible cases early. Ask for a hint, explain an approach,
+   or ask the agent to trace a suspicious line. Assistance is part of the
+   evidence, not something hidden from the record.
+6. **Submit.** Spar runs the committed test suite. The result is per-case and
+   reproducible; the model is not in the judging path.
+7. **Interpret.** The agent explains what the attempt supports, what is still
+   uncertain, and why the next exercise is different. That explanation is a
+   hypothesis to test, not a grade to blindly accept.
+8. **Repeat.** History, concepts, abilities, and future targets become more
+   specific as the evidence accumulates.
+
+## A guided first session
+
+### 1. Install and connect the two things Spar needs
+
+Download a release for your operating system and open the app. Spar needs a
+backend for your account and learning history, and a model provider for the
+training agent. The release does not hide a shared Spar account or resell model
+tokens.
+
+For the model, choose one of the supported sign-in providers, enter an API key,
+use an OpenAI-compatible endpoint, or connect a local Ollama/LM Studio model.
+Keys are stored in the operating system keychain. A subscription sign-in is
+still your provider account: Spar does not receive or store your provider
+password.
+
+If you are testing the desktop app locally, the repository's development
+commands can start the API and renderer together. See [`docs/hosting.md`](docs/hosting.md)
+for backend setup and [`docs/architecture.md`](docs/architecture.md) for the
+process boundaries.
+
+### 2. Answer onboarding like a coach would need you to
+
+Spar asks about your experience, focus, language, and sticking point. This is
+not a personality quiz. It seeds the first target, so concrete answers help:
+
+```text
+Weak:  “I need to get better at algorithms.”
+Useful: “I find the right data structure, then lose track of the invariant when
+         an edge case changes the loop boundary.”
+```
+
+Choose a language you can read and edit comfortably. You can change direction
+later; the point of the first session is to create evidence, not to lock your
+identity forever.
+
+### 3. Take the baseline seriously, but do not try to perform
+
+The baseline is calibration. Spar is trying to see how you reason, not whether
+you can guess the expected answer quickly. Read the prompt aloud to yourself,
+write down the invariant or state you think matters, run a small case, and ask
+for help when you would ask a human coach.
+
+A wrong first attempt is useful. An unexplained perfect-looking solution is
+less informative than a short trajectory that shows where your reasoning became
+uncertain.
+
+### 4. Use the workspace in this order
+
+1. Read the statement and identify the input, output, and boundary cases.
+2. Inspect the starter file and the visible cases.
+3. Write a small plan before editing. For boundary-heavy problems, write the
+   valid index range or loop invariant explicitly.
+4. Make the smallest useful edit.
+5. Run visible cases. A failing case is a question about your model of the
+   program, not a reason to immediately ask for the answer.
+6. Use Chat when a hint, trace, or explanation will unblock you.
+7. Re-run after each meaningful change, then submit when the result is yours.
+
+The tabs have distinct jobs. **Problem** is the prompt and cases. **Chat** is
+the conversation and the agent's reasoning about the session. The editor is the
+file you are actually changing. The panel below it separates **Testcase** (the
+declared cases), **Test Result** (what ran), and **Attempt** (the recorded
+replay).
+
+### 5. Read the next target as feedback
+
+After submission, look for three things:
+
+- What the tests proved about the code.
+- What the trajectory suggested about the reasoning process.
+- What changed in the next challenge and why.
+
+Spar may choose a smaller diagnostic, a transfer problem with unfamiliar
+surface details, or another exercise at the same weakness. That is intentional:
+solving one familiar problem demonstrates less than finding the same idea when
+the prompt no longer advertises it.
+
+## A real session, with fictional demo data
+
+The following captures use a fictional account named Maya Chen. They contain no
+personal user data. Maya solved **Find the First Adjacent Pair**, a boundary
+exercise, then asked what the submission actually proved. The GPT-5.6 Luna
+agent inspected the trajectory and produced **Stop at the first sufficient
+prefix** as a different TypeScript probe. The second challenge was left open so
+the screenshots show the honest state of a learning session rather than a
+perfectly staged completion.
+
+<p align="center">
+  <img src="docs/assets/screenshots/live-agent-luna.png" alt="Maya Chen's live GPT-5.6 Luna conversation: the agent checks transfer evidence and writes a second TypeScript challenge." width="900">
+</p>
+
+<p align="center">
+  <sub>The agent reads the attempt as calibration evidence, answers a direct
+  question about ability, and explains why the next probe is different.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/live-home-luna.png" alt="Maya Chen's Spar Home: a provisional rating, one solved challenge, one open session, and a baseline card." width="900">
+</p>
+
+<p align="center">
+  <sub>Home is the orientation surface: rating movement, what is solved, what is
+  open, and the next session to continue.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/assets/screenshots/live-history-luna.png" alt="Maya Chen's Spar History: two challenges, one passed and one open, with concepts and files." width="900">
+</p>
+
+<p align="center">
+  <sub>History keeps the receipt: challenge state, concepts, test runs, attempts,
+  and the ability to reopen a past problem without changing its original session.</sub>
+</p>
+
+## How to get better evidence
+
+Spar becomes more useful when the attempt reflects how you really learn.
+
+- **State the uncertainty.** “I do not know whether this pointer moves before
+  or after the check” is actionable; “give me a hint” is less so.
+- **Run before you feel ready.** Small cases reveal whether the plan and the
+  implementation agree.
+- **Use edge cases deliberately.** Empty input, one item, duplicate values,
+  the last valid index, thresholds at zero, and already-satisfied prefixes are
+  often where an invariant shows itself.
+- **Ask for a trace.** Spar can inspect execution when a value changes in a way
+  that is easier to see than describe.
+- **Do not erase the struggle.** Reverting a bad edit is fine; hiding every
+  failed thought makes the evidence less representative.
+- **Return to history.** Replaying a passed challenge without changing the
+  original record is a good way to test whether the idea stuck.
+- **Treat abilities as claims with receipts.** An uncertain ability is a target
+  Spar wants to test. An earned ability has repeated supporting submissions.
+
+## What Spar does not promise
+
+The agent can misunderstand your intent, generate a target that needs to be
+replaced, or explain a trajectory imperfectly. Spar surfaces that uncertainty
+and keeps the mechanical parts deterministic; it does not pretend that a model
+is an infallible teacher.
+
+The first few sessions are also not a final ranking. They are a calibration
+period. The rating is provisional, abilities may be uncertain, and a challenge
+can be replaced when it cannot be validated or no longer tests the intended
+thing. Those states are information about the measurement process, not a
+failure you need to hide.
 
 ## What's in the app
 

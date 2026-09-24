@@ -3,11 +3,12 @@ import { canonicalWorkspacePath } from "./workspacePath.js";
 import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spar/visualizer";
 import type { AgentActivityStep } from "@spar/domain";
 export type { VisualizerSpec, VisualizerTrace };
-import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
+import type { SubmissionRecord, SubmissionRow } from "./submissions.js";
+import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
-  tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
+  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
   /* The window reports its own state; the main process decides when that becomes
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
@@ -15,9 +16,9 @@ export const ipc = {
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentAnswer: "agent:answer", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
-  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsProviderOauthStart: "settings:provider-oauth-start",
+  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsUsageReport: "settings:usage-report", settingsProviderAccount: "settings:provider-account", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
-  settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort",
+  settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort", settingsFastMode: "settings:fast-mode",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
   settingsWebSearchEnabled: "settings:web-search-enabled",
   settingsComplexityCheck: "settings:complexity-check", settingsComplexityCheckEnabled: "settings:complexity-check-enabled",
@@ -27,8 +28,10 @@ export const ipc = {
   sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
   sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
   challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
+  challengeSubmissions: "challenges:submissions", submissionRead: "submissions:read", sessionSubmissions: "sessions:submissions",
   challengeRun: "challenges:run", challengeCheck: "challenges:check", challengeReset: "challenges:reset",
   conceptRead: "concepts:read", abilityRead: "abilities:read", practiceStart: "practice:start",
+  problemsSave: "problems:save",
   /* Practice sources: where real problems come from. Distinct from `practiceStart`
      above, which is Spar's own word for drilling an ability — an unfortunate
      collision, kept because renaming a channel the renderer already calls is a
@@ -36,7 +39,8 @@ export const ipc = {
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
-  visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity",
+  visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity", messageRate: "messages:rate",
+  lessonRead: "lesson:read",
   restoreRetry: "restore:retry",
   updateState: "update:state", updateCheck: "update:check", updateDownload: "update:download",
   updateDismissChangelog: "update:dismiss-changelog",
@@ -161,7 +165,7 @@ export const themePreferenceSchema = z.enum(["system", "light", "dark"]);
 export const reasoningEffortSchema = z.enum(["off", "low", "medium", "high", "xhigh"]);
 export type ReasoningEffort = z.infer<typeof reasoningEffortSchema>;
 /** The translucent material the OS paints behind the window, if any. */
-export type NativeSurface = "liquid-glass" | "vibrancy" | "mica" | "none";
+export type NativeSurface = "liquid-glass" | "vibrancy" | "acrylic" | "mica" | "none";
 /** Which edge must reserve room for the OS window buttons; "none" = native frame. */
 export type WindowControls = "left" | "right" | "none";
 /** `process.platform`, narrowed to what the renderer branches on. */
@@ -196,7 +200,7 @@ export type ProviderInventory = {
    *  it resolves credentials, so the composer never has to infer runnability
    *  from `defaultModel` — which names a provider even before one is connected. */
   ready: boolean;
-  defaultModel: { provider: ProviderId; model: string; reasoningEffort: ReasoningEffort };
+  defaultModel: { provider: ProviderId; model: string; reasoningEffort: ReasoningEffort; fastMode: boolean };
 };
 /** One rate-limit window of a subscription. `usedPercent` is how much of the
  *  window has been spent (0–100) — the same direction both upstreams report it
@@ -205,6 +209,22 @@ export type UsageWindow = { kind: "five-hour" | "weekly"; usedPercent: number; r
 /** What Spar currently knows about a subscription's quota. Null, rather than an
  *  empty reading, whenever nothing has told it — see `subscriptionUsage`. */
 export type SubscriptionUsage = { windows: UsageWindow[]; capturedAt: number };
+/** Which account a subscription is signed in as. `email` is null when the
+ *  provider would not give one — GitHub answers with a login for everybody who
+ *  keeps their address private — and `label` is always something showable. */
+export type ProviderAccount = { email: string | null; label: string };
+/** One finished agent run's spend, as the main process records it locally. */
+export type AgentUsageRow = { runId: string; sessionId: string; provider: string; model: string; turnKind: string; status: string; inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number; latencyMs: number; startedAt: string; completedAt: string };
+/** Token counts are pi's: `inputTokens` excludes cache reads and writes. `costUsd`
+ *  is estimated from list prices, so on a subscription it is the API-equivalent. */
+export type UsageTotals = { runs: number; inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number };
+export type UsageReport = {
+  since: string | null;
+  totals: UsageTotals;
+  daily: Array<UsageTotals & { day: string }>;
+  models: Array<UsageTotals & { provider: string; model: string }>;
+  sessions: Array<UsageTotals & { sessionId: string; title: string | null; lastRunAt: string; models: string[] }>;
+};
 export type ProviderOAuthEvent = {
   flowId: string;
   provider: ProviderId;
@@ -238,6 +258,9 @@ export const sourceSearchInput = z.object({
   offset: z.number().int().min(0).max(5_000).default(0),
 });
 export const sourceSlugInput = z.object({ source: sourceIdSchema, slug: z.string().trim().min(1).max(120) });
+/** One rating, on its way to the store. `null` is the un-rate: clicking the
+ *  thumb that is already lit takes the verdict back rather than restating it. */
+export const rateMessageInput = z.object({ messageId: z.string().trim().min(1), rating: z.enum(["good", "bad"]).nullable() });
 export const sourceConnectionInput = z.object({ source: sourceIdSchema });
 export const sourceRegionInput = sourceConnectionInput.extend({ region: sourceRegionSchema });
 export const sourceJudgeInput = sourceConnectionInput.extend({ preference: sourceJudgeSchema });
@@ -279,6 +302,11 @@ export type PracticeSearchHit = {
   displayId: string;
   title: string;
   difficulty: "easy" | "medium" | "hard";
+  /** The source's own numeric difficulty, where it publishes one. Carried into
+   *  the renderer because the library ranks by how a problem is priced against
+   *  the learner's rating, and two problems a source calls "medium" are not the
+   *  same problem — see `itemRating`. */
+  sourceRating?: number | null;
   paidOnly: boolean;
   acceptanceRate: number | null;
   concepts: string[];
@@ -374,7 +402,7 @@ export type VisualizerProblem = {
   paidOnly: boolean;
 };
 
-export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; saved: SavedProblem[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** How far the pull half of sync has got. The shell gates on this before it
    *  gates on `profile`: a signed-in device with no local profile has either not
    *  finished restoring or could not reach the server, and treating either as "no
@@ -386,25 +414,96 @@ export type BootstrapData ={ account: { id: string; displayName: string; email: 
   serverConfigured: boolean };
 export type RestoreState = "idle" | "pending" | "done" | "failed";
 /** One file a tool wrote, with the line counts the activity row reports. */
-export type AgentActivityFile = { path: string; added: number; removed: number };
+export type AgentActivityFile = {
+  path: string;
+  added: number;
+  removed: number;
+  /** Which part of a challenge design the file belongs to, when it is one: the
+   *  starter and the reference usually share a path. */
+  group?: "starter" | "reference" | "visible" | "hidden";
+};
 /** A saved explanation: the steps the agent chose, each with its caption and the
  *  two snapshots the canvas needs to draw what moved. The payload is produced by
  *  `sliceView` in `@spar/visualizer` and is passed through the store opaquely. */
 export type AgentVisualization = { id: string; sessionId: string; title: string; payload: VisualizerView };
 export type VisualizerView = import("@spar/visualizer").TraceView & { setup: string; takeaway: string };
+/** A lesson the agent wrote, read back for the card and the reader that opens
+ *  it. The pages are the whole of it, so unlike a visualisation there is no
+ *  second payload behind this one — but it is still fetched rather than carried
+ *  in the transcript row, because eight pages of markdown is not a row. */
+export type StoredLesson = { id: string; sessionId: string; title: string; summary: string; createdAt: string } & import("@spar/domain").LessonInput;
+/**
+ * One observable stage of a multi-stage host tool call — the private fit
+ * reviewer, a compile, a repair — reported as it starts and again as it settles,
+ * under the one row the learner already sees. Runtime facts only: which stage,
+ * against what, which model, how long, and what came back. Never the model's own
+ * reasoning. Timestamps are the worker's wall clock, which is this machine's.
+ */
+export type ToolStage = {
+  id: string;
+  kind: "draft" | "review" | "revise" | "validate" | "repair" | "redraft" | "outcome";
+  /** Present tense while running, past tense once settled. */
+  verb: string;
+  subject: string;
+  state: "running" | "done" | "failed" | "skipped";
+  /** One line of what came back: a verdict's reason, the fields a patch changed. */
+  detail?: string;
+  /** Failed checks, each in full, for a validation that did not pass. */
+  findings?: string[];
+  /** A short count for the stage's corner, e.g. `4/6 checks`. */
+  badge?: string;
+  /** The model a private model stage ran on. */
+  model?: string;
+  provider?: string;
+  /** A learner-visible file the stage's model is writing right now — starter
+   *  code or a visible test, never the reference or a hidden test. */
+  writing?: { path: string; content: string };
+  /** The sandbox runs of a validation stage, as the compiler reports them. */
+  runs?: ToolStageRun[];
+  startedAt: number;
+  endedAt?: number;
+};
+/**
+ * A challenge being written, parsed from the model's streaming tool arguments.
+ * Only what the learner will be handed anyway carries content — the statement,
+ * the starter files and the visible tests. The reference, the hidden tests and
+ * the known-incorrect implementations are named and counted, never shown.
+ */
+export type ChallengeDraft = {
+  key: string;
+  title?: string;
+  language?: string;
+  statement?: string;
+  files: Array<{ group: "starter" | "visible" | "reference" | "hidden" | "incorrect"; path: string; lines: number; content?: string }>;
+  received: number;
+};
+/** One sandbox run inside a validation stage. Counts only, except for the
+ *  learner-visible cases, whose names the learner will read anyway. */
+export type ToolStageRun = {
+  id: string;
+  label: string;
+  expect: "pass" | "fail";
+  state: "running" | "passed" | "failed";
+  cases?: { total: number; passed: number; failed: number };
+  visibleCases?: Array<{ name: string; passed: boolean }>;
+  durationMs?: number;
+};
 export type AgentStreamEvent = {
   runId: string;
   /** Which session this turn is working on. Stamped in the main process, because
    *  the utility process only knows its own request id — and a card the learner
    *  is not looking at still has to be able to say "the agent is on this one". */
   sessionId?: string;
-  type: "text" | "reasoning" | "tool" | "status" | "error" | "done";
+  type: "text" | "reasoning" | "tool" | "status" | "question-pending" | "draft" | "error" | "done";
   text?: string;
   tool?: string;
   detail?: string;
   /** Correlates a tool's start and end events so a row updates in place. */
   callId?: string;
-  phase?: "start" | "end";
+  /** Progress keeps an existing tool row open while replacing its short live
+   *  detail. This is used for multi-stage host work such as compile, repair,
+   *  and revalidation. */
+  phase?: "start" | "progress" | "end";
   ok?: boolean;
   /** Short human summary of the tool's input, e.g. the challenge's own title.
    *  Host-generated, and distinct from `actionTitle`: a published challenge row
@@ -417,6 +516,18 @@ export type AgentStreamEvent = {
   input?: string;
   output?: string;
   files?: AgentActivityFile[];
+  /** A challenge design as the model is still writing it, before its call
+   *  exists. Redacted in the worker: see `ChallengeDraft`. */
+  draft?: ChallengeDraft;
+  /** A stage of the call that just started or settled, upserted by `stage.id`. */
+  stage?: ToolStage;
+  /** Every stage of the call, on its end event — the authoritative list, and the
+   *  one stored with the turn. */
+  stages?: ToolStage[];
+  /** How full the model's context window got on this turn, reported once per
+   *  provider turn so the composer's ring can move while the turn is running.
+   *  Only ever grows within a run — see the note in `agent.ts`. */
+  context?: { usedTokens: number; totalTokens: number };
 };
 /** Native menu items are routed to the renderer so the macOS menu bar drives the same UI as the in-app controls. */
 export type MenuCommand = "settings" | "new-session" | "command-palette";
@@ -443,6 +554,7 @@ export type UpdateState = {
 export interface SparApi {
   bootstrap(): Promise<BootstrapData>;
   createSession(input: z.infer<typeof createSessionInput>): Promise<{ sessionId: string }>;
+  deleteTrack(trackId: string): Promise<void>;
   createTrack(input: z.infer<typeof createTrackInput>): Promise<{ track: Track; sessionId: string }>;
   setActiveTrack(trackId: string): Promise<Track | null>;
   setTrainingMode(mode: z.infer<typeof trainingModeSchema>): Promise<TrainingMode>;
@@ -468,7 +580,7 @@ export interface SparApi {
    *  the message is recorded and the running turn picks it up at its next phase
    *  boundary — rather than being dropped, which is what used to happen.
    *  `steered` says which of the two occurred. */
-  sendAgentMessage(input: { sessionId: string; message: string }): Promise<{ runId: string; steered?: boolean }>;
+  sendAgentMessage(input: { sessionId: string; message: string; contextQuestionId?: string }): Promise<{ runId: string; steered?: boolean }>;
   /** Resume the exact agent tool call which put this question on screen. */
   answerAgentQuestion(input: { sessionId: string; answer: string }): Promise<{ runId: string; resumed: boolean }>;
   /** Stops the turn running for this session, if there is one.
@@ -512,7 +624,23 @@ export interface SparApi {
      records an attempt event, changes a question's status, or starts an agent
      turn: re-opening finished work is rehearsal, and rehearsal is not evidence. */
   listChallengePreviews(): Promise<Record<string, ChallengeCodePreview>>;
+  /** Puts a problem on the shelf, or takes it off, and answers with the whole
+   *  shelf. Returning the list rather than an acknowledgement is what keeps the
+   *  bookmark in the transcript and the bookmark in the library from having to
+   *  agree by coincidence: both are drawn from one answer. */
+  setProblemSaved(input: { key: string; saved: boolean; snapshot?: SavedProblem["snapshot"] }): Promise<SavedProblem[]>;
   readChallenge(challengeId: string): Promise<ChallengeDetail | null>;
+  /** Every submission ever sent at this challenge, oldest first, across every
+   *  attempt at it. Summaries only — the code and the case grid come with
+   *  `readSubmission`, because a list of ten would otherwise carry ten
+   *  solutions nobody has asked to read. */
+  listChallengeSubmissions(challengeId: string): Promise<SubmissionRow[]>;
+  /** One submission in full: what was sent and every case it was graded on. */
+  readSubmission(submissionId: string): Promise<SubmissionRecord | null>;
+  /** A whole session's submissions, newest first, across all of its challenges.
+   *  What `@` offers when the learner reaches for one directly rather than by
+   *  remembering which problem it was at. */
+  listSessionSubmissions(sessionId: string): Promise<SubmissionRow[]>;
   writeChallengeFile(input: z.infer<typeof challengeWriteInput>): Promise<void>;
   /** Runs the visible cases; output streams over `onRunnerEvent` under this id. */
   runChallenge(input: z.infer<typeof challengeIdInput>): Promise<{ id: string }>;
@@ -569,7 +697,16 @@ export interface SparApi {
   /** What a connected subscription's quota looks like right now, or null when
    *  the provider has none to report or nothing has reported one yet. */
   providerUsage(provider: ProviderId): Promise<SubscriptionUsage | null>;
+  /** Which account a connected subscription belongs to, or null when the
+   *  provider does not say. Asked separately from the inventory for the same
+   *  reason usage is: it can cost a network call, and only a hover wants it. */
+  providerAccount(provider: ProviderId): Promise<ProviderAccount | null>;
+  /** Local agent spend over the last `days` days, or all of it for null. */
+  usageReport(days: number | null): Promise<UsageReport>;
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
+  /** OpenAI's priority service tier, which is what ChatGPT calls fast mode. Set
+   *  for every model; only the Responses providers can act on it. */
+  setFastMode(enabled: boolean): Promise<void>;
   /** Whether the agent can reach the web, and where its key came from. The key
    *  itself is never read back — Settings shows the state, not the secret. */
   webSearchStatus(): Promise<{ source: "keychain" | "env" | "none"; enabled: boolean }>;
@@ -624,9 +761,16 @@ export interface SparApi {
    *  far larger than the sentence that introduces it, and a transcript that
    *  inlined them would grow by a trace per explanation. */
   visualizerView(input: { id: string }): Promise<AgentVisualization | null>;
+  /** One lesson, whole. Null for an id written by a version that is gone, which
+   *  the card draws as its own missing state rather than failing the thread. */
+  lessonRead(input: { id: string }): Promise<StoredLesson | null>;
   /** The steps behind an older transcript row, which the session load leaves on
    *  disk. See `TRANSCRIPT_ACTIVITY_WINDOW`. */
   messageActivity(input: { messageId: string }): Promise<AgentActivityStep[]>;
+  /** Record the learner's verdict on one agent reply, or clear it by passing
+   *  null. Resolves to the rating now in force, so a footer that painted the
+   *  click optimistically can settle on what was actually stored. */
+  rateMessage(input: { messageId: string; rating: "good" | "bad" | null }): Promise<"good" | "bad" | null>;
   /** Try the pull again after it failed — the button on the screen that failure
    *  puts up. Resolves with wherever the retry landed. */
   retryRestore(): Promise<RestoreState>;

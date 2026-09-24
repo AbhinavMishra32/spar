@@ -122,30 +122,50 @@ export function challengeTimeline(attempts: RecordedAttempt[]): ChallengeTimelin
         type: event.type,
         source: event.source,
         occurredAt: event.occurredAt,
-        detail: describe(event.type, event.payload),
+        ...describe(event.type, event.payload),
       });
     }
   }
   return entries;
 }
 
-function describe(type: string, payload: Record<string, unknown>): string {
+/** The line and the tone for one event. Both come off the payload in the same
+ *  pass, because the payload is the only place that knows whether a `test_run`
+ *  was a pass or a fail. */
+function describe(
+  type: string,
+  payload: Record<string, unknown>,
+): { detail: string; tone: ChallengeTimelineEntry["tone"] } {
   const text = (key: string) => (typeof payload[key] === "string" ? (payload[key] as string) : "");
   switch (type) {
     case "attempt_started":
-      return payload.replacesQuestionId ? "Opened in place of an earlier challenge" : "Challenge opened";
+      return {
+        detail: payload.replacesQuestionId ? "Opened in place of an earlier challenge" : "Challenge opened",
+        tone: "neutral",
+      };
     case "file_changed":
-      return text("path");
+      return { detail: text("path"), tone: "neutral" };
     case "command_executed":
-      return text("command") === "test" ? "Ran the visible cases" : `Ran ${text("command")}`;
+      return {
+        detail: text("command") === "test" ? "Ran the visible cases" : `Ran ${text("command")}`,
+        tone: "neutral",
+      };
     case "test_run": {
       const scope = text("scope") === "visible" ? "visible cases" : "visible and hidden cases";
-      return `${payload.passed ? "Passed" : "Failed"} the ${scope}`;
+      return {
+        detail: `${payload.passed ? "Passed" : "Failed"} the ${scope}`,
+        tone: payload.passed ? "good" : "bad",
+      };
     }
     case "submission_created":
-      return "Submitted for judging";
-    case "submission_evaluated":
-      return text("outcome") === "passed" ? "Judged: all tests passed" : "Judged: one or more tests failed";
+      return { detail: "Submitted for judging", tone: "neutral" };
+    case "submission_evaluated": {
+      const passed = text("outcome") === "passed";
+      return {
+        detail: passed ? "Judged: all tests passed" : "Judged: one or more tests failed",
+        tone: passed ? "good" : "bad",
+      };
+    }
     case "attempt_completed": {
       const reason = text("reason");
       const outcome = text("outcome");
@@ -154,9 +174,13 @@ function describe(type: string, payload: Record<string, unknown>): string {
         : outcome === "failed" ? "Completed — failed"
         : outcome === "replaced" ? "Swapped out for a better-aimed challenge"
         : "Given up on";
-      return reason ? `${headline}: ${reason}` : headline;
+      const tone: ChallengeTimelineEntry["tone"] =
+        outcome === "passed" ? "good"
+        : outcome === "failed" || outcome === "abandoned" ? "bad"
+        : "neutral";
+      return { detail: reason ? `${headline}: ${reason}` : headline, tone };
     }
     default:
-      return type.replace(/_/g, " ");
+      return { detail: type.replace(/_/g, " "), tone: "neutral" };
   }
 }

@@ -28,7 +28,13 @@ export function normalizeCodeforcesSummary(problem: CodeforcesProblemWire, stat?
   const concepts = conceptTagsForProblem(tags.map((name) => ({ slug: name, name }))).map((entry) => entry.slug);
   return {
     source: "codeforces", slug, displayId: slug, title: problem.name,
-    difficulty: codeforcesDifficulty(problem.rating), paidOnly: false, acceptanceRate: null,
+    difficulty: codeforcesDifficulty(problem.rating),
+    /* Carried as the number, not only as the band it falls in. Codeforces problem
+       ratings are the same scale as its user ratings, so this is what the Spar
+       Rating is actually played against; collapsing 1737 to "medium" threw away
+       the only measured difficulty any source hands us. */
+    sourceRating: problem.rating ?? null,
+    paidOnly: false, acceptanceRate: null,
     topicTags: tags, concepts, status,
   };
 }

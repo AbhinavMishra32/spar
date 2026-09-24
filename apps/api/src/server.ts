@@ -6,6 +6,7 @@ import { createAuth, installAccountRoutes, installAuth } from "./auth.js";
 import { createMailer } from "./mailer.js";
 import { installRoutes } from "./routes.js";
 import { ObjectStorage } from "./storage.js";
+import { AgentTraceExporter } from "./telemetry.js";
 
 export async function createServer(environment=process.env){const env=envSchema.parse(environment);const app=Fastify({logger:{level:env.NODE_ENV==="production"?"info":"debug"},requestIdHeader:"x-request-id",trustProxy:true});const database=createDatabase(env.DATABASE_URL);await app.register(cors,{origin:false});
 /* The mailer is built before the auth config because the auth config reads it:
@@ -17,7 +18,7 @@ const mailer=createMailer(env,(message)=>app.log.info(message));installAuth(app,
    answers 503 on the one route that needs it, which is currently unreachable
    from the desktop app — challenge artifacts and workspace files both ride
    inline as jsonb. */
-installRoutes(app,database.db,objectStorageConfigured(env)?new ObjectStorage(env):undefined);
+installRoutes(app,database.db,objectStorageConfigured(env)?new ObjectStorage(env):undefined,new AgentTraceExporter(env));
 app.addHook("onClose",()=>database.close());return {app,env};}
 /* Binding a port is for running this process ourselves. Under Vercel the platform
    owns the socket and hands each request to the function in `api/index.ts`, so

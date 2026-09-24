@@ -1,15 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { CornerDownRight, Folder, Search as SearchMark } from "lucide-react";
+import { Clock3, CornerDownRight, Folder, Search as SearchMark } from "lucide-react";
+
+import { Tabs } from "radix-ui";
 
 import { languageForPath } from "@spar/domain";
-import { useCodeTheme } from "@/hooks/use-code-theme";
-import { highlight, type Span } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
+import { FileTab } from "../common/FileTab";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 import { Inline } from "./Markdown";
 import { useMarkdownLinks } from "./MarkdownLinks";
 import { memoryLabel } from "./toolSubject";
-import { FadedScroll, RawPayload } from "./ToolPayload";
+import { closeOff, FadedScroll, RawPayload } from "./ToolPayload";
+import { Snippet } from "./Snippet";
+import { readAttempt } from "./attemptReport";
+import { AttemptReadView } from "./AttemptRead";
+import { questionExchange } from "./questionExchange";
 
 /**
  * What a tool call actually did, drawn rather than dumped.
@@ -33,15 +38,24 @@ export function ToolDetail({
   input,
   output,
   tool,
+  phase,
 }: {
   input: string;
   output: string;
   tool: string;
+  /* Only the raw fallback uses it, to name how the call ended beside what it
+     came back with. A drawn view says that in its own terms. */
+  phase?: "running" | "done" | "error";
 }) {
   /* Arguments are always an object; a result can be an object, an array, or a
      bare string, so the two are read with different expectations. */
   const args = useObject(input);
   const result = useJson(output);
+  /* The replay is read back into the shapes its report was printed from, which
+     is the one payload in the app that survives the 16k cap badly enough to need
+     its own reader. Only for the calls that carry one — every other tool would
+     be paying for a parse of a report it never returns. */
+  const replay = useMemo(() => (ATTEMPT_TOOLS.has(tool) ? readAttempt(output) : null), [tool, output]);
 
   switch (tool) {
     case "read-file": {
@@ -94,14 +108,12 @@ export function ToolDetail({
        Construct's own. */
     case "ask_user_question":
     case "ask-user-question": {
-      const question = text(args?.question);
-      if (!question) break;
+      const exchanges = questionExchange(input, output);
+      if (!exchanges.length) break;
       return (
-        <Exchange
-          answer={answerText(output)}
-          choices={Array.isArray(args?.choices) ? (args.choices as unknown[]).map(text).filter(Boolean) : []}
-          question={question}
-        />
+        <div className="space-y-4">
+          {exchanges.map((exchange, index) => <Exchange key={`${index}-${exchange.question}`} {...exchange} />)}
+        </div>
       );
     }
 
@@ -120,10 +132,14 @@ export function ToolDetail({
        JSON, and the learner's own file buried somewhere inside it. */
     case "inspect_current_attempt":
     case "read_attempt":
+    case "replay_attempt":
     case "evaluate_attempt": {
       /* Only when the payload actually arrived. A result too damaged to read is
          the raw payload's job — a drawn view of nothing says the attempt is
          empty, which is a different and false claim. */
+      if (replay && (replay.nothing || replay.log.length || replay.cases.length || replay.runs.length || replay.files.length)) {
+        return <AttemptReadView read={replay} />;
+      }
       const attempt = record(result);
       if (!Array.isArray(attempt.events) && !Array.isArray(attempt.files)) break;
       return <Attempt result={attempt} />;
@@ -141,8 +157,31 @@ export function ToolDetail({
   /* No view for this tool, or not enough of its arguments survived to draw one.
      The raw payload is the honest answer — a tool nobody has drawn yet is
      plain, never blank. */
-  return <RawPayload input={input} output={output} />;
+  return <RawPayload input={input} output={output} status={phaseWord(phase)} />;
 }
+
+/**
+ * Whether this tool's detail is a turn of conversation rather than a payload.
+ *
+ * Those are drawn in the transcript's own column with no panel around them: a
+ * question the agent asked and the answer it got are the two things in a row
+ * that were written to be read, and boxing them in the surface reserved for
+ * arguments and results files them as machine output.
+ */
+export function baresDetail(tool: string): boolean {
+  return tool === "ask_user_question" || tool === "ask-user-question";
+}
+
+/** How the call ended, as the one word that goes beside its output. A call
+ *  still running has not come back with anything to label. */
+function phaseWord(phase?: "running" | "done" | "error"): string | undefined {
+  return phase === "done" ? "Done" : phase === "error" ? "Failed" : undefined;
+}
+
+/** The calls that come back with a solve log. `evaluate_attempt` and
+ *  `inspect_current_attempt` are v0.7 spellings of the same read, and old turns
+ *  still draw. */
+const ATTEMPT_TOOLS = new Set(["read_attempt", "evaluate_attempt", "inspect_current_attempt", "replay_attempt"]);
 
 /* ---- Pieces ------------------------------------------------------------- */
 
@@ -171,47 +210,6 @@ function parseJson(body: string): unknown {
   }
 }
 
-/**
- * A payload that was cut off, made readable up to the cut.
- *
- * The worker caps what it stores at 16k, so the long results — an attempt's
- * whole event log above all — reach the renderer as valid JSON with the end
- * sawn off. Parsing that fails, and a view handed nothing has no way to tell
- * "the tool returned nothing" from "I could not read this", which is how a
- * panel ends up stating the first when the second is true.
- *
- * So the half that did arrive is closed: cut back to the last value that
- * finished, then shut the brackets that were open at that point. Ten of twelve
- * events is the honest reading of a payload with ten complete events in it.
- */
-export function closeOff(body: string): string {
-  const stack: string[] = [];
-  let shut: string[] = [];
-  let end = -1;
-  let inString = false;
-  let escaped = false;
-
-  for (let index = 0; index < body.length; index += 1) {
-    const character = body[index];
-    if (inString) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === "\"") inString = false;
-      continue;
-    }
-    if (character === "\"") inString = true;
-    else if (character === "{" || character === "[") stack.push(character === "{" ? "}" : "]");
-    else if (character === "}" || character === "]") {
-      stack.pop();
-      /* A value just finished, and everything still open at this point is what
-         has to be closed to make the prefix whole. */
-      end = index;
-      shut = [...stack].reverse();
-    }
-  }
-  return end < 0 ? body : body.slice(0, end + 1) + shut.join("");
-}
-
 /** The same, narrowed to a tool's arguments. */
 function useObject(body: string): Record<string, unknown> | null {
   const parsed = useJson(body);
@@ -221,67 +219,7 @@ function useObject(body: string): Record<string, unknown> | null {
 /** The label above a field. One idiom for all of them, so a detail panel reads
  *  as one thing rather than as several. */
 function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pt-2 pb-1 text-thread font-medium tracking-wide text-muted-foreground uppercase">{children}</p>;
-}
-
-/**
- * Code, in the theme the editor uses.
- *
- * Capped by default and openable. A file the agent read can be four hundred
- * lines, and a transcript that grows by a screenful every time the agent looks
- * at something is a transcript nobody can scroll.
- */
-function Snippet({ body, language }: { body: string; language: string }) {
-  const { theme } = useCodeTheme();
-  const [spans, setSpans] = useState<Span[] | null>(null);
-  const [full, setFull] = useState(false);
-  const trimmed = body.replace(/\s+$/, "");
-  const lines = trimmed ? trimmed.split("\n").length : 0;
-
-  useEffect(() => {
-    let alive = true;
-    void highlight(trimmed, language).then((next) => {
-      if (alive) setSpans(next);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [trimmed, language]);
-
-  if (!trimmed) return null;
-
-  return (
-    <>
-      <pre
-        className={cn(
-          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-thread leading-[1.55]",
-          !full && lines > 14 && "max-h-[15.5rem] overflow-y-hidden",
-        )}
-        style={{ color: theme.slots.foreground }}
-      >
-        {/* Plain until the grammar resolves, so a long file is readable
-            immediately rather than blank for a beat. */}
-        <code>
-          {spans
-            ? spans.map((span, index) => (
-                <span key={index} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>
-                  {span.text}
-                </span>
-              ))
-            : trimmed}
-        </code>
-      </pre>
-      {lines > 14 && (
-        <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-thread text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => setFull((value) => !value)}
-          type="button"
-        >
-          {full ? "Collapse" : `Show all ${lines} lines`}
-        </button>
-      )}
-    </>
-  );
+  return <p className="px-2.5 pt-2 pb-1 text-[length:inherit] font-medium tracking-wide text-muted-foreground uppercase">{children}</p>;
 }
 
 /** Plain output — a command's, a page's. Same cap, no grammar. */
@@ -295,7 +233,7 @@ function Lines({ body }: { body: string }) {
     <>
       <pre
         className={cn(
-          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-thread leading-[1.55] whitespace-pre text-muted-foreground/90",
+          "app-scroll overflow-x-auto px-2.5 pb-2 font-mono text-[length:inherit] leading-[1.55] whitespace-pre text-muted-foreground/90",
           !full && lines > 14 && "max-h-[15.5rem] overflow-y-hidden",
         )}
       >
@@ -303,7 +241,7 @@ function Lines({ body }: { body: string }) {
       </pre>
       {lines > 14 && (
         <button
-          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-thread text-muted-foreground transition-colors hover:text-foreground"
+          className="mx-2.5 mb-2 cursor-default rounded-md bg-[var(--accent)] px-2 py-1 text-[length:inherit] text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => setFull((value) => !value)}
           type="button"
         >
@@ -335,14 +273,14 @@ function FileView({ body, path, wrote = false }: { body: string; path: string; w
           <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
         )}
         <button
-          className="min-w-0 truncate font-mono text-thread text-foreground/85 transition-colors hover:text-foreground hover:underline"
+          className="min-w-0 truncate font-mono text-[length:inherit] text-foreground/85 transition-colors hover:text-foreground hover:underline"
           onClick={() => onOpenFile?.(path)}
           title={`Open ${path}`}
           type="button"
         >
           {path}
         </button>
-        {wrote && <span className="shrink-0 text-thread text-muted-foreground">written</span>}
+        {wrote && <span className="shrink-0 text-[length:inherit] text-muted-foreground">written</span>}
       </div>
       <Snippet body={body} language={language ?? "text"} />
     </div>
@@ -353,7 +291,7 @@ function FileView({ body, path, wrote = false }: { body: string; path: string; w
  *  sort first — the service already returns them that way. */
 function Listing({ entries, where }: { entries: Entry[]; where: string }) {
   const { onOpenFile } = useMarkdownLinks();
-  if (entries.length === 0) return <p className="px-2.5 py-2 text-thread text-muted-foreground">Nothing in there.</p>;
+  if (entries.length === 0) return <p className="px-2.5 py-2 text-[length:inherit] text-muted-foreground">Nothing in there.</p>;
 
   return (
     <div className="min-w-0">
@@ -379,7 +317,7 @@ function Listing({ entries, where }: { entries: Entry[]; where: string }) {
                 ) : (
                   <span className="size-3.5 shrink-0" />
                 )}
-                <span className={cn("min-w-0 truncate font-mono text-thread", directory ? "text-foreground/70" : "text-muted-foreground")}>
+                <span className={cn("min-w-0 truncate font-mono text-[length:inherit]", directory ? "text-foreground/70" : "text-muted-foreground")}>
                   {name}
                   {directory && "/"}
                 </span>
@@ -405,12 +343,12 @@ function Command({ command, exitCode, output }: { command: string; exitCode: num
   return (
     <div className="min-w-0">
       <div className="flex min-w-0 items-start gap-1.5 px-2.5 pt-2 pb-1.5">
-        <span aria-hidden className="mt-px shrink-0 font-mono text-thread text-muted-foreground">
+        <span aria-hidden className="mt-px shrink-0 font-mono text-[length:inherit] text-muted-foreground">
           $
         </span>
-        <code className="min-w-0 flex-1 font-mono text-thread break-all text-foreground/85">{command}</code>
+        <code className="min-w-0 flex-1 font-mono text-[length:inherit] break-all text-foreground/85">{command}</code>
         {failed && (
-          <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--destructive)_16%,transparent)] px-1.5 py-px text-thread font-medium text-destructive">
+          <span className="shrink-0 rounded-full bg-[color-mix(in_oklab,var(--destructive)_16%,transparent)] px-1.5 py-px text-[length:inherit] font-medium text-destructive">
             exit {exitCode}
           </span>
         )}
@@ -418,7 +356,7 @@ function Command({ command, exitCode, output }: { command: string; exitCode: num
       {output.trim() ? (
         <Lines body={output} />
       ) : (
-        <p className="px-2.5 pb-2 text-thread text-muted-foreground">No output.</p>
+        <p className="px-2.5 pb-2 text-[length:inherit] text-muted-foreground">No output.</p>
       )}
     </div>
   );
@@ -449,10 +387,10 @@ function WebSearch({ query, result }: { query: string; result: unknown }) {
       <div className="flex min-w-0 items-center gap-2 px-2.5 pt-2.5 pb-1.5">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-[var(--accent)] px-2.5 py-1">
           <SearchMark className="size-3.5 shrink-0 text-muted-foreground/85 [&_*]:[stroke-width:1.8]" />
-          <span className="min-w-0 truncate text-thread text-foreground/90">{query}</span>
+          <span className="min-w-0 truncate text-[length:inherit] text-foreground/90">{query}</span>
         </span>
         {rows.length > 0 && (
-          <span className="shrink-0 text-thread tabular-nums text-muted-foreground">
+          <span className="shrink-0 text-[length:inherit] tabular-nums text-muted-foreground">
             {rows.length === 1 ? "1 result" : `${rows.length} results`}
           </span>
         )}
@@ -491,7 +429,7 @@ function WebPages({ result, urls }: { result: unknown; urls: string[] }) {
         </div>
       ))}
       {missing.map((url) => (
-        <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-thread text-muted-foreground" key={url}>
+        <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[length:inherit] text-muted-foreground" key={url}>
           <Favicon host={host(url)} />
           <span className="min-w-0 truncate">{host(url)} returned nothing to read.</span>
         </div>
@@ -520,14 +458,14 @@ function Result({ row }: { row: Record<string, unknown> }) {
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-baseline gap-1.5">
-          <span className="min-w-0 truncate text-thread text-foreground/90 group-hover/result:text-foreground">{title}</span>
+          <span className="min-w-0 truncate text-[length:inherit] text-foreground/90 group-hover/result:text-foreground">{title}</span>
         </span>
-        <span className="flex min-w-0 items-baseline gap-1.5 text-thread text-muted-foreground">
+        <span className="flex min-w-0 items-baseline gap-1.5 text-[length:inherit] text-muted-foreground">
           <span className="min-w-0 truncate">{host(url)}</span>
           {when && <span className="shrink-0">· {when}</span>}
         </span>
         {extract && (
-          <span className="mt-0.5 line-clamp-2 text-thread leading-[1.5] text-muted-foreground/80">{extract}</span>
+          <span className="mt-0.5 line-clamp-2 text-[length:inherit] leading-[1.5] text-muted-foreground/80">{extract}</span>
         )}
       </span>
     </button>
@@ -537,7 +475,7 @@ function Result({ row }: { row: Record<string, unknown> }) {
 /** A short aside in the detail panel: an Exa error, an unset key, an empty
  *  result. Said in a sentence, where the raw payload used to be. */
 function Note({ children }: { children: React.ReactNode }) {
-  return <p className="px-2.5 pb-2 text-thread leading-[1.5] text-muted-foreground/85">{children}</p>;
+  return <p className="px-2.5 py-2 text-[length:inherit] leading-[1.5] text-muted-foreground/85">{children}</p>;
 }
 
 /** The results out of a `WebSearchResult`, whichever shape the turn stored —
@@ -647,7 +585,7 @@ function TracedRun({ result }: { result: Record<string, unknown> }) {
           <Snippet body={text(result.setup)} language="python" />
         </>
       ) : null}
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-2.5 pt-2 pb-2 text-thread text-muted-foreground">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-2.5 pt-2 pb-2 text-[length:inherit] text-muted-foreground">
         {steps !== null && <span className="tabular-nums">{steps} steps</span>}
         {text(digest.returned) ? (
           <span>
@@ -662,15 +600,15 @@ function TracedRun({ result }: { result: Record<string, unknown> }) {
           <Eyebrow>What moved</Eyebrow>
           <div className="px-2.5 pb-2">
             {variables.slice(0, 8).map((variable, index) => (
-              <div className="flex min-w-0 items-baseline gap-2 py-px" key={index}>
-                <code className="shrink-0 font-mono text-thread text-foreground/85">{text(variable.name)}</code>
-                <span className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">
+              <div className="relative flex min-w-0 items-baseline gap-2 border-l border-border/70 py-1.5 pl-3 ml-1" key={index}>
+                <code className="shrink-0 font-mono text-[length:inherit] text-foreground/85">{text(variable.name)}</code>
+                <span className="min-w-0 flex-1 truncate font-mono text-[length:inherit] text-muted-foreground">
                   {text(variable.first)}
                   <span className="mx-1 text-muted-foreground/50">→</span>
                   {text(variable.last)}
                 </span>
                 {typeof variable.changes === "number" && variable.changes > 0 && (
-                  <span className="shrink-0 tabular-nums text-thread text-muted-foreground/60">
+                  <span className="shrink-0 tabular-nums text-[length:inherit] text-muted-foreground/60">
                     {variable.changes}×
                   </span>
                 )}
@@ -703,7 +641,7 @@ function FoundMoments({ args, result }: { args: Record<string, unknown>; result:
   return (
     <div className="min-w-0">
       {looked.length > 0 && (
-        <p className="px-2.5 pt-2 pb-1 text-thread text-muted-foreground">Looked for {looked.join(", ")}</p>
+        <p className="px-2.5 pt-2 pb-1 text-[length:inherit] text-muted-foreground">Looked for {looked.join(", ")}</p>
       )}
       {moments.length === 0 ? (
         <Note>{text(result.note) || "Nothing in the run matched."}</Note>
@@ -711,19 +649,19 @@ function FoundMoments({ args, result }: { args: Record<string, unknown>; result:
         <div className="px-2.5 pt-1 pb-2">
           {moments.slice(0, 12).map((moment, index) => (
             <div className="flex min-w-0 items-baseline gap-2 py-0.5" key={index}>
-              <span className="shrink-0 tabular-nums text-thread text-muted-foreground/60">
+              <span className="shrink-0 tabular-nums text-[length:inherit] text-muted-foreground/60">
                 {typeof moment.step === "number" ? moment.step : "—"}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="text-thread text-foreground/85">{text(moment.why)}</span>
+                <span className="text-[length:inherit] text-foreground/85">{text(moment.why)}</span>
                 {text(moment.source) ? (
-                  <code className="ml-2 font-mono text-thread text-muted-foreground/70">{text(moment.source)}</code>
+                  <code className="ml-2 font-mono text-[length:inherit] text-muted-foreground/70">{text(moment.source)}</code>
                 ) : null}
               </span>
             </div>
           ))}
           {moments.length > 12 && (
-            <p className="pt-1 text-thread text-muted-foreground/60">
+            <p className="pt-1 text-[length:inherit] text-muted-foreground/60">
               {moments.length - 12} more
             </p>
           )}
@@ -746,7 +684,7 @@ function ReadStep({ result }: { result: Record<string, unknown> }) {
 
   return (
     <div className="min-w-0">
-      <p className="px-2.5 pt-2 pb-1 text-thread text-muted-foreground">
+      <p className="px-2.5 pt-2 pb-1 text-[length:inherit] text-muted-foreground">
         <span className="tabular-nums">
           Step {result.step}
           {typeof result.of === "number" ? ` of ${result.of}` : ""}
@@ -759,7 +697,7 @@ function ReadStep({ result }: { result: Record<string, unknown> }) {
           <Eyebrow>Changed here</Eyebrow>
           <div className="px-2.5 pb-2">
             {changed.map((entry, index) => (
-              <p className="font-mono text-thread text-foreground/85" key={index}>{entry}</p>
+              <p className="font-mono text-[length:inherit] text-foreground/85" key={index}>{entry}</p>
             ))}
           </div>
         </>
@@ -769,9 +707,9 @@ function ReadStep({ result }: { result: Record<string, unknown> }) {
           <Eyebrow>In scope</Eyebrow>
           <div className="px-2.5 pb-2">
             {names.slice(0, 12).map((name) => (
-              <div className="flex min-w-0 items-baseline gap-2 py-px" key={name}>
-                <code className="shrink-0 font-mono text-thread text-foreground/85">{name}</code>
-                <code className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">{text(locals[name])}</code>
+              <div className="relative flex min-w-0 items-baseline gap-2 border-l border-border/70 py-1.5 pl-3 ml-1" key={name}>
+                <code className="shrink-0 font-mono text-[length:inherit] text-foreground/85">{name}</code>
+                <code className="min-w-0 flex-1 truncate font-mono text-[length:inherit] text-muted-foreground">{text(locals[name])}</code>
               </div>
             ))}
           </div>
@@ -799,16 +737,15 @@ function Attempt({ result }: { result: Record<string, unknown> }) {
 
   return (
     <div className="min-w-0">
-      {files.map((file, index) => (
-        <div className="min-w-0" key={text(file.path) || index}>
-          {index > 0 && <div className="mx-2.5 border-t border-border/60" />}
-          <FileView body={text(file.text)} path={text(file.path)} />
-        </div>
-      ))}
+      {files.length > 0 && <AttemptFiles files={files} />}
       {events.length > 0 && (
         <>
           {files.length > 0 && <div className="mx-2.5 border-t border-border/60" />}
-          <Eyebrow>{events.length === 1 ? "1 event" : `${events.length} events`}</Eyebrow>
+          <div className="flex items-center gap-1.5 px-2.5 pt-2.5 pb-1.5 text-muted-foreground">
+            <Clock3 aria-hidden className="size-3.5" />
+            <span className="font-medium">Activity</span>
+            <span className="ml-auto tabular-nums">{events.length} {events.length === 1 ? "event" : "events"}</span>
+          </div>
           {/* Held to a height. A long attempt is ninety events, and a panel that
               tall is one row pushing the rest of the turn off the screen — the
               same reason the thinking block inside a step is capped. */}
@@ -825,6 +762,33 @@ function Attempt({ result }: { result: Record<string, unknown> }) {
   );
 }
 
+function AttemptFiles({ files }: { files: Array<Record<string, unknown>> }) {
+  const [selected, setSelected] = useState("");
+  const value = files.some((file, index) => `${text(file.path)}:${index}` === selected)
+    ? selected : `${text(files[0]?.path)}:0`;
+
+  return (
+    <Tabs.Root value={value} onValueChange={setSelected}>
+      <Tabs.List aria-label="Solution files" className="app-scroll flex items-center gap-1 overflow-x-auto border-b border-border/60 p-1.5">
+        {files.map((file, index) => {
+          const path = text(file.path);
+          const tabValue = `${path}:${index}`;
+          return (
+            <Tabs.Trigger key={tabValue} value={tabValue} asChild>
+              <FileTab path={path} active={value === tabValue} className="text-[length:inherit]" />
+            </Tabs.Trigger>
+          );
+        })}
+      </Tabs.List>
+      {files.map((file, index) => (
+        <Tabs.Content key={`${text(file.path)}:${index}`} value={`${text(file.path)}:${index}`} className="min-w-0 pt-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring">
+          <Snippet body={text(file.text)} language={languageForPath(text(file.path)) ?? "text"} />
+        </Tabs.Content>
+      ))}
+    </Tabs.Root>
+  );
+}
+
 /** One recorded event: when it happened, what kind it was, and the one thing
  *  about it worth reading. The offset rather than the clock time — an attempt is
  *  read as a stretch of work, and 4:12 into it says something 14:06:22 does not. */
@@ -833,16 +797,17 @@ function Moment({ event, since }: { event: Record<string, unknown>; since: numbe
   const kind = text(event.type);
 
   return (
-    <div className="flex min-w-0 items-baseline gap-2 py-px">
-      <span className="w-12 shrink-0 text-right font-mono text-thread whitespace-nowrap tabular-nums text-muted-foreground/70">{offset(text(event.occurredAt), since)}</span>
-      <span className={cn("shrink-0 text-thread", kind === "test_run" && !payload.passed ? "text-[var(--warning)]" : "text-foreground/85")}>{MOMENT[kind] ?? kind.replace(/_/g, " ")}</span>
-      <span className="min-w-0 flex-1 truncate font-mono text-thread text-muted-foreground">{momentDetail(kind, payload)}</span>
+    <div className="relative flex min-w-0 items-baseline gap-2 border-l border-border/70 py-1.5 pl-3 ml-1">
+      <span aria-hidden className="absolute -left-[3px] top-[0.9em] size-[5px] rounded-full bg-muted-foreground/50" />
+      <span className={cn("shrink-0 text-[length:inherit]", kind === "test_run" && !payload.passed ? "text-[var(--warning)]" : "text-foreground/85")}>{MOMENT[kind] ?? kind.replace(/_/g, " ")}</span>
+      <span className="min-w-0 flex-1 truncate font-mono text-[length:inherit] text-muted-foreground">{momentDetail(kind, payload)}</span>
+      <span className="shrink-0 font-mono tabular-nums text-muted-foreground/70">{offset(text(event.occurredAt), since)}</span>
     </div>
   );
 }
 
 const MOMENT: Record<string, string> = {
-  attempt_started: "opened",
+  attempt_started: "Attempt opened",
   file_changed: "edited",
   command_executed: "ran",
   test_run: "tested",
@@ -920,9 +885,9 @@ function Patches({ patches }: { patches: unknown }) {
         <div className="min-w-0" key={index}>
           {index > 0 && <div className="mx-2.5 border-t border-border/60" />}
           <div className="flex min-w-0 items-baseline gap-1.5 px-2.5 pt-2 pb-1">
-            <span className="shrink-0 text-thread text-foreground/85">{memoryLabel(text(row.file)) || "Memory"}</span>
-            <span className="shrink-0 text-thread text-muted-foreground">{PATCH_MODE[text(row.mode)] ?? PATCH_MODE.append}</span>
-            {text(row.reason) && <span className="min-w-0 truncate text-thread text-muted-foreground">· {text(row.reason)}</span>}
+            <span className="shrink-0 text-[length:inherit] text-foreground/85">{memoryLabel(text(row.file)) || "Memory"}</span>
+            <span className="shrink-0 text-[length:inherit] text-muted-foreground">{PATCH_MODE[text(row.mode)] ?? PATCH_MODE.append}</span>
+            {text(row.reason) && <span className="min-w-0 truncate text-[length:inherit] text-muted-foreground">· {text(row.reason)}</span>}
           </div>
           <Lines body={text(row.content)} />
         </div>
@@ -945,13 +910,17 @@ function Patches({ patches }: { patches: unknown }) {
  * answer was not one of them — offering "A / B" above an answer of "A" is the
  * interface saying the same thing twice.
  */
-function Exchange({ answer, choices, question }: { answer: string; choices: string[]; question: string }) {
+export function Exchange({ answer, choices, question }: { answer: string; choices: string[]; question: string }) {
   const chosen = choices.some((choice) => choice.toLowerCase() === answer.trim().toLowerCase());
   const spare = chosen ? [] : choices;
 
   return (
-    <div className="min-w-0 px-2.5 py-2">
-      <p className="text-thread leading-[1.55] text-foreground/90">
+    <div className="min-w-0">
+      {/* The question at the weight the agent asked it in. It used to be drawn
+          at payload size inside the machine panel, which put a sentence written
+          for the reader in the one place in a row reserved for data — and made
+          it the smallest text on screen at the moment the turn stopped for it. */}
+      <p className="text-thread leading-[1.55] font-medium text-foreground">
         <Inline text={question} />
       </p>
 
@@ -960,7 +929,7 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
           {spare.map((choice, index) => (
             <li
               key={`${choice}-${index}`}
-              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-thread text-muted-foreground/80"
+              className="rounded-[var(--radius-item)] bg-[color-mix(in_oklab,var(--foreground)_4%,transparent)] px-1.5 py-[2px] text-thread-tool text-muted-foreground/80"
             >
               <Inline text={choice} />
             </li>
@@ -968,28 +937,19 @@ function Exchange({ answer, choices, question }: { answer: string; choices: stri
         </ul>
       )}
 
+      {/* The answer sits where a learner message sits in the thread. This is a
+          record of what they chose, so it should be readable without opening
+          JSON or mistaking the reply for another agent step. */}
       {answer ? (
-        <p className="mt-2 border-l border-border/70 pl-2.5 text-thread leading-[1.55] whitespace-pre-wrap text-foreground">
-          <Inline text={answer} />
-        </p>
+        <div className="mt-2 flex min-w-0 justify-end">
+          <p className="max-w-[85%] min-w-0 rounded-[calc(1rem*1.4)] bg-secondary px-3 py-2 text-thread leading-[1.5] text-foreground whitespace-pre-wrap [corner-shape:superellipse(1.4)]">
+            <Inline text={answer} />
+          </p>
+        </div>
       ) : (
         /* The row is open while the card below it is still waiting. */
-        <p className="mt-2 text-thread text-muted-foreground/85">Waiting for your answer.</p>
+        <p className="mt-1 text-thread text-muted-foreground/70">Waiting for your answer.</p>
       )}
     </div>
   );
-}
-
-/** The learner's answer as they typed it. The worker stores tool results as
- *  strings, and a string result arrives JSON-quoted; anything else is already
- *  the text. */
-function answerText(output: string): string {
-  const body = output.trim();
-  if (!body.startsWith('"')) return body;
-  try {
-    const parsed: unknown = JSON.parse(body);
-    return typeof parsed === "string" ? parsed : body;
-  } catch {
-    return body;
-  }
 }

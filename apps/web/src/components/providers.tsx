@@ -209,10 +209,9 @@ const GLYPHS = {
 
 export type ProviderId = keyof typeof GLYPHS;
 
-/** The desktop app's `PROVIDER_BRAND_COLOR`, same values. */
+/** The desktop app's `PROVIDER_BRAND_COLOR`, same values — OpenAI's absence
+ *  included: its current mark is monochrome and inherits the foreground. */
 const BRAND_COLOR: Partial<Record<ProviderId, string>> = {
-  "openai": "#10a37f",
-  "openai-codex": "#10a37f",
   "claude-code": "#d97757",
   "google": "#4285f4",
   "openrouter": "#94a3b8",

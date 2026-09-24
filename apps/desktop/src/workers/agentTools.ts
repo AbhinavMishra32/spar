@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
-import { askUserQuestionInputSchema, languageSchema } from "@spar/domain";
+import { askUserQuestionInputSchema, languageSchema, lessonInputSchema } from "@spar/domain";
 import { PRACTICE_READ_TOOLS } from "@spar/practice/mcp";
 import { ACTION_TITLE_KEY } from "./toolPayload.js";
 import { syntheticChallengeAuthoringDoctrine } from "./challengeAuthoring.js";
@@ -32,7 +32,18 @@ const conceptTagInputSchema=z.object({
   parentSlug:z.string().min(2).max(60).optional().describe("the area a new sub-concept belongs under, e.g. sliding-window"),
   role:z.enum(["primary","supporting"]).default("supporting"),
 });
-const questionInputSchema=z.object({ concepts:z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."),title:z.string().min(3).describe("A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."),language:languageSchema,kind:z.enum(["function","module","repair","extension","repository"]),difficulty:z.enum(["foundation","developing","proficient","advanced"]),statement:z.string().min(30).describe("The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details."),starterFiles:z.record(z.string()),referenceFiles:z.record(z.string()),visibleTests:z.record(z.string()).describe("The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here."),hiddenTests:z.record(z.string()).describe("The grader. It must run at least twenty-four cases, which means a generated sweep and not a longer list typed out: loop over inputs from a seeded pseudo-random generator, compute each expected answer with a brute-force oracle written inside the test file itself, and emit one verdict line per case whose name contains the actual input. Keep your targeted cases for the known misconceptions alongside it. On failure every case must print its input, expected and actual — the learner cannot see this file, so a failure that does not say what it ran leaves them guessing."),knownIncorrectFiles:z.array(z.record(z.string())).min(1),runCommand:z.string().min(1),accidentalDifficulty:z.array(z.string()).max(3),expectedFailureSignatures:z.array(z.string()).min(1),solutionRequirements:z.array(z.string().min(4).max(160)).max(4).optional().describe("How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely.") });
+const questionInputSchema=z.object({ concepts:z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."),title:z.string().min(3).describe("A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."),language:languageSchema,kind:z.enum(["function","module","repair","extension","repository"]),difficulty:z.enum(["foundation","developing","proficient","advanced"]).describe("How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Use context.learnerStanding.writeProblemsAt as evidence, then choose the level that serves your teaching purpose. Explain a surprising choice when it matters."),requiresComplexityAnalysis:z.boolean().describe("Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence."),statement:z.string().min(30).describe("The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details."),starterFiles:z.record(z.string()),referenceFiles:z.record(z.string()),visibleTests:z.record(z.string()).describe("The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here."),hiddenTests:z.record(z.string()).describe("The grader. It must run at least twenty-four cases, which means a generated sweep and not a longer list typed out: loop over inputs from a seeded pseudo-random generator, compute each expected answer with a brute-force oracle written inside the test file itself, and emit one verdict line per case whose name contains the actual input. Keep your targeted cases for the known misconceptions alongside it. On failure every case must print its input, expected and actual — the learner cannot see this file, so a failure that does not say what it ran leaves them guessing."),knownIncorrectFiles:z.array(z.record(z.string())).min(1),runCommand:z.string().min(1),accidentalDifficulty:z.array(z.string()).max(3),expectedFailureSignatures:z.array(z.string()).min(1),solutionRequirements:z.array(z.string().min(4).max(160)).max(4).optional().describe("How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely.") });
+const authoredQuestionInputSchema = questionInputSchema.extend({
+  why: z.string().min(10).max(500).describe("Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."),
+  runCommand: z.string().min(1).describe("A descriptive command for the challenge. The host uses its fixed language runner for validation and learner tests; this value cannot select pytest or change execution. Python test files execute directly with python3 and must call any defined test functions themselves."),
+  hiddenTests: z.record(z.string()).describe("The unseen grading contract. For a function, execute at least twenty-four cases, preferably a seeded sweep checked against a simple oracle. For a module, execute at least twelve cases. For a repair, extension, or repository task, execute at least eight meaningful scenarios covering the defect, boundaries, and interactions. Emit one verdict per case and show input, expected, and actual on failure. Choose the tests that prove this task, rather than padding case counts."),
+  trainingTarget: z.object({
+    ability: z.string().min(2),
+    specificGap: z.string().min(8),
+    desiredEvidence: z.string().min(8),
+    avoidTesting: z.array(z.string()),
+  }).optional().describe("Only when this candidate changes what the learner is practicing: persist a corrected evidence target with the question. Use this when the previous target is stale or contradicted by a passed challenge. Omit it to retain the current target."),
+});
 /**
  * What turns an ability document into an Ability the learner has. The markdown is
  * the agent's working notes; these three are the claim it supports — one sentence
@@ -50,8 +61,8 @@ const abilityClaimShape = {
 } as const;
 
 export const toolDefinitions = {
-  search_learner_model: ["Search focused learner-model passages relevant to a query.", z.object({ query: z.string(), limit: z.number().int().min(1).max(8).default(4) })],
-  read_ability: ["Read one versioned ability document.", z.object({ abilityId: z.string().uuid() })],
+  search_learner_model: ["Search this learner's memory at three resolutions at once: the ability documents (`passages`, the standing claims), the mistake patterns open under them, and the individual behavioural observations recorded from past attempts. The last two are your own earlier readings of this person — find the hypothesis you wrote before, and one matching observation now promotes it to a pattern instead of being written down a second time.", z.object({ query: z.string(), limit: z.number().int().min(1).max(8).default(4) })],
+  read_ability: ["Read one versioned ability document, with the mistake patterns filed under it and its most recent behavioural evidence. The markdown is the claim; the patterns are what is still open about it. Read both before proposing an update — an update written from the document alone can only restate it.", z.object({ abilityId: z.string().uuid() })],
   search_attempt_history: ["Search attempts by ability or failure signature.", z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) })],
   search_challenge_history: ["Search the learner's durable challenge library, including outcomes and replacement lineage.", z.object({ query:z.string(),limit:z.number().int().min(1).max(12).default(6) })],
   read_challenge: ["Read one stored challenge design, validation report, attempts, and test history.", z.object({ questionId:z.string().uuid() })],
@@ -61,20 +72,29 @@ export const toolDefinitions = {
      for looking up answers, which the host compiler decides anyway. */
   web_search: ["Search the web for current, external information: what a company's interviews actually cover, what a library's current API is, what a topic's standard formulation is. Returns titles, URLs, and short extracts. Use it to ground a goal in reality when the learner's own record cannot answer the question, and prefer one focused query over several vague ones.", z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(10).default(5) })],
   web_fetch: ["Read one or more web pages in full, by URL. Use it after web_search has told you which page is worth reading. http and https only.", z.object({ urls: z.array(z.string().url()).min(1).max(5) })],
-  read_attempt: ["Read a focused attempt trace.", z.object({ attemptId: z.string().uuid() })],
   read_session: ["Read the current session summary and decisions.", z.object({ sessionId: z.string().uuid() })],
   read_concept_graph: ["Read the concept vocabulary near a topic, with this learner's evidence against each one. Use it to choose what to tag and what to test next.", z.object({ query: z.string().optional(), limit: z.number().int().min(1).max(24).default(14) })],
   search_concept_evidence: ["Read how this learner behaves under one concept, broken down by sub-concept, with the recent challenges and outcomes behind it. This is the tool for finding which specific sub-concept is failing inside an area that looks fine on average.", z.object({ concept: z.string().min(2).describe("a concept slug or a topic in words"), limit: z.number().int().min(1).max(6).default(3) })],
   ask_user_question: ["Suspend the session for one focused learner answer. Offer 2-3 mutually exclusive choices. Each option is one self-contained line the learner can scan — no subtitle, no second sentence — so write the whole choice into the label. Always allow a custom answer.", askUserQuestionInputSchema],
   set_session_objective: ["Persist a lightweight session objective.", z.object({ objective: z.string() })],
   set_training_target: ["Persist one primary evidence target.", z.object({ ability: z.string(), specificGap: z.string(), desiredEvidence: z.string(), avoidTesting: z.array(z.string()) })],
-  create_question: ["Compile and validate a complete question from the active target. All paths are relative and the reference implementation must replace starter implementation files.", questionInputSchema],
-  replace_current_question: ["Compile a validated replacement for the active challenge while preserving its attempt, tests, and replacement lineage in history.", questionInputSchema.extend({reason:z.string().min(3).max(500)})],
-  inspect_current_attempt: ["Read the learner's code as it stands right now, with the attempt's events, diffs, test runs and submission evidence. This is the cheap first look: when the question is what they wrote or why a case fails, read this before reaching for the tracer — a trace is a whole program run and costs far more than a file that already says it.", z.object({ attemptId: z.string().uuid() })],
-  replay_attempt: [
-    "Read the attempt's own log: every recorded event in order — edits, runs, submissions, verdicts — with its offset from when the attempt opened, plus one line per test case inside every run with its expected/actual values. Nothing in it is summarised or interpreted; it is what was recorded. Two derived sections come with it because a log in order cannot show them: each case's verdict across every run (a transpose) and each run's newly-passing and newly-failing cases (a diff). Take the whole log when the attempt is small — that is the default — and use the parameters to narrow it when it is long or when you only need one metric. This is the sharpest instrument you have for aiming the next question: a 6/7 reached by fixing one case in ninety seconds and a 6/7 reached by breaking two others are different learners.",
+  create_question: ["Review fit against recent solved work, then compile and validate a complete question. A new trainingTarget can be supplied with the candidate when the existing one is stale. The host repairs recoverable validation failures within this call. All paths are relative and the reference implementation must replace starter implementation files.", authoredQuestionInputSchema],
+  replace_current_question: ["Review fit and compile a validated replacement for the active challenge while preserving its attempt and replacement lineage. Supply a corrected trainingTarget when the existing one no longer describes this task.", authoredQuestionInputSchema.extend({reason:z.string().min(3).max(500)})],
+  /**
+   * One attempt, read once.
+   *
+   * This was four tools. `inspect_current_attempt` and `read_attempt` were the
+   * same host handler under two names, `evaluate_attempt` was that handler's
+   * events with the files left off, and `replay_attempt` was the same attempt
+   * with its log folded — so an agent asked "how am I doing" spent its whole
+   * budget on each of them in turn and the learner watched nine rows go by for
+   * one act of reading their code. A question with one answer gets one tool.
+   */
+  read_attempt: [
+    "Read an attempt's current code, deterministic runner verdict, and recorded solve history. The runner is the authority on correctness. Returns the complete report and source files, plus a sequence-to-event-ID index for ability evidence. Payloads are represented once in the report instead of duplicated as raw events. Start with one call and work from that evidence. Use sections, eventTypes, cases or scope when you want a focused view.",
     z.object({
-      attemptId: z.string().uuid(),
+      attemptId: z.string().uuid().optional()
+        .describe("Omit for the attempt the learner has open right now, which is almost always the one you mean. Name one only to read a different attempt out of their history."),
       sections: z.array(z.enum(["log", "cases", "runs", "timings"])).min(1).max(4).optional()
         .describe("log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs."),
       eventTypes: z.array(z.string().min(3).max(40)).max(12).optional()
@@ -84,10 +104,34 @@ export const toolDefinitions = {
       scope: z.enum(["all", "since-last-submission"]).optional()
         .describe("`since-last-submission` keeps only what happened after the last graded run, which is often the whole question on a follow-up turn."),
       caseDetail: z.enum(["brief", "full"]).optional().describe("`brief` drops the expected/actual pair from each failing case line in the log. Default full."),
-      maxLines: z.number().int().min(20).max(2_000).optional().describe("Cap on log lines, newest kept, and it says how many it dropped. Default 400. Raise it rather than guessing at what a truncated log left out."),
+      maxLines: z.number().int().min(20).max(2_000).optional().describe("Cap on log lines, newest kept, and it says how many it dropped. Omit to return all log lines. Only applies when explicitly requested."),
     }),
   ],
-  evaluate_attempt: ["Read the already-recorded deterministic runner outcome and evidence. Never judge correctness with the model.", z.object({ attemptId: z.string().uuid() })],
+  /**
+   * The learner's submissions, as things that can be pointed at.
+   *
+   * `read_attempt` already returns the whole solve, and this is not a second
+   * copy of it. It answers a different question: not "how did this attempt go"
+   * but "what did they actually send, and when" — every submission at a
+   * challenge, in order, each with an id that a reply can cite. A sentence like
+   * "your second submission fixed the empty case but broke the duplicate one" is
+   * only worth writing if the learner can open the thing it names.
+   *
+   * Summaries by default because a challenge can hold ten submissions and each
+   * one carries a whole solution. Name one to read its code and its case grid.
+   */
+  read_submissions: [
+    "Read what the learner actually submitted at a challenge, in order. Without `submissionId` it returns every submission's verdict and case counts — this is the tool for \"what have they tried\", for seeing whether they converged or thrashed, and for finding which submission a question is about. With `submissionId` it returns that one in full: the exact code that was sent and every case it was graded on, including the inputs and expected/actual values of the ones that failed. Cite any submission you refer to as [[submission:<id>|a few words]] so the learner can open it — never quote its id in your prose.",
+    z.object({
+      challengeId: z.string().uuid().optional()
+        .describe("The challenge whose submissions to list. Omit for the one the learner has open right now."),
+      submissionId: z.string().uuid().optional()
+        .describe("One submission, in full, with its code and cases. Take the id from a previous listing."),
+      outcome: z.enum(["all", "passed", "failed"]).optional()
+        .describe("Narrow the listing. `failed` is the record of what they tried and why it was wrong, which is usually the interesting half."),
+      limit: z.number().int().min(1).max(40).default(20).describe("How many submissions to return. The list reads oldest first and a longer history is cut from the front, so the cap keeps the most recent and the ordinals stay absolute."),
+    }),
+  ],
   /**
    * The one judgement about the solution that the tests cannot make.
    *
@@ -104,7 +148,18 @@ export const toolDefinitions = {
     approach: z.string().min(10).max(300).describe("What they actually did, in one sentence, in their own terms."),
     reasons: z.array(z.string().min(8).max(220)).max(4).describe("For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner."),
   })],
-  propose_ability_update: ["Propose a versioned markdown ability change backed by evidence. Include summary, concepts and practice whenever the evidence now supports naming this as something the learner can do.", z.object({ abilityId: z.string().uuid(), markdown: z.string(), evidenceEventIds: z.array(z.string().uuid()), ...abilityClaimShape })],
+  /**
+   * `evidence` is required here and optional on `upsert_ability`, and the
+   * difference is the turn each one runs on.
+   *
+   * This is the attempt-complete write: there is a graded attempt behind it, so
+   * there is always something specific to say about what the learner actually
+   * did. Left optional, the host fell back to synthesising one row per linked
+   * event with the outcome as its polarity and a generic sentence as its
+   * statement — which is the whole finding flattened back to passed or failed,
+   * on the one turn that had the replay in hand to say better.
+   */
+  propose_ability_update: ["Propose a versioned markdown ability change backed by evidence. Include summary, concepts and practice whenever the evidence now supports naming this as something the learner can do.", z.object({ abilityId: z.string().uuid(), markdown: z.string(), evidenceEventIds: z.array(z.string().uuid()), ...abilityClaimShape, evidence: abilityClaimShape.evidence.unwrap().min(1).describe("Nuanced interpretations of exact durable events, at least one. Describe the behavior observed, not a score: which step of the idea held and which did not, and whether it held again on the second occasion. \"Failed the window question\" is not an interpretation of anything.") })],
   upsert_ability: ["Introduce an uncertain ability, or grant one: append an evidence-backed version and give it the summary, concepts and practice drills that make it something the learner can see and train.", z.object({title:z.string().min(2).max(120),markdown:z.string().min(20),evidenceEventIds:z.array(z.string().uuid()).default([]), ...abilityClaimShape})],
   commit_session_decision: ["Commit exactly one next pedagogical action.", z.object({ action: z.enum(["diagnose", "teach", "practise", "transfer", "advance", "retain"]), reason: z.string() })],
   /**
@@ -158,6 +213,35 @@ export const toolDefinitions = {
     }),
   ],
   /**
+   * Teaching, as something the agent can hand over.
+   *
+   * Everything Spar could produce durably was a challenge. An idea the learner
+   * was missing could only be handled inside a reply — and a reply is three
+   * screens up by the next turn, cannot be pointed at, cannot be reopened, and
+   * is gone from the agent's own view of what this learner has been told. So the
+   * turn that noticed the gap either wrote an essay nobody would return to, or
+   * skipped the explaining and set another problem. That second behaviour is
+   * what this exists to end.
+   *
+   * The schema is the domain's, unchanged, so the pages the agent sends are the
+   * pages the store keeps and the reader draws — there is no second definition
+   * of what a lesson is to drift from this one.
+   *
+   * Depth is deliberately not a parameter. An agent given a `depth` enum picks
+   * the middle one every time; an agent given a page budget and told what a page
+   * is for writes two pages for a small idea, because there were only two things
+   * to say.
+   */
+  teach_lesson: [
+    "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem — the concept their attempt showed they are missing, a topic they asked about, the thing the next challenge is going to need. A request to clarify an existing explanation can be answered directly in chat; do not create another lesson merely to repeat it. Scale a new lesson to what is actually being taught: one or two pages for a single misconception, more only when the idea genuinely has that many parts. For a new mechanism, start with a tiny input, show each state change and why it happens, then name the invariant; defer complexity until the mechanism is clear. Each page is one thing, in their language, short enough to hold in mind at once; the body is markdown, may use fenced code, and may reference a concept as [[concept:slug|words]] or an earlier lesson as [[lesson:id|words]] exactly as a reply can. Every entry in `references` says why it is worth their time: use `url` only for a page you actually fetched this turn or know to exist, `reading` for a book or chapter you are naming from memory, and `concept`/`lesson` for Spar's own records. Tag `concepts` in the same vocabulary you tag challenges with, primary first. When you make a lesson, point at it as [[lesson:<the id this returns>|its title]] and give a brief concrete starting point in your reply.",
+    lessonInputSchema,
+  ],
+  /** One lesson, back in full, for the turn that has to build on what was said in
+   *  it rather than teach the same ground twice under a new title. */
+  read_lesson: ["Read one lesson you have already taught: its pages, its takeaways and its reading list. Use it before teaching near something in your context's recentLessons, so the new lesson continues that one instead of repeating it, and before claiming you taught something specific, so what you say you showed them is what you showed them.", z.object({ lessonId: z.string().uuid() })],
+  /** The search that stops the same idea being taught twice. */
+  search_lessons: ["Search what Spar has already taught this learner, by topic or concept. Cite what comes back with [[lesson:id|title]] rather than explaining it again.", z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(12).default(6) })],
+  /**
    * Setting a real problem instead of writing one.
    *
    * The counterpart to `create_question`, and the reason the source exists. What
@@ -167,12 +251,12 @@ export const toolDefinitions = {
    * statement about why, and the ledger would gain a challenge nobody can explain.
    */
   assign_practice_problem: [
-    "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Prefer this over create_question whenever a real problem genuinely lands on the target you chose: it carries the provider's judge, calibrated difficulty, and the learner's history when that provider is connected. Read it first. The host mounts it, tags it with the concepts you name, and returns the challenge; do not describe its contents in your reply because the learner is about to read it.",
+    "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. Use learnerStanding.setProblemsRated as context, then decide what level serves this step. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
     z.object({
       source: z.enum(["leetcode", "codeforces"]).describe("The provider identity returned by search. A slug is only unique inside its provider."),
       slug: z.string().min(1).max(120).describe("The problem's URL slug, exactly as the source gave it."),
-      concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and it must name the gap the target describes — not merely the topic the source files the problem under."),
-      why: z.string().min(20).max(400).describe("One or two sentences: why this specific problem discriminates what is still uncertain about this learner. This is stored with the challenge and is what a later turn reads to know what you were testing."),
+      concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and names what this problem actually exercises. A prerequisite or transfer problem can use a different concept from the current target; explain the connection in your reply."),
+      why: z.string().min(20).max(400).describe("One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns."),
       language: languageSchema.optional().describe("The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn."),
       replaceReason: z.string().min(3).max(500).optional().describe("Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."),
     }),
@@ -222,7 +306,7 @@ export function withActionTitle(schema: z.ZodTypeAny): z.ZodTypeAny {
  * Schema on the wire — and it used `zod-to-json-schema` to do it. So does this,
  * at the version Mastra pinned, which is why the output is byte-identical to
  * what the agent sent before the migration rather than merely equivalent to it.
- * agentTools.test.ts holds Mastra's own output and checks all thirty-five.
+ * agentTools.test.ts holds Mastra's own output and checks every one of them.
  *
  * `parse` comes along because the schema cannot carry everything zod knows.
  * A JSON Schema validator checks a value; zod also *produces* one, filling in

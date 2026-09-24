@@ -19,9 +19,12 @@ export const LANGUAGE_BRAND_COLOR: Record<Language, string> = {
   go:"#00add8",rust:"#b7410e",swift:"#f05138",ruby:"#cc342d",
 };
 
+/* OpenAI is absent on purpose: the teal of the old blossom mark is not the
+   brand's colour any more — the current mark is monochrome, and stamping the
+   retired green on it is the kind of detail that dates a UI. It inherits the
+   foreground instead, so it is white on the dark theme and near-black on the
+   light one, which is how OpenAI itself draws it. */
 export const PROVIDER_BRAND_COLOR: Partial<Record<ProviderId, string>> = {
-  openai: "#10a37f",
-  "openai-codex": "#10a37f",
   "claude-code": "#d97757",
   google: "#4285f4",
   openrouter: "#94a3b8",

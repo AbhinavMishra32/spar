@@ -1,12 +1,12 @@
-import { Fragment, memo, useEffect, useMemo, useState } from "react";
+import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useCodeTheme } from "@/hooks/use-code-theme";
 import { highlight, type Span } from "@/lib/highlight";
 import { plainMath } from "@/lib/tex";
-import { Check, Copy } from "lucide-react";
+import { Check, Code2, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { parseReference, Reference, useMarkdownLinks } from "./MarkdownLinks";
-import { parse, type Block } from "./markdownBlocks";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
+import { parseReference, Reference, REFERENCE_KINDS, useMarkdownLinks } from "./MarkdownLinks";
+import { parse, type Block } from "./markdownBlocks";
 
 /** Inline spans: `code`, **bold**, *italic*, and real links.
  *
@@ -14,6 +14,13 @@ import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
  *  question the agent asks is written in the same language as the message
  *  before it, references and all, and rendering it as a bare string is what
  *  made `[[file:main.py|main.py]]` show up literally in the question card. */
+/* Everything the inline tokeniser matches after a reference, in one string so
+   the reference kinds can be interpolated in front of it. A double-quoted
+   string rather than a template literal because one of these rules is the code
+   span, and a backtick cannot be escaped into a template. */
+const INLINE_RULES =
+  "|(\\[[^\\]\\n]*\\]\\((?:https?:\\/\\/|mailto:)[^\\s)]+\\))|(`[^`]+`)|(\\*\\*[^*]+\\*\\*)|(\\*[^*]+\\*)|(_[^_]+_)|(https?:\\/\\/[^\\s<>()[\\]\"']+)";
+
 export function Inline({ text }: { text: string }) {
   const nodes = useMemo(() => {
     /* References first, so a `[[file:a_b.c|x]]` is not torn apart by the
@@ -27,8 +34,7 @@ export function Inline({ text }: { text: string }) {
        `[SolveWithPython version](https://…)` — which is the one thing a reader
        cannot use: the link is right there and unclickable, and the URL is
        spelled out in the middle of a sentence. */
-    const pattern =
-      /(\[\[(?:concept|file):[^\]]+\]\])|(\[[^\]\n]*\]\((?:https?:\/\/|mailto:)[^\s)]+\))|(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)|(https?:\/\/[^\s<>()[\]"']+)/g;
+    const pattern = new RegExp(`(\\[\\[(?:${REFERENCE_KINDS.join("|")}):[^\\]]+\\]\\])${INLINE_RULES}`, "g");
     const result: Array<{ key: string; node: React.ReactNode }> = [];
     let cursor = 0;
     let match: RegExpExecArray | null;
@@ -182,62 +188,117 @@ function InlineCode({ body }: { body: string }) {
  * elements rather than as HTML — there is no markup to inject, only text and a
  * colour.
  */
-function Colorized({ body, language }: { body: string; language: string }) {
+function Colorized({ body, language, follow = false, className }: { body: string; language: string; follow?: boolean; className?: string }) {
   const { theme } = useCodeTheme();
-  const [spans, setSpans] = useState<Span[] | null>(null);
+  const [colored, setColored] = useState<{ body: string; spans: Span[] } | null>(null);
+  const pre = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
     let alive = true;
-    void highlight(body, language).then((next) => { if (alive) setSpans(next); });
+    void highlight(body, language).then((next) => { if (alive) setColored({ body, spans: next }); });
     return () => { alive = false; };
   }, [body, language]);
 
+  /* A block still being written keeps its colours while the next pass runs:
+     the part already highlighted stays as it was and only the new tail is plain,
+     so streaming code does not flash grey on every delta. */
+  const spans = useMemo(() => {
+    if (!colored) return null;
+    if (colored.body === body) return colored.spans;
+    if (body.startsWith(colored.body)) return [...colored.spans, { text: body.slice(colored.body.length), slot: null }];
+    return null;
+  }, [body, colored]);
+
+  useLayoutEffect(() => {
+    /* Glides to the newest line rather than snapping, so the eye can stay on
+       the line being written instead of refinding it after every delta. */
+    if (follow && pre.current) pre.current.scrollTo({ top: pre.current.scrollHeight, behavior: "smooth" });
+  }, [body, follow]);
+
+  const lines = useMemo(() => {
+    const result: Span[][] = [[]];
+    for (const span of spans ?? [{ text: body, slot: null }]) {
+      span.text.split("\n").forEach((text, index) => {
+        if (index > 0) result.push([]);
+        result[result.length - 1]!.push({ ...span, text });
+      });
+    }
+    // The closing fence's newline is not an extra source line.
+    if (body.endsWith("\n") && result.length > 1) result.pop();
+    return result;
+  }, [body, spans]);
+
   return (
-    <pre className="app-scroll overflow-x-auto px-2.5 py-2 text-thread leading-[1.55] text-[var(--code-foreground)]">
-      {/* Plain until the grammar resolves, so a block that is still streaming is
-          readable rather than blank. Rendered as elements rather than as HTML —
-          there is no markup to inject, only text and a colour. */}
+    <pre className={cn("code-block-body app-scroll text-thread text-[var(--code-foreground)]", className)} ref={pre} tabIndex={0} aria-label={`${language || "Plain text"} code`}>
       <code>
-        {spans
-          ? spans.map((span, index) => (
-              <span key={index} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>
-                {span.text}
-              </span>
-            ))
-          : body}
+        {lines.map((line, index) => (
+          <span className="code-block-line" key={index}>
+            {line.map((span, token) => (
+              <span key={token} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>{span.text}</span>
+            ))}
+            {index < lines.length - 1 ? "\n" : null}
+          </span>
+        ))}
       </code>
     </pre>
   );
 }
 
 function CodeBlock({ language, body }: { language: string; body: string }) {
-  const [copied, setCopied] = useState(false);
-  // A fence can say anything — `bash`, `json`, `text`. Only the three Construct trains
-  // in have a mark; the rest keep the tag they were written with.
   const marked = languageOf(language);
-  const copy = () => {
-    void navigator.clipboard.writeText(body).then(() => {
+  const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+  const reset = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (reset.current) clearTimeout(reset.current); }, []);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(body);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1400);
-    });
+      setCopyError(false);
+      if (reset.current) clearTimeout(reset.current);
+      reset.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopyError(true);
+    }
   };
 
+
   return (
-    <div className="code-block group/code my-2 overflow-hidden">
-      <div className="flex h-7 items-center justify-between border-b border-border/70 px-2.5">
-        {marked
-          ? <LanguageGlyph className="size-3 text-muted-foreground" language={marked} />
-          : <span className="font-mono text-thread text-muted-foreground">{language}</span>}
-        <button
-          className="grid size-5 place-items-center rounded-md text-muted-foreground opacity-0 transition group-hover/code:opacity-100 hover:bg-accent hover:text-foreground"
-          onClick={copy}
-          title="Copy"
-          type="button"
-        >
-          {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-        </button>
+    <div className="code-block">
+      <div className="code-block-header">
+        <span className="code-block-language" title={language || "Plain text"}>
+          {marked ? <LanguageGlyph className="size-3.5" language={marked} /> : <Code2 className="size-3.5" role="img" aria-label={language || "Plain text"} />}
+        </span>
+        <div className="code-block-actions">
+          <button aria-label={copied ? "Copied" : "Copy code"} title={copyError ? "Copy failed — try again" : copied ? "Copied" : "Copy code"} onClick={() => void copy()} type="button">
+            {copied ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
+          </button>
+        </div>
       </div>
+      <span className="sr-only" role="status">{copyError ? "Could not copy code. Try again." : copied ? "Code copied" : ""}</span>
       <Colorized body={body} language={language} />
+    </div>
+  );
+}
+
+/**
+ * A file, in the thread's own code block: its language's mark and its path in
+ * the header, line numbers, the editor's colours. `live` follows the newest line
+ * while the file is still being written.
+ */
+export function FileCodeBlock({ path, body, language, live = false, className }: { path: string; body: string; language: string; live?: boolean; className?: string }) {
+  const marked = languageOf(language);
+  const lines = body.replace(/\n$/, "").split("\n").length;
+  return (
+    <div className={cn("code-block !my-1", className)}>
+      <div className="code-block-header !h-7 !py-1">
+        <span className="code-block-language flex items-center gap-1.5">
+          {marked ? <LanguageGlyph className="size-3.5 shrink-0" language={marked} /> : <Code2 className="size-3.5 shrink-0" aria-hidden />}
+          <span className="truncate text-thread-tool">{path}</span>
+        </span>
+        <span className={cn("shrink-0 pr-1 text-thread-tool tabular-nums", live && "thinking-shimmer")}>{live ? "writing" : `${lines} lines`}</span>
+      </div>
+      <Colorized body={body} className={live ? "!max-h-[15rem]" : "!max-h-[20rem]"} follow={live} language={language} />
     </div>
   );
 }

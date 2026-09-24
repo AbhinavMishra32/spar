@@ -1,19 +1,21 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquare, SquareCode } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ActiveQuestion, SessionDetail } from "@spar/domain";
+import type { ActiveQuestion, RatingPoint, SessionDetail } from "@spar/domain";
 import { ViewSwitch } from "@/components/ui/view-switch";
-import { AgentThread } from "../agent/AgentThread";
+import { AgentThread, type OptimisticLearnerMessage } from "../agent/AgentThread";
 import { Composer, ComposerPill } from "../agent/Composer";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import type { AgentRun } from "../agent/agentRun";
 import { useStopTurn } from "@/hooks/use-stop-turn";
 import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
-import { DifficultyPill } from "./Difficulty";
+import { ChallengeRatingBadge } from "./ChallengeCalibration";
 import { ProblemView } from "./ProblemView";
 import type { ConceptContext } from "../concepts/ConceptChip";
 import { ComplexityCheckpoint, type ComplexityCheckpointState } from "./ComplexityCheckpoint";
+import type { ChallengeTrail } from "./ChallengeStepper";
+import { ChallengeComposerContext } from "../agent/ChallengeCardMeta";
 
 type View = "problem" | "chat";
 const ORDER: View[] = ["problem", "chat"];
@@ -28,6 +30,7 @@ export function AgentPanel({
   answering,
   concepts,
   detail,
+  learnerRating,
   question,
   run,
   draft,
@@ -43,15 +46,19 @@ export function AgentPanel({
   onComplexityChange,
   onComplexityReview,
   onComplexityAcknowledge,
+  optimisticMessages,
+  trail,
 }: {
   answering: boolean;
   concepts?: ConceptContext | undefined;
   detail: SessionDetail;
+  /** The learner's rating, for pitching this problem against them. */
+  learnerRating?: RatingPoint | null | undefined;
   question: ActiveQuestion;
   run: AgentRun | null;
   draft: string;
   onDraft(value: string): void;
-  onSend(): void;
+  onSend(contextQuestionId?: string): void;
   /** Answering the agent's question, which is a message like any other — but
    *  one the composer never held, so it cannot come from the draft. */
   onAnswer(answer: string): void;
@@ -66,8 +73,30 @@ export function AgentPanel({
   onComplexityChange(next: Pick<ComplexityCheckpointState, "time" | "space">): void;
   onComplexityReview(): void;
   onComplexityAcknowledge(): void;
+  optimisticMessages: OptimisticLearnerMessage[];
+  trail?: ChallengeTrail | undefined;
 }) {
   const [view, setView] = useState<View>("problem");
+  const [focusRequest, setFocusRequest] = useState(0);
+  const [challengeContext, setChallengeContext] = useState<ChallengeTrail["stops"][number] | null>(null);
+  const actionableTrail = useMemo(() => trail ? {
+    ...trail,
+    onAsk: (challenge: ChallengeTrail["stops"][number]) => {
+      setChallengeContext(challenge);
+      setView("chat");
+      setFocusRequest((value) => value + 1);
+    },
+  } : undefined, [trail]);
+  /* Upgrade a draft produced by the first version of this action into the real
+     attachment without discarding anything the learner typed after its prefix. */
+  useEffect(() => {
+    if (challengeContext || !trail || !draft) return;
+    const legacy = trail.stops.find((challenge) => draft.startsWith(`About challenge #${challenge.ordinal}, "${challenge.title}" (question ID: ${challenge.id}): `));
+    if (!legacy) return;
+    const prefix = `About challenge #${legacy.ordinal}, "${legacy.title}" (question ID: ${legacy.id}): `;
+    setChallengeContext(legacy);
+    onDraft(draft.slice(prefix.length));
+  }, [challengeContext, draft, onDraft, trail]);
   const busy = run?.status === "streaming";
   const pending = detail.pendingLearnerQuestion;
   const stop = useStopTurn(detail.summary.id);
@@ -91,7 +120,13 @@ export function AgentPanel({
       <div className="flex h-10 shrink-0 items-center gap-2 px-3">
         <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/70">#{question.ordinal}</span>
         <span className="min-w-0 flex-1 truncate text-ui font-medium">{question.title}</span>
-        <DifficultyPill difficulty={question.difficulty} />
+        <ChallengeRatingBadge
+          conceptContext={concepts}
+          concepts={question.concepts}
+          difficulty={question.difficulty}
+          learnerRating={learnerRating}
+          source={question.source}
+        />
         <ViewSwitch<View>
           ariaLabel="Panel view"
           className="ml-1 w-[12.5rem]"
@@ -152,9 +187,9 @@ export function AgentPanel({
             }}
           >
             {view === "problem" ? (
-              <ProblemView concepts={concepts} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
+              <ProblemView concepts={concepts} learnerRating={learnerRating} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
             ) : (
-              <AgentThread className="[--transcript-width:46rem]" messages={detail.messages} onEditMessage={onEditMessage} run={run} undoable={undoable} />
+              <AgentThread className="[--transcript-width:46rem]" currentQuestionId={question.id} messages={detail.messages} onEditMessage={onEditMessage} optimisticMessages={optimisticMessages} run={run} trail={actionableTrail} undoable={undoable} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -176,8 +211,10 @@ export function AgentPanel({
             onReview={onComplexityReview}
             state={complexityCheckpoint}
           /> : <Composer
+            focusRequest={focusRequest}
             busy={busy}
             steerable={busy}
+            context={challengeContext && <ChallengeComposerContext onRemove={() => setChallengeContext(null)} stop={challengeContext} />}
             leading={
               <ComposerPill title={LANGUAGE_LABEL[question.language]}>
                 <LanguageGlyph className="size-3.5" language={question.language} />
@@ -189,10 +226,11 @@ export function AgentPanel({
             onStop={stop}
             onSubmit={() => {
               setView("chat");
-              onSend();
+              onSend(challengeContext?.id);
+              setChallengeContext(null);
             }}
-            placeholder="Ask for a hint, or explain your approach…"
-            trailing={<ComposerModelPicker {...(onOpenSettings ? { onOpenSettings } : {})} />}
+            placeholder={challengeContext ? `Ask about ${challengeContext.title}…` : "Ask for a hint, or explain your approach…"}
+            trailing={<ComposerModelPicker sessionId={detail.summary.id} {...(onOpenSettings ? { onOpenSettings } : {})} />}
             value={draft}
           />}
         </div>

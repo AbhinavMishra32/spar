@@ -1,12 +1,22 @@
 {
   "name": "@spar/practice",
-  "version": "0.6.0",
+  "version": "0.6.11",
   "type": "module",
   "exports": {
-    ".": { "types": "./src/index.ts", "development": "./src/index.ts", "default": "./dist/index.js" },
-    "./mcp": { "types": "./src/mcp/index.ts", "development": "./src/mcp/index.ts", "default": "./dist/mcp/index.js" }
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./mcp": {
+      "types": "./src/mcp/index.ts",
+      "development": "./src/mcp/index.ts",
+      "default": "./dist/mcp/index.js"
+    }
   },
-  "bin": { "spar-practice-mcp": "./dist/mcp/stdio.js" },
+  "bin": {
+    "spar-practice-mcp": "./dist/mcp/stdio.js"
+  },
   "scripts": {
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
     "typecheck": "tsc --noEmit",

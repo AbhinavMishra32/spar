@@ -52,6 +52,7 @@ describe("guaranteed fallback challenge", () => {
       const failures = compiled.report.checks.filter((check) => !check.passed);
       expect(failures.map((check) => `${check.name}: ${check.detail}`)).toEqual([]);
       expect(compiled.report.valid).toBe(true);
+      expect(compiled.design.requiresComplexityAnalysis).toBe(true);
     }, 120_000);
   }
 });

@@ -1,5 +1,8 @@
 import { z } from "zod";
 export const envSchema = z.object({ NODE_ENV: z.enum(["development","test","production"]).default("development"), PORT: z.coerce.number().int().positive().default(4318), DATABASE_URL: z.string().url(), SUPABASE_URL:z.string().url().optional(),SUPABASE_SECRET_KEY:z.string().min(20).optional(), AUTH_SECRET: z.string().min(32), OBJECT_STORAGE_ENDPOINT: z.string().url().optional(), OBJECT_STORAGE_BUCKET: z.string().min(1).default("spar"), OBJECT_STORAGE_REGION: z.string().min(1).default("auto"), OBJECT_STORAGE_ACCESS_KEY: z.string().min(1).optional(), OBJECT_STORAGE_SECRET_KEY: z.string().min(1).optional(), GOOGLE_CLIENT_ID: z.string().optional(), GOOGLE_CLIENT_SECRET: z.string().optional(), GITHUB_CLIENT_ID: z.string().optional(), GITHUB_CLIENT_SECRET: z.string().optional(),
+  LANGFUSE_BASE_URL:z.string().url().optional(),LANGFUSE_PUBLIC_KEY:z.string().min(1).optional(),LANGFUSE_SECRET_KEY:z.string().min(1).optional(),
+  LANGSMITH_TRACING:z.string().optional(),LANGSMITH_ENDPOINT:z.string().url().optional(),LANGSMITH_API_KEY:z.string().min(1).optional(),LANGSMITH_PROJECT:z.string().min(1).optional(),LANGSMITH_OTEL_ENABLED:z.string().optional(),
+  TELEMETRY_OTLP_TRACES_URL:z.string().url().optional(),TELEMETRY_OTLP_HEADERS:z.string().optional(),
   /* Where this API answers from the outside. Better Auth signs and checks against
      it, so it has to be the origin the desktop app actually calls — not the port
      the process happens to have bound. */
@@ -15,7 +18,13 @@ export const envSchema = z.object({ NODE_ENV: z.enum(["development","test","prod
 /* A deployment that cannot send email cannot verify an address or reset a
    password, and both are load-bearing once anyone but the author has an account.
    Running from source is allowed to skip it — see `createMailer`. */
-if(value.NODE_ENV==="production"&&!(value.RESEND_API_KEY&&value.EMAIL_FROM))context.addIssue({code:z.ZodIssueCode.custom,message:"Set RESEND_API_KEY and EMAIL_FROM so the API can send verification and password-reset codes"});});
+if(value.NODE_ENV==="production"&&!(value.RESEND_API_KEY&&value.EMAIL_FROM))context.addIssue({code:z.ZodIssueCode.custom,message:"Set RESEND_API_KEY and EMAIL_FROM so the API can send verification and password-reset codes"});
+const langfuse=[value.LANGFUSE_BASE_URL,value.LANGFUSE_PUBLIC_KEY,value.LANGFUSE_SECRET_KEY].filter(Boolean).length;
+if(langfuse>0&&langfuse<3)context.addIssue({code:z.ZodIssueCode.custom,message:"Set LANGFUSE_BASE_URL, LANGFUSE_PUBLIC_KEY, and LANGFUSE_SECRET_KEY together"});
+const langsmith=[value.LANGSMITH_ENDPOINT,value.LANGSMITH_API_KEY,value.LANGSMITH_PROJECT].filter(Boolean).length;
+if(langsmith>0&&langsmith<3)context.addIssue({code:z.ZodIssueCode.custom,message:"Set LANGSMITH_ENDPOINT, LANGSMITH_API_KEY, and LANGSMITH_PROJECT together"});
+if(value.TELEMETRY_OTLP_HEADERS){try{const parsed=JSON.parse(value.TELEMETRY_OTLP_HEADERS) as unknown;if(!parsed||typeof parsed!=="object"||Array.isArray(parsed))throw new Error();}catch{context.addIssue({code:z.ZodIssueCode.custom,message:"TELEMETRY_OTLP_HEADERS must be a JSON object"});}}
+});
 export type Env = z.infer<typeof envSchema>;
 /** Whether enough is configured to actually build an `ObjectStorage`. Kept next
  *  to the schema rather than inside `storage.ts`, so the one decision of "is

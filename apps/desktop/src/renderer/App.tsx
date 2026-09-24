@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
+import type { ChallengeCodePreview, ChallengeDetail, Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
 import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
 import { Sidebar, type Page, type SessionActions } from "./components/shell/Sidebar";
 import { SparWordmark } from "./components/common/SparWordmark";
 import { Toolbar } from "./components/shell/Toolbar";
+import { pageChrome, type ShellPage } from "./components/shell/pageChrome";
 import { SearchPalette } from "./components/common/SearchPalette";
 import { HomePage } from "./components/pages/HomePage";
 import type { ChallengeTrail } from "./components/workspace/ChallengeStepper";
@@ -16,11 +17,15 @@ import { SIDEBAR_SLIDE, SIDEBAR_SLIDE_CSS } from "./components/shell/sidebarMoti
 import { TracksPage } from "./components/pages/TracksPage";
 import { TrackPage } from "./components/pages/TrackPage";
 import { ProblemsPage } from "./components/pages/ProblemsPage";
+import { registerShelfRoute, seedSavedProblems } from "./hooks/use-saved-problems";
 import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
 import { ConceptSheet } from "./components/concepts/ConceptSheet";
+import { LessonReader } from "./components/agent/LessonReader";
+import { MarkdownLinkProvider } from "./components/agent/MarkdownLinks";
+import { MentionProvider } from "./components/agent/Mentions";
 import { ChallengePage } from "./components/pages/ChallengePage";
 import { AuthPage } from "./components/pages/AuthPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
@@ -30,25 +35,13 @@ import { ChatView } from "./components/workspace/ChatView";
 import { reduceRunBatch, type AgentRun } from "./components/agent/agentRun";
 import { canGoBack, canGoForward, forget, step, visit, type History, type View } from "./hooks/navigation";
 import { useSidebarWidth } from "./hooks/use-sidebar-width";
+import { recordContextUsage } from "./hooks/use-context-usage";
 import { SparDots } from "@/components/common/SparDots";
+import { Toaster } from "@/components/common/Toaster";
 import { Button } from "@/components/ui/button";
 
 const api: SparApi | undefined = window.spar;
 
-/** Pages the shell puts a plain toolbar over. "workspace" and "challenge" draw
- *  their own, because both carry a back button and their own actions. */
-const PAGE_TITLE: Record<Exclude<Page, "workspace" | "challenge" | "baseline">, string> = {
-  home: "Home",
-  tracks: "Tracks",
-  track: "Track",
-  history: "History",
-  problems: "Problems",
-  visualizer: "Visualize",
-  sessions: "Sessions",
-  ability: "Abilities",
-  challenges: "Challenges",
-  settings: "Settings",
-};
 
 export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
@@ -66,7 +59,12 @@ export function App() {
   /* Which challenge the standalone page is showing. Held here rather than inside
      the challenges list so navigating away and back does not silently keep a
      challenge mounted behind the list. */
+  const [challengeSeed, setChallengeSeed] = useState<ChallengeDetail | null>(null);
   const [challengeId, setChallengeId] = useState<string | null>(null);
+  /* Which submission the challenge page should open unfolded, when it was
+     reached by following a reference to one rather than by opening the
+     challenge itself. */
+  const [challengeSubmission, setChallengeSubmission] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   /* Every agent turn in flight, by the session it belongs to — not just the one
      the workspace is showing. A turn is started from a session and then survives
@@ -74,6 +72,18 @@ export function App() {
      can both keep reporting live work on cards for sessions nobody has open. */
   const [runs, setRuns] = useState<Record<string, AgentRun>>({});
   const [palette, setPalette] = useState(false);
+  /* Bumped when something elsewhere in the window asks for the shelf — a save
+     receipt, so far. A counter rather than a boolean because the Problems page
+     owns its own filters and this is a request to set one, not a mode the shell
+     holds on its behalf: asking twice has to land twice. */
+  const [shelfRequest, setShelfRequest] = useState(0);
+  const shelfRouteRef = useRef<(() => void) | null>(null);
+  /* A code excerpt per challenge, for the hover preview on a session's stack.
+     Fetched rather than bootstrapped for the same reason the session cards'
+     plates are: it is a page of code per challenge, every launch would pay for
+     it, and every surface that uses one draws perfectly well in the moment
+     before it lands. */
+  const [codePreviews, setCodePreviews] = useState<Record<string, ChallengeCodePreview>>({});
   /** A retry of the cloud pull is in flight, so its button can say so. */
   const [retrying, setRetrying] = useState(false);
   /* One concept sheet for the whole app rather than one per list. A chip appears
@@ -81,6 +91,96 @@ export function App() {
      one of them has to open the same surface — nesting a second dialog inside the
      first is how you end up unable to get back out of it. */
   const [concept, setConcept] = useState<string | null>(null);
+  /* And one lesson reader, for the same reason and with the same rule. A lesson
+     is referenced from the thread, from inside another lesson's reading list and
+     from a problem statement, and all three have to land on the same surface. */
+  const [lesson, setLesson] = useState<string | null>(null);
+  /* Memoised because it is a context value: a new object every render would
+     redraw every markdown block in the window on every keystroke. */
+  const markdownLinks = useMemo(
+    () => ({
+      onOpenConcept: setConcept,
+      onOpenLesson: setLesson,
+      /* Which lesson the reader has, so the card it grew out of can stand down
+         while it is open — the two share a layout id. */
+      openLessonId: lesson,
+      onOpenUrl: (url: string) => { void api?.openExternal(url); },
+      onOpenChallenge: (challengeId: string) => { openChallengeRef.current?.(challengeId); },
+      /* Reading is safe to hand over unconditionally — it is a lookup by id that
+         answers null for anything that is not one. Opening goes through the
+         challenge the submission belongs to, which the record itself names, so
+         the transcript never has to know where a submission lives. */
+      readSubmission: (submissionId: string) =>
+        typeof api?.readSubmission === "function" ? api.readSubmission(submissionId) : Promise.resolve(null),
+      onOpenSubmission: (submissionId: string) => {
+        if (typeof api?.readSubmission !== "function") return;
+        void api.readSubmission(submissionId).then((found) => {
+          if (found) openChallengeRef.current?.(found.challengeId, found.id);
+        }).catch(() => undefined);
+      },
+    }),
+    [lesson],
+  );
+
+  /**
+   * What `@` can reach, from any composer in the window.
+   *
+   * Everything the learner might point at is already in the bootstrap — the
+   * challenge library is read once and kept — so the picker's first level costs
+   * nothing to offer. Submissions are the level that needs a read, and it only
+   * happens once a challenge has actually been opened in the list.
+   *
+   * The open session leads, because the thing being referred to is nearly always
+   * in the conversation you are having; everything else in the library follows,
+   * so a reference back to last week's problem is still one keystroke away.
+   */
+  const mentionSource = useMemo(() => {
+    const open = detail?.summary.id;
+    const challenges = [...(data?.challenges ?? [])]
+      .sort((left, right) => {
+        const active = detail?.question?.id;
+        const live = Number(right.id === active) - Number(left.id === active);
+        const mine = Number(right.sessionId === open) - Number(left.sessionId === open);
+        return live || mine || right.createdAt.localeCompare(left.createdAt);
+      })
+      .map((challenge) => ({
+        id: challenge.id,
+        ordinal: challenge.ordinal,
+        title: challenge.title,
+        language: challenge.language,
+        outcome: challenge.lastOutcome,
+        sessionId: challenge.sessionId,
+        sessionTitle: challenge.sessionTitle,
+        difficulty: challenge.difficulty,
+        elapsedMs: challenge.elapsedMs,
+        passedCases: challenge.passedCases,
+        totalCases: challenge.totalCases,
+        testRunCount: challenge.testRunCount,
+        concepts: challenge.concepts.map((concept) => concept.title),
+      }));
+    return {
+      challenges,
+      concepts: (data?.concepts ?? []).map((concept) => ({
+        slug: concept.slug,
+        title: concept.title,
+        detail: concept.kind ?? "",
+      })),
+      ...(open ? { sessionId: open } : {}),
+      /* The challenge on screen right now, marked in the list. It is what "@"
+         means more often than everything else put together, and scanning a
+         library of forty to find the one you are looking at is the one search
+         the picker should never make anybody do. */
+      ...(detail?.question?.id ? { activeChallengeId: detail.question.id } : {}),
+      /* Called through, not held: a preload from before these channels existed
+         still answers every other call, and the picker losing its submissions is
+         a row that is missing rather than a window that is gone. */
+      listSubmissions: (challengeId: string) =>
+        typeof api?.listChallengeSubmissions === "function" ? api.listChallengeSubmissions(challengeId) : Promise.resolve([]),
+      listSessionSubmissions: (sessionId: string) =>
+        typeof api?.listSessionSubmissions === "function" ? api.listSessionSubmissions(sessionId) : Promise.resolve([]),
+    };
+  }, [data?.challenges, data?.concepts, detail?.question?.id, detail?.summary.id]);
+
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
   const { width: sidebarWidth, dragging, handleProps: sidebarHandle } = useSidebarWidth();
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
@@ -91,6 +191,11 @@ export function App() {
      editor that swallowed ⌘[ would make the buttons the only way back, which is
      the thing a shortcut exists to avoid. */
   const goRef = useRef<(direction: -1 | 1) => void>(() => {});
+  /* `markdownLinks` is memoised above the navigation helpers, and a submission
+     reference in the transcript has to be able to reach `openChallenge`. The ref
+     is the seam: the context value stays stable across renders and still calls
+     the current opener. */
+  const openChallengeRef = useRef<((id: string, submissionId?: string) => void) | null>(null);
   const detailRef = useRef<SessionDetail | null>(null);
   detailRef.current = detail;
 
@@ -100,6 +205,15 @@ export function App() {
     setData(next);
     return next;
   }, []);
+
+  /* The shelf, pushed to the store that holds it for the renderer rather than
+     handed down as a prop. It is read by the transcript's challenge card and by
+     the library's rows and tiles, which have no path between them — see
+     `use-saved-problems`. Driven off `data` so every route that re-reads the
+     bootstrap refreshes it, including the restore finishing long after launch. */
+  useEffect(() => {
+    if (data) seedSavedProblems(data.saved);
+  }, [data]);
 
   /* Sidebar housekeeping. The main process is authoritative for all of it, so each
      one writes and then re-reads the bootstrap rather than patching the copy the
@@ -254,6 +368,22 @@ export function App() {
       const sessionId = event.sessionId ?? detailRef.current?.summary.id;
       if (!sessionId) return;
 
+      /* Recorded straight from the listener rather than through the run
+         reducer: the reading has to outlive the run it came from, and the run
+         is dropped the moment its turn is done. */
+      if (event.context) {
+        recordContextUsage(sessionId, event.context);
+        return;
+      }
+
+      if (event.type === "question-pending") {
+        if (detailRef.current?.summary.id === sessionId) {
+          void api.openSession(sessionId).then((next) => { if (next && detailRef.current?.summary.id === sessionId) setDetail(next); })
+            .catch((cause) => setError(message(cause)));
+        }
+        return;
+      }
+
       if (event.type === "done") {
         /* The turn's own buffered deltas are dropped: the reply it produced is
            about to be re-read from storage, and replaying a partial stream over
@@ -346,6 +476,18 @@ export function App() {
     return api.onSyncState((syncState) => setData((current) => (current ? { ...current, syncState } : current)));
   }, []);
 
+  /* Re-read whenever the number of challenges changes, which is the one event
+     that can add an excerpt this map has not got. */
+  const challengeCount = data?.challenges.length ?? 0;
+  useEffect(() => {
+    if (!api || !challengeCount) return;
+    let cancelled = false;
+    void api.listChallengePreviews()
+      .then((value) => { if (!cancelled) setCodePreviews(value); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [challengeCount]);
+
   /* The restore reports itself the same way. Re-reading the bootstrap when it
      finishes is the point: the pull writes sessions, challenges and abilities
      straight into the local store, and none of them are in the copy the shell is
@@ -357,6 +499,14 @@ export function App() {
       if (restore === "done") void refresh().catch((cause) => setError(message(cause)));
     });
   }, [refresh]);
+
+  /* The one route anything in the window can ask for by name. Registered once
+     and kept behind a ref rather than re-registered whenever navigation changes
+     identity, because the shell's early returns mean this has to sit above them
+     while `navigate` is defined below. */
+  useEffect(() => registerShelfRoute(() => {
+    shelfRouteRef.current?.();
+  }), []);
 
   if (error && !data) return <FatalError error={error} />;
   if (!data) return <BootShell />;
@@ -391,8 +541,18 @@ export function App() {
      else. Split so a back press cannot append the entry it is standing on. */
   const show = (next: Page) => {
     setPage(next);
-    if (next !== "workspace") setDetail(null);
-    if (next !== "challenge") setChallengeId(null);
+    /* The session and a past challenge are one pane, not two pages. Dropping the
+       one you are leaving is what made the crossing a teardown: `show("challenge")`
+       cleared the open session, so the workspace was gone from the tree before the
+       practice page had drawn a pixel, and stepping back cleared the challenge the
+       same way. They are both kept for as long as either is on screen, and both are
+       let go the moment the pane itself is left. */
+    const pane = next === "workspace" || next === "challenge";
+    if (!pane) {
+      setDetail(null);
+      setChallengeId(null);
+      setChallengeSeed(null);
+    }
     if (next !== "ability") setAbility(null);
   };
 
@@ -406,6 +566,16 @@ export function App() {
     if (next !== "workspace" && next !== "baseline" && next !== "challenge" && next !== "ability" && next !== "track") {
       setHistory((current) => visit(current, { page: next }));
     }
+  };
+
+  /* What `registerShelfRoute` actually calls, kept current on every render. Goes
+     to the page and asks it for the saved filter, because "saved" is a filter on
+     the library rather than a page of its own — landing on the unfiltered
+     library after pressing a receipt that said "Saved in Problems" is arriving
+     somewhere true and useless. */
+  shelfRouteRef.current = () => {
+    navigate("problems");
+    setShelfRequest((value) => value + 1);
   };
 
   /**
@@ -425,6 +595,7 @@ export function App() {
     }
     if (view.page === "challenge") {
       setChallengeId(view.challengeId);
+      setChallengeSubmission(view.submissionId ?? null);
       show("challenge");
       return;
     }
@@ -484,14 +655,55 @@ export function App() {
    */
   const trailFor = (sessionId: string | undefined): ChallengeTrail | undefined => {
     if (!sessionId) return undefined;
-    const liveId = data.sessions.find((session) => session.id === sessionId)?.activeQuestion?.id ?? null;
+    /* The challenge the session is *on*, which is not the same as the challenge
+       whose row still says `status = active`.
+     *
+     * Solving one does not immediately produce the next: the question goes to
+     * `completed` and the workspace keeps showing it — your code, your attempt,
+     * the conversation — until the agent sets another. `activeQuestion` is null
+     * for that whole stretch, and reading the trail from it meant the stepper
+     * called the challenge you were sitting in "Practice · not recorded", and
+     * stepping away and back opened the practice sandbox for it instead of
+     * returning to the workspace: scaffold code, no chat, no Problem/Chat switch.
+     *
+     * `detail.question` is the store's own answer to "which challenge is this
+     * session on" — the last one that was not abandoned, completed or not — so
+     * the trail asks that whenever the session in question is the one open.
+     * `activeQuestion` stays as the fallback for the other sessions in the list,
+     * where a live challenge is the only thing we can see from here anyway. */
+    const liveId = (detail?.summary.id === sessionId ? detail.question?.id : undefined)
+      ?? data.sessions.find((session) => session.id === sessionId)?.activeQuestion?.id
+      ?? null;
     const stops = data.challenges
       .filter((challenge) => challenge.sessionId === sessionId)
       .sort((a, b) => a.ordinal - b.ordinal)
-      .map((challenge) => ({ id: challenge.id, ordinal: challenge.ordinal, title: challenge.title, live: challenge.id === liveId }));
-    if (stops.length < 2) return undefined;
+      .map((challenge) => ({
+        id: challenge.id,
+        ordinal: challenge.ordinal,
+        title: challenge.title,
+        live: challenge.id === liveId,
+        replaced: Boolean(challenge.replacedByQuestionId),
+        elapsedMs: challenge.elapsedMs,
+        passedCases: challenge.passedCases,
+        totalCases: challenge.totalCases,
+        testRunCount: challenge.testRunCount,
+        assistance: challenge.assistance,
+        outcome: challenge.lastOutcome,
+        /* Carried so a row in the stack can raise the same hover preview the
+           transcript card does. The excerpt is fetched rather than bootstrapped
+           — see `useChallengePreviews` — so a trail built before it lands simply
+           has no code on its stops, and the panel does not open for them yet. */
+        language: challenge.language,
+        difficulty: challenge.difficulty,
+        source: challenge.source?.source ?? null,
+        concepts: challenge.concepts.map((concept) => concept.title),
+        code: codePreviews[challenge.id] ?? null,
+      }));
+    if (!stops.length) return undefined;
     return {
       stops,
+      onOpenQuestion: (stop) => openChallenge(stop.id),
+      onOpenSession: () => { void openSession(sessionId).catch((cause) => setError(message(cause))); },
       onGo: (stop) => {
         if (stop.live) void openSession(sessionId).catch((cause) => setError(message(cause)));
         else openChallenge(stop.id);
@@ -514,12 +726,22 @@ export function App() {
   /* `from` is gone: a challenge is opened from two libraries, and where Back
      lands is now the history's business rather than a guess recorded at the
      door. */
-  const openChallenge = (id: string) => {
+  const openChallenge = (id: string, submissionId?: string) => {
+    /* The destination is known before the local detail read starts, so move to
+       the standalone page immediately. Waiting here left the session on screen
+       after "Open question" and made a successful click look inert. The page
+       owns its read; a seed that arrives shortly afterwards only lets it adopt
+       the same detail without another visible transition. */
+    setChallengeSeed(null);
     setChallengeId(id);
+    setChallengeSubmission(submissionId ?? null);
     show("challenge");
-    setDetail(null);
-    setHistory((current) => visit(current, { page: "challenge", challengeId: id }));
+    setHistory((current) => visit(current, { page: "challenge", challengeId: id, ...(submissionId ? { submissionId } : {}) }));
+    if (api) void api.readChallenge(id).then((next) => {
+      if (next?.summary.id === id) setChallengeSeed(next);
+    }).catch(() => undefined);
   };
+  openChallengeRef.current = openChallenge;
 
   const openAbility = (id: string) => {
     show("ability");
@@ -605,6 +827,15 @@ export function App() {
       return !value;
     });
   const expandSidebar = sidebar ? undefined : toggleSidebar;
+  /* What the toolbar says over this page: a name only where the page does not
+     name itself, and the counts that page is about. Null for a page that draws
+     its own chrome, which leaves the row bare — see `pageChrome`. Computed on
+     each render rather than memoised because the hooks above it are behind the
+     boot guards, and the work is two filters over lists the pages below filter
+     again anyway. */
+  const chrome = page === "workspace" || page === "challenge" || page === "baseline"
+    ? null
+    : pageChrome(page as ShellPage, data, ability);
   const changeTheme = async (theme: ThemePreference) => {
     if (!api) return;
     await api.setTheme(theme);
@@ -620,6 +851,25 @@ export function App() {
 
     setError(null);
     await refresh();
+  };
+
+  const deleteTrack = async (track: Track): Promise<boolean> => {
+    if (!api || !data) return false;
+    setOpening(true); setError(null);
+    const sessions = data.sessions.filter((session) => session.trackId === track.id);
+    try {
+      if (detailRef.current?.summary.trackId === track.id) setDetail(null);
+      for (const session of sessions) clearRun(session.id);
+      await api.deleteTrack(track.id);
+      // Deleted challenges and abilities may also appear in navigation history.
+      setHistory({ entries: [{ page: "tracks" }], index: 0 });
+      await refresh();
+      return true;
+    } catch (cause) {
+      setError(message(cause));
+      await refresh().catch(() => undefined);
+      return false;
+    } finally { setOpening(false); }
   };
 
   const createTrack = async (input: { goal: string; title?: string; language?: Language }) => {
@@ -640,281 +890,345 @@ export function App() {
   };
 
   return (
-    <div className="app-vibrant relative flex h-full">
-      {/* The column, which is only ever a window onto the sidebar.
+    /* One link context for the whole window. The transcript, a lesson's own
+       reading list and a problem statement all render the agent's references,
+       and every one of them has to land on the same two surfaces — so the doors
+       are handed down from here rather than wired up pane by pane. A pane that
+       knows something extra, like the language its code is in, merges that on
+       top of this. */
+    <MarkdownLinkProvider value={markdownLinks}>
+      <MentionProvider value={mentionSource}>
+      <div className="app-vibrant relative flex h-full">
+        {/* The column, which is only ever a window onto the sidebar.
 
-             It used to be the sidebar: one element whose width animated from
-             zero, with `<Sidebar/>` filling whatever it was that frame. So every
-             frame of the collapse re-laid-out the entire source list at a new
-             width — labels rewrapping, titles re-truncating, the Track groups
-             reflowing — which is the churn that made this read as a browser
-             panel rather than a native one, and it was the most expensive
-             animation in the window besides.
+               It used to be the sidebar: one element whose width animated from
+               zero, with `<Sidebar/>` filling whatever it was that frame. So every
+               frame of the collapse re-laid-out the entire source list at a new
+               width — labels rewrapping, titles re-truncating, the Track groups
+               reflowing — which is the churn that made this read as a browser
+               panel rather than a native one, and it was the most expensive
+               animation in the window besides.
 
-             Now nothing inside it changes size at all. The sidebar below is
-             pinned to its full width and slides; this clips. The two run on the
-             same curve, so the sidebar's right edge sits exactly on the clip
-             edge for the whole travel: a pure slide, no stretch, no reflow, and
-           the icons never move relative to the words beside them.
+               Now nothing inside it changes size at all. The sidebar below is
+               pinned to its full width and slides; this clips. The two run on the
+               same curve, so the sidebar's right edge sits exactly on the clip
+               edge for the whole travel: a pure slide, no stretch, no reflow, and
+             the icons never move relative to the words beside them.
 
-          Animated rather than mounted and unmounted, unlike the version this
-          came from: the sidebar owns state the learner set — which Tracks they
-          opened, whether the archive is showing — and unmounting it on collapse
-          throws that away every time the column is hidden. */}
-      <motion.div
-        animate={{ width: sidebar ? sidebarWidth : 0 }}
-        className="relative shrink-0 overflow-hidden"
-        initial={false}
-        /* No transition while the divider is being dragged: the width is
-           animated so collapsing eases, and the same easing applied to a drag
-           leaves the edge lagging a frame behind the cursor. */
-        transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
-      >
+            Animated rather than mounted and unmounted, unlike the version this
+            came from: the sidebar owns state the learner set — which Tracks they
+            opened, whether the archive is showing — and unmounting it on collapse
+            throws that away every time the column is hidden. */}
         <motion.div
-          /* Laid out once, at the width it will still be when the animation
-             ends. `will-change` because this is the one element in the window
-             that is worth a compositor layer of its own — a whole source list
-             being moved, sixty times a second. */
-          animate={{ x: sidebar ? 0 : -sidebarWidth }}
-          className="h-full will-change-transform"
+          animate={{ width: sidebar ? sidebarWidth : 0 }}
+          className="relative shrink-0 overflow-hidden"
           initial={false}
-          style={{ width: sidebarWidth }}
+          /* No transition while the divider is being dragged: the width is
+             animated so collapsing eases, and the same easing applied to a drag
+             leaves the edge lagging a frame behind the cursor. */
           transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
         >
-          <Sidebar
-            // The name the learner gave onboarding, not the one derived from their email.
-            account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
-            activeSessionId={detail?.summary.id}
-            challenges={data.challenges}
-            onCollapse={toggleSidebar}
-            onCommandPalette={() => setPalette(true)}
-            onNewSession={() => navigate("tracks")}
-            onNewTrack={() => navigate("tracks")}
-            onOpenSession={open}
-            onOpenTrack={(track) => void openTrack(track)}
-            nav={nav}
-            onPage={navigate}
-            page={page}
-            runs={runs}
-            sessionActions={sessionActions}
-            /* Every Track's sessions, not just the open one's: the sidebar groups
-               them under their Tracks now, and a list that can only show you the
-               Track you are already in is not one. */
-            sessions={data.sessions.filter((session) => session.context !== "baseline")}
-            syncState={data.syncState}
-            tracks={data.tracks}
-            {...(data.activeTrack ? { activeTrackId: data.activeTrack.id } : {})}
-          />
-        </motion.div>
-      </motion.div>
-
-      {/* The pane's leading corners round away from the sidebar so the translucent
-          material wraps around it and the two read as one continuous surface —
-          but only while the sidebar is there to wrap it. Collapsed, the pane owns
-          the window edge and has to meet it square. */}
-      {/* Floated over the seam rather than placed in the flex row: a handle with
-          real width would hold the two panes apart, and on a transparent window
-          that gap is a stripe of desktop. The grab target is 8px wide but shows
-          only a hairline, and only under the pointer — a permanently drawn
-          divider would cut the sidebar off from the pane it flows into. */}
-      {sidebar && (
-        <div
-          aria-label="Resize sidebar"
-          aria-orientation="vertical"
-          className={cn(
-            "app-no-drag absolute inset-y-0 z-20 w-2 cursor-col-resize",
-            "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent",
-            "after:transition-colors hover:after:bg-[var(--border-strong)]",
-            dragging && "after:bg-[var(--border-strong)]",
-          )}
-          role="separator"
-          style={{ left: sidebarWidth - 4 }}
-          {...sidebarHandle}
-        />
-      )}
-
-      {/* The two surfaces you work on rather than read keep the window's glass;
-          every other page is opaque, because the desktop moving behind a
-          paragraph is the desktop competing with it. */}
-      <main
-        className={cn(
-          "app-pane relative flex min-w-0 flex-1 flex-col",
-          /* The content pane's rounded leading corners and inset ring arrive
-             with the sidebar rather than the instant it is asked for. */
-          "transition-[border-radius,box-shadow]",
-          SIDEBAR_SLIDE_CSS,
-          sidebar && "app-content-pane",
-          (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
-        )}
-      >
-        {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
-          <Toolbar nav={nav} onExpandSidebar={expandSidebar} title={PAGE_TITLE[page as Exclude<Page, "workspace" | "challenge" | "baseline">]} />
-        )}
-
-        {error && (
-          <div className="absolute right-3 top-11 z-20 flex w-[min(26rem,calc(100vw-2rem))] items-start gap-2 rounded-xl border border-destructive/30 bg-popover px-3 py-2.5 text-ui text-destructive shadow-[var(--app-shadow-overlay)]">
-            <AlertCircle className="mt-px size-3.5 shrink-0" />
-            <span className="min-w-0 flex-1">{error}</span>
-            <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setError(null)} type="button">
-              <X className="size-3.5" />
-            </button>
-          </div>
-        )}
-
-        <div className="min-h-0 flex-1">
-
-          {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
-          {page === "tracks" && <TracksPage busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
-          {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
-          {page === "problems" && (
-            <ProblemsPage
-              api={api}
+          <motion.div
+            /* Laid out once, at the width it will still be when the animation
+               ends. `will-change` because this is the one element in the window
+               that is worth a compositor layer of its own — a whole source list
+               being moved, sixty times a second. */
+            animate={{ x: sidebar ? 0 : -sidebarWidth }}
+            className="h-full will-change-transform"
+            initial={false}
+            style={{ width: sidebarWidth }}
+            transition={dragging ? { duration: 0 } : SIDEBAR_SLIDE}
+          >
+            <Sidebar
+              // The name the learner gave onboarding, not the one derived from their email.
+              account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
+              activeSessionId={detail?.summary.id}
               challenges={data.challenges}
-              onOpenChallenge={openChallenge}
-              onStartProblem={startProblem}
-            />
-          )}
-          {/* Mounted only while it is the page. The visualiser holds a trace,
-              an editor and a running animation, and none of that is worth
-              keeping warm behind four other surfaces. */}
-          {page === "visualizer" && <VisualizerPage api={api} dark={dark} onError={setError} />}
-          {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
-          {(page === "home" || page === "ability") && (
-            <HomePage
-              abilities={data.abilities}
-              ability={ability}
-              api={api}
-              busy={opening}
-              challenges={data.challenges}
-              concepts={data.concepts}
-              data={data}
-              onBaseline={beginBaseline}
-              onCreateTrack={() => navigate("tracks")}
-              onMode={setTrainingMode}
-              onNavigate={navigate}
-              onOpen={open}
-              onOpenAbility={(next) => (next ? openAbility(next) : navigate("home"))}
-              onOpenConcept={setConcept}
-              onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
-              onPractise={practise}
-            />
-          )}
-          {(page === "history" || page === "challenges") && (
-            <ChallengesPage
-              api={api}
-              challenges={data.challenges}
-              concepts={data.concepts}
-              onOpen={(challenge) => openChallenge(challenge.id)}
-              onOpenConcept={setConcept}
-            />
-          )}
-          {page === "challenge" && challengeId && (
-            <ChallengePage
-              api={api}
-              challengeId={challengeId}
-              dark={dark}
+              onCollapse={toggleSidebar}
+              onCommandPalette={() => setPalette(true)}
+              onNewSession={() => navigate("tracks")}
+              onNewTrack={() => navigate("tracks")}
+              onOpenSession={open}
+              onOpenTrack={(track) => void openTrack(track)}
+              onDeleteTrack={(track) => void deleteTrack(track)}
               nav={nav}
-              onError={setError}
+              onPage={navigate}
+              page={page}
+              runs={runs}
+              sessionActions={sessionActions}
+              /* Every Track's sessions, not just the open one's: the sidebar groups
+                 them under their Tracks now, and a list that can only show you the
+                 Track you are already in is not one. */
+              sessions={data.sessions.filter((session) => session.context !== "baseline")}
+              syncState={data.syncState}
+              tracks={data.tracks}
+              {...(data.activeTrack ? { activeTrackId: data.activeTrack.id } : {})}
+            />
+          </motion.div>
+        </motion.div>
+
+        {/* The pane's leading corners round away from the sidebar so the translucent
+            material wraps around it and the two read as one continuous surface —
+            but only while the sidebar is there to wrap it. Collapsed, the pane owns
+            the window edge and has to meet it square. */}
+        {/* Floated over the seam rather than placed in the flex row: a handle with
+            real width would hold the two panes apart, and on a transparent window
+            that gap is a stripe of desktop. The grab target is 8px wide but shows
+            only a hairline, and only under the pointer — a permanently drawn
+            divider would cut the sidebar off from the pane it flows into. */}
+        {sidebar && (
+          <div
+            aria-label="Resize sidebar"
+            aria-orientation="vertical"
+            className={cn(
+              "app-no-drag absolute inset-y-0 z-20 w-2 cursor-col-resize",
+              "after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-transparent",
+              "after:transition-colors hover:after:bg-[var(--border-strong)]",
+              dragging && "after:bg-[var(--border-strong)]",
+            )}
+            role="separator"
+            style={{ left: sidebarWidth - 4 }}
+            {...sidebarHandle}
+          />
+        )}
+
+        {/* The two surfaces you work on rather than read keep the window's glass;
+            every other page is opaque, because the desktop moving behind a
+            paragraph is the desktop competing with it. */}
+        <main
+          className={cn(
+            "app-pane relative flex min-w-0 flex-1 flex-col",
+            /* The content pane's rounded leading corners and inset ring arrive
+               with the sidebar rather than the instant it is asked for. */
+            "transition-[border-radius,box-shadow]",
+            SIDEBAR_SLIDE_CSS,
+            sidebar && "app-content-pane",
+            (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
+          )}
+        >
+          {/* The row is drawn for every shell page, including the ones with
+              nothing to say in it: it is the window's own title bar, and on a
+              collapsed sidebar it is the only place the traffic lights and the
+              back control can go. What varies is whether it carries anything —
+              see `pageChrome`. */}
+          {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
+            <Toolbar
+              nav={nav}
               onExpandSidebar={expandSidebar}
-              onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
-              trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
+              {...(chrome ?? {})}
             />
           )}
-          {page === "settings" && (
-            <SettingsPage
-              api={api}
-              baseline={data.baseline}
-              language={data.profile.language}
-              onBaseline={beginBaseline}
-              onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
-              onSignedOut={signedOut}
-              onThemeChange={changeTheme}
-              theme={data.theme}
-            />
+
+          {error && (
+            <div className="absolute right-3 top-11 z-20 flex w-[min(26rem,calc(100vw-2rem))] items-start gap-2 rounded-xl border border-destructive/30 bg-popover px-3 py-2.5 text-ui text-destructive shadow-[var(--app-shadow-overlay)]">
+              <AlertCircle className="mt-px size-3.5 shrink-0" />
+              <span className="min-w-0 flex-1">{error}</span>
+              <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setError(null)} type="button">
+                <X className="size-3.5" />
+              </button>
+            </div>
           )}
-          {page === "workspace" &&
-            (detail ? (
-              /* Session identity and workspace mode both define the mounted
-                 surface. Including both keeps the same blur cross-dissolve for
-                 challenge-to-challenge session navigation as well as mode changes. */
-              <AnimatePresence initial={false} mode="wait">
-                <motion.div
-                  key={`${detail.summary.id}:${sessionMode(detail)}`}
-                  animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-                  className="h-full"
-                  exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
-                  initial={{ opacity: 0, scale: 1.01, filter: "blur(8px)" }}
-                  transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
-                >
-                  {detail.question ? (
-                    <Workspace
+
+          <div className="min-h-0 flex-1">
+
+            {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
+            {page === "tracks" && <TracksPage onDelete={deleteTrack} busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
+            {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
+            {page === "problems" && (
+              <ProblemsPage
+                abilities={data.abilities}
+                shelfRequest={shelfRequest}
+                api={api}
+                challenges={data.challenges}
+                concepts={data.concepts}
+                onOpenAbility={openAbility}
+                onOpenChallenge={openChallenge}
+                onOpenConcept={setConcept}
+                onStartProblem={startProblem}
+                progress={data.progress}
+              />
+            )}
+            {/* Mounted only while it is the page. The visualiser holds a trace,
+                an editor and a running animation, and none of that is worth
+                keeping warm behind four other surfaces. */}
+            {page === "visualizer" && <VisualizerPage api={api} dark={dark} onError={setError} />}
+            {page === "sessions" && <SessionsPage api={api} challenges={data.challenges} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline")} />}
+            {(page === "home" || page === "ability") && (
+              <HomePage
+                abilities={data.abilities}
+                ability={ability}
+                api={api}
+                busy={opening}
+                challenges={data.challenges}
+                concepts={data.concepts}
+                data={data}
+                onBaseline={beginBaseline}
+                onCreateTrack={() => navigate("tracks")}
+                onMode={setTrainingMode}
+                onNavigate={navigate}
+                onOpen={open}
+                onOpenAbility={(next) => (next ? openAbility(next) : navigate("home"))}
+                onOpenConcept={setConcept}
+                onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+                onPractise={practise}
+              />
+            )}
+            {(page === "history" || page === "challenges") && (
+              <ChallengesPage
+                api={api}
+                challenges={data.challenges}
+                concepts={data.concepts}
+                onOpen={(challenge) => openChallenge(challenge.id)}
+                onOpenConcept={setConcept}
+              />
+            )}
+            {page === "settings" && (
+              <SettingsPage
+                // Same identity the sidebar row shows: the onboarding name, not the one derived from their email.
+                account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
+                api={api}
+                baseline={data.baseline}
+                language={data.profile.language}
+                onBaseline={beginBaseline}
+                onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
+                onSignedOut={signedOut}
+                onThemeChange={changeTheme}
+                theme={data.theme}
+              />
+            )}
+            {/* The session and a past challenge, stacked rather than routed.
+                They used to be two branches of this list, so stepping between them
+                was an unmount and a mount: Monaco torn down and rebuilt, the
+                practice page reading its challenge from disk behind a full-height
+                spinner, and the workspace arriving through a blurred, scaled
+                dissolve on the way back. That is what read as flicker, and no
+                transition inside either page could have covered it — there was
+                nothing on screen to transition from.
+
+                Both are mounted for as long as either is in use, and the crossing
+                is an opacity fade between two layers that are already painted. The
+                hidden one keeps its editors, its drafts and its scroll position, so
+                stepping back is instantaneous rather than another cold load. */}
+            {(page === "workspace" || page === "challenge") && (
+              <div className="relative h-full">
+                {detail && (
+                  <Surface active={page === "workspace"}>
+                    {/* Session identity and workspace mode both define the mounted
+                        surface, so both are in the key: this covers
+                        challenge-to-challenge navigation within a session as well as
+                        mode changes. The blur cross-dissolve is deliberate here and
+                        is not the same crossing as stepping between a live challenge
+                        and a past one — that one is two surfaces of the same pane and
+                        fades plainly, this one is arriving somewhere else. */}
+                    <AnimatePresence initial={false} mode="wait">
+                      <motion.div
+                        key={`${detail.summary.id}:${sessionMode(detail)}`}
+                        animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+                        className="h-full"
+                        exit={{ opacity: 0, scale: 0.985, filter: "blur(8px)" }}
+                        initial={{ opacity: 0, scale: 1.01, filter: "blur(8px)" }}
+                        transition={{ duration: 0.32, ease: [0.22, 0.61, 0.36, 1] }}
+                      >
+                        {detail.question ? (
+                          <Workspace
+                            api={api}
+                            concepts={conceptContext}
+                            dark={dark}
+                            learnerRating={data.progress.rating}
+                            detail={detail}
+                            onAbandon={abandon}
+                            nav={nav}
+                            onError={setError}
+                            onExpandSidebar={expandSidebar}
+                            onOpenSettings={() => navigate("settings")}
+                            onRefresh={() => openSession(detail.summary.id)}
+                            question={detail.question}
+                            run={runs[detail.summary.id] ?? null}
+                            trail={trailFor(detail.summary.id)}
+                          />
+                        ) : sessionMode(detail) === "chat" ? (
+                          <ChatView
+                            api={api}
+                            detail={detail}
+                            nav={nav}
+                            onError={setError}
+                            onExpandSidebar={expandSidebar}
+                            onOpenSettings={() => navigate("settings")}
+                            onRefresh={() => openSession(detail.summary.id)}
+                            run={runs[detail.summary.id] ?? null}
+                          />
+                        ) : (
+                          <PlanningView
+                            api={api}
+                            detail={detail}
+                            nav={nav}
+                            onError={setError}
+                            onExpandSidebar={expandSidebar}
+                            onOpenSettings={() => navigate("settings")}
+                            onRefresh={() => openSession(detail.summary.id)}
+                            run={runs[detail.summary.id] ?? null}
+                          />
+                        )}
+                      </motion.div>
+                    </AnimatePresence>
+                  </Surface>
+                )}
+
+                {challengeId && (
+                  <Surface active={page === "challenge"}>
+                    <ChallengePage
                       api={api}
+                      challengeId={challengeId}
                       concepts={conceptContext}
                       dark={dark}
-                      detail={detail}
-                      onAbandon={abandon}
+                      focusSubmissionId={challengeSubmission}
+                      learnerRating={data.progress.rating}
                       nav={nav}
                       onError={setError}
                       onExpandSidebar={expandSidebar}
-                      onOpenSettings={() => navigate("settings")}
-                      onRefresh={() => openSession(detail.summary.id)}
-                      question={detail.question}
-                      run={runs[detail.summary.id] ?? null}
-                      trail={trailFor(detail.summary.id)}
+                      onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+                      seed={challengeSeed}
+                      trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
                     />
-                  ) : sessionMode(detail) === "chat" ? (
-                    <ChatView
-                      api={api}
-                      detail={detail}
-                      nav={nav}
-                      onError={setError}
-                      onExpandSidebar={expandSidebar}
-                      onOpenSettings={() => navigate("settings")}
-                      onRefresh={() => openSession(detail.summary.id)}
-                      run={runs[detail.summary.id] ?? null}
-                    />
-                  ) : (
-                    <PlanningView
-                      api={api}
-                      detail={detail}
-                      nav={nav}
-                      onError={setError}
-                      onExpandSidebar={expandSidebar}
-                      onOpenSettings={() => navigate("settings")}
-                      onRefresh={() => openSession(detail.summary.id)}
-                      run={runs[detail.summary.id] ?? null}
-                    />
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            ) : (
-              <WorkspaceSkeleton />
-            ))}
-        </div>
-      </main>
+                  </Surface>
+                )}
 
-      <SearchPalette
-        challenges={data.challenges}
-        concepts={data.concepts}
-        onNewSession={() => navigate("tracks")}
-        onOpenChallenge={openChallenge}
-        onOpenChange={setPalette}
-        onOpenConcept={setConcept}
-        onOpenSession={open}
-        onPage={navigate}
-        open={palette}
-        sessions={data.sessions.filter((session) => session.context !== "baseline")}
-      />
+                {page === "workspace" && !detail && <WorkspaceSkeleton />}
+              </div>
+            )}
+          </div>
+        </main>
 
-      <ConceptSheet
-        api={api}
-        onOpenChange={(next) => { if (!next) setConcept(null); }}
-        onOpenSession={(sessionId) => { setConcept(null); void openSession(sessionId).catch((cause) => setError(message(cause))); }}
-        onPractise={(conceptSlug) => practise({ conceptSlug })}
-        slug={concept}
-        summaries={conceptSummaries}
-      />
-    </div>
+        <SearchPalette
+          challenges={data.challenges}
+          concepts={data.concepts}
+          onNewSession={() => navigate("tracks")}
+          onOpenChallenge={openChallenge}
+          onOpenChange={setPalette}
+          onOpenConcept={setConcept}
+          onOpenSession={open}
+          onPage={navigate}
+          open={palette}
+          sessions={data.sessions.filter((session) => session.context !== "baseline")}
+        />
+
+        <LessonReader lessonId={lesson} onClose={() => setLesson(null)} />
+
+        <ConceptSheet
+          api={api}
+          onOpenChange={(next) => { if (!next) setConcept(null); }}
+          onOpenSession={(sessionId) => { setConcept(null); void openSession(sessionId).catch((cause) => setError(message(cause))); }}
+          onPractise={(conceptSlug) => practise({ conceptSlug })}
+          slug={concept}
+          summaries={conceptSummaries}
+        />
+
+        {/* Last in the shell, over everything, outside every pane: what the app
+            says back is never about the pane it happened in. */}
+        <Toaster />
+      </div>
+      </MentionProvider>
+    </MarkdownLinkProvider>
   );
 }
 
@@ -987,6 +1301,30 @@ function RestoreFailed({ onRetry, busy }: { onRetry(): void; busy: boolean }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * One of the two challenge surfaces, holding its place while the other is shown.
+ *
+ * Both layers fill the pane and only their opacity moves, so the crossing is a
+ * dissolve between two things that are already laid out — nothing reflows, and
+ * neither page has to be rebuilt to come back. The hidden layer is taken out of
+ * the pointer and accessibility trees rather than hidden with `display`, which
+ * would throw away exactly the Monaco models and scroll offsets this exists to
+ * keep warm.
+ */
+function Surface({ active, children }: { active: boolean; children: React.ReactNode }) {
+  return (
+    <motion.div
+      animate={{ opacity: active ? 1 : 0 }}
+      aria-hidden={!active}
+      className={cn("absolute inset-0", active ? "z-10" : "pointer-events-none z-0")}
+      initial={{ opacity: 0 }}
+      transition={{ duration: 0.2, ease: [0.22, 0.61, 0.36, 1] }}
+    >
+      {children}
+    </motion.div>
   );
 }
 

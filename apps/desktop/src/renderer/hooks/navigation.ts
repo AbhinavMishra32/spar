@@ -24,7 +24,11 @@ export type View =
      baseline interview, which is the same session machinery in a different
      frame. Both are the session, so both carry its id. */
   | { page: "workspace" | "baseline"; sessionId: string }
-  | { page: "challenge"; challengeId: string }
+  /* `submissionId` is where on the page, not which page: a submission reference
+     in the transcript opens the challenge it belongs to with that submission
+     already unfolded. Two entries for the same challenge and different
+     submissions are the same destination, so history treats it as one. */
+  | { page: "challenge"; challengeId: string; submissionId?: string }
   | { page: "ability"; abilityId: string }
   | { page: "track"; trackId: string };
 

@@ -4,18 +4,17 @@ import { cn } from "@/lib/utils";
 /**
  * The Settings page's structural vocabulary, ported from construct.
  *
- * Five pieces and the whole page is built from them: a header, a titled
+ * Six pieces and the whole page is built from them: a header, a titled
  * section, a card of rows, a row, and the row's two halves — the label on the
  * left and whatever control answers it on the right. Nothing here holds state
  * or knows what a provider is; the page composes these and supplies content.
  *
  * The rules that matter are the ones no single row shows. The card is
  * negatively inset so its rows sit flush with the column's reading edge while
- * the heading above it does not. Rows are divided by a hairline in light and by
- * a gap in dark, because on a dark ground a translucent surface separated by a
- * gap reads as stacked material while a drawn line reads as a table. And the
- * control slot is capped rather than sized, so a long select and a switch land
- * on the same right edge.
+ * the heading above it does not. Rows are divided by a hairline in both themes,
+ * so a card reads as one piece of material however dark the ground behind it
+ * is. And the control slot is capped rather than sized, so a long select and a
+ * switch land on the same right edge.
  *
  * Written against Spar's own tokens rather than copied class-for-class: the two
  * apps share a design, not a stylesheet, and construct's utilities would have
@@ -25,15 +24,36 @@ import { cn } from "@/lib/utils";
 /** The page title. The size and weight live here rather than on the page's own
  *  `h1`, so no section can drift off the scale by writing its own. */
 export function SettingsHeader({ children }: { children: React.ReactNode }) {
-  return <header className="mb-6 [&_h1]:text-[1.55rem] [&_h1]:font-semibold [&_h1]:tracking-[-0.035em]">{children}</header>;
+  return <header className="mb-6 [&_h1]:text-2xl [&_h1]:font-[450] [&_h1]:tracking-[-0.02em]">{children}</header>;
 }
 
-/** A titled band of the page. The title is optional: a section that opens the
- *  page often needs no label, because the `h1` above it already is one. */
-export function SettingsSection({ children, id, title }: { children: React.ReactNode; id?: string; title?: string }) {
+/**
+ * A titled band of the page. The title is optional: a section that opens the
+ * page often needs no label, because the `h1` above it already is one.
+ *
+ * `data-settings-section` is not decoration — it is the whole contract the rail
+ * in the margin and the sidebar's search both read. A section that forgets its
+ * title drops out of both rather than appearing unnamed.
+ */
+export function SettingsSection({
+  children,
+  description,
+  id,
+  title,
+}: {
+  children: React.ReactNode;
+  description?: React.ReactNode;
+  id?: string;
+  title?: string;
+}) {
   return (
     <section data-settings-section={title} id={id}>
-      {title && <h2 className="mb-2 pl-1 text-ui font-medium text-muted-foreground">{title}</h2>}
+      {title && (
+        <div className="mb-2">
+          <h2 className="flex items-center gap-1.5 text-sm font-[550] text-muted-foreground/80">{title}</h2>
+          {description && <p className="mt-1 text-xs font-medium text-muted-foreground">{description}</p>}
+        </div>
+      )}
       {children}
     </section>
   );
@@ -48,10 +68,17 @@ export function SettingsGroup({ className, ...props }: React.ComponentProps<"div
       className={cn(
         /* Raised off the sheet, because the sheet is the ground. A group is the
            only material on this page you actually operate — every switch and
-           select lives in one — so it takes the card surface and the card's
-           contact shadow, and the recessed sheet under it is what makes the
-           lift readable at all. */
-        "-mx-1 divide-y divide-border overflow-hidden rounded-[var(--radius-2xl)] border-[length:var(--hairline)] border-[var(--border-surface-strong)] bg-[var(--surface-primary)] [&+&]:mt-2",
+           select lives in one — so it takes the card surface, and the quiet
+           sheet under it is what makes the lift readable at all.
+
+           One card in both themes, divided by a hairline. Dark used to split
+           the rows with a one-pixel gap instead, on the theory that translucent
+           panes read as material — but on a near-black ground that gap is a
+           black line, and a card cut into floating strips is what it actually
+           read as. The border thins rather than disappears: at 10% white it is
+           the edge of the card, not a frame drawn around it. */
+        "-mx-3.5 divide-y divide-border overflow-hidden rounded-xl border border-border",
+        "[&+&]:mt-2",
         className,
       )}
     />
@@ -61,7 +88,12 @@ export function SettingsGroup({ className, ...props }: React.ComponentProps<"div
 /** One row. A minimum height rather than a fixed one: a row with a two-line
  *  description grows, and a row with a bare switch does not. */
 export function SettingsRow({ className, ...props }: React.ComponentProps<"div">) {
-  return <div {...props} className={cn("flex min-h-[3.375rem] items-center gap-3 px-3 py-2.5", className)} />;
+  return (
+    <div
+      {...props}
+      className={cn("flex min-h-[3.25rem] items-center gap-3 bg-[var(--surface-secondary)] p-2.5", className)}
+    />
+  );
 }
 
 /** A row that is itself the control — the whole surface is the hit target, so it
@@ -71,7 +103,12 @@ export function SettingsRowButton({ className, ...props }: React.ComponentProps<
     <button
       type="button"
       {...props}
-      className={cn("flex min-h-[3.375rem] w-full cursor-default items-center gap-3 px-3 py-2.5 text-left outline-none transition-colors hover:bg-accent/60", className)}
+      className={cn(
+        "flex w-full cursor-pointer items-center gap-3 text-left outline-none transition-colors",
+        "min-h-[3.25rem] bg-[var(--surface-secondary)] p-2.5",
+        "hover:bg-neutral-100 dark:hover:bg-accent",
+        className,
+      )}
     />
   );
 }
@@ -79,8 +116,13 @@ export function SettingsRowButton({ className, ...props }: React.ComponentProps<
 /** The left half: what the row is, and one line on why you would touch it. */
 export function SettingsField({ description, title }: { description?: React.ReactNode; title: React.ReactNode }) {
   return (
-    <div className="min-w-0 grow px-0.5">
-      <h4 className="text-content font-medium text-foreground">{title}</h4>
+    <div className="min-w-0 grow px-1">
+      <h4
+        className="text-content font-medium text-foreground"
+        data-settings-field={typeof title === "string" ? title : undefined}
+      >
+        {title}
+      </h4>
       {description && <p className="mt-0.5 text-ui text-muted-foreground">{description}</p>}
     </div>
   );

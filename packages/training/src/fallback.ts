@@ -5,8 +5,8 @@ type Language = QuestionDesign["language"];
 /**
  * The last resort when every model-authored candidate has been rejected.
  *
- * A session that ends with "challenge generation stopped after 15 rejected
- * attempts" has taught the learner nothing and left them nowhere to go. These
+ * A session whose authored candidate still fails after private repair has
+ * taught the learner nothing and left them nowhere to go. These
  * designs are held to the same bar as any other candidate — they are compiled
  * and validated by the host like everything else, never trusted — but they are
  * written against the build contract rather than guessed at, so validation
@@ -33,6 +33,7 @@ const javascript: QuestionDesign = {
   language: "javascript",
   kind: "function",
   difficulty: "foundation",
+  requiresComplexityAnalysis: true,
   statement: STATEMENT,
   starterFiles: { "src/prefix.js": "export function prefixLength(weights, threshold) {\n  throw new Error(\"implement prefixLength\");\n}\n" },
   referenceFiles: { "src/prefix.js": "export function prefixLength(weights, threshold) {\n  let total = 0;\n  for (let index = 0; index < weights.length; index += 1) {\n    total += weights[index];\n    if (total >= threshold) return index + 1;\n  }\n  return 0;\n}\n" },

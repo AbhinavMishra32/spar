@@ -17,7 +17,11 @@ function Separator({
       decorative={decorative}
       orientation={orientation}
       className={cn(
-        "shrink-0 bg-border data-horizontal:h-px data-horizontal:w-full data-vertical:w-px data-vertical:self-stretch",
+        /* Spelled as full attribute selectors on purpose. Tailwind compiles the
+           short `data-horizontal:` form to `[data-horizontal]`, and Radix writes
+           the orientation as `data-orientation="horizontal"` — so the short form
+           matched nothing and every separator rendered zero pixels tall. */
+        "shrink-0 bg-border data-[orientation=horizontal]:h-px data-[orientation=horizontal]:w-full data-[orientation=vertical]:w-px data-[orientation=vertical]:self-stretch",
         className
       )}
       {...props}

@@ -1,14 +1,12 @@
 import { useMemo, useState } from "react";
-import { ArrowRight, ChevronDown, FlaskConical, Target, TriangleAlert } from "lucide-react";
-import type { ActiveQuestion } from "@spar/domain";
+import { ArrowRight, FlaskConical } from "lucide-react";
+import type { ActiveQuestion, RatingPoint } from "@spar/domain";
 import { cn } from "@/lib/utils";
+import { useTranscriptFade } from "@/hooks/use-transcript-fade";
 import { declaredCases, sourcedCases } from "@/lib/testCases";
-import { presentSourcedStatement } from "@/lib/sourcedStatement";
-import { ChallengeEmblem } from "./ChallengeEmblem";
-import { ProblemStatement } from "./ProblemStatement";
-import { SourceHints } from "./SourceHints";
-import { ConceptChip, conceptChipProps, type ConceptContext } from "../concepts/ConceptChip";
-import { SourceBadge } from "../common/SourceBadge";
+import { ChallengeBrief } from "./ChallengeBrief";
+import { ChallengeRoll } from "./ChallengeRoll";
+import { type ConceptContext } from "../concepts/ConceptChip";
 import { SourceGlyph } from "../common/SourceGlyph";
 
 /**
@@ -18,12 +16,15 @@ import { SourceGlyph } from "../common/SourceGlyph";
  */
 export function ProblemView({
   concepts,
+  learnerRating,
   onOpenExternal,
   question,
   testFiles,
 }: {
   /** What the concept chips need to preview and open. */
   concepts?: ConceptContext | undefined;
+  /** The learner's rating, for pitching this problem against them. */
+  learnerRating?: RatingPoint | null | undefined;
   /** Opens the problem at its source in the real browser. */
   onOpenExternal?: ((url: string) => void) | undefined;
   question: ActiveQuestion;
@@ -40,73 +41,34 @@ export function ProblemView({
     [question.source, testFiles, question.visibleTestFiles],
   );
   const [selected, setSelected] = useState("");
-  const [whyOpen, setWhyOpen] = useState(false);
-  const presented = useMemo(
-    () => presentSourcedStatement(question.statement, question.source),
-    [question.source, question.statement],
-  );
+  /* The same dissolve the transcript uses on the tab beside this one: the
+     statement running on under the header, or the cases continuing past the
+     fold, should read as content travelling under the chrome rather than as a
+     column that was cut off there. */
+  const { ref: scroller, style: fade } = useTranscriptFade<HTMLDivElement>();
 
   const active = declared.cases.find((item) => item.id === selected) ?? declared.cases[0];
 
   return (
-    <div className="app-scroll h-full overflow-y-auto">
+    <div className="app-scroll transcript-fade h-full overflow-y-auto" ref={scroller} style={fade}>
       {/* One column, and the vertical rhythm is owned here rather than by each
           block's own bottom margin: the header, the chips and the statement are
           three sizes of type in a row, and spacing set per block is what left a
           negative margin cancelling a positive one further down. */}
-      <div className="mx-auto w-full max-w-[46rem] px-5 pb-10 pt-5">
-        <div className="flex items-center gap-3">
-          <ChallengeEmblem className="shrink-0" question={question} size={40} />
-          <div className="min-w-0 flex-1">
-            {/* The problem's name, and under it what Spar is using the problem to
-                test. The eyebrow that used to sit above this said "CHALLENGE SET
-                FOR YOU", which is true of every challenge in the app and so told
-                nobody anything — and it pushed the title down a line to make
-                room for itself. */}
-            <p className="truncate text-[1.0625rem] font-semibold leading-[1.3] tracking-[-0.015em]">{question.title}</p>
-            {question.abilityTitle && (
-              <p className="mt-0.5 truncate text-ui leading-[1.35] text-muted-foreground">Testing: {question.abilityTitle}</p>
-            )}
-          </div>
-          {question.source && (
-            <SourceBadge
-              source={question.source}
-              {...(onOpenExternal ? { onOpen: onOpenExternal } : {})}
-            />
-          )}
-        </div>
-
-        {/* What it is training. These carry the same preview and the same opener
-            as every other chip in the app: a chip that behaves one way in
-            history and another way here is two controls wearing one face, and
-            the moment you most want to know what you have already done under a
-            concept is while you are stuck on a problem about it. */}
-        {question.concepts.length > 0 && (
-          <div className="mt-3.5 flex flex-wrap gap-1.5">
-            {question.concepts.map((concept) => (
-              <ConceptChip key={concept.slug} showArea tag={concept} {...conceptChipProps(concepts, concept.slug)} />
-            ))}
-          </div>
-        )}
-
-        <div className="mt-5">
-          <ProblemStatement language={question.language} source={presented.statement} />
-        </div>
-
-        {question.source?.localRunNote && (
-          <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-lg)] border border-[color-mix(in_oklab,var(--warning)_30%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_6%,transparent)] px-3 py-2 text-ui leading-[1.55] text-muted-foreground">
-            <TriangleAlert className="mt-[0.15em] size-3.5 shrink-0 text-[var(--warning)]" />
-            <p><span className="font-medium text-foreground/80">Local run unavailable. </span>{question.source.localRunNote}</p>
-          </div>
-        )}
-
-        {question.source?.source === "leetcode" && (
-          <SourceHints className="mt-4" hints={presented.hints} language={question.language} />
-        )}
-
+      <ChallengeRoll
+        className="mx-auto w-full max-w-[46rem] px-5 pb-10 pt-5"
+        ordinal={question.ordinal}
+        scroller={scroller}
+        stopId={question.id}
+      >
+        <ChallengeBrief
+          brief={question}
+          conceptContext={concepts}
+          {...(onOpenExternal ? { onOpenExternal } : {})}
+        >
         {declared.cases.length > 0 && active && (
           <section className="mt-5">
-            <p className="mb-2 flex items-center gap-1.5 text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">
+            <p className="mb-2 flex items-center gap-1.5 text-content-sm font-medium tracking-[0.06em] text-muted-foreground/80">
               <FlaskConical className="size-3" />
               SAMPLE CASES
               {/* Whose cases these are. A sourced problem's samples are published
@@ -143,15 +105,15 @@ export function ProblemView({
             </div>
 
             <div className="overflow-hidden rounded-[var(--radius-xl)] border border-border bg-card">
-              <p className="border-b border-border/70 px-3 py-2 text-ui font-medium">{active.name}</p>
+              <p className="border-b border-border/70 px-3 py-2 text-content font-medium">{active.name}</p>
               {active.assertions.length > 0 ? (
                 <div className="divide-y divide-border/60">
                   {active.assertions.map((assertion, index) => (
                     <div className="flex min-w-0 flex-col gap-1 px-3 py-2" key={index}>
-                      <code className="min-w-0 break-words font-mono text-ui-sm text-foreground/85">{assertion.call}</code>
+                      <code className="min-w-0 break-words font-mono text-content-sm text-foreground/85">{assertion.call}</code>
                       <span className="flex min-w-0 items-start gap-1.5">
                         <ArrowRight className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
-                        <code className="min-w-0 break-words font-mono text-ui-sm text-[var(--success)]">
+                        <code className="min-w-0 break-words font-mono text-content-sm text-[var(--success)]">
                           {assertion.expected}
                         </code>
                       </span>
@@ -159,7 +121,7 @@ export function ProblemView({
                   ))}
                 </div>
               ) : (
-                <p className="px-3 py-2 text-ui text-muted-foreground">
+                <p className="px-3 py-2 text-content text-muted-foreground">
                   {active.file
                     ? `This case asserts something the reader cannot summarise — open ${active.file} to read it in full.`
                     : "This case published no expected value, so there is nothing to assert against here."}
@@ -169,33 +131,8 @@ export function ProblemView({
           </section>
         )}
 
-        <div className="mt-4 overflow-hidden rounded-[var(--radius-xl)] border border-border bg-[var(--color-background-elevated-secondary)]">
-          <button
-            className="flex w-full items-center gap-2 px-3 py-2 text-left"
-            onClick={() => setWhyOpen((value) => !value)}
-            type="button"
-          >
-            <Target className="size-3 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 truncate text-ui font-medium">Why this problem</span>
-            <ChevronDown className={cn("size-3 shrink-0 text-muted-foreground transition-transform", !whyOpen && "-rotate-90")} />
-          </button>
-          {whyOpen && (
-            <div className="space-y-1.5 border-t border-border/70 px-3 py-2 text-ui leading-[1.6]">
-              <p className="text-foreground/85">{question.specificGap}</p>
-              <p className="text-muted-foreground">
-                <span className="font-medium text-foreground/70">Evidence wanted: </span>
-                {question.desiredEvidence}
-              </p>
-              {question.avoidTesting.length > 0 && (
-                <p className="text-muted-foreground">
-                  <span className="font-medium text-foreground/70">Not under test: </span>
-                  {question.avoidTesting.join(", ")}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+        </ChallengeBrief>
+      </ChallengeRoll>
     </div>
   );
 }

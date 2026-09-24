@@ -83,6 +83,9 @@ requests:
 | `RESEND_API_KEY` | Required in production. Sends the verification and password-reset codes — see below |
 | `EMAIL_FROM` | The sender, e.g. `Spar <no-reply@yourdomain.com>`. Must be an address on a domain verified with Resend |
 | `SUPABASE_URL` and `SUPABASE_SECRET_KEY`, or `OBJECT_STORAGE_*` | Optional. Object storage backs one route, `/v1/storage/upload`, which the desktop app does not call yet — challenge artifacts and workspace files both ride inline in Postgres. Skip both and the API boots and answers 503 on that one route instead of refusing to start |
+| `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` | Recommended. Exports completed agent and eval traces to the premade Langfuse UI. The base URL may be Langfuse Cloud or your own deployment. All three must be set together |
+| `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_OTEL_ENABLED` | Optional direct LangSmith exporter. The API key stays server-side; the endpoint defaults to LangSmith SaaS and the project selects the LangSmith tracing project |
+| `TELEMETRY_OTLP_TRACES_URL`, `TELEMETRY_OTLP_HEADERS` | Optional vendor-neutral override for Phoenix or an OpenTelemetry collector. The headers value is a JSON object; this pair takes precedence over the Langfuse variables |
 
 **Email.** Creating an account asks for a six-digit code, and so does resetting a
 password, so a deployment that cannot send email cannot let anyone in — the API
@@ -116,6 +119,10 @@ the client changes if you host Postgres somewhere else.
 
 Keep the **direct** (non-pooled) URL for migrations. `drizzle-kit` runs DDL, which
 wants a real session rather than a transaction-scoped one.
+
+Agent trace storage and the premade observability UI are described in
+[Agent observability](./agent-observability.md). Apply migration `0006` before
+enabling a telemetry exporter.
 
 ### Migrate before you deploy
 

@@ -9,6 +9,7 @@ import { SparDots } from "@/components/common/SparDots";
 import { message } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { SourceGlyph } from "../common/SourceGlyph";
+import { SettingsRow } from "./layout";
 
 type SourceNote = { tone: "muted" | "error"; text: string };
 
@@ -220,7 +221,7 @@ function ConnectedSource({
         </div>
         <div className="w-[13.5rem] shrink-0">
           <div className="mb-1.5 flex items-baseline justify-between gap-3 text-ui-sm tabular-nums text-muted-foreground">
-            <span><span className="font-medium text-foreground/85">{account.solved.total.toLocaleString()}</span> solved</span>
+            <span><span className="font-medium text-foreground">{account.solved.total.toLocaleString()}</span> solved</span>
             {account.available.total > 0 && <span>of {account.available.total.toLocaleString()}</span>}
           </div>
           <Meter bands={bands} height="0.3125rem" total={account.available.total} />
@@ -302,6 +303,8 @@ function topSkills(account: NonNullable<PracticeInventory["account"]>): string {
     .join(", ");
 }
 
+/* The shared row, not a local one: every row in a settings card has to agree
+   about its surface, or the card is a stack of panes in two colours. */
 function Row({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex min-h-[3.375rem] items-center gap-3 px-3.5 py-2", className)} {...props} />;
+  return <SettingsRow className={className} {...props} />;
 }

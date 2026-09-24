@@ -11,10 +11,26 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * is what it sent, captured from a live Mastra request while it was still the
  * runtime, and every tool now goes to the provider through a different path.
  *
- * So this is not a snapshot of the current code's own output — it is the older
- * implementation's output, kept as the reference. A diff here means the model
- * is being told something different from what it was told before the
- * migration, which is the one thing the migration promised not to do.
+ * So this started as the older implementation's output rather than a snapshot of
+ * this code's own, and it stays the reference. A failure here means the model is
+ * being told something different from what it was told before — which is either
+ * accidental drift, and the bug this file exists to catch, or a deliberate
+ * change to a tool, in which case that tool's entry is regenerated in the same
+ * commit as the schema and the diff is the review.
+ *
+ * Deliberate changes so far: `read_ability` and `search_learner_model` now
+ * return the learner's patterns and behavioural evidence beside the documents,
+ * `propose_ability_update` requires at least one interpreted evidence entry.
+ * Challenge tools state the difficulty prices while leaving the teaching choice
+ * with the agent, and the four
+ * tools that read an attempt became one — `inspect_current_attempt` and the old
+ * `read_attempt` were the same host handler under two names, `evaluate_attempt`
+ * was that handler with the files left off, and `replay_attempt` was the same
+ * attempt with its log folded, so a turn asked how the learner was doing spent a
+ * round trip on each of them in turn. `read_attempt` now returns all of it at
+ * once and the other three are gone from the table. `read_submissions` is new:
+ * a submission became a thing with an id the reply can cite, so there is a call
+ * that lists them and returns the code and cases of one.
  */
 describe("the tool contract, against what Mastra sent", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;
@@ -38,5 +54,13 @@ describe("the tool contract, against what Mastra sent", () => {
     const search = agentToolSchemas().search_learner_model;
     expect((search?.inputSchema as { properties: { limit: { default: number } } }).properties.limit.default).toBe(4);
     expect(search?.parse({ query: "arrays", actionTitle: "Checking arrays" })).toMatchObject({ query: "arrays", limit: 4 });
+  });
+
+  it("makes the author classify whether complexity is useful evidence", () => {
+    const create = current.create_question?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
+    const replace = current.replace_current_question?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
+    expect(create.required).toContain("requiresComplexityAnalysis");
+    expect(replace.required).toContain("requiresComplexityAnalysis");
+    expect(create.properties).toHaveProperty("requiresComplexityAnalysis");
   });
 });

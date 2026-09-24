@@ -29,7 +29,7 @@ const api = {
         { id: "anthropic", name: "Anthropic", description: "", kind: "api-key", state: "connected", selectedModel: "opus", baseUrl: "", models: [] },
       ],
       ready: true,
-      defaultModel: { provider: "anthropic", model: "opus", reasoningEffort: "medium" },
+      defaultModel: { provider: "anthropic", model: "opus", reasoningEffort: "medium", fastMode: false },
     };
   },
   async saveProfile(input: unknown) {

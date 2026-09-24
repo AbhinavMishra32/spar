@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { closeOff } from "./ToolDetail";
+import { closeOff } from "./ToolPayload";
 
 /**
  * The worker caps a stored payload at 16k, so the long results — an attempt's

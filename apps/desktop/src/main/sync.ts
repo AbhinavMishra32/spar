@@ -63,5 +63,8 @@ export function route(kind:string,value:Record<string,unknown>):{path:string;met
   if(kind==="concept-create")return{path:"/v1/concepts",method:"POST",body:value};
   if(kind==="checkpoint")return{path:`/v1/sessions/${value.sessionId}/checkpoints/${value.version}`,method:"PUT",body:value};
   if(kind==="attempt-event")return{path:`/v1/attempts/${value.attemptId}/events`,method:"POST",body:{attemptId:value.attemptId,expectedSequence:value.sequence,events:[value]}};
+  if(kind==="agent-run-start")return{path:`/v1/telemetry/runs/${value.id}`,method:"PUT",body:value};
+  if(kind==="agent-trace-event")return{path:`/v1/telemetry/runs/${value.runId}/events`,method:"POST",body:{events:[value]}};
+  if(kind==="agent-run-finish")return{path:`/v1/telemetry/runs/${value.id}`,method:"PATCH",body:value};
   return null;
 }

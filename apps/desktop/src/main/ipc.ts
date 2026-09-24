@@ -3,19 +3,22 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { baselineStateSchema, languageSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
+import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
+import { snapshotCode } from "../shared/submissions.js";
 import { sourceSubmissionOutput } from "../shared/sourceOutput.js";
 import { canonicalWorkspacePath } from "../shared/workspacePath.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
 import { openChosenProblem } from "./practiceChoice.js";
+import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import { judgeCaseBlock } from "./judgeCases.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
+import { agentTurnPayload, openQuestion } from "./agentTurnPayload.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { PracticeService } from "./practice.js";
 import type { VisualizerService } from "./visualizer.js";
@@ -24,12 +27,12 @@ import type { CloudSyncService } from "./sync.js";
 import type { CheckpointService } from "./checkpoints.js";
 import type { RestoreService } from "./restore.js";
 import type { WebSearchService } from "./webSearch.js";
-import { requestsChallengeRevision } from "./agentIntent.js";
 import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 import type { AgentQuestions } from "./agentQuestions.js";
+import type { AgentTelemetry } from "./agentTelemetry.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentQuestions: AgentQuestions; agentRunSessions: Map<string, string>; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentQuestions: AgentQuestions; agentRunSessions: Map<string, string>; telemetry:AgentTelemetry; appVersion:string; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; window: () => BrowserWindow | null }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
@@ -52,7 +55,15 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      seen the state and asked for it, so this is no longer a loop the app is
      driving by itself. */
   const clearAutoResume = (sessionId: string) => autoResumedPlanning.delete(sessionId);
-  ipcMain.handle(ipc.bootstrap, async () => ({ account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() }));
+  /* Before anything is read, not on a timer. The only moment an ability's age
+     matters is the moment somebody looks at the ledger, and every look starts
+     here — so a learner returning after two months away sees the decay in the
+     same frame as everything else rather than watching a status change under
+     them a second later. */
+  ipcMain.handle(ipc.bootstrap, async () => {
+    deps.store.decayAbilities();
+    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
+  });
   ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
@@ -92,14 +103,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const id=zUuid(sessionId);let detail=deps.store.readSession(id);
     if(detail?.summary.trackId)deps.store.setActiveTrack(detail.summary.trackId);
     if(detail?.summary.status!=="planning"||detail.pendingLearnerQuestion||activeAgentRuns.has(id)||startingAgentRuns.has(id))return ensureLiveWorkspace(id, detail);
-    if(deps.store.resetIncompletePlanning(id)){clearAutoResume(id);detail=deps.store.readSession(id);}
+    if(deps.store.settleLessonPlanning(id)){clearAutoResume(id);return deps.store.readSession(id);}
     if(!detail)return null;
     if(!mayAutoResume(id))return detail;
     const placementAnswer=deps.store.answeredIntake(id);
     countAutoResume(id);
-    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal,detail.summary.trackId)&&!placementAnswer){void startAgentTurn(id,`Resume placement for this learner goal inside its Track: ${detail.summary.originalGoal}. Ask one focused prerequisite and confidence question before choosing a target.`,"system","cold-start");return detail;}
-    if(placementAnswer){void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Commit one accessible target and create a validated question.`,"system","session-start");return detail;}
-    void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Re-evaluate the goal from relevant evidence and commit one fresh target.` ,"system","session-start");
+    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal,detail.summary.trackId)&&!placementAnswer){void startAgentTurn(id,`Resume placement for this learner goal inside its Track: ${detail.summary.originalGoal}. Use the supplied context and persisted decisions. Ask a prerequisite question only if its answer would change the next lesson or challenge.`,"system","cold-start");return detail;}
+    if(placementAnswer){void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Continue from any persisted objective and target; do not repeat completed planning. Create a validated question or teach a missing prerequisite.`,"system","session-start");return detail;}
+    void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Continue from the persisted objective and target. Use the supplied context and retrieve only missing evidence; do not repeat completed planning.` ,"system","session-start");
     return ensureLiveWorkspace(id, detail);
   });
   ipcMain.handle(ipc.workspaceStateSave, (_event, value) => { const { sessionId, ...state } = workspaceStateInput.parse(value); deps.checkpoints.remember(sessionId, state); });
@@ -170,14 +181,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       }:null;
       /* Bound once, because it now answers two questions: what the Track is, and
          which language its challenges are written in. */
-      const track=session.summary.trackId?deps.store.listTracks().find((item)=>item.id===session.summary.trackId)??null:null;
-      const payload={sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,activeQuestion:openQuestion(session)?{id:session.question!.id,attemptId:session.question!.attemptId}:null,resumeState:{...(session.summary.objective!==defaultObjective?{objective:{committed:true,objective:session.summary.objective}}:{}),...(turnKind!=="challenge-revision"&&target?{target:{committed:true,...target}}:{})},context:JSON.stringify({session:session.summary,activeQuestion:session.question,activeTrainingTarget:target,targetProgress:deps.store.targetProgress(sessionId),checkpoint:session.checkpoint,recentConversation:session.messages.slice(-12),track,relevantAbilitySummary:deps.store.searchLearner(session.summary.originalGoal,4,session.summary.trackId),
-        /* Carried unconditionally, unlike `relevantAbilitySummary`, which is
-           scoped to the goal and so cannot show a topic the goal never mentions.
-           Repetition across sessions is exactly the thing a goal-scoped view
-           hides: the agent needs to see the last dozen challenges to know it has
-           asked about the same concept twelve times. */
-        recentChallenges:deps.store.recentChallengeCoverage(12,session.summary.trackId),practiceSource:practiceSummary,accountId:account.id,preferredLanguage:track?.language??profile?.language??"javascript",learnerProfile:profile?{name:profile.name,experience:profile.experience,focus:profile.focus,statedWeakness:profile.weakness}:null})};
+      /* Assembled by `agentTurnPayload`, which is also what the eval calls, so
+         the prompt the product sends and the prompt a measurement is taken
+         against cannot be two different prompts. */
+      const payload=agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id});
       /* A run is claimed by its session for as long as it is in flight, in two
          places: `activeAgentRuns` guards against a second turn, and
          `agentRunSessions` is what lets the main process stamp a session id onto
@@ -191,8 +198,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       const startedAt=Date.now();
       const claim=(runId:string)=>{activeAgentRuns.set(sessionId,runId);deps.agentRunSessions.set(runId,sessionId);return runId;};
       const release=(runId:string)=>{activeAgentRuns.delete(sessionId);deps.agentRunSessions.delete(runId);};
-      const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);
-      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string};
+      const beginTelemetry=(runId:string,index:number)=>deps.telemetry.start({runId,sessionId,provider:providers[index]!.provider,model:providers[index]!.model,turnKind,input:{message,visibleMessage,role,context:payload.context,activeQuestion:payload.activeQuestion??null},appVersion:deps.appVersion});
+      const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);beginTelemetry(first.id,0);
+      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string;usage?:unknown;finishReason?:string;phaseSteps?:number};
         /* The turn's own steps go into storage with the reply they produced. The
            live run is dropped the instant this `done` reaches the renderer, and
            without this the transcript would keep only the last sentence of a
@@ -202,7 +210,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
            turn answers with a challenge rather than a sentence, and it used to
            leave the transcript with no trace that it ran at all. */
         if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity,Date.now()-startedAt);
-        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...payload,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);return attempt(retry,index+1);}if(turnKind==="session-start"){deps.store.resetIncompletePlanning(sessionId);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
+        deps.telemetry.finish(request.id,value);
+        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);deps.telemetry.finish(request.id,{},error);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,resumeSince:new Date(startedAt).toISOString()}),provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);beginTelemetry(retry.id,index+1);return attempt(retry,index+1);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);
@@ -286,6 +295,20 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   /* A turn already in flight is dropped rather than waited for: the learner has
      said the session is going away, and the worker's result has nowhere to land
      once the row is gone. Anything the turn still writes is a no-op after this. */
+  ipcMain.handle(ipc.tracksDelete, async (_event, value) => {
+    const trackId = zUuid(value);
+    const sessions = deps.store.listSessions().filter((session) => session.trackId === trackId);
+    for (const session of sessions) {
+      const runId = activeAgentRuns.get(session.id);
+      activeAgentRuns.delete(session.id);
+      clearAutoResume(session.id);
+      deps.agentQuestions.cancel(session.id);
+      if (runId) void deps.agent.request("abort", { requestId: runId }).promise.catch(() => undefined);
+    }
+    if (!deps.store.deleteTrack(trackId)) return;
+    await Promise.all(sessions.map((session) => deps.workspaces.remove(session.id)));
+  });
+
   ipcMain.handle(ipc.sessionsDelete, async (_event, value) => {
     const sessionId = zUuid(value);
     activeAgentRuns.delete(sessionId);
@@ -338,7 +361,18 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   };
 
   ipcMain.handle(ipc.challengePreviews, () => deps.store.challengePreviews());
+  /* Validated here rather than trusted: the snapshot is the one thing the window
+     sends that the device will read back and draw without asking anyone else, so
+     a malformed one would be a bad row on the shelf forever. */
+  ipcMain.handle(ipc.problemsSave, (_event, input: { key?: unknown; saved?: unknown; snapshot?: unknown }) => {
+    const request = savedProblemSchema.pick({ key: true, snapshot: true }).safeParse({ key: input?.key, snapshot: input?.snapshot ?? null });
+    if (!request.success) throw new Error("A problem can only be saved under a problem key.");
+    return deps.store.setProblemSaved(request.data.key, input?.saved !== false, request.data.snapshot);
+  });
   ipcMain.handle(ipc.challengeRead, (_event, value) => challengeDetail(zUuid(value)));
+  ipcMain.handle(ipc.challengeSubmissions, (_event, value) => deps.store.submissionsForQuestion(zUuid(value)));
+  ipcMain.handle(ipc.submissionRead, (_event, value) => deps.store.readSubmission(zUuid(value)));
+  ipcMain.handle(ipc.sessionSubmissions, (_event, value) => deps.store.submissionsForSession(zUuid(value)));
   ipcMain.handle(ipc.challengeWrite, async (_event, value) => {
     const input = challengeWriteInput.parse(value);
     const record = practiceTarget(input.challengeId);
@@ -404,7 +438,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sourceSearch, async (_event, value) => {
     const input = sourceSearchInput.parse(value);
     const found = await deps.practice.search(input);
-    return { total: found.total, failed: found.failed, problems: found.problems.map((problem) => ({ source: problem.source, sourceName: problem.source === "leetcode" ? "LeetCode" : "Codeforces", slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
+    return { total: found.total, failed: found.failed, problems: found.problems.map((problem) => ({ source: problem.source, sourceName: problem.source === "leetcode" ? "LeetCode" : "Codeforces", slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, sourceRating: problem.sourceRating ?? null, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
   });
   ipcMain.handle(ipc.sourceProblem, async (_event, value) => { const input = sourceSlugInput.parse(value); return (await deps.practice.problem(input.source, input.slug)).problem; });
 
@@ -436,9 +470,31 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const id = String((value as { id?: unknown })?.id ?? "");
     return id ? deps.store.readVisualization(id) : null;
   });
+  /* A lesson, read back by id. Same shape and the same reason as the
+     visualisation above it: the transcript row carries an identity, the reader
+     fetches the document. */
+  ipcMain.handle(ipc.lessonRead, (_event, value) => {
+    const id = String((value as { id?: unknown })?.id ?? "");
+    if (!id) return null;
+    const found = deps.store.readLesson(id);
+    if (!found) return null;
+    const payload = lessonInputSchema.safeParse(found.payload);
+    if (!payload.success) return null;
+    /* The payload is the whole lesson; the columns beside it are a copy kept so
+       a search can read titles without parsing every row. The payload wins. */
+    return { ...payload.data, id: found.id, sessionId: found.sessionId, createdAt: found.createdAt };
+  });
   ipcMain.handle(ipc.messageActivity, (_event, value) => {
     const messageId = String((value as { messageId?: unknown })?.messageId ?? "");
     return messageId ? deps.store.messageActivity(messageId) : [];
+  });
+  ipcMain.handle(ipc.messageRate, (_event, value) => {
+    const input = rateMessageInput.parse(value);
+    /* The rating that is now in force, so the footer settles on what was
+       written rather than on what it hoped for. A message the store would not
+       rate — a learner's own, or one that has since been rewound away — comes
+       back unrated, and the thumb the click lit goes out again. */
+    return deps.store.rateMessage(input.messageId, input.rating) ? input.rating : null;
   });
   ipcMain.handle(ipc.visualizerProblem, async (_event, value) => {
     const input = sourceSlugInput.parse(value);
@@ -538,7 +594,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     clearAutoResume(sessionId);
     const result = deps.agentQuestions.answer(sessionId, answer);
     const runId = activeAgentRuns.get(sessionId);
-    if (result.resumed && runId) return { runId, resumed: true };
+    if (result.resumed && runId) {
+      deps.store.addMessage(sessionId, "learner", answer);
+      return { runId, resumed: true };
+    }
 
     /* A persisted question can outlive the process which asked it. There is no
        promise to resume after a relaunch, so recover with one new run while
@@ -572,9 +631,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     clearAutoResume(sessionId);
     const rewound = deps.store.rewindToMessage(sessionId, messageId);
     if (!rewound) throw new Error("That message is no longer in this conversation.");
-    const session = deps.store.readSession(sessionId);
-    const turnKind = session?.question && requestsChallengeRevision(input.message, session.messages) ? "challenge-revision" : "learner-message";
-    return startAgentTurn(sessionId, input.message.trim(), "learner", turnKind);
+    return startAgentTurn(sessionId, input.message.trim(), "learner", "learner-message");
   });
 
   /**
@@ -593,8 +650,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
    * learner meant either way.
    */
   ipcMain.handle(ipc.agentSend, async (_event, value) => {
-    const input = value as { sessionId?: unknown; message?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
+    const input = value as { sessionId?: unknown; message?: unknown; contextQuestionId?: unknown }; const sessionId = zUuid(input.sessionId); if (typeof input.message !== "string" || !input.message.trim()) throw new Error("Message is required");
     const said = input.message.trim();
+    const contextQuestionId = input.contextQuestionId === undefined ? null : zUuid(input.contextQuestionId);
+    const contextChallenge = contextQuestionId ? deps.store.readChallenge(contextQuestionId) : null;
+    if (contextChallenge && contextChallenge.session_id !== sessionId) throw new Error("That challenge does not belong to this session.");
+    const contextual = contextChallenge
+      ? `The learner attached challenge #${contextChallenge.ordinal}, "${contextChallenge.title}" (question ID: ${contextQuestionId}) to this message. Answer about that specific challenge.\n\nThe learner said: ${said}`
+      : said;
     clearAutoResume(sessionId);
     /* Steering and starting a turn are the same act from the learner's side, so
        which one happens is decided here rather than at four call sites. The
@@ -615,7 +678,12 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       return startAgentTurn(sessionId, body, "learner", turnKind);
     };
     if(deps.store.pendingIntake(sessionId)){
-      deps.store.answerIntake(sessionId,said);
+      const answeredQuestion = deps.agentQuestions.answer(sessionId, said);
+      const waitingRunId = activeAgentRuns.get(sessionId);
+      if (answeredQuestion.resumed && waitingRunId) {
+        deps.store.addMessage(sessionId, "learner", said);
+        return { runId: waitingRunId, resumed: true };
+      }
       /* An answer given while a challenge is open is context for that challenge,
          not the start of a session: the agent asked something about work in
          progress, and a session-start turn would try to publish a second
@@ -628,9 +696,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       if(answered?.summary.context==="baseline")return deliverIntake(`The learner answered the baseline context question: ${said}\nUse only what materially changes calibration. Set one diagnostic Training Target and create exactly one fair coding probe in their preferred language. Stay inside the dedicated baseline; do not create a Track, syllabus, or general chat.`);
       return deliverIntake(`The learner answered the cold-start placement question: ${said}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`);
     }
-    const session=deps.store.readSession(sessionId);
-    const turnKind=session?.question&&requestsChallengeRevision(input.message,session.messages)?"challenge-revision":"learner-message";
-    return deliver(said,turnKind);
+    return deliver(contextual,"learner-message",said);
   });
   /**
    * A submission judged by the source that wrote the problem.
@@ -647,6 +713,11 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
    */
   const noteBaselineEvidence=(sessionId:string)=>{const baseline=deps.store.getBaseline();if(baseline.status!=="in-progress"||baseline.sessionId!==sessionId)return{baseline:false,complete:false};const directEvidenceCount=baseline.directEvidenceCount+1;const required=baseline.importedEvidenceCount>=4?2:3;const complete=directEvidenceCount>=required;const importedContribution=Math.min(0.15,baseline.importedEvidenceCount*0.03);deps.store.setBaseline({directEvidenceCount,confidence:Math.min(0.85,directEvidenceCount/required*0.7+importedContribution),...(complete?{status:"complete" as const,completedAt:new Date().toISOString()}:{})});return{baseline:true,complete};};
   const complexityCheckEnabled=()=>deps.store.getSetting<boolean>("complexity-check-enabled",true);
+  /* Two gates, with separate owners: the authoring agent decides whether Big-O
+     is useful evidence for this particular challenge, while the learner's
+     Settings switch decides whether Spar may interrupt any solve for it. Legacy
+     challenges have no capability stamp and therefore do not get guessed at. */
+  const requiresComplexityCheckpoint=(design:{requiresComplexityAnalysis?:boolean|undefined})=>challengeRequiresComplexityCheckpoint(design,complexityCheckEnabled());
   /* Attempt events are JSON on disk and are read back from rows written by older
      versions of this handler, so the verdict is parsed rather than cast: a review
      recorded before it existed has none, and that is a valid answer. */
@@ -681,7 +752,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          where it was, because an outage is not something they did. */
       return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output: verdict.status, summary: `${name} could not judge that submission (${verdict.status}). Nothing was recorded — try again in a moment.`, requiresComplexity:false } satisfies SubmissionResult;
     }
-    append("submission_created", { questionId: bundle.question_id, judge: source.source, url: verdict.submissionUrl }, "learner");
+    append("submission_created", { questionId: bundle.question_id, judge: source.source, url: verdict.submissionUrl, code: snapshotCode(path, code) }, "learner");
     append("test_run", {
       scope: "source-submission", judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed",
       status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases,
@@ -694,7 +765,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if (verdict.outcome === "failed") {
       return { outcome: "failed" as const, exitCode: 1, durationMs: 0, output, summary: `${name} says ${verdict.status}${verdict.totalCases ? ` — ${verdict.passedCases} of ${verdict.totalCases} cases passed` : ""}. Keep going and submit again, or give up to move on.`, requiresComplexity:false } satisfies SubmissionResult;
     }
-    const requiresComplexity=complexityCheckEnabled();
+    const requiresComplexity=requiresComplexityCheckpoint(bundle.design);
     if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle,source});
     return { outcome: "passed" as const, exitCode: 0, durationMs: 0, output, summary: `${name} accepted it${verdict.runtime ? ` — ${verdict.runtime}` : ""}. Every hidden case passed.`, requiresComplexity } satisfies SubmissionResult;
   };
@@ -709,10 +780,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        brief restore window before the renderer has redrawn the checkpoint. */
     const latestEvaluation=[...deps.store.readAttempt(attemptId)].reverse().find((event)=>event.type==="submission_evaluated");
     if(latestEvaluation?.payload.outcome==="passed"){
-      const requiresComplexity=complexityCheckEnabled();
+      const requiresComplexity=requiresComplexityCheckpoint(bundle.design);
       const source=deps.store.readSession(sessionId)?.question?.source;
       if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle,...(source?{source}:{})});
-      return{outcome:"passed" as const,exitCode:0,durationMs:0,output:"",summary:"All tests already passed. Finish the complexity check to finalize this solve.",requiresComplexity} satisfies SubmissionResult;
+      return{outcome:"passed" as const,exitCode:0,durationMs:0,output:"",summary:requiresComplexity?"All tests already passed. Finish the complexity check to finalize this solve.":"All tests already passed.",requiresComplexity} satisfies SubmissionResult;
     }
     /* A challenge from a source with a judge behind it is graded there, by the
        people who wrote the hidden cases. Everything after the verdict is the same
@@ -721,14 +792,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        what the evidence itself says. */
     const submissionSource=deps.store.readSession(sessionId)?.question?.source;
     if(submissionSource?.remoteJudge)return submitToSource({sessionId,attemptId,bundle,source:submissionSource});
-    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:runLimits(bundle.language).timeoutMs,failFast:true}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
+    const workspaceFiles:Record<string,string>={};for(const file of await deps.workspaces.list(sessionId))workspaceFiles[file]=await deps.workspaces.read(sessionId,file);const validationId=randomUUID();const root=await deps.workspaces.writeValidation(sessionId,validationId,{...workspaceFiles,...bundle.design.hiddenTests});let result:{exitCode:number;stdout:string;stderr:string;durationMs:number};try{result=await deps.runner.request("run",{root,language:bundle.language,command:"test",timeoutMs:runLimits(bundle.language).timeoutMs,failFast:true}).promise as typeof result;}finally{await deps.workspaces.removeValidation(sessionId,validationId);}const append=(type:"submission_created"|"test_run"|"submission_evaluated"|"attempt_completed",payload:Record<string,unknown>,source:"learner"|"runner"|"system")=>deps.store.appendNextEvent({id:randomUUID(),attemptId,type,occurredAt:new Date().toISOString(),payload,source,schemaVersion:1});append("submission_created",{questionId:bundle.question_id,code:snapshotCode(solutionPath(bundle.design),workspaceFiles[solutionPath(bundle.design)]??"")},"learner");const output=runOutput(result.stdout,result.stderr);append("test_run",{scope:"visible-and-hidden",exitCode:result.exitCode,passed:result.exitCode===0,durationMs:result.durationMs,...runEvidence(output)},"runner");const outcome=result.exitCode===0?"passed":"failed";append("submission_evaluated",{outcome,exitCode:result.exitCode},"system");
     /* A failed submission leaves the attempt open. Solving it is the point, so a
        wrong answer is a step in the attempt rather than the end of it: the learner
        keeps working and submits again, every submission is recorded as evidence,
        and Spar is not asked to judge a challenge that is still being solved.
        Giving up is the other way out, and it is the learner's decision. */
     if(outcome==="failed")return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"Some tests still fail. Keep going and submit again, or give up to move on.",requiresComplexity:false} satisfies SubmissionResult;
-    const requiresComplexity=complexityCheckEnabled();
+    const requiresComplexity=requiresComplexityCheckpoint(bundle.design);
     if(!requiresComplexity)finishPassedAttempt({sessionId,attemptId,bundle});
     return{outcome,exitCode:result.exitCode,durationMs:result.durationMs,output,summary:"All visible and hidden tests passed.",requiresComplexity} satisfies SubmissionResult;});
 
@@ -738,6 +809,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if(!bundle||bundle.session_id!==input.sessionId)return null;
     const events=deps.store.readAttempt(input.attemptId);
     if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")return null;
+    /* A setting can be disabled while a passed attempt is paused here. Resolving
+       that durable pass during restore prevents a now-hidden checkpoint from
+       leaving the attempt permanently open. */
+    if(!requiresComplexityCheckpoint(bundle.design)){
+      const source=deps.store.readSession(input.sessionId)?.question?.source;
+      finishPassedAttempt({sessionId:input.sessionId,attemptId:input.attemptId,bundle,...(source?{source}:{})});
+      return null;
+    }
     const claim=[...events].reverse().find((event)=>event.type==="learner_remark"&&event.payload.kind==="complexity-claim");
     const review=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
     return{time:String(claim?.payload.timeComplexity??""),space:String(claim?.payload.spaceComplexity??""),review:String(review?.payload.body??""),verdict:readVerdict(review?.payload.verdict)};
@@ -747,6 +826,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const input=complexityReviewInput.parse(value);
     const bundle=deps.store.submissionBundle(input.attemptId);
     if(!bundle||bundle.session_id!==input.sessionId)throw new Error("This complexity checkpoint is no longer active.");
+    if(!requiresComplexityCheckpoint(bundle.design))throw new Error("This challenge does not require a complexity check, or the check is disabled in Settings.");
     const events=deps.store.readAttempt(input.attemptId);
     if([...events].reverse().find((event)=>event.type==="submission_evaluated")?.payload.outcome!=="passed")throw new Error("Pass every test before reviewing complexity.");
     const priorReview=[...events].reverse().find((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
@@ -773,6 +853,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const input=complexityAcknowledgeInput.parse(value);
     const bundle=deps.store.submissionBundle(input.attemptId);
     if(!bundle||bundle.session_id!==input.sessionId)throw new Error("This complexity checkpoint is no longer active.");
+    if(!requiresComplexityCheckpoint(bundle.design))throw new Error("This challenge does not require a complexity check, or the check is disabled in Settings.");
     const reviewed=deps.store.readAttempt(input.attemptId).some((event)=>event.type==="agent_message"&&event.payload.kind==="complexity-review");
     if(!reviewed)throw new Error("Wait for Spar's complexity review before continuing.");
     const source=deps.store.readSession(input.sessionId)?.question?.source;
@@ -864,7 +945,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     deps.providers.setDefault(providerId(input.provider), input.model.trim());
   });
   ipcMain.handle(ipc.settingsProviderUsage, (_event, value) => deps.providers.subscriptionUsage(providerId(value)));
+  ipcMain.handle(ipc.settingsUsageReport, (_event, value) => deps.store.usageReport(typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(value, 3650) : null));
+  ipcMain.handle(ipc.settingsProviderAccount, (_event, value) => deps.providers.subscriptionAccount(providerId(value)));
   ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
+  ipcMain.handle(ipc.settingsFastMode, (_event, value) => deps.providers.setFastMode(z.boolean().parse(value)));
   /* The key goes in and never comes back out. Settings needs to know whether one
      is set and where it came from, which is not the same as needing to read it —
      and a renderer that can read it is one XSS away from exfiltrating it. */
@@ -1021,10 +1105,6 @@ function withoutFinalReply(activity: AgentActivityStep[], reply: string): AgentA
  * attempt's own completion is the honest signal: while it is open the learner can
  * still submit, and once it closes the session is waiting for what comes next.
  */
-function openQuestion(session: { question: { attemptCompletedAt: string | null } | null }): boolean {
-  return Boolean(session.question && !session.question.attemptCompletedAt);
-}
-
 function zUuid(value: unknown) { if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) throw new Error("Invalid identifier"); return value; }
 function providerId(value: unknown): ProviderId {
   if (typeof value !== "string" || !["openai-codex","claude-code","github-copilot","openai","anthropic","google","xai","openrouter","cline","opencode","opencode-go","deepseek","minimax","moonshotai","kimi-coding","zai","vercel-ai-gateway","cloudflare-ai-gateway","ollama","lm-studio","custom"].includes(value)) throw new Error("Unknown provider");

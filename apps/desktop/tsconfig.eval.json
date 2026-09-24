@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"module":"NodeNext","moduleResolution":"NodeNext","types":["node"],"noEmit":true},"include":["src/eval/**/*.ts","src/main/**/*.ts","src/shared/**/*.ts","src/workers/**/*.ts"]}

@@ -35,7 +35,7 @@ export const trainingTargets = pgTable("training_targets", { id: uuid("id").prim
    `[{slug, role}]` — carried on the row rather than through `conceptRelations`
    because it is a tag list the device reads back verbatim, and a challenge
    restored without its tags is invisible to every concept rollup. */
-export const questions = pgTable("questions", { id: uuid("id").primaryKey().defaultRandom(), sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }), trainingTargetId: uuid("training_target_id").notNull().references(() => trainingTargets.id), ordinal: integer("ordinal").notNull(), title: text("title").notNull(), statement: text("statement").notNull(), language: text("language").notNull(), kind: text("kind").notNull(), difficulty: text("difficulty").notNull(), status: questionStatus("status").notNull().default("generating"), challengeArtifactId: uuid("challenge_artifact_id"), replacesQuestionId: uuid("replaces_question_id"), engineVersion: text("engine_version").notNull(), sourceRef: jsonb("source_ref").$type<Record<string, unknown>>(), concepts: jsonb("concepts").$type<Array<{ slug: string; role: string }>>().notNull().default([]), ...timestamps }, (t) => [uniqueIndex("questions_session_ordinal_idx").on(t.sessionId, t.ordinal),index("questions_replacement_idx").on(t.replacesQuestionId)]);
+export const questions = pgTable("questions", { id: uuid("id").primaryKey().defaultRandom(), sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }), trainingTargetId: uuid("training_target_id").notNull().references(() => trainingTargets.id), ordinal: integer("ordinal").notNull(), title: text("title").notNull(), statement: text("statement").notNull(), language: text("language").notNull(), kind: text("kind").notNull(), difficulty: text("difficulty").notNull(), status: questionStatus("status").notNull().default("generating"), challengeArtifactId: uuid("challenge_artifact_id"), replacesQuestionId: uuid("replaces_question_id"), introductionReason: text("introduction_reason").notNull().default(""), engineVersion: text("engine_version").notNull(), sourceRef: jsonb("source_ref").$type<Record<string, unknown>>(), concepts: jsonb("concepts").$type<Array<{ slug: string; role: string }>>().notNull().default([]), ...timestamps }, (t) => [uniqueIndex("questions_session_ordinal_idx").on(t.sessionId, t.ordinal),index("questions_replacement_idx").on(t.replacesQuestionId)]);
 export const challengeArtifacts = pgTable("challenge_artifacts", { id: uuid("id").primaryKey().defaultRandom(), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), objectKey: text("object_key").notNull(), contentHash: text("content_hash").notNull(), manifest: jsonb("manifest").$type<Record<string, unknown>>().notNull(), validatedAt: timestamp("validated_at", { withTimezone: true }), validationReport: jsonb("validation_report"), ...timestamps }, (t) => [uniqueIndex("challenge_artifact_hash_idx").on(t.userId, t.contentHash)]);
 
 export const attempts = pgTable("attempts", { id: uuid("id").primaryKey().defaultRandom(), questionId: uuid("question_id").notNull().references(() => questions.id, { onDelete: "cascade" }), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), status: attemptStatus("status").notNull().default("active"), latestEventSequence: integer("latest_event_sequence").notNull().default(-1), startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(), completedAt: timestamp("completed_at", { withTimezone: true }), ...timestamps }, (t) => [index("attempts_user_updated_idx").on(t.userId, t.updatedAt)]);
@@ -71,6 +71,72 @@ export const learnerConcepts = pgTable("learner_concepts", { userId: uuid("user_
 
 export const sessionCheckpoints = pgTable("session_checkpoints", { id: uuid("id").primaryKey(), sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), version: integer("version").notNull(), eventSequence: integer("event_sequence").notNull(), payload: jsonb("payload").$type<Record<string, unknown>>().notNull(), createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow() }, (t) => [uniqueIndex("session_checkpoint_version_idx").on(t.sessionId, t.version)]);
 export const workspaceSnapshots = pgTable("workspace_snapshots", { id: uuid("id").primaryKey(), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }), objectKey: text("object_key").notNull(), contentHash: text("content_hash").notNull(), byteLength: bigint("byte_length", { mode: "number" }).notNull(), createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow() });
-export const agentRuns = pgTable("agent_runs", { id: uuid("id").primaryKey(), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), sessionId: uuid("session_id").notNull().references(() => sessions.id, { onDelete: "cascade" }), attemptId: uuid("attempt_id").references(() => attempts.id, { onDelete: "cascade" }), provider: text("provider").notNull(), model: text("model").notNull(), contextReferences: jsonb("context_references").$type<string[]>().notNull().default([]), toolTrace: jsonb("tool_trace").$type<unknown[]>().notNull().default([]), promptTokens: integer("prompt_tokens"), completionTokens: integer("completion_tokens"), estimatedCostMicros: bigint("estimated_cost_micros", { mode: "number" }), latencyMs: integer("latency_ms"), finalAction: text("final_action"), error: text("error"), startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(), completedAt: timestamp("completed_at", { withTimezone: true }) });
+/** One product turn or one eval scenario execution. Full detail lives in the
+ * append-only event table below; this row is deliberately a queryable summary
+ * so the observability exporter and our own incident tooling never have to scan
+ * a JSON trace just to find failed or expensive runs. */
+export const agentRuns = pgTable("agent_runs", {
+  id: uuid("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  sessionId: uuid("session_id").references(() => sessions.id, { onDelete: "cascade" }),
+  attemptId: uuid("attempt_id").references(() => attempts.id, { onDelete: "set null" }),
+  origin: text("origin").notNull().default("product"),
+  mode: text("mode").notNull().default("live"),
+  status: text("status").notNull().default("running"),
+  turnKind: text("turn_kind"),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  schemaVersion: integer("schema_version").notNull().default(1),
+  appVersion: text("app_version"),
+  commitSha: text("commit_sha"),
+  input: jsonb("input").$type<Record<string, unknown>>().notNull().default({}),
+  output: jsonb("output").$type<Record<string, unknown>>().notNull().default({}),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  contextReferences: jsonb("context_references").$type<string[]>().notNull().default([]),
+  /* Kept for compatibility with pre-event telemetry rows. New writes use
+     `agent_trace_events`; removing it would make this migration destructive. */
+  toolTrace: jsonb("tool_trace").$type<unknown[]>().notNull().default([]),
+  promptTokens: integer("prompt_tokens"),
+  completionTokens: integer("completion_tokens"),
+  cachedInputTokens: integer("cached_input_tokens"),
+  estimatedCostMicros: bigint("estimated_cost_micros", { mode: "number" }),
+  latencyMs: integer("latency_ms"),
+  eventCount: integer("event_count").notNull().default(0),
+  finalAction: text("final_action"),
+  error: text("error"),
+  telemetryExportedAt: timestamp("telemetry_exported_at", { withTimezone: true }),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+}, (t) => [index("agent_runs_user_started_idx").on(t.userId, t.startedAt), index("agent_runs_session_started_idx").on(t.sessionId, t.startedAt), index("agent_runs_status_started_idx").on(t.status, t.startedAt)]);
+
+/** Lossless controller events. `sequence` is assigned on the device before the
+ * event enters the durable outbox, making retries idempotent and preserving the
+ * true order even when a laptop goes offline halfway through a run. */
+export const agentTraceEvents = pgTable("agent_trace_events", {
+  id: uuid("id").primaryKey(),
+  runId: uuid("run_id").notNull().references(() => agentRuns.id, { onDelete: "cascade" }),
+  sequence: integer("sequence").notNull(),
+  kind: text("kind").notNull(),
+  name: text("name").notNull(),
+  phase: integer("phase"),
+  callId: text("call_id"),
+  level: text("level").notNull().default("DEFAULT"),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+}, (t) => [uniqueIndex("agent_trace_events_sequence_idx").on(t.runId, t.sequence), index("agent_trace_events_kind_idx").on(t.kind, t.occurredAt)]);
+
+/** Deterministic, model-judge, and human scores share one shape. Keeping scores
+ * beside the trace is what lets the premade observability UI compare eval runs
+ * without weakening Spar's own replayable evaluation artifacts. */
+export const agentEvalScores = pgTable("agent_eval_scores", {
+  id: uuid("id").primaryKey(),
+  runId: uuid("run_id").notNull().references(() => agentRuns.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  source: text("source").notNull(),
+  value: jsonb("value").$type<number | string | boolean>().notNull(),
+  comment: text("comment"),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("agent_eval_scores_run_name_idx").on(t.runId, t.name, t.source)]);
 
 export const schemaHealth = pgTable("schema_health", { singleton: boolean("singleton").primaryKey().default(true), migrationVersion: integer("migration_version").notNull(), checkedAt: timestamp("checked_at", { withTimezone: true }).notNull().default(sql`now()`) });

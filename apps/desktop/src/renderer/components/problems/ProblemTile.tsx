@@ -1,18 +1,24 @@
 import { ArrowUpRight, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { shortTime } from "@/lib/format";
-import type { ProblemItem } from "@/lib/problems";
+import { savedSnapshot, type ProblemItem } from "@/lib/problems";
+import { SaveProblem } from "../common/SaveProblem";
 import { BandPill, OriginChip, ProblemMark, StandingMark, problemNote } from "./ProblemMark";
 
 /**
  * One problem as a card.
  *
- * The whole tile is a single button rather than a surface with controls on it.
- * That is a deliberate step away from the challenge history card, which has to
- * carry openable concept chips: here the population is mixed, half of it comes
- * from a source that has never heard of Spar's concept vocabulary, and a grid
- * where some tags are links and some are decoration would teach the learner
- * nothing except to stop trusting the tags. One target, one destination.
+ * One destination, and exactly one control beside it. The tags stay ink rather
+ * than links — the population is mixed, half of it comes from a source that has
+ * never heard of Spar's concept vocabulary, and a grid where some tags open
+ * something and some do not teaches the learner only to stop trusting the tags.
+ * The bookmark is the exception it is worth making the card a surface for: it is
+ * the one thing you can do to a problem without committing to solving it, which
+ * is the whole reason a browsing grid exists.
+ *
+ * So the card-wide action is an overlay button underneath rather than a button
+ * wrapped around everything — a control nested inside a button is neither valid
+ * markup nor reachable by keyboard.
  *
  * Height is fixed rather than fitted. A grid of cards that each end where their
  * content does is a ragged wall, and the ragged edge is the first thing the eye
@@ -37,22 +43,26 @@ export function ProblemTile({
   const note = problemNote(item);
 
   return (
-    <button
+    <div
       aria-busy={pending || undefined}
       className={cn(
         "group relative flex h-[10.25rem] w-full flex-col overflow-hidden rounded-xl border border-border bg-card p-3.5 text-left",
-        "shadow-[var(--app-shadow-card)] outline-none",
+        "shadow-[var(--app-shadow-card)]",
         "transition-[border-color,box-shadow,transform] duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)]",
         "hover:-translate-y-0.5 hover:border-[var(--border-strong)] hover:shadow-[var(--app-shadow-sheet)]",
-        "focus-visible:border-[var(--border-strong)] focus-visible:ring-1 focus-visible:ring-ring",
+        "focus-within:border-[var(--border-strong)]",
         "motion-reduce:transition-none motion-reduce:hover:translate-y-0",
         pending && "pointer-events-none",
       )}
-      disabled={pending}
-      onClick={onOpen}
-      type="button"
     >
-      <div className="flex min-w-0 items-start gap-3">
+      <button
+        aria-label={item.kind === "challenge" ? `Open ${item.title}` : `Start solving ${item.title}`}
+        className="absolute inset-0 z-0 rounded-xl outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+        disabled={pending}
+        onClick={onOpen}
+        type="button"
+      />
+      <div className="pointer-events-none relative z-10 flex min-w-0 items-start gap-3">
         <ProblemMark
           className="mt-px transition-transform duration-300 ease-[cubic-bezier(0.22,0.61,0.36,1)] group-hover:scale-[1.05] motion-reduce:transition-none motion-reduce:group-hover:scale-100"
           item={item}
@@ -69,47 +79,63 @@ export function ProblemTile({
               {item.title}
             </span>
             <BandPill band={item.band} className="mt-px" />
+            {/* Top right, where a bookmark goes on anything that has a corner.
+                Quiet until the card is hovered, so a grid of fifty is a grid of
+                problems rather than a grid of bookmarks. */}
+            <SaveProblem
+              className="pointer-events-auto -mr-1 -mt-0.5"
+              problemKey={item.key}
+              revealOnHover
+              snapshot={savedSnapshot(item)}
+              title={item.title}
+            />
           </div>
 
           <span className="mt-1.5 flex min-w-0 items-center gap-1.5">
             <OriginChip origin={item.origin} />
-            <span className="min-w-0 truncate text-ui-sm tabular-nums text-muted-foreground/70">
+            <span className="min-w-0 truncate text-ui-sm tabular-nums text-muted-foreground">
               {item.displayId ?? (item.kind === "challenge" ? item.challenge.sessionTitle : "")}
             </span>
           </span>
         </div>
       </div>
 
-      {/* Tags are ink, not controls — see the note above. Capped at three because
-          a fourth wraps the row, and a wrapped tag row is what makes a fixed-height
-          card start clipping its own footer. */}
-      <div className="relative mt-2.5 flex min-w-0 flex-wrap gap-1 overflow-hidden">
-        {item.tags.slice(0, 3).map((tag) => (
+      {/* Tags are ink, not controls — see the note above.
+
+          One row that never wraps, rather than three tags that might need two.
+          The card's height is fixed, so a wrapped tag row had nowhere to go: it
+          pushed itself under the `mt-auto` footer and was sliced in half by the
+          footer's rule — a tag reading "Variable window" cut through the middle of
+          the word. Capping the count was the old defence and it did not hold,
+          because two long tags wrap as readily as three short ones. Now the row is
+          a fixed line and anything past it is counted. */}
+      <div className="pointer-events-none relative z-10 mt-2.5 flex h-[1.375rem] min-w-0 shrink-0 items-center gap-1 overflow-hidden">
+        {item.tags.slice(0, 2).map((tag) => (
           <span
             key={tag}
-            className="max-w-[9rem] truncate rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground transition-colors duration-300 group-hover:bg-background/70"
+            className="max-w-[9rem] shrink-0 truncate rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 text-ui-sm text-muted-foreground transition-colors duration-300 group-hover:bg-background/70"
           >
             {tag}
           </span>
         ))}
-        {item.tags.length > 3 && (
-          <span className="px-0.5 py-0.5 text-ui-sm text-muted-foreground/70" title={item.tags.slice(3).join(", ")}>
-            +{item.tags.length - 3}
+        {item.tags.length > 2 && (
+          <span className="shrink-0 px-0.5 text-ui-sm text-muted-foreground" title={item.tags.slice(2).join(", ")}>
+            +{item.tags.length - 2}
           </span>
         )}
       </div>
 
-      <div className="relative mt-auto flex min-w-0 items-center gap-2 border-t border-border/70 pt-2.5">
+      <div className="pointer-events-none relative z-10 mt-auto flex min-w-0 items-center gap-2 border-t border-border/70 pt-2.5">
         <StandingMark standing={item.standing} />
-        <span className="shrink-0 text-ui-sm text-muted-foreground/80">{STANDING_WORD[item.standing]}</span>
+        <span className="shrink-0 text-ui-sm text-muted-foreground">{STANDING_WORD[item.standing]}</span>
 
         {/* At rest the card reports the standing fact it has; under the pointer it
             says what clicking will do. The two never show at once, so the footer
             stays one line however long the note is — and while the click is being
             honoured only the third thing shows, hover or not. */}
-        <span className="min-w-0 flex-1 truncate text-right text-ui-sm text-muted-foreground/70">
+        <span className="min-w-0 flex-1 truncate text-right text-ui-sm text-muted-foreground">
           {pending ? (
-            <span className="inline-flex items-center justify-end gap-1 font-medium text-foreground/80">
+            <span className="inline-flex items-center justify-end gap-1 font-medium text-foreground">
               <Loader2 className="size-3 animate-spin" />
               Opening…
             </span>
@@ -126,7 +152,7 @@ export function ProblemTile({
           )}
         </span>
       </div>
-    </button>
+    </div>
   );
 }
 

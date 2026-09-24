@@ -34,3 +34,32 @@ describe("what a turn leaves behind", () => {
     expect(takeAgentActivity("b").map((step) => step.text)).toEqual(["Turn B"]);
   });
 });
+
+/**
+ * Some providers summarise their reasoning as a run of bold titles with no
+ * working under any of them. Those name the live thinking row while the model is
+ * in them; stored, they are a column of headings under a finished turn that says
+ * nothing about how it went.
+ */
+describe("thinking that is only its own headings", () => {
+  it("drops a block with no working in it", () => {
+    const run = "titles-only";
+    recordAgentActivity(run, { type: "reasoning", phase: "start" });
+    recordAgentActivity(run, { type: "reasoning", text: "**Planning the test harness**\n\n" });
+    recordAgentActivity(run, { type: "reasoning", text: "**Designing the oracle**\n\n" });
+    recordAgentActivity(run, { type: "reasoning", phase: "end" });
+
+    expect(takeAgentActivity(run)).toEqual([]);
+  });
+
+  it("keeps a block that has working under its heading", () => {
+    const run = "titles-and-prose";
+    recordAgentActivity(run, { type: "reasoning", phase: "start" });
+    recordAgentActivity(run, { type: "reasoning", text: "**Designing the oracle**\n\nA brute force over every window is enough here." });
+    recordAgentActivity(run, { type: "reasoning", phase: "end" });
+
+    const activity = takeAgentActivity(run);
+    expect(activity.map((step) => step.kind)).toEqual(["reasoning"]);
+    expect(activity[0]?.text).toContain("brute force");
+  });
+});

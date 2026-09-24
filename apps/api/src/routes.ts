@@ -2,12 +2,13 @@ import { createHash, randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { appendEventsRequestSchema, learnerProfileSchema, sessionCheckpointSchema } from "@spar/domain";
-import { abilityDocumentVersions, abilityDocuments, abilityEvidenceLinks, agentMessages, attemptEvents, attempts, challengeArtifacts, learnerConcepts, questions, sessionCheckpoints, sessions, trainingTargets, userSettings } from "@spar/database";
+import { abilityDocumentVersions, abilityDocuments, abilityEvidenceLinks, agentEvalScores, agentMessages, agentRuns, agentTraceEvents, attemptEvents, attempts, challengeArtifacts, learnerConcepts, questions, sessionCheckpoints, sessions, trainingTargets, userSettings } from "@spar/database";
 /* `conceptNodes` is deliberately not imported any more — see the note in the
    abilities route about the fabricated concept row that used to live there. */
 import type { Database } from "@spar/database";
 import { requireUser } from "./auth.js";
 import type { ObjectStorage } from "./storage.js";
+import type { AgentTraceExporter } from "./telemetry.js";
 
 /** How many sessions one restore call will assemble. A restore is a fan-out of
  *  joins per session and the function has 30 seconds, so the device asks for
@@ -15,7 +16,7 @@ import type { ObjectStorage } from "./storage.js";
 const RESTORE_BATCH = 10;
 const uuidPattern = /^[0-9a-f-]{36}$/i;
 
-export function installRoutes(app: FastifyInstance, db: Database, storage?: ObjectStorage) {
+export function installRoutes(app: FastifyInstance, db: Database, storage?: ObjectStorage, telemetry?:AgentTraceExporter) {
   app.get("/health", async () => ({ ok: true }));
 
   /* ---- The learner's profile ---------------------------------------------
@@ -99,7 +100,7 @@ export function installRoutes(app: FastifyInstance, db: Database, storage?: Obje
     await tx.execute(sql`delete from ability_evidence_links where attempt_event_id in (select e.id from attempt_events e join attempts a on a.id=e.attempt_id join questions q on q.id=a.question_id where q.session_id=${id})`);
     await tx.delete(sessions).where(eq(sessions.id,id));
   });return reply.code(204).send();});
-  app.post("/v1/challenges",async(request,reply)=>{const user=await requireUser(request);const body=request.body as Record<string,unknown>;const sessionId=String(body.sessionId??"");const questionId=String(body.questionId??"");const attemptId=String(body.attemptId??"");const design=(body.design&&typeof body.design==="object"?body.design:{}) as Record<string,unknown>;const target=(body.target&&typeof body.target==="object"?body.target:{}) as Record<string,unknown>;if(!/^[0-9a-f-]{36}$/i.test(sessionId)||!/^[0-9a-f-]{36}$/i.test(questionId)||!/^[0-9a-f-]{36}$/i.test(attemptId))return reply.code(400).send({error:"Invalid challenge identity"});const owned=await db.select({id:sessions.id}).from(sessions).where(and(eq(sessions.id,sessionId),eq(sessions.userId,user.id))).limit(1);if(!owned[0])return reply.code(404).send({error:"Session not found"});const title=String(design.title??"").trim();if(title.length<3)return reply.code(400).send({error:"Challenge title is required"});const artifactId=randomUUID();const createdAt=new Date(String(body.createdAt??new Date().toISOString()));const ordinalRow=await db.select({value:sql<number>`coalesce(max(${questions.ordinal}),0)+1`}).from(questions).where(eq(questions.sessionId,sessionId));const ordinal=Number(ordinalRow[0]?.value??1);const targetId=String(target.id??randomUUID());const manifest=design;const hash=createHash("sha256").update(JSON.stringify(manifest)).digest("hex");await db.transaction(async(tx)=>{await tx.insert(trainingTargets).values({id:targetId,sessionId,abilityDocumentId:typeof target.abilityId==="string"?target.abilityId:null,action:String(target.action??"practise"),specificGap:String(target.specificGap??"Adaptive challenge"),desiredEvidence:String(target.desiredEvidence??"A deterministic attempt"),avoidTesting:Array.isArray(target.avoidTesting)?target.avoidTesting.map(String):[]}).onConflictDoNothing();await tx.insert(challengeArtifacts).values({id:artifactId,userId:user.id,objectKey:`inline:${questionId}`,contentHash:hash,manifest,validatedAt:createdAt,validationReport:(body.report&&typeof body.report==="object"?body.report:{}) as Record<string,unknown>}).onConflictDoNothing();await tx.insert(questions).values({id:questionId,sessionId,trainingTargetId:targetId,ordinal,title,statement:String(design.statement??""),language:String(design.language??"javascript"),kind:String(design.kind??"function"),difficulty:String(design.difficulty??"developing"),status:"active",challengeArtifactId:artifactId,replacesQuestionId:typeof body.replacesQuestionId==="string"?body.replacesQuestionId:null,engineVersion:"local-compiler-v1",
+  app.post("/v1/challenges",async(request,reply)=>{const user=await requireUser(request);const body=request.body as Record<string,unknown>;const sessionId=String(body.sessionId??"");const questionId=String(body.questionId??"");const attemptId=String(body.attemptId??"");const design=(body.design&&typeof body.design==="object"?body.design:{}) as Record<string,unknown>;const target=(body.target&&typeof body.target==="object"?body.target:{}) as Record<string,unknown>;if(!/^[0-9a-f-]{36}$/i.test(sessionId)||!/^[0-9a-f-]{36}$/i.test(questionId)||!/^[0-9a-f-]{36}$/i.test(attemptId))return reply.code(400).send({error:"Invalid challenge identity"});const owned=await db.select({id:sessions.id}).from(sessions).where(and(eq(sessions.id,sessionId),eq(sessions.userId,user.id))).limit(1);if(!owned[0])return reply.code(404).send({error:"Session not found"});const title=String(design.title??"").trim();if(title.length<3)return reply.code(400).send({error:"Challenge title is required"});const artifactId=randomUUID();const createdAt=new Date(String(body.createdAt??new Date().toISOString()));const ordinalRow=await db.select({value:sql<number>`coalesce(max(${questions.ordinal}),0)+1`}).from(questions).where(eq(questions.sessionId,sessionId));const ordinal=Number(ordinalRow[0]?.value??1);const targetId=String(target.id??randomUUID());const manifest=design;const hash=createHash("sha256").update(JSON.stringify(manifest)).digest("hex");await db.transaction(async(tx)=>{await tx.insert(trainingTargets).values({id:targetId,sessionId,abilityDocumentId:typeof target.abilityId==="string"?target.abilityId:null,action:String(target.action??"practise"),specificGap:String(target.specificGap??"Adaptive challenge"),desiredEvidence:String(target.desiredEvidence??"A deterministic attempt"),avoidTesting:Array.isArray(target.avoidTesting)?target.avoidTesting.map(String):[]}).onConflictDoNothing();await tx.insert(challengeArtifacts).values({id:artifactId,userId:user.id,objectKey:`inline:${questionId}`,contentHash:hash,manifest,validatedAt:createdAt,validationReport:(body.report&&typeof body.report==="object"?body.report:{}) as Record<string,unknown>}).onConflictDoNothing();await tx.insert(questions).values({id:questionId,sessionId,trainingTargetId:targetId,ordinal,title,statement:String(design.statement??""),language:String(design.language??"javascript"),kind:String(design.kind??"function"),difficulty:String(design.difficulty??"developing"),status:"active",challengeArtifactId:artifactId,replacesQuestionId:typeof body.replacesQuestionId==="string"?body.replacesQuestionId:null,introductionReason:typeof body.introductionReason==="string"?body.introductionReason.slice(0,500):"",engineVersion:"local-compiler-v1",
     /* Where the problem came from, and what it is about. Both were dropped on
        the floor before: a restored challenge could not say it was LeetCode's
        rather than Spar's, and carried no concept tags, which left it invisible
@@ -123,6 +124,55 @@ export function installRoutes(app: FastifyInstance, db: Database, storage?: Obje
   app.get("/v1/sessions/:id/checkpoints/latest", async (request,reply)=>{const user=await requireUser(request);const id=String((request.params as {id:string}).id);const row=await db.select().from(sessionCheckpoints).where(and(eq(sessionCheckpoints.sessionId,id),eq(sessionCheckpoints.userId,user.id))).orderBy(desc(sessionCheckpoints.version)).limit(1);return row[0]?.payload??reply.code(404).send({error:"Checkpoint not found"});});
   app.put("/v1/sessions/:id/checkpoints/:version", async(request,reply)=>{const user=await requireUser(request);const checkpoint=sessionCheckpointSchema.parse(request.body);const id=String((request.params as {id:string}).id);if(checkpoint.sessionId!==id)return reply.code(400).send({error:"Session mismatch"});const owned=await db.select({id:sessions.id}).from(sessions).where(and(eq(sessions.id,id),eq(sessions.userId,user.id))).limit(1);if(!owned[0])return reply.code(404).send({error:"Session not found"});await db.insert(sessionCheckpoints).values({id:checkpoint.id,sessionId:id,userId:user.id,version:checkpoint.version,eventSequence:checkpoint.eventSequence,payload:checkpoint}).onConflictDoNothing();return reply.code(204).send();});
   app.post("/v1/attempts/:id/events", async(request,reply)=>{const user=await requireUser(request);const value=appendEventsRequestSchema.parse(request.body);const attempt=await db.select().from(attempts).where(and(eq(attempts.id,value.attemptId),eq(attempts.userId,user.id))).limit(1);if(!attempt[0])return reply.code(404).send({error:"Attempt not found"});if(value.expectedSequence!==attempt[0].latestEventSequence+1)return reply.code(409).send({error:"Event sequence conflict",latestSequence:attempt[0].latestEventSequence});await db.transaction(async(tx)=>{await tx.insert(attemptEvents).values(value.events.map(e=>({id:e.id,attemptId:e.attemptId,sequence:e.sequence,type:e.type,source:e.source,payload:e.payload,schemaVersion:e.schemaVersion,occurredAt:new Date(e.occurredAt)}))).onConflictDoNothing();await tx.update(attempts).set({latestEventSequence:value.events.at(-1)!.sequence,updatedAt:new Date()}).where(eq(attempts.id,value.attemptId));});return reply.code(202).send({acceptedThrough:value.events.at(-1)!.sequence});});
+  /* ---- Agent observability -------------------------------------------------
+     The desktop writes these through its durable outbox. Spar's database is the
+     ownership and recovery plane; a configured OTLP exporter sends one complete,
+     immutable hierarchy to Langfuse, Phoenix, or a collector only
+     after the run closes. No vendor credential ever ships in the desktop app. */
+  app.put("/v1/telemetry/runs/:id",async(request,reply)=>{
+    const user=await requireUser(request);const id=String((request.params as {id:string}).id);const body=request.body as Record<string,unknown>;
+    const origin=limited(body.origin,"product",32);const suppliedSession=typeof body.sessionId==="string"?body.sessionId:"";const sessionId=uuidPattern.test(suppliedSession)?suppliedSession:null;
+    if(!uuidPattern.test(id)||origin!=="eval"&&!sessionId)return reply.code(400).send({error:"Invalid run identity"});
+    if(sessionId){const owned=await db.select({id:sessions.id}).from(sessions).where(and(eq(sessions.id,sessionId),eq(sessions.userId,user.id))).limit(1);if(!owned[0])return reply.code(404).send({error:"Session not found"});}
+    const startedAt=safeDate(body.startedAt);if(!startedAt)return reply.code(400).send({error:"Invalid start time"});
+    await db.insert(agentRuns).values({id,userId:user.id,sessionId,origin,mode:limited(body.mode,"live",32),status:"running",turnKind:optionalText(body.turnKind,80),provider:limited(body.provider,"unknown",80),model:limited(body.model,"unknown",160),schemaVersion:integer(body.schemaVersion,1),appVersion:optionalText(body.appVersion,80),commitSha:optionalText(body.commitSha,80),input:plainRecord(body.input),metadata:plainRecord(body.metadata),startedAt}).onConflictDoNothing();
+    if(telemetry?.configured()){const [created]=await db.select().from(agentRuns).where(and(eq(agentRuns.id,id),eq(agentRuns.userId,user.id))).limit(1);if(created)await telemetry.start(created);}
+    return reply.code(202).send({id});
+  });
+  app.post("/v1/telemetry/runs/:id/events",async(request,reply)=>{
+    const user=await requireUser(request);const id=String((request.params as {id:string}).id);const body=request.body as {events?:unknown};
+    if(!uuidPattern.test(id))return reply.code(400).send({error:"Invalid run identity"});
+    const run=await db.select({id:agentRuns.id}).from(agentRuns).where(and(eq(agentRuns.id,id),eq(agentRuns.userId,user.id))).limit(1);
+    if(!run[0])return reply.code(404).send({error:"Run not found"});
+    const requested=Array.isArray(body.events)?body.events:[];if(!requested.length||requested.length>64)return reply.code(400).send({error:"Send between 1 and 64 events"});
+    const rows=requested.flatMap((value)=>{const event=plainRecord(value);const eventId=String(event.id??"");const runId=String(event.runId??"");const sequence=Number(event.sequence);const occurredAt=safeDate(event.occurredAt);if(!uuidPattern.test(eventId)||runId!==id||!Number.isInteger(sequence)||sequence<0||!occurredAt)return[];return[{id:eventId,runId:id,sequence,kind:limited(event.kind,"event",40),name:limited(event.name,"event",160),phase:Number.isInteger(event.phase)?Number(event.phase):null,callId:optionalText(event.callId,100),level:["DEBUG","DEFAULT","WARNING","ERROR"].includes(String(event.level))?String(event.level):"DEFAULT",payload:plainRecord(event.payload),occurredAt}];});
+    if(rows.length!==requested.length)return reply.code(400).send({error:"Invalid trace event"});
+    const inserted=await db.insert(agentTraceEvents).values(rows).onConflictDoNothing().returning({id:agentTraceEvents.id});
+    if(inserted.length)await db.update(agentRuns).set({eventCount:sql`${agentRuns.eventCount} + ${inserted.length}`}).where(eq(agentRuns.id,id));
+    return reply.code(202).send({stored:inserted.length});
+  });
+  app.patch("/v1/telemetry/runs/:id",async(request,reply)=>{
+    const user=await requireUser(request);const id=String((request.params as {id:string}).id);const body=request.body as Record<string,unknown>;
+    if(!uuidPattern.test(id))return reply.code(400).send({error:"Invalid run identity"});
+    const completedAt=safeDate(body.completedAt);if(!completedAt)return reply.code(400).send({error:"Invalid completion time"});
+    const status=["completed","error","cancelled"].includes(String(body.status))?String(body.status):"error";
+    const updated=await db.update(agentRuns).set({status,output:plainRecord(body.output),promptTokens:optionalInteger(body.promptTokens),completionTokens:optionalInteger(body.completionTokens),cachedInputTokens:optionalInteger(body.cachedInputTokens),estimatedCostMicros:optionalInteger(body.estimatedCostMicros),latencyMs:optionalInteger(body.latencyMs),eventCount:integer(body.eventCount,0),error:body.error===null?null:optionalText(body.error,8_000),completedAt}).where(and(eq(agentRuns.id,id),eq(agentRuns.userId,user.id))).returning();
+    if(!updated[0])return reply.code(404).send({error:"Run not found"});
+    if(telemetry&&telemetry.configured()&&!updated[0].telemetryExportedAt){
+      const [events,scores]=await Promise.all([db.select().from(agentTraceEvents).where(eq(agentTraceEvents.runId,id)).orderBy(asc(agentTraceEvents.sequence)),db.select().from(agentEvalScores).where(eq(agentEvalScores.runId,id)).orderBy(asc(agentEvalScores.createdAt))]);
+      await telemetry.export(updated[0],events,scores);
+      await db.update(agentRuns).set({telemetryExportedAt:new Date()}).where(eq(agentRuns.id,id));
+    }
+    return reply.code(202).send({id,exported:Boolean(telemetry?.configured())});
+  });
+  app.post("/v1/telemetry/runs/:id/scores",async(request,reply)=>{
+    const user=await requireUser(request);const id=String((request.params as {id:string}).id);const body=request.body as {scores?:unknown};
+    const run=await db.select({id:agentRuns.id}).from(agentRuns).where(and(eq(agentRuns.id,id),eq(agentRuns.userId,user.id))).limit(1);if(!run[0])return reply.code(404).send({error:"Run not found"});
+    const requested=Array.isArray(body.scores)?body.scores:[];if(!requested.length||requested.length>64)return reply.code(400).send({error:"Send between 1 and 64 scores"});
+    const rows=requested.map((value)=>{const score=plainRecord(value);return{id:typeof score.id==="string"&&uuidPattern.test(score.id)?score.id:randomUUID(),runId:id,name:limited(score.name,"score",120),source:limited(score.source,"deterministic",40),value:score.value as number|string|boolean,comment:optionalText(score.comment,2_000),metadata:plainRecord(score.metadata)};});
+    if(rows.some((row)=>!["string","number","boolean"].includes(typeof row.value)))return reply.code(400).send({error:"Score values must be scalar"});
+    await db.insert(agentEvalScores).values(rows).onConflictDoNothing();return reply.code(202).send({stored:rows.length});
+  });
   /* ---- The transcript and the learner's own vocabulary --------------------
      Both are pushed from the device outbox in batches and both are replayable:
      an id that has already landed is left alone rather than rewritten. */
@@ -235,3 +285,10 @@ export function installRoutes(app: FastifyInstance, db: Database, storage?: Obje
 
   app.post("/v1/storage/upload",async(request,reply)=>{const user=await requireUser(request);if(!storage)return reply.code(503).send({error:"Object storage unavailable"});const body=request.body as {kind?:string;id?:string;contentType?:string};if(!["workspace","challenge"].includes(String(body.kind))||!body.id)return reply.code(400).send({error:"Invalid artifact"});const key=`users/${user.id}/${body.kind}/${body.id}`;return{key,url:await storage.uploadUrl(key,body.contentType)};});
 }
+
+function plainRecord(value:unknown):Record<string,unknown>{return value&&typeof value==="object"&&!Array.isArray(value)?value as Record<string,unknown>:{};}
+function limited(value:unknown,fallback:string,max:number){const text=typeof value==="string"?value.trim():"";return(text||fallback).slice(0,max);}
+function optionalText(value:unknown,max:number){return typeof value==="string"?value.slice(0,max):null;}
+function integer(value:unknown,fallback:number){const number=Number(value);return Number.isInteger(number)&&number>=0?number:fallback;}
+function optionalInteger(value:unknown){const number=Number(value);return Number.isInteger(number)&&number>=0?number:null;}
+function safeDate(value:unknown){if(typeof value!=="string")return null;const date=new Date(value);return Number.isFinite(date.getTime())?date:null;}

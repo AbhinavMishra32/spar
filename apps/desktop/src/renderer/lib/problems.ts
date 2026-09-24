@@ -1,4 +1,4 @@
-import type { ChallengeHistorySummary } from "@spar/domain";
+import { generatedItemRating, itemRating, solveProbability, type ChallengeHistorySummary, type Rating, type SavedProblem } from "@spar/domain";
 import type { PracticeSearchHit } from "../../shared/api";
 import { matchRank } from "./search";
 
@@ -48,6 +48,12 @@ export type ProblemFacets = {
   /** When the learner last touched it, in ms. Zero for a problem they never
    *  have, which is every remote hit. */
   touchedAt: number;
+  /** What it costs, in rating points, on the one scale everything here is priced
+   *  on. A published Codeforces rating where there is one, a band anchor where
+   *  there is not, and Spar's own difficulty anchor for a challenge it wrote —
+   *  all of it from `itemRating`, so the list ranks problems the same way the
+   *  rating scores them. */
+  price: number;
   /** Everything beyond the title that a query may match. */
   meta: string;
 };
@@ -96,6 +102,13 @@ function challengeStanding(challenge: ChallengeHistorySummary): ProblemStanding 
   return "todo";
 }
 
+/** What level a challenge is, on the one scale the app grades everything by. A
+ *  sourced challenge is banded by the source, which graded it, rather than by the
+ *  band Spar assigned when it mounted the problem. */
+export function challengeBand(challenge: Pick<ChallengeHistorySummary, "difficulty" | "source">): ProblemBand {
+  return challenge.source ? challenge.source.difficulty : SPAR_BAND[challenge.difficulty];
+}
+
 export function challengeItem(challenge: ChallengeHistorySummary): ProblemItem {
   const tags = challenge.concepts.map((concept) => concept.title);
   const origin: ProblemOrigin = challenge.source?.source ?? "spar";
@@ -105,13 +118,12 @@ export function challengeItem(challenge: ChallengeHistorySummary): ProblemItem {
     key: problemKey({ origin, id: challenge.id, slug: challenge.source?.slug ?? null }),
     title: challenge.title,
     origin,
-    /* A sourced challenge is banded by the source, which graded it, rather than
-       by the band Spar assigned when it mounted the problem. */
-    band: challenge.source ? challenge.source.difficulty : SPAR_BAND[challenge.difficulty],
+    band: challengeBand(challenge),
     standing: challengeStanding(challenge),
     tags,
     displayId: challenge.source?.displayId ?? null,
     touchedAt: Date.parse(challenge.updatedAt) || 0,
+    price: challenge.source ? itemRating(challenge.source) : generatedItemRating(challenge.difficulty),
     meta: [challenge.sessionTitle, challenge.language, challenge.difficulty, tags.join(" "), challenge.source?.displayId ?? ""].join(" "),
   };
 }
@@ -128,7 +140,61 @@ export function sourceItem(hit: PracticeSearchHit): ProblemItem {
     tags: hit.concepts,
     displayId: hit.displayId,
     touchedAt: 0,
+    price: itemRating({ source: hit.source, difficulty: hit.difficulty, sourceRating: hit.sourceRating }),
     meta: [hit.sourceName, hit.displayId, hit.slug, hit.concepts.join(" ")].join(" "),
+  };
+}
+
+/**
+ * A saved source problem, from what was kept of it.
+ *
+ * The shelf is the one place a problem can be named that no live population is
+ * offering: a Codeforces problem saved from a search for "two pointers" is not in
+ * the results of the next search, and it has never been attempted, so neither
+ * history nor the current hits hold it. Without this, saving a problem and then
+ * typing anything into the box would empty the shelf, which is the opposite of
+ * what saving is for.
+ *
+ * It is built to be indistinguishable from the same problem arriving live —
+ * identical key, identical price — so when the source *does* return it, the
+ * dedupe drops this one and the learner never sees the same problem twice.
+ * `standing` is the one thing a snapshot cannot honestly carry: whether they have
+ * solved it since is the source's to say, and "not done yet" is the safe claim
+ * until it does.
+ */
+export function savedSourceItem(saved: SavedProblem): ProblemItem | null {
+  const snapshot = saved.snapshot;
+  if (!snapshot) return null;
+  return sourceItem({
+    source: snapshot.source,
+    sourceName: snapshot.sourceName || ORIGIN_LABEL[snapshot.source],
+    slug: snapshot.slug,
+    displayId: snapshot.displayId ?? "",
+    title: snapshot.title,
+    difficulty: snapshot.difficulty,
+    sourceRating: snapshot.sourceRating,
+    paidOnly: false,
+    acceptanceRate: null,
+    concepts: snapshot.concepts,
+    status: "unknown",
+  });
+}
+
+/** What has to be kept about a source problem for the shelf to draw it later.
+ *  Never the statement: that belongs to the source and is fetched when the
+ *  problem is opened. */
+export function savedSnapshot(item: ProblemItem): SavedProblem["snapshot"] {
+  if (item.kind !== "source") return null;
+  const { hit } = item;
+  return {
+    title: hit.title,
+    source: hit.source,
+    slug: hit.slug,
+    difficulty: hit.difficulty,
+    displayId: hit.displayId || null,
+    sourceRating: hit.sourceRating ?? null,
+    concepts: hit.concepts,
+    sourceName: hit.sourceName,
   };
 }
 
@@ -145,7 +211,7 @@ export function sourceItem(hit: PracticeSearchHit): ProblemItem {
  * same Codeforces problem twice and there are two local rows for one problem, and
  * the one worth keeping is the attempt that reflects where the learner is now.
  */
-export function mergeProblems(challenges: ChallengeHistorySummary[], hits: PracticeSearchHit[]): ProblemItem[] {
+export function mergeProblems(challenges: ChallengeHistorySummary[], hits: PracticeSearchHit[], saved: readonly SavedProblem[] = []): ProblemItem[] {
   const items: ProblemItem[] = [];
   const seen = new Set<string>();
   for (const item of challenges.map(challengeItem).sort((a, b) => b.touchedAt - a.touchedAt)) {
@@ -159,6 +225,15 @@ export function mergeProblems(challenges: ChallengeHistorySummary[], hits: Pract
     seen.add(item.key);
     items.push(item);
   }
+  /* Last, so it can only ever add a problem the live populations did not offer —
+     a shelf row is a copy of what a search once said, and anything live outranks
+     it for the same reason a local challenge outranks a remote hit. */
+  for (const row of saved) {
+    const item = savedSourceItem(row);
+    if (!item || seen.has(item.key)) continue;
+    seen.add(item.key);
+    items.push(item);
+  }
   return items;
 }
 
@@ -167,6 +242,16 @@ export type ProblemFilter = {
   origin: ProblemOrigin | "all";
   band: ProblemBand | "all";
   standing: ProblemStanding | "all";
+  /** The shelf, as a filter. Deliberately not an origin, though it is drawn
+   *  beside them: where a problem came from and whether the learner filed it are
+   *  different questions, and folding filing into the origin list would make
+   *  "Saved" exclusive with "LeetCode" when the whole point of a shelf is that it
+   *  cuts across every source. */
+  saved?: boolean;
+  /** Which keys are on it. Passed in rather than read from the store here so the
+   *  filter stays a pure function of what it is given, like the ranking beside
+   *  it. */
+  savedKeys?: ReadonlySet<string>;
 };
 
 /** How many items each origin would leave, ignoring the origin filter itself —
@@ -183,6 +268,7 @@ export function originCounts(items: ProblemItem[], filter: ProblemFilter): Recor
 }
 
 function passesExceptOrigin(item: ProblemItem, filter: ProblemFilter): boolean {
+  if (filter.saved && !filter.savedKeys?.has(item.key)) return false;
   if (filter.band !== "all" && item.band !== filter.band) return false;
   if (filter.standing !== "all" && item.standing !== filter.standing) return false;
   return matchRank(filter.query, item.title, item.meta) !== null;
@@ -190,6 +276,28 @@ function passesExceptOrigin(item: ProblemItem, filter: ProblemFilter): boolean {
 
 export function filterProblems(items: ProblemItem[], filter: ProblemFilter): ProblemItem[] {
   return items.filter((item) => (filter.origin === "all" || item.origin === filter.origin) && passesExceptOrigin(item, filter));
+}
+
+/**
+ * Where a problem sits against the learner, as a distance from the one they
+ * would find worth solving.
+ *
+ * `LIBRARY_TARGET` is what the page is picking for: something they would get
+ * about three times in five. Not even money, because this is the browsing list
+ * rather than a diagnostic — somebody opening the library wants the next problem
+ * they can finish, and Spar's own assessment of what it still needs to find out
+ * is the agent's job on the training path.
+ *
+ * Distance rather than difficulty, so the scale is symmetric: a problem far too
+ * easy is as badly suggested as one far too hard, which a difficulty sort cannot
+ * say. It is a probability gap and not a rating gap for the same reason the gate
+ * uses one — 300 points above a beginner and 300 points above a specialist are
+ * not the same problem.
+ */
+const LIBRARY_TARGET = 0.6;
+
+function misfit(item: ProblemItem, rating: Rating): number {
+  return Math.abs(solveProbability(rating, item.price) - LIBRARY_TARGET);
 }
 
 /**
@@ -201,11 +309,22 @@ export function filterProblems(items: ProblemItem[], filter: ProblemFilter): Pro
  * back to what the page is for: pick up what you left unfinished, then what you
  * have not tried, and put what you have already solved last.
  *
+ * Inside each of those three groups, the learner's rating orders what is left.
+ * The grouping stays on top of it deliberately: a problem they walked away from
+ * on Tuesday is the thing they came back for, and no fit score should push it
+ * under a stranger. What the rating decides is the question the grouping cannot
+ * answer — which of two hundred problems they have never tried to offer first —
+ * and until it did, that was "whichever source answered first", drawn as a
+ * recommendation.
+ *
+ * Without a rating it is the old order exactly, which is what the preview
+ * harness and any caller that has no learner in hand get.
+ *
  * Every comparison ends without a tie-break on purpose. `Array.prototype.sort` is
  * stable, so equal items keep the order `mergeProblems` gave them: history before
  * remote hits, and each source in the order it answered.
  */
-export function sortProblems(items: ProblemItem[], sort: ProblemSort, query = ""): ProblemItem[] {
+export function sortProblems(items: ProblemItem[], sort: ProblemSort, query = "", rating?: Rating | null): ProblemItem[] {
   const rows = [...items];
   if (sort === "easiest") return rows.sort((a, b) => BAND_ORDER[a.band] - BAND_ORDER[b.band]);
   if (sort === "hardest") return rows.sort((a, b) => BAND_ORDER[b.band] - BAND_ORDER[a.band]);
@@ -213,5 +332,6 @@ export function sortProblems(items: ProblemItem[], sort: ProblemSort, query = ""
   if (query.trim()) {
     return rows.sort((a, b) => (matchRank(query, a.title, a.meta) ?? 9) - (matchRank(query, b.title, b.meta) ?? 9));
   }
-  return rows.sort((a, b) => STANDING_ORDER[a.standing] - STANDING_ORDER[b.standing] || b.touchedAt - a.touchedAt);
+  if (!rating) return rows.sort((a, b) => STANDING_ORDER[a.standing] - STANDING_ORDER[b.standing] || b.touchedAt - a.touchedAt);
+  return rows.sort((a, b) => STANDING_ORDER[a.standing] - STANDING_ORDER[b.standing] || misfit(a, rating) - misfit(b, rating) || b.touchedAt - a.touchedAt);
 }

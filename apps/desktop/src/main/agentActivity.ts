@@ -30,6 +30,8 @@ const MAX_STEPS = 80;
 const MAX_REASONING = 4_000;
 /** A phase narration is one sentence. This is a guard, not a budget. */
 const MAX_NOTE = 600;
+/** A challenge call that exhausted every repair runs a dozen stages. */
+const MAX_STAGES = 40;
 
 export function recordAgentActivity(runId: string, event: Record<string, unknown>) {
   if (event.type === "reasoning") return recordReasoning(runId, event);
@@ -51,6 +53,7 @@ export function recordAgentActivity(runId: string, event: Record<string, unknown
        worker, which is the only place that sees the unredacted design. */
     input: typeof event.input === "string" ? event.input : "",
     output: typeof event.output === "string" ? event.output : "",
+    stages: Array.isArray(event.stages) ? (event.stages as unknown[]).filter((stage): stage is Record<string, unknown> => Boolean(stage) && typeof stage === "object").slice(0, MAX_STAGES) : [],
   });
   thinkingSince.delete(runId);
 }
@@ -63,6 +66,7 @@ export function recordAgentActivity(runId: string, event: Record<string, unknown
 function recordReasoning(runId: string, event: Record<string, unknown>) {
   if (event.phase === "end") {
     thinkingSince.delete(runId);
+    dropHeadingOnly(runId);
     return;
   }
   const text = typeof event.text === "string" ? event.text : "";
@@ -76,7 +80,29 @@ function recordReasoning(runId: string, event: Record<string, unknown>) {
     return;
   }
   thinkingSince.set(runId, Date.now());
-  push(runId, { kind: "reasoning", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0, input: "", output: "" });
+  push(runId, { kind: "reasoning", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_REASONING), seconds: 0, input: "", output: "", stages: [] });
+}
+
+/**
+ * A block of thinking that turned out to be nothing but its own headings.
+ *
+ * Some providers summarise their reasoning as titles and no prose — three lines
+ * of `**Designing the test harness**` and nothing under them. Stored, those
+ * become rows in a transcript that say what the model was about to think about
+ * and never what it thought, which is the shape that put a column of grey
+ * headings under every turn. They are still worth seeing *while* the turn runs,
+ * where they are the live label on the thinking row — so they stream as usual
+ * and are dropped here, at the end of the block, rather than never sent.
+ *
+ * Spar asks for the prose where the provider can give it — see
+ * `piReasoningSummaryForApi`. This is for the ones that will not.
+ */
+function dropHeadingOnly(runId: string) {
+  const held = segments.get(runId);
+  const open = held?.at(-1);
+  if (!held || open?.kind !== "reasoning") return;
+  if (open.text.replace(/\*\*[^\n*]+\*\*/g, "").trim()) return;
+  held.pop();
 }
 
 /**
@@ -95,7 +121,7 @@ function recordNote(runId: string, event: Record<string, unknown>) {
     return;
   }
   thinkingSince.delete(runId);
-  push(runId, { kind: "note", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_NOTE), seconds: 0, input: "", output: "" });
+  push(runId, { kind: "note", tool: "", label: "", actionTitle: "", detail: "", ok: true, text: text.slice(0, MAX_NOTE), seconds: 0, input: "", output: "", stages: [] });
 }
 
 function push(runId: string, step: AgentActivityStep) {

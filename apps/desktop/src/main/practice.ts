@@ -386,6 +386,10 @@ export class PracticeService {
       language,
       kind: problem.source === "codeforces" ? "repository" : "function",
       difficulty: DIFFICULTY[problem.difficulty],
+      // Source-backed problems are algorithm/data-structure exercises. The
+      // source chooses the challenge; Spar still records the same explicit
+      // capability an authored challenge would carry.
+      requiresComplexityAnalysis: true,
       statement: problem.statement.trim(),
       starterFiles: { [harness.entryPath]: harness.files[harness.entryPath] ?? "" },
       referenceFiles: {},

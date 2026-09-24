@@ -1,6 +1,6 @@
 {
   "name": "@spar/visualizer",
-  "version": "0.6.0",
+  "version": "0.6.11",
   "type": "module",
   "exports": {
     ".": {
@@ -20,7 +20,7 @@
     }
   },
   "scripts": {
-    "dev": "node scripts/copy-assets.mjs && tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "dev": "node scripts/copy-assets.mjs && node scripts/watch.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "tsc --noEmit",
