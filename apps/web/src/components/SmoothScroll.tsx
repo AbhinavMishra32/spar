@@ -24,10 +24,11 @@ export function SmoothScroll() {
     if (calm.matches) return;
 
     const lenis = new Lenis({
-      // Slow enough to read as weight, short enough that a flick still gets you
-      // down the page rather than making you wait out an animation.
-      duration: 1.05,
-      easing: (t: number) => 1 - Math.pow(1 - t, 3),
+      // Chases the wheel rather than replaying a fixed-length ease per notch:
+      // each frame closes this fraction of the gap, so the page answers the
+      // first frame you scroll and still glides to a stop. Lenis's default is
+      // 0.1; higher is tighter, and 1 would be the native step.
+      lerp: 0.15,
       smoothWheel: true,
       syncTouch: false,
       // Same-page links are scrolled by Lenis rather than by the browser, or

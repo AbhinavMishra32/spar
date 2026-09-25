@@ -15,11 +15,9 @@ export const site = {
 
 export const nav = [
   { label: "Ability map", href: "#abilities" },
-  { label: "Rating", href: "#rating" },
   { label: "How it works", href: "#how" },
-  { label: "Problems", href: "#sources" },
-  { label: "The app", href: "#app" },
-  { label: "Get started", href: "#start" },
+  { label: "Agent", href: "#agent" },
+  { label: "Privacy", href: "#yours" },
   { label: "FAQ", href: "#faq" },
 ] as const;
 

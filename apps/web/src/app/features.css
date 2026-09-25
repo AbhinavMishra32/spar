@@ -1,0 +1,560 @@
+/* ---- Feature cards -------------------------------------------------------
+
+   A plate of light with a piece of Spar floating on it, and one sentence under
+   it. The plates are the page's only colour outside the dots: out-of-focus
+   light behind a pane of glass, each in a hue the app itself uses for
+   something (a failing case, a passing one, a provisional rating). The UI on
+   them is drawn in the app's own dark palette and sized in container units, so
+   a fragment reads the same in a three-up row as it does stacked on a phone. */
+
+@layer components {
+  .plate {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border-radius: 18px;
+    background: var(--plate-base, #0b0b0d);
+    container-type: inline-size;
+    /* Everything inside is sized off this, in proportion to the card, so a
+       fragment keeps its composition at every width the way a picture would —
+       never a small window lost in a big plate. --fit is how many percent of
+       the plate's width one em is; the default runs a 34em fragment just off the right edge, the way a
+       crop of a screenshot would, so the type stays readable in a three-up row. */
+    --fit: 2.9;
+    --hot-at: var(--hx, 26%) var(--hy, 22%);
+    --ui: clamp(7px, calc(var(--fit) * 1cqw), 16px);
+  }
+
+  /* The light, drawn through the page's dots.
+
+     The same light sits in two layers. Underneath, smooth — that is the
+     gradient. On top, masked to a sparse dot grid and screened over it, so
+     where the light is strong its points catch and where it is dark they
+     vanish. The grid is fixed to the plate; the light
+     drifts under it, so the points brighten and dim as it passes. */
+  .plate-glow,
+  .plate-field {
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .plate-glow {
+    opacity: 0.9;
+  }
+  /* The page's own point (1.2px, as .dots draws it) on a wider step than
+     the hero's field, and only a little brighter than the wash — a texture in
+     the light, not a screen over it. */
+  .plate-field {
+    opacity: 0.75;
+    mix-blend-mode: screen;
+    /* The grid stops short of the plate's edge, the way the page's own dots
+       sit inside the column rather than running under the border. Centred, so
+       the margin is the same on every side. */
+    --dots-inset: 10px;
+    mask-image:
+      radial-gradient(circle at center, #000 1.2px, transparent 1.5px),
+      linear-gradient(#000 0 0);
+    mask-size:
+      18px 18px,
+      calc(100% - 2 * var(--dots-inset)) calc(100% - 2 * var(--dots-inset));
+    mask-position: center, center;
+    mask-repeat: repeat, no-repeat;
+    mask-composite: intersect;
+  }
+
+  .plate-glow::before,
+  .plate-field::before {
+    content: "";
+    position: absolute;
+    inset: -30%;
+    background:
+      radial-gradient(12% 15% at var(--hot-at), var(--hot), transparent 100%),
+      radial-gradient(28% 34% at var(--p1, 24% 20%), var(--g1), transparent 100%),
+      radial-gradient(34% 38% at var(--p2, 80% 78%), var(--g2), transparent 100%),
+      radial-gradient(24% 28% at var(--p3, 66% 34%), var(--g3), transparent 100%);
+    filter: blur(24px) saturate(130%);
+    animation: plate-drift 26s ease-in-out infinite alternate;
+    animation-play-state: paused;
+  }
+  .plate-field::before {
+    /* The dots want the light brighter than the wash does: most of each
+       point's cell is black. */
+    filter: blur(24px) saturate(140%) brightness(1.5);
+  }
+
+  .reveal[data-shown="true"] :is(.plate-glow, .plate-field)::before {
+    animation-play-state: running;
+  }
+
+  /* Only the edge of the glass: a hairline, a sheen along the top, and the
+     corners falling away so the light reads as coming from somewhere. */
+  .plate::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: inherit;
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 0.06), transparent 16%),
+      radial-gradient(125% 100% at 50% 25%, transparent 50%, rgb(0 0 0 / 0.5) 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.12),
+      inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  }
+
+  /* Hues. Each is three or four lights, not one colour at three strengths —
+     the second and third sit a step round the wheel so the falloff shifts hue
+     the way real light through coloured glass does. */
+  .plate--ember {
+    --plate-base: #0e0409;
+    --hot: rgb(255 214 190 / 0.85);
+    --g1: rgb(255 40 90 / 0.8);
+    --g2: rgb(255 120 40 / 0.62);
+    --g3: rgb(150 40 200 / 0.45);
+    --hx: 22%;
+    --hy: 18%;
+    --p2: 88% 84%;
+  }
+  .plate--tide {
+    --plate-base: #030811;
+    --hot: rgb(200 245 255 / 0.8);
+    --g1: rgb(0 170 255 / 0.75);
+    --g2: rgb(60 60 255 / 0.62);
+    --g3: rgb(0 230 200 / 0.38);
+    --hx: 78%;
+    --hy: 16%;
+    --p1: 74% 22%;
+    --p2: 12% 88%;
+    --p3: 40% 55%;
+  }
+  .plate--moss {
+    --plate-base: #030b07;
+    --hot: rgb(225 255 200 / 0.78);
+    --g1: rgb(40 220 130 / 0.7);
+    --g2: rgb(0 150 170 / 0.6);
+    --g3: rgb(200 240 60 / 0.32);
+    --hx: 30%;
+    --hy: 24%;
+    --p2: 84% 70%;
+    --p3: 70% 20%;
+  }
+  .plate--dusk {
+    --plate-base: #07050f;
+    --hot: rgb(240 220 255 / 0.82);
+    --g1: rgb(140 80 255 / 0.78);
+    --g2: rgb(255 60 160 / 0.55);
+    --g3: rgb(60 120 255 / 0.45);
+    --hx: 70%;
+    --hy: 20%;
+    --p1: 66% 24%;
+    --p2: 16% 82%;
+    --p3: 88% 70%;
+  }
+  .plate--amber {
+    --plate-base: #0d0703;
+    --hot: rgb(255 240 200 / 0.88);
+    --g1: rgb(255 170 30 / 0.75);
+    --g2: rgb(255 70 60 / 0.55);
+    --g3: rgb(255 110 170 / 0.32);
+    --hx: 80%;
+    --hy: 22%;
+    --p1: 76% 26%;
+    --p2: 14% 86%;
+    --p3: 40% 60%;
+  }
+  .plate--smoke {
+    --plate-base: #07080b;
+    --hot: rgb(235 242 255 / 0.7);
+    --g1: rgb(150 175 225 / 0.5);
+    --g2: rgb(70 95 160 / 0.55);
+    --g3: rgb(190 210 255 / 0.3);
+    --hx: 24%;
+    --hy: 16%;
+    --p2: 86% 80%;
+    --p3: 78% 28%;
+  }
+
+  /* ---- Spar's surfaces, at landing-page scale ---------------------------- */
+
+  .ui {
+    font-family: var(--font-sans);
+    font-size: var(--ui);
+    line-height: 1.45;
+    letter-spacing: 0;
+    color: #f4f4f5;
+    background: rgb(30 30 32 / 0.84);
+    backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid rgb(255 255 255 / 0.09);
+    border-radius: 1em;
+    box-shadow:
+      0 2.4em 5em -1.6em rgb(0 0 0 / 0.85),
+      inset 0 1px 0 rgb(255 255 255 / 0.06);
+    text-align: left;
+  }
+
+  .ui-muted {
+    color: #a1a1aa;
+  }
+  .ui-faint {
+    color: #71717a;
+  }
+  .ui-mono {
+    font-family: var(--font-mono);
+  }
+
+  .ui-rule {
+    border-top: 1px solid rgb(255 255 255 / 0.07);
+  }
+
+  /* A learner's message, as the chat draws it — the thing Aside floats above
+     its cards is a task; Spar's equivalent is what the learner said. */
+  .ui-bubble {
+    font-family: var(--font-sans);
+    font-size: calc(var(--ui) * 1.45);
+    line-height: 1.3;
+    color: #fafafa;
+    background: rgb(62 62 66 / 0.88);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgb(255 255 255 / 0.1);
+    border-radius: 1em;
+    padding: 0.62em 0.95em;
+    box-shadow: 0 1.2em 3em -1em rgb(0 0 0 / 0.8);
+    white-space: nowrap;
+  }
+
+  .ui-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
+    border-radius: 0.5em;
+    padding: 0.12em 0.5em;
+    font-size: 0.92em;
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+
+  /* Card caption: the bold phrase, then the rest in the muted voice. */
+  .feature-caption {
+    margin-top: 1.4rem;
+    padding-inline: 0.4rem;
+    font-size: 1.04rem;
+    line-height: 1.55;
+    color: var(--color-faint);
+    text-wrap: pretty;
+  }
+
+  .feature-caption strong {
+    color: var(--color-paper);
+    font-weight: 500;
+  }
+
+  .feature-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.95rem;
+    color: #7cc4ff;
+  }
+}
+
+/* ---- The app's own motion, on the fragments --------------------------------
+
+   Ported from the desktop thread rather than invented for the page: rows rise
+   8px on a soft spring (useThreadArrival), cards 14px (its `card` variant),
+   check marks pop from 0.72 (useMarkArrival), test names slide 4px, the rating
+   curve sweeps open, and anything still working shimmers instead of spinning.
+   Each waits, paused on its first frame, until the card it sits in has been
+   revealed; `--at` is its place in the card's little timeline. */
+
+@layer components {
+  .arrive,
+  .arrive-card,
+  .arrive-mark,
+  .arrive-slide,
+  .arrive-word,
+  .grow-x,
+  .sweep {
+    animation-fill-mode: both;
+    animation-play-state: paused;
+    animation-delay: calc(var(--reveal-delay, 0ms) + 350ms + var(--at, 0ms));
+  }
+
+  .reveal[data-shown="true"] :is(.arrive, .arrive-card, .arrive-mark, .arrive-slide, .arrive-word, .grow-x, .sweep) {
+    animation-play-state: running;
+  }
+
+  /* spring, visualDuration 0.38, bounce 0.16 */
+  .arrive {
+    animation-name: thread-arrive;
+    animation-duration: 520ms;
+    animation-timing-function: cubic-bezier(0.3, 1.22, 0.52, 1);
+  }
+  /* spring, visualDuration 0.5, bounce 0.08 */
+  .arrive-card {
+    animation-name: thread-arrive-card;
+    animation-duration: 640ms;
+    animation-timing-function: cubic-bezier(0.3, 1.12, 0.5, 1);
+  }
+  /* spring, visualDuration 0.34, bounce 0.42 */
+  .arrive-mark {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation-name: mark-pop;
+    animation-duration: 420ms;
+    animation-timing-function: cubic-bezier(0.34, 1.7, 0.6, 1);
+  }
+  .arrive-slide {
+    animation-name: run-slide;
+    animation-duration: 250ms;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  /* A reply arriving over the stream, a word at a time. */
+  .arrive-word {
+    animation-name: word-in;
+    animation-duration: 180ms;
+    animation-timing-function: ease-out;
+  }
+  .grow-x {
+    transform-origin: 0 50%;
+    animation-name: grow-x;
+    animation-duration: 900ms;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .sweep {
+    transform-origin: 0 0;
+    animation-name: grow-x;
+    animation-duration: 1100ms;
+    animation-timing-function: cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .thinking-shimmer {
+    background: linear-gradient(90deg, #f4f4f561 0%, #f4f4f561 35%, #f4f4f5 50%, #f4f4f561 65%, #f4f4f561 100%);
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    animation: agent-shimmer 2.4s linear infinite;
+  }
+
+  .streaming-caret::after {
+    content: "";
+    display: inline-block;
+    width: 0.45em;
+    height: 1em;
+    margin-left: 0.15em;
+    vertical-align: text-bottom;
+    border-radius: 1px;
+    background: currentColor;
+    animation: agent-caret 1.1s steps(1, end) infinite;
+  }
+}
+
+@keyframes plate-drift {
+  from { transform: translate(-3%, 2%) rotate(-3deg) scale(1); }
+  to { transform: translate(3%, -2%) rotate(4deg) scale(1.06); }
+}
+@keyframes thread-arrive {
+  from { opacity: 0; translate: 0 8px; scale: 0.985; }
+  30% { opacity: 1; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+@keyframes thread-arrive-card {
+  from { opacity: 0; translate: 0 14px; scale: 0.97; }
+  38% { opacity: 1; }
+  to { opacity: 1; translate: 0 0; scale: 1; }
+}
+@keyframes mark-pop {
+  from { opacity: 0; scale: 0.72; }
+  33% { opacity: 1; }
+  to { opacity: 1; scale: 1; }
+}
+@keyframes run-slide {
+  from { opacity: 0; translate: -4px 0; }
+  to { opacity: 1; translate: 0 0; }
+}
+@keyframes word-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes grow-x {
+  from { scale: 0 1; }
+  to { scale: 1 1; }
+}
+@keyframes agent-shimmer {
+  from { background-position: 140% 0; }
+  to { background-position: -40% 0; }
+}
+@keyframes agent-caret {
+  0%, 45% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* Reduced motion gets every fragment finished, as it would look a second later. */
+@media (prefers-reduced-motion: reduce) {
+  .plate-glow::before,
+  .plate-field::before,
+  .arrive, .arrive-card, .arrive-mark, .arrive-slide, .arrive-word, .grow-x, .sweep,
+  .thinking-shimmer, .streaming-caret::after {
+    animation: none !important;
+  }
+  .thinking-shimmer {
+    color: #f4f4f5b3;
+    background: none;
+  }
+}
+
+/* ---- The provider wall -----------------------------------------------------
+
+   The models Spar can run on, as the icons people already know, set on a
+   shallow floor that recedes, the back rows a little quieter than the front. Each row drifts a few pixels, in turn, so the wall is not a
+   screenshot of a grid. */
+
+@layer components {
+  .provider-wall {
+    /* Clipped at the sides only: a tile falling from above the camera must
+       never meet an edge on its way down. */
+    overflow-x: clip;
+    overflow-y: visible;
+    perspective: 1000px;
+    padding-bottom: 1rem;
+  }
+
+  .provider-wall-floor {
+    display: grid;
+    gap: clamp(10px, 1.4vw, 18px);
+    transform: rotateX(16deg);
+    transform-origin: 50% 0;
+  }
+
+  .provider-row {
+    display: flex;
+    justify-content: center;
+    gap: clamp(10px, 1.4vw, 18px);
+    /* No offset: rows of six, seven and four already sit half a tile apart
+       when each is centred, which is the brick the wall wants. */
+    opacity: calc(1 - var(--row) * 0.14);
+    animation: provider-drift 14s ease-in-out calc(var(--row) * -4s) infinite alternate;
+    --tile: clamp(52px, 8.6vw, 108px);
+  }
+
+  .provider-tile {
+    position: relative;
+    display: block;
+    flex: none;
+    width: var(--tile);
+    aspect-ratio: 1;
+  }
+
+  .provider-tile-body {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border-radius: 27%;
+    color: #f4f4f5;
+    background:
+      radial-gradient(120% 90% at 28% 0%, color-mix(in srgb, var(--tint) 42%, transparent), transparent 62%),
+      linear-gradient(180deg, #242427, #111113);
+    border: 1px solid rgb(255 255 255 / 0.08);
+    transition:
+      transform 420ms cubic-bezier(0.34, 1.4, 0.64, 1),
+      box-shadow 300ms ease,
+      border-color 300ms ease;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.14),
+      0 1.1rem 2rem -1rem rgb(0 0 0 / 0.9),
+      0 0 2.4rem -1rem color-mix(in srgb, var(--tint) 55%, transparent);
+  }
+
+  /* Pointed at: a little bigger, a little lifted, its own colour a little
+     brighter underneath. Only where hover is real. */
+  @media (hover: hover) {
+    .provider-tile-body:hover {
+      transform: translateY(-3%) scale(1.08);
+      border-color: rgb(255 255 255 / 0.16);
+      box-shadow:
+        inset 0 1px 0 rgb(255 255 255 / 0.2),
+        0 1.4rem 2.4rem -1rem rgb(0 0 0 / 0.9),
+        0 0 3rem -0.6rem color-mix(in srgb, var(--tint) 75%, transparent);
+    }
+  }
+
+}
+
+/* The wall's entrance, driven by scroll: the floor starts steep and eases
+   down to its resting tilt while each tile falls from above the camera into
+   its seat. Where scroll-driven animation is not supported, the wall is simply
+   there — the finished state is the static one. */
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .provider-wall {
+      view-timeline-name: --wall;
+    }
+
+    .provider-wall-floor {
+      animation: wall-floor linear both;
+      animation-timeline: --wall;
+      animation-range: cover 4% cover 42%;
+    }
+
+    /* Each row gets its own depth, so a tile can come at you from in front of
+       the glass. */
+    .provider-row {
+      perspective: 700px;
+    }
+
+    .provider-tile {
+      animation: tile-land linear both;
+      animation-timeline: --wall;
+      animation-range: cover var(--land-from) cover var(--land-to);
+    }
+  }
+}
+
+@keyframes wall-floor {
+  from { transform: rotateX(58deg) translateY(3rem) scale(0.92); }
+  to { transform: rotateX(16deg); }
+}
+
+@keyframes tile-land {
+  /* Comes in a little small and blurred, as a fast thing is; eases into its
+     seat sharp; grows a hair past its size and settles back, like a spring
+     finding rest. The overshoot is 1% — felt, not seen. */
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translate3d(var(--dx), var(--dy), var(--dz)) rotateX(var(--rx)) rotate(var(--rz)) scale(0.9);
+    animation-timing-function: cubic-bezier(0.22, 0.8, 0.3, 1);
+  }
+  35% {
+    opacity: 1;
+  }
+  70% {
+    filter: blur(0);
+    transform: translate3d(0, 0, 0) rotateX(0deg) rotate(0deg) scale(0.985);
+    animation-timing-function: ease-in-out;
+  }
+  86% {
+    transform: scale(1.01);
+    animation-timing-function: ease-in-out;
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+@keyframes provider-drift {
+  from { transform: translateX(-10px); }
+  to { transform: translateX(10px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .provider-row {
+    animation: none;
+  }
+}

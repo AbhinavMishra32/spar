@@ -2,7 +2,6 @@ import { DownloadButton } from "@/components/DownloadButton";
 import { Mark } from "@/components/Mark";
 import { Reveal } from "@/components/Reveal";
 import { Section } from "@/components/Section";
-import { DotField } from "@/components/hero/DotField";
 import { AppleGlyph, ArrowGlyph, LinuxGlyph, WindowsGlyph } from "@/components/icons";
 import type { Release } from "@/lib/release";
 import { site } from "@/lib/site";
@@ -25,23 +24,20 @@ export function Download({ release }: { release: Release }) {
   return (
     <Section id="download">
       <Reveal>
-        <div className="beam-border relative isolate overflow-hidden rounded-3xl border border-line bg-surface px-6 py-20 text-center sm:px-12 sm:py-24">
-          {/* The page opened on the field and closes on it — the same dots, the
-              same swell under the cursor, arcs and all. A CSS halftone stood in
-              here before, and a still picture of the field in the one place the
-              page is asking for something reads as the moment it gave up. */}
-          <DotField spacing={30} radius={2.7} seat={null} arcZone={1} className="dot-field--panel" />
-          <div className="panel-scrim" aria-hidden />
+        {/* The last plate on the page, lit like the others: the same light
+            through the same dots, with the one thing it asks for on it. */}
+        <div className="plate plate--dusk relative isolate px-6 py-20 text-center sm:px-12 sm:py-24">
+          <span className="plate-glow" aria-hidden />
+          <span className="plate-field" aria-hidden />
 
           <div className="relative">
-            <Mark size={34} animated className="mx-auto" />
-            <h2 className="mt-8 text-[length:var(--text-title)]">Get in the ring.</h2>
-            <p className="lede mx-auto mt-5 max-w-[54ch]">
-              Stop deciding for yourself whether today is another sliding-window problem, a graph problem you
-              have forgotten, or yesterday&rsquo;s mistake again. Free, and the whole product is on GitHub.
+            <Mark size={30} animated className="mx-auto" />
+            <h2 className="mt-7 text-[length:var(--text-title)]">Get in the ring.</h2>
+            <p className="mx-auto mt-4 max-w-[40ch] text-[clamp(1.02rem,1.3vw,1.15rem)] leading-relaxed text-white/60">
+              Free, and the whole product is on GitHub.
             </p>
 
-            <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <DownloadButton builds={release.builds} />
               <a href={site.repo} target="_blank" rel="noreferrer" className="btn btn-ghost">
                 Read the source
@@ -49,11 +45,7 @@ export function Download({ release }: { release: Release }) {
               </a>
             </div>
 
-            <p className="mt-6 font-mono text-[11px] tracking-[0.14em] text-ghost uppercase">
-              <span className="shimmer">
-                v{release.version} — LeetCode + Codeforces + adaptive Spar challenges
-              </span>
-            </p>
+            <p className="mt-6 text-[13px] text-white/40">v{release.version} · macOS, Windows and Linux</p>
           </div>
         </div>
       </Reveal>

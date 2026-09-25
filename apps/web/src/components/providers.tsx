@@ -225,3 +225,8 @@ export function ProviderGlyph({ provider, className }: { provider: ProviderId; c
   const color = BRAND_COLOR[provider];
   return <Glyph className={className} style={color ? { color } : undefined} />;
 }
+
+/** The provider's brand colour, where its mark has one. */
+export function providerColor(provider: ProviderId): string | undefined {
+  return BRAND_COLOR[provider];
+}

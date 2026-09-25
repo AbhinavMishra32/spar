@@ -4,23 +4,14 @@ import { Footer } from "@/components/Footer";
 import { Hero } from "@/components/hero/Hero";
 import { Nav } from "@/components/Nav";
 import { SmoothScroll } from "@/components/SmoothScroll";
-import { AbilityMap } from "@/components/sections/AbilityMap";
-import { Attempt } from "@/components/sections/Attempt";
+import { AgentFeature } from "@/components/sections/AgentFeature";
 import { Download } from "@/components/sections/Download";
+import { Evidence } from "@/components/sections/Evidence";
 import { Faq } from "@/components/sections/Faq";
-import { HowItWorks } from "@/components/sections/HowItWorks";
-import { LadderField } from "@/components/sections/Ladder";
 import { Languages } from "@/components/sections/Languages";
-import { Models } from "@/components/sections/Models";
-import { NoCourse } from "@/components/sections/NoCourse";
-import { ProofRun } from "@/components/sections/Proof";
-import { Rating } from "@/components/sections/Rating";
-import { Sources } from "@/components/sections/Sources";
-import { StartHere } from "@/components/sections/StartHere";
-import { Submission } from "@/components/sections/Submission";
-import { TheAgent } from "@/components/sections/TheAgent";
-import { TheApp } from "@/components/sections/TheApp";
-import { Workspace } from "@/components/sections/Workspace";
+import { NextMove } from "@/components/sections/NextMove";
+import { Providers } from "@/components/sections/Providers";
+import { Yours } from "@/components/sections/Yours";
 
 /* The page is static, rebuilt on a timer, so the version it advertises follows
    GitHub without anyone editing this repository. */
@@ -35,25 +26,15 @@ export default async function Home() {
       <SmoothScroll />
       <Nav />
       <main className="relative z-10">
-        {/* The order is the argument: what Spar knows about you, where that
-            knowledge comes from, what it does with it, where the problems come
-            from, and only then the app the whole thing happens in. */}
+        {/* What Spar knows about you, what it does with it, who does the
+            work, and what stays yours. Every section shows the app. */}
         <Hero release={release} />
         <Languages />
-        <LadderField />
-        <AbilityMap />
-        <Rating />
-        <Attempt />
-        <HowItWorks />
-        <NoCourse />
-        <Sources />
-        <TheApp />
-        <StartHere />
-        <ProofRun />
-        <Submission />
-        <TheAgent />
-        <Workspace />
-        <Models />
+        <Evidence />
+        <NextMove />
+        <AgentFeature />
+        <Providers />
+        <Yours />
         <Download release={release} />
         <Faq />
       </main>
