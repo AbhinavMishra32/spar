@@ -1,0 +1,5 @@
+/* The renderer's stylesheet, scanned from the renderer. With the hero as Vite's
+   root, Tailwind's automatic detection would only see this folder. */
+@import "../renderer/theme.css";
+@source "../renderer";
+@source ".";

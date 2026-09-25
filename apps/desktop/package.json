@@ -19,7 +19,10 @@
     "package": "electron-builder --mac",
     "package:win": "electron-builder --win",
     "package:linux": "electron-builder --linux",
-    "eval": "ELECTRON_RUN_AS_NODE=1 NODE_OPTIONS=--conditions=development electron node_modules/tsx/dist/cli.mjs src/eval/cli.ts"
+    "eval": "ELECTRON_RUN_AS_NODE=1 NODE_OPTIONS=--conditions=development electron node_modules/tsx/dist/cli.mjs src/eval/cli.ts",
+    "hero:record": "ELECTRON_RUN_AS_NODE=1 NODE_OPTIONS=--conditions=development electron node_modules/tsx/dist/cli.mjs src/hero/record.ts",
+    "hero:dev": "vite --config vite.hero.config.ts",
+    "hero:build": "vite build --config vite.hero.config.ts"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.87.1",

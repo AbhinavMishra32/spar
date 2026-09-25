@@ -1,6 +1,6 @@
 import { DownloadButton } from "@/components/DownloadButton";
 import { DotField } from "@/components/hero/DotField";
-import { Shot } from "@/components/Shot";
+import { SparReplay } from "@/components/hero/SparReplay";
 import type { Release } from "@/lib/release";
 
 /**
@@ -80,12 +80,7 @@ export function Hero({ release }: { release: Release }) {
           somewhere the page continues, rather than as where it stops. */}
       <div className="relative z-10 mt-12 sm:mt-16">
         <div className="shell hero-window">
-          <Shot
-            shot="workspace"
-            priority
-            sizes="(max-width: 640px) 170vw, (max-width: 900px) 120vw, 1160px"
-            alt="A Spar challenge open: the problem statement and sample cases on the left, the file being repaired in the editor, and the declared test cases below it."
-          />
+          <SparReplay />
         </div>
       </div>
     </section>
