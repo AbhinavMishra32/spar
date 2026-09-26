@@ -19,7 +19,8 @@ import { ChallengePreview, hasChallengePreview, publishedPreviewData, stopPrevie
 import { SaveProblem } from "../common/SaveProblem";
 import { readPublishedChallenge } from "./publishedChallenge";
 import { useRevealOnExpand } from "./useRevealOnExpand";
-import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
+import { challengeMode, diffTotals, isChallengeAuthoringTool, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
+import { NotebookCard } from "./NotebookView";
 import { solveStats, spentOn, type SolveStats } from "./solveStats";
 import { Clock, DraftTree, InsightTree, QuestionTitle, Reveal, StageTree, draftFromCall, type QuestionMark } from "./StageTree";
 import type { ChallengeDraft } from "../../../shared/api";
@@ -107,7 +108,7 @@ function orbFor(tool: string): OrbState {
   if (name === "load_skill") return "searching";
   if (name.startsWith("search_") || name.startsWith("read_") || name.startsWith("inspect_") || name.startsWith("list_") || name.startsWith("grep") || name === "replay_attempt") return "searching";
   if (name.startsWith("write_") || name.startsWith("edit_") || name.startsWith("apply_") || name.startsWith("create_file")) return "shaping";
-  if (name === "create_question" || name === "replace_current_question" || name.startsWith("plan_") || name.startsWith("path")) return "weaving";
+  if (isChallengeAuthoringTool(name) || name.startsWith("plan_") || name.startsWith("path")) return "weaving";
   if (name === "evaluate_attempt" || name.startsWith("run_") || name.startsWith("terminal") || name.startsWith("shell")) return "solving";
   if (name === "ask_user_question") return "listening";
   if (name.startsWith("record_") || name.startsWith("upsert_") || name.startsWith("flow_memory") || name.startsWith("remember")) return "breathing";
@@ -199,6 +200,7 @@ function ToolIcon({ part }: { part: ToolPart }) {
        whether it was written, replaced, or fell back to a stock one. */
     case "create_question":
     case "replace_current_question":
+    case "set_challenge":
     case "create_fallback_question":
     case "assign_practice_problem":
       return <IconPuzzle className={MARK} />;
@@ -215,6 +217,7 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "evaluate_attempt":
       return <IconCheck className={MARK} />;
     case "upsert_ability":
+    case "update_ability":
     case "propose_ability_update":
     case "read_ability":
       return <IconBook className={MARK} />;
@@ -223,6 +226,9 @@ function ToolIcon({ part }: { part: ToolPart }) {
       return <IconChip className={MARK} />;
     case "commit_session_decision":
       return <IconLightning className={MARK} />;
+    /* The coach's notes about the learner — a dossier, not a file in their project. */
+    case "update_notebook":
+      return <IconDossier className={MARK} />;
     /* The one call that files something for the learner to keep. */
     case "record_insight":
       return <IconSparkle className={MARK} />;
@@ -240,7 +246,7 @@ function ToolIcon({ part }: { part: ToolPart }) {
 
 /** What the call did, as one word, in the corner of its panel. */
 function StatusPill({ part }: { part: ToolPart }) {
-  const rejected = part.phase === "error" && (part.tool === "create_question" || part.tool === "replace_current_question" || part.tool === "create_fallback_question");
+  const rejected = part.phase === "error" && (isChallengeAuthoringTool(part.tool) || part.tool === "create_fallback_question");
   const [text, tone] = part.phase === "running"
     ? ["Running", "text-muted-foreground"]
     : rejected
@@ -359,6 +365,17 @@ function oneLine(value: string, limit = 72): string {
   return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
 }
 
+/** What a build that published did, as the word in front of its question. */
+function createdVerb(part: ToolPart): string {
+  if (part.tool === "replace_current_question") return "Replaced with";
+  if (part.tool === "set_challenge") {
+    const mode = challengeMode(part.input);
+    if (mode === "revise") return "Revised";
+    if (mode === "replace") return "Replaced with";
+  }
+  return "Created";
+}
+
 export function ToolRow({ part, after, continues = false, thinking }: { part: ToolPart; after?: ReasoningPart | undefined; continues?: boolean; thinking?: ReasoningPart | undefined }) {
   const [open, setOpen] = useState(false);
   const block = useRevealOnExpand<HTMLDivElement>(open);
@@ -387,7 +404,9 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
   /* A filed insight card hangs off the row the way a build's stages do: it is
      a thing the call made, not a payload to open. */
   const insight = part.tool === "record_insight" && part.phase === "done" && hasCall;
-  const treed = staged || insight;
+  /* So does the notebook a write left behind: the page, and what changed on it. */
+  const notebook = part.tool === "update_notebook" && part.phase === "done" && hasCall;
+  const treed = staged || insight || notebook;
   const design = useMemo(() => (staged ? draftFromCall(part.input, part.files) : null), [staged, part.input, part.files]);
   /* A staged call's row folds its stages, not a panel of JSON: the tree is the
      account of what the call did, and its arguments and result are already
@@ -403,7 +422,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
      it produced — language, number, title, how hard — is the thing the learner
      is about to open, and it should not only exist in the card further down. */
   const question = useMemo<QuestionMark | null>(() => {
-    if (part.phase !== "done" || (part.tool !== "create_question" && part.tool !== "replace_current_question")) return null;
+    if (part.phase !== "done" || !isChallengeAuthoringTool(part.tool)) return null;
     const challenge = readPublishedChallenge(part);
     const outcome = part.stages.find((stage) => stage.kind === "outcome");
     if (!challenge.questionId && outcome?.state !== "done") return null;
@@ -424,7 +443,9 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
     const timer = window.setTimeout(() => setLanded(true), 1_100);
     return () => window.clearTimeout(timer);
   }, [question, landed]);
-  const treeOpen = treeChoice ?? !(question && landed);
+  /* A notebook is a page long; it opens when asked for rather than pushing the
+     rest of the turn down every time the coach takes a note. */
+  const treeOpen = treeChoice ?? (notebook ? false : !(question && landed));
   const setTreeOpen = (next: (value: boolean) => boolean) => setTreeChoice(next(treeOpen));
 
   const label = (
@@ -433,7 +454,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
         /* Once it published, the row is the question: what was made, not the
            agent's caption for the step that made it. */
         <span className="flex min-w-0 items-center gap-1.5">
-          <span className="shrink-0">{part.tool === "replace_current_question" ? "Replaced with" : "Created"}</span>
+          <span className="shrink-0">{createdVerb(part)}</span>
           <QuestionTitle question={question} />
         </span>
       ) : (
@@ -536,6 +557,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
             <div className={cn(LABEL_ROW, "text-[var(--transcript-step)] transition-colors hover:text-[var(--transcript-step-strong)]")}>{label}</div>
           )}
           {insight && <Reveal show={treeOpen}><InsightTree input={part.input} output={part.output} /></Reveal>}
+          {notebook && <Reveal show={treeOpen}><NotebookCard input={part.input} output={part.output} /></Reveal>}
           {staged && <Reveal show={treeOpen}><StageTree draft={design} language={design?.language} question={question} stages={part.stages} /></Reveal>}
           {/* One rounded box, not two. The surface lives on the element that
               clips, because that element is also the one animating the height —

@@ -2,7 +2,7 @@ import { normalizeStatementText } from "../shared/statementText.js";
 import { checkFigure } from "../shared/figure.js";
 import type { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
-import { compileQuestion, fallbackDesign, type DesignOrigin } from "@spar/training";
+import { compileQuestion, type DesignOrigin } from "@spar/training";
 import { REVIEW_TARGETS, abilityStatusSchema, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput, type ReviewTarget } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
@@ -108,7 +108,7 @@ export async function executeTrainingTool(
   /* The session's own choice of where challenges come from, enforced here
      rather than trusted to the prompt: a provider the learner left out is never
      searched, read or assigned, and a session that left Spar out never has a
-     challenge written for it — the host's own fallback included. */
+     challenge written for it. */
   const problemSources = local.problemSourcesForSession(sessionId);
   const providers = problemSources.filter((source): source is "leetcode" | "codeforces" => source !== "spar");
   if (SOURCE_READ_TOOLS.includes(name)) {
@@ -126,7 +126,7 @@ export async function executeTrainingTool(
     }
     return assignPracticeProblem(value, sessionId, local, workspaces, practice);
   }
-  if ((name === "create_question" || name === "replace_current_question" || name === "create_fallback_question") && !problemSources.includes("spar")) {
+  if ((name === "create_question" || name === "replace_current_question") && !problemSources.includes("spar")) {
     return { status: "invalid", report: { valid: false, checks: [{ name: "session sources", passed: false, detail: `This session only takes real problems from ${providers.map(practiceSourceName).join(" and ")}, so Spar does not write challenges for it. Search for one and assign it with assign_practice_problem.` }] } };
   }
   /* Optional so the tool tests can call this without standing up a network
@@ -147,38 +147,25 @@ export async function executeTrainingTool(
      lifetime rather than another branch here. */
   if (visualizer?.handles(name)) return visualizer.execute(name, value, sessionId);
   if (VISUALIZER_TOOLS.includes(name)) return { error: "unavailable", note: "The execution visualiser is not available in this context." };
-  if (name === "read_session") return local.readSession(String(value.sessionId));
-  /* Three readings of the same memory at three resolutions. `passages` are the
-     standing claims; `patterns` are the mistake lifecycles open under them; and
-     `evidence` is what was actually observed, one behaviour per row. The last
-     two used to be written on every attempt-complete turn and read by nothing,
-     so a finding could never be confirmed across attempts — only rewritten. */
-  if (name === "search_learner_model") {
-    const query = String(value.query ?? "");
-    const limit = Number(value.limit ?? 4);
-    const memory = local.searchLearnerMemory(query, limit, trackId);
-    return { passages: local.searchLearner(query, limit, trackId), ...memory, note: memory.patterns.length || memory.evidence.length ? "`patterns` and `evidence` are your own earlier readings of this learner. A hypothesis here plus one new observation is what promotes it to a pattern; the host refuses a promotion whose evidence does not span two attempts." : "" };
+  /* The record, searched in one call. Each kind is the read that used to be its
+     own tool; asking for several at once is the common case, and the coach
+     narrows with `kinds` when it knows what it is after. */
+  if (name === "search_record") return searchRecord(local, value, trackId);
+  if (name === "read_record") return readRecord(local, value, trackId);
+  /* The coach's own notebook for this Track. The previous version goes back
+     with the result so the thread can draw what changed; the worker drops it
+     from what the model reads. */
+  if (name === "update_notebook") {
+    const markdown = typeof value.markdown === "string" ? value.markdown : "";
+    if (!markdown.trim()) return { status: "invalid", note: "The notebook cannot be empty. Send the whole document." };
+    const { saved, previous } = local.writeNotebook(trackId, { markdown, note: String(value.note ?? ""), author: "coach", sessionId });
+    const unchanged = previous !== null && previous.version === saved.version;
+    return { status: unchanged ? "unchanged" : "saved", version: saved.version, note: saved.note, markdown: saved.markdown, previous: unchanged ? null : previous?.markdown ?? null, previousAuthor: previous?.author ?? null };
   }
-  if (name === "search_attempt_history") return { attempts: local.searchAttempts(String(value.query ?? ""), Number(value.limit ?? 5), trackId) };
-  if (name === "search_challenge_history") return { challenges: local.searchChallenges(String(value.query ?? ""), Number(value.limit ?? 6), trackId) };
-  if (name === "read_challenge") return { challenge: local.readChallenge(String(value.questionId ?? "")) };
-  /* Both concept reads answer the same question at different resolutions.
-     `read_concept_graph` is the shelf — what vocabulary exists near this topic
-     and whether the learner has met it. `search_concept_evidence` is the
-     finding — how they actually behave under one concept, split by sub-concept,
-     which is the difference between "arrays are shaky" and "the in-place pass is
-     the problem and two-pointers is fine". */
-  if (name === "read_concept_graph") {
-    const concepts = local.conceptGraph(String(value.query ?? value.conceptId ?? ""), Number(value.limit ?? 14), trackId);
-    return { concepts, bounded: true, note: concepts.length ? "Counts roll each sub-concept's evidence into its area. `standing` is derived from graded outcomes; an untested concept is not a weak one." : "No concept in the vocabulary matches this query and the learner has no tagged evidence yet." };
-  }
-  if (name === "search_concept_evidence") {
-    const report = local.conceptEvidenceReport(String(value.concept ?? value.query ?? ""), Number(value.limit ?? 3), trackId);
-    return { concepts: report, note: report.length ? "Read subConcepts before the top-level counts: an area's average hides the specific one that is failing." : "This concept has no tagged challenges yet, so there is nothing to read behaviour from." };
-  }
-  if (name === "set_session_objective") return { committed: true, ...local.setObjective(sessionId, String(value.objective)) };
-  if (name === "set_training_target") { const target=local.setTrainingTarget(sessionId, value as { ability: string; specificGap: string; desiredEvidence: string; avoidTesting: string[] });local.ensureAbility(target.abilityId,target.abilityTitle,trackId);local.queueAbilitySync(target.abilityId);return { committed: true, ...target }; }
-  if (name === "commit_session_decision") return { committed: true, ...local.commitDecision(sessionId, value as { action: string; reason: string }) };
+  /* What the builder needs to write a challenge that fits the Track: the open
+     challenge when one is being revised, and the starters the learner has been
+     handed so the next one has the same shape. Worker-only. */
+  if (name === "challenge_builder_context") return builderContext(local, sessionId, trackId);
   if (name === "ask_user_question") {
     if (questions) return questions.ask(sessionId, value as AskUserQuestionInput);
     /* `pending` says whether the learner still has to answer. It used to be a
@@ -282,26 +269,6 @@ export async function executeTrainingTool(
     rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
   }
-  /* Not in the agent's tool list. The controller reaches for this only after
-     every model-authored candidate has been rejected, so that a session ends
-     with something to attempt rather than with a compiler error. It is
-     compiled and validated exactly like any other candidate — the guarantee
-     comes from the design being written against the build contract, never from
-     trusting it. */
-  if (name === "create_fallback_question") {
-    if (openChallenge(local, sessionId)) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "A challenge is already active for this session." }] } };
-    const language = languageSchema.catch("javascript").parse(value.language);
-    const design = fallbackDesign(language);
-    const compiled = await compileCandidate(design, sessionId, workspaces, runner, "host");
-    if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
-    await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
-    /* Tagged like any other challenge, and tagged for what it actually is rather
-       than for the target it failed to hit. An untagged challenge is invisible to
-       every concept rollup, and a fallback the learner attempted is still
-       evidence about them — just evidence about tracing a running total. */
-    const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: [{ slug: "tracing-execution", role: "primary" }, { slug: "prefix-sums", role: "supporting" }], introductionReason: "A validated tracing exercise while a tailored challenge could not be published." });
-    return { status: "playable", question, report: compiled.report, fallback: true };
-  }
   if (name === "replace_current_question") {
     const activeQuestion = openChallenge(local, sessionId);
     if (!activeQuestion) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "There is no active challenge to replace." }] } };
@@ -338,8 +305,20 @@ export async function executeTrainingTool(
     const abilityId = String(value.abilityId);
     return { ability: local.readAbility(abilityId), patterns: local.patternsForAbility(abilityId), evidence: local.evidenceForAbility(abilityId).slice(0, 12) };
   }
-  if (name === "propose_ability_update") {const updated=local.updateAbility({abilityId:String(value.abilityId),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)});local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
-  if (name === "upsert_ability") {const updated=local.upsertAbility({title:String(value.title),markdown:String(value.markdown),evidenceEventIds:stringList(value.evidenceEventIds),...abilityClaim(value)},trackId);local.queueAbilitySync(updated.id);return { committed: true, ...updated };}
+  if (name === "update_ability") {
+    const abilityId = typeof value.abilityId === "string" && value.abilityId ? value.abilityId : "";
+    if (abilityId) {
+      if (!local.readAbility(abilityId)) return { committed: false, note: `No ability ${abilityId}. Search the record for its id, or omit abilityId and give a title to introduce one.` };
+      const updated = local.updateAbility({ abilityId, markdown: String(value.markdown), evidenceEventIds: stringList(value.evidenceEventIds), ...abilityClaim(value) });
+      local.queueAbilitySync(updated.id);
+      return { committed: true, ...updated };
+    }
+    const title = typeof value.title === "string" ? value.title.trim() : "";
+    if (!title) return { committed: false, note: "Give a title to introduce an ability, or an abilityId to update one." };
+    const updated = local.upsertAbility({ title, markdown: String(value.markdown), evidenceEventIds: stringList(value.evidenceEventIds), ...abilityClaim(value) }, trackId);
+    local.queueAbilitySync(updated.id);
+    return { committed: true, ...updated };
+  }
   throw new Error(`Unsupported Spar tool: ${name}`);
 }
 
@@ -478,6 +457,72 @@ async function assignPracticeProblem(
 function openChallenge(local: LocalStore, sessionId: string) {
   const question = local.readSession(sessionId)?.question;
   return question && !question.attemptCompletedAt ? question : null;
+}
+
+const RECORD_KINDS = ["abilities", "patterns", "attempts", "challenges", "concepts", "lessons"] as const;
+
+function searchRecord(local: LocalStore, value: Record<string, unknown>, trackId: string | null) {
+  const query = String(value.query ?? "");
+  const limit = Math.max(1, Math.min(12, Number(value.limit ?? 6) || 6));
+  const asked = stringList(value.kinds).filter((kind): kind is (typeof RECORD_KINDS)[number] => (RECORD_KINDS as readonly string[]).includes(kind));
+  const kinds = new Set(asked.length ? asked : RECORD_KINDS);
+  const result: Record<string, unknown> = {};
+  if (kinds.has("abilities")) result.abilities = local.searchLearner(query, limit, trackId).map((row) => ({ id: row.id, title: row.title, status: row.status, version: row.version, updatedAt: row.updated_at, markdown: row.markdown.slice(0, 900) }));
+  if (kinds.has("patterns")) {
+    const memory = local.searchLearnerMemory(query, limit, trackId);
+    result.patterns = memory.patterns;
+    result.observations = memory.evidence;
+  }
+  if (kinds.has("attempts")) result.attempts = local.searchAttempts(query, limit, trackId);
+  if (kinds.has("challenges")) result.challenges = local.searchChallenges(query, limit, trackId).map((row) => ({ id: row.id, title: row.title, difficulty: row.difficulty, language: row.language, outcome: row.lastOutcome, assistance: row.assistance, source: row.source?.source ?? "spar", concepts: row.concepts.map((tag) => tag.slug), replaces: row.replacesQuestionTitle, replacedBy: row.replacedByQuestionTitle, createdAt: row.createdAt }));
+  if (kinds.has("concepts")) result.concepts = local.conceptGraph(query, Math.min(14, limit * 2), trackId);
+  if (kinds.has("lessons")) result.lessons = local.searchLessons(query, limit);
+  const found = Object.values(result).some((entry) => Array.isArray(entry) && entry.length > 0);
+  return { ...result, note: found ? "Patterns and observations are your own earlier readings of this learner; one new matching observation promotes a hypothesis to a pattern. For a concept, read_record kind concept splits the evidence by sub-concept." : "Nothing in the record matches. An untested concept is not a weak one." };
+}
+
+function readRecord(local: LocalStore, value: Record<string, unknown>, trackId: string | null) {
+  const id = String(value.id ?? "").trim();
+  if (value.kind === "challenge") {
+    const challenge = local.readChallenge(id);
+    if (!challenge) return { error: "not-found", note: "No challenge with that id. The journey document and search_record list challenge ids." };
+    const design = challenge.design as Record<string, unknown>;
+    return {
+      id: challenge.id, title: challenge.title, statement: challenge.statement, language: challenge.language, kind: challenge.kind, difficulty: challenge.difficulty, status: challenge.status,
+      concepts: challenge.concepts, introductionReason: challenge.introduction_reason,
+      design: { starterFiles: design.starterFiles, visibleTests: design.visibleTests, referenceFiles: design.referenceFiles, solutionRequirements: design.solutionRequirements },
+      attempts: (challenge.attempts as unknown as Array<Record<string, unknown> & { events: unknown[] }>).map((attempt) => ({ id: attempt.id, status: attempt.status, startedAt: attempt.started_at, completedAt: attempt.completed_at, events: attempt.events.length })),
+      note: "Use read_attempt with an attemptId for how any of these attempts went.",
+    };
+  }
+  if (value.kind === "ability") {
+    const ability = local.readAbility(id);
+    if (!ability) return { error: "not-found", note: "No ability with that id. search_record with kinds [\"abilities\"] finds ability ids." };
+    return { ability, patterns: local.patternsForAbility(id), evidence: local.evidenceForAbility(id).slice(0, 12) };
+  }
+  if (value.kind === "lesson") {
+    const found = local.readLesson(id);
+    if (!found) return { error: "not-found", note: "No lesson with that id." };
+    return { id: found.id, taughtAt: found.createdAt, ...(found.payload as Record<string, unknown>) };
+  }
+  if (value.kind === "concept") {
+    const report = local.conceptEvidenceReport(id, 3, trackId);
+    return { concepts: report, note: report.length ? "Read subConcepts before the totals: an area's average hides the one that is failing." : "No tagged challenges under this concept yet." };
+  }
+  return { error: "unknown-kind", note: "kind is one of challenge, ability, lesson, concept." };
+}
+
+function builderContext(local: LocalStore, sessionId: string, trackId: string | null) {
+  const open = openChallenge(local, sessionId);
+  const track = trackId ? local.listTracks().find((entry) => entry.id === trackId) ?? null : null;
+  let openDesign: Record<string, unknown> | null = null;
+  if (open) {
+    const record = local.readChallenge(open.id);
+    const design = (record?.design ?? {}) as Record<string, unknown>;
+    openDesign = { title: open.title, statement: open.statement, language: open.language, kind: open.kind, difficulty: open.difficulty, starterFiles: design.starterFiles, referenceFiles: design.referenceFiles, visibleTests: design.visibleTests, solutionRequirements: design.solutionRequirements };
+  }
+  const recent = local.journey(trackId, 4).challenges.filter((entry) => entry.source === "spar" && entry.starter).slice(-3).map((entry) => ({ title: entry.title, language: entry.language, difficulty: entry.difficulty, starter: entry.starter }));
+  return { preferredLanguage: track?.language ?? local.getProfile()?.language ?? "javascript", open: openDesign, recentStarters: recent };
 }
 
 /**
@@ -703,8 +748,8 @@ function conceptTags(value: unknown): ConceptTagInput[] {
   });
 }
 
-/** The parts of an ability write that are optional on both ability tools, kept in
- *  one place so `propose_ability_update` and `upsert_ability` cannot drift into
+/** The optional parts of an ability write, shared by both branches of
+ *  update_ability (an existing ability, or a new one) so they cannot drift into
  *  supporting different halves of what an ability is. */
 function abilityClaim(value: Record<string, unknown>): { summary?: string; practice?: string[]; concepts?: ConceptTagInput[]; status?: AbilityStatus; evidence?: Array<{eventId:string;statement:string;polarity:"supporting"|"contradictory"|"neutral";independence:"independent"|"assisted"|"unknown";strength:number}>; pattern?:{title:string;description:string;status:"observation"|"hypothesis"|"pattern"|"monitoring"|"resolved";evidenceEventIds:string[]} } {
   const status = abilityStatusSchema.safeParse(value.status);

@@ -103,3 +103,11 @@ describe("baseName", () => {
     expect(baseName("src/lib/")).toBe("lib");
   });
 });
+
+describe("toolSubject for the v0.7 coach tools", () => {
+  it("names the query, the ability and the notebook note", () => {
+    expect(toolSubject("search_record", json({ query: "two pointers", limit: 5 }))).toEqual({ verb: "Searched your record for", subject: "two pointers" });
+    expect(toolSubject("update_ability", json({ title: "Sliding window" }), true)).toEqual({ verb: "Updating ability:", subject: "Sliding window" });
+    expect(toolSubject("update_notebook", json({ markdown: "# x", note: "Prefers hints late" }))).toEqual({ verb: "Updated notebook:", subject: "Prefers hints late" });
+  });
+});

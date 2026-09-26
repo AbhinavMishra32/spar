@@ -83,10 +83,3 @@ export const attemptEvaluationSchema = z.object({
 });
 export type AttemptEvaluation = z.infer<typeof attemptEvaluationSchema>;
 
-export const trainingToolNames = [
-  "search_learner_model", "read_ability", "search_attempt_history", "read_attempt",
-  "read_session", "read_concept_graph", "search_concept_evidence", "ask_user_question", "set_session_objective",
-  "set_training_target", "create_question",
-  "propose_ability_update", "commit_session_decision"
-] as const;
-export type TrainingToolName = typeof trainingToolNames[number];

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupParts, publishedRunArtifacts, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
+import { groupParts, isChallengeAuthoringTool, isChallengePublished, publishedRunArtifacts, reduceRun, runActivity, safeToolLabel, toolRowTitle, type AgentRun, type RunPart } from "./agentRun";
 
 const tool = (name: string): Extract<RunPart, { kind: "tool" }> => ({
   kind: "tool", id: name, tool: name, label: "", actionTitle: "", detail: "raw query", phase: "done", files: [], input: "", output: "", stages: [], startedAt: 0,
@@ -356,5 +356,44 @@ describe("challenge stages", () => {
     let current = reduceRun(null, { runId: "run", type: "draft", draft: { key: "0-0", files: [], received: 10 } });
     current = reduceRun(current, { runId: "run", type: "status", detail: "tool-error:create_question:accidentalDifficulty: required" });
     expect(current?.parts.map((part) => part.kind)).toEqual(["status"]);
+  });
+});
+
+describe("v0.7 coach tools", () => {
+  const challenge = (mode: string, output = JSON.stringify({ status: "playable", question: { id: "q1" } })) => ({ ...tool("set_challenge"), input: JSON.stringify({ title: "Window", mode }), output });
+
+  it("treats set_challenge as a challenge-authoring tool", () => {
+    expect(isChallengeAuthoringTool("set_challenge")).toBe(true);
+    expect(isChallengeAuthoringTool("create_question")).toBe(true);
+    expect(isChallengeAuthoringTool("replace_current_question")).toBe(true);
+    expect(isChallengeAuthoringTool("create_fallback_question")).toBe(false);
+  });
+
+  it("names a set_challenge call by what it did to the challenge", () => {
+    expect(toolRowTitle(challenge("new"))).toBe("Built challenge");
+    expect(toolRowTitle({ ...challenge("new"), phase: "running" })).toBe("Building challenge");
+    expect(toolRowTitle(challenge("revise"))).toBe("Revised challenge");
+    expect(toolRowTitle({ ...challenge("replace"), phase: "running" })).toBe("Replacing challenge");
+    expect(toolRowTitle({ ...challenge("new"), phase: "error" })).toBe("Challenge candidate rejected");
+  });
+
+  it("publishes a playable set_challenge as a challenge card, and not an invalid one", () => {
+    expect(groupParts([challenge("new")]).map((row) => row.kind)).toEqual(["challenge"]);
+    expect(isChallengePublished(challenge("new", JSON.stringify({ status: "invalid", report: { status: "ok" } })))).toBe(false);
+  });
+
+  it("drops the draft row when set_challenge starts, as create_question does", () => {
+    let current = reduceRun(null, { runId: "run", type: "draft", draft: { key: "0-0", files: [], received: 10 } });
+    current = reduceRun(current, { runId: "run", type: "tool", callId: "c1", tool: "set_challenge", phase: "start" });
+    expect(current?.parts.map((part) => part.kind)).toEqual(["tool"]);
+  });
+
+  it("labels the record, ability and notebook tools", () => {
+    expect(safeToolLabel("search_record", true)).toBe("Searching your record");
+    expect(safeToolLabel("search_record", false)).toBe("Searched your record");
+    expect(safeToolLabel("read_record", true, false, JSON.stringify({ kind: "challenge", id: "q1" }))).toBe("Reading a challenge");
+    expect(safeToolLabel("read_record", false, false, JSON.stringify({ kind: "ability", id: "a1" }))).toBe("Read an ability");
+    expect(safeToolLabel("update_ability", true)).toBe("Updating ability");
+    expect(safeToolLabel("update_notebook", false)).toBe("Updated notebook");
   });
 });

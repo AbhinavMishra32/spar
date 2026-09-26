@@ -8,7 +8,7 @@ import { AgentThread, type OptimisticLearnerMessage } from "../agent/AgentThread
 import { Composer } from "../agent/Composer";
 import { ComposerModelPicker } from "../agent/ModelPicker";
 import { AskUserQuestion } from "../agent/AskUserQuestion";
-import type { AgentRun } from "../agent/agentRun";
+import { isChallengeAuthoringTool, type AgentRun } from "../agent/agentRun";
 import { useStopTurn } from "@/hooks/use-stop-turn";
 import { useEditMessage } from "@/hooks/use-edit-message";
 import { expandMentions } from "../agent/Mentions";
@@ -19,7 +19,7 @@ function planningOrbState(run: AgentRun | null): OrbState {
   const tool = [...(run?.parts ?? [])].reverse().find((part) => part.kind === "tool" && part.phase === "running");
   if (!tool || tool.kind !== "tool") return "working";
   if (tool.tool.startsWith("search_") || tool.tool.startsWith("read_")) return "searching";
-  if (tool.tool === "create_question" || tool.tool === "replace_current_question") return "shaping";
+  if (isChallengeAuthoringTool(tool.tool)) return "shaping";
   if (tool.tool === "ask_user_question") return "listening";
   return "composing";
 }
@@ -37,7 +37,7 @@ function PlanningPresence({ run }: { run: AgentRun }) {
   const state = planningOrbState(run);
   const active = [...run.parts].reverse().find((part) => part.kind === "tool" && part.phase === "running");
   if (active?.kind !== "tool") return null;
-  const label = active.tool === "create_question" || active.tool === "replace_current_question"
+  const label = isChallengeAuthoringTool(active.tool)
     ? "Compiling and testing a challenge"
     : "Working through your learning evidence";
   return (

@@ -8,6 +8,7 @@ type RunStart = {
   turnKind: string;
   input: Record<string, unknown>;
   appVersion: string;
+  prompts?: Record<string, string>;
 };
 
 type TraceEvent = {
@@ -168,7 +169,7 @@ function rootRun(value: RunStart & { startedAt: string }, project: string, dotte
     start_time: Date.parse(value.startedAt),
     inputs: value.input,
     extra: metadata(value),
-    tags: ["spar-development", "development", "product", "live", value.provider],
+    tags: ["spar-development", "development", "product", "live", value.provider, ...Object.values(value.prompts ?? {})],
     serialized: { name: `spar.product.${value.turnKind}` },
   };
 }
@@ -234,6 +235,7 @@ function metadata(value: RunStart) {
       release: value.appVersion,
       runtime: "pi",
       transport: "desktop-direct",
+      ...(value.prompts ? { prompts: value.prompts } : {}),
     },
   };
 }

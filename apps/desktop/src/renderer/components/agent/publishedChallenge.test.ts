@@ -105,6 +105,18 @@ describe("reading a published challenge off its transcript row", () => {
     expect(replacement.replacedQuestionId).toBe("q0");
   });
 
+  it("reads a set_challenge design like a create_question one, and its mode as the replacement flag", () => {
+    const fresh = readPublishedChallenge(row({ tool: "set_challenge", label: "Typed Record Partitioning", input: design({ mode: "new" }), output: result() }));
+    expect(fresh.title).toBe("Typed Record Partitioning");
+    expect(fresh.language).toBe("typescript");
+    expect(fresh.cases).toBe(36);
+    expect(fresh.questionId).toBe("q1");
+    expect(fresh.replaced).toBe(false);
+    expect(readPublishedChallenge(row({ tool: "set_challenge", input: design({ mode: "revise" }), output: result() })).replaced).toBe(true);
+    expect(readPublishedChallenge(row({ tool: "set_challenge", input: design({ mode: "replace" }), output: result() })).replaced).toBe(true);
+    expect(readPublishedChallenge(row({ tool: "set_challenge", input: design({ mode: "new" }), output: result({ replacedQuestionId: "q0" }) })).replaced).toBe(true);
+  });
+
   /* Spar's four bands and a judge's three are claims by different graders. A
      mounted problem reports the source's band and no case count, because Spar
      never compiled it and has no number of its own to give. */

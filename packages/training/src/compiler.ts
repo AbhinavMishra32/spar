@@ -53,12 +53,9 @@ const PROBE_BUDGET_SECONDS = 7;
  *
  * The bar exists to break a habit of the model's: three hand-written cases,
  * which grade nothing. It does not apply to `host` — designs Spar itself wrote,
- * which today means the fixed fallback exercise published after every model
- * candidate has been rejected, and the fixtures that exercise the other checks.
- * Holding the last safety net to a generated sweep in ten languages would put it
- * at the mercy of ten toolchains for no teaching gain. Everything else in this
- * file applies to both, and the exemption is named at the call site rather than
- * inferred here.
+ * which today means the fixtures that exercise the other checks. Everything
+ * else in this file applies to both, and the exemption is named at the call site
+ * rather than inferred here.
  */
 export type DesignOrigin = "authored" | "host";
 

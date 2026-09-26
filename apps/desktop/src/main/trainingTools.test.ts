@@ -81,7 +81,7 @@ describe("reading back what the agent already worked out", () => {
     }
   });
 
-  it("finds an earlier hypothesis through the learner-model search, so a second sighting can promote it", async () => {
+  it("finds an earlier hypothesis through the record search, so a second sighting can promote it", async () => {
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Practise variable windows");
@@ -93,10 +93,14 @@ describe("reading back what the agent already worked out", () => {
          state the next turn has to be able to find and finish. */
       expect(store.listPatterns()[0]?.status).toBe("hypothesis");
 
-      const found = await executeTrainingTool("search_learner_model", { query: "window invariant restoration shrinking" }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { passages: unknown[]; patterns: Array<{ title: string; status: string }>; evidence: Array<{ statement: string }> };
-      expect(found.passages).not.toHaveLength(0);
+      const found = await executeTrainingTool("search_record", { query: "window invariant restoration shrinking" }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { abilities: Array<{ id: string }>; patterns: Array<{ title: string; status: string }>; observations: Array<{ statement: string }>; challenges: unknown[]; note: string };
+      expect(found.abilities.map((row) => row.id)).toContain(target.abilityId);
       expect(found.patterns).toMatchObject([{ title: "Stops after one shrink", status: "hypothesis" }]);
-      expect(found.evidence[0]?.statement).toContain("stopped shrinking");
+      expect(found.observations[0]?.statement).toContain("stopped shrinking");
+      expect(found.note).toContain("promotes a hypothesis");
+
+      const narrowed = await executeTrainingTool("search_record", { query: "window invariant restoration shrinking", kinds: ["patterns"] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Record<string, unknown>;
+      expect(Object.keys(narrowed).sort()).toEqual(["note", "observations", "patterns"]);
 
       /* Promotion needs both events named in the same call, which is the whole
          reason the first one has to be findable: an agent that cannot retrieve
@@ -401,6 +405,107 @@ describe("challenge lifecycle after a solve", () => {
 function workspaceStub(): WorkspaceService {
   return { writeValidation: async () => "/tmp/spar-test", removeValidation: async () => undefined, writeAll: async () => undefined } as unknown as WorkspaceService;
 }
+
+describe("reading one record", () => {
+  it("reads a challenge, an ability and a lesson by id, and says plainly when there is none", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise arrays");
+      const target = store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
+      const question = store.createQuestion(sessionId, design("Count values"), { valid: true });
+      const read = (input: Record<string, unknown>) => executeTrainingTool("read_record", input, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<Record<string, unknown>>;
+
+      const challenge = await read({ kind: "challenge", id: question.id }) as { id: string; title: string; design: { starterFiles: unknown; hiddenTests?: unknown }; attempts: Array<{ id: string; events: number }> };
+      expect(challenge).toMatchObject({ id: question.id, title: "Count values", design: { starterFiles: { "src/count.js": "" } } });
+      expect(challenge.design).not.toHaveProperty("hiddenTests");
+      expect(challenge.attempts.map((attempt) => attempt.id)).toEqual([question.attemptId]);
+      expect(typeof challenge.attempts[0]?.events).toBe("number");
+
+      store.updateAbility({ abilityId: target.abilityId, markdown: "# Arrays\n\nCounts in one pass.", evidenceEventIds: [] });
+      const ability = await read({ kind: "ability", id: target.abilityId }) as { ability: { id: string }; patterns: unknown[]; evidence: unknown[] };
+      expect(ability.ability.id).toBe(target.abilityId);
+      expect(Array.isArray(ability.patterns) && Array.isArray(ability.evidence)).toBe(true);
+
+      const lessonId = randomUUID();
+      store.saveLesson({ id: lessonId, sessionId, title: "Counting", summary: "One pass", concepts: [], payload: { title: "Counting", body: "Walk once." } });
+      expect(await read({ kind: "lesson", id: lessonId })).toMatchObject({ id: lessonId, title: "Counting", body: "Walk once." });
+
+      expect(await read({ kind: "challenge", id: "missing" })).toMatchObject({ error: "not-found" });
+      expect(await read({ kind: "ability", id: "missing" })).toMatchObject({ error: "not-found" });
+      expect(await read({ kind: "lesson", id: "missing" })).toMatchObject({ error: "not-found" });
+      expect(await read({ kind: "concept", id: "arrays" })).toHaveProperty("concepts");
+      expect(await read({ kind: "nonsense", id: "x" })).toMatchObject({ error: "unknown-kind" });
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("the coach's notebook tool", () => {
+  it("saves a new version, reports an unchanged write, refuses an empty one, and hands back the previous text", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise graphs");
+      const trackId = store.trackIdForSession(sessionId);
+      const write = (input: Record<string, unknown>) => executeTrainingTool("update_notebook", input, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<Record<string, unknown>>;
+
+      expect(await write({ markdown: "   " })).toMatchObject({ status: "invalid" });
+      expect(store.readNotebook(trackId)).toBeNull();
+
+      expect(await write({ markdown: "Forgets visited sets.", note: "first read" })).toEqual({ status: "saved", version: 1, note: "first read", markdown: "Forgets visited sets.", previous: null, previousAuthor: null });
+      expect(await write({ markdown: "Forgets visited sets." })).toMatchObject({ status: "unchanged", version: 1, previous: null, previousAuthor: "coach" });
+
+      store.writeNotebook(trackId, { markdown: "Forgets visited sets on grids.", author: "learner" });
+      expect(await write({ markdown: "Forgets visited sets on grids and trees." })).toMatchObject({ status: "saved", version: 3, previous: "Forgets visited sets on grids.", previousAuthor: "learner" });
+      expect(store.readNotebook(trackId)).toMatchObject({ version: 3, author: "coach", sessionId });
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("update_ability", () => {
+  it("introduces an ability by title, updates it by id, and refuses an unknown id or a missing title", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise recursion");
+      const call = (input: Record<string, unknown>) => executeTrainingTool("update_ability", input, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<Record<string, unknown>>;
+
+      expect(await call({ markdown: "# Something" })).toMatchObject({ committed: false });
+      expect(await call({ abilityId: "missing", markdown: "# Something" })).toMatchObject({ committed: false, note: expect.stringContaining("No ability missing") });
+
+      const created = await call({ title: "Base cases", markdown: "# Base cases\n\nStates the base case first.", evidenceEventIds: [] }) as { committed: boolean; id: string; version: number };
+      expect(created.committed).toBe(true);
+      expect(store.listAbilities(store.trackIdForSession(sessionId)).map((entry) => entry.title)).toContain("Base cases");
+
+      const updated = await call({ abilityId: created.id, markdown: "# Base cases\n\nStates the base case before recurring.", evidenceEventIds: [] }) as { committed: boolean; id: string; version: number };
+      expect(updated).toMatchObject({ committed: true, id: created.id });
+      expect(updated.version).toBeGreaterThan(created.version);
+    } finally {
+      store.close();
+    }
+  });
+});
+
+describe("challenge_builder_context", () => {
+  it("hands the builder the open design and the starters the learner was already given", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise arrays");
+      const call = () => executeTrainingTool("challenge_builder_context", {}, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<{ preferredLanguage: string; open: Record<string, unknown> | null; recentStarters: Array<{ title: string; starter: { path: string } }> }>;
+      expect(await call()).toMatchObject({ open: null, recentStarters: [] });
+
+      store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
+      store.createQuestion(sessionId, { ...design("Count values"), starterFiles: { "src/count.js": "export function count(values) {}" } }, { valid: true });
+      const context = await call();
+      expect(typeof context.preferredLanguage).toBe("string");
+      expect(context.open).toMatchObject({ title: "Count values", language: "javascript", starterFiles: { "src/count.js": "export function count(values) {}" } });
+      expect(context.recentStarters).toEqual([expect.objectContaining({ title: "Count values", starter: { path: "src/count.js", text: "export function count(values) {}" } })]);
+    } finally {
+      store.close();
+    }
+  });
+});
 
 /** Every run passes, which is exactly what a candidate must not be able to do. */
 function passingRunner(): UtilityClient {

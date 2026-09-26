@@ -1,165 +1,94 @@
 import { describe, expect, it } from "vitest";
-import { allowedTools, completionInstruction, nextToolStage, owedChallenge, phaseExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
+import { CHALLENGE_PUBLISHING_TOOLS, coachTools, CORE_TOOLS, owesChallenge, publishedChallenge, SKILL_TOOL, SOURCE_TOOLS, VISUALIZER_TOOLS, WEB_TOOLS, type AgentTurnKind, type Outcomes } from "./agentPolicy.js";
 
 const kinds: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message"];
-const result = (status: string) => [{ result: { status } }];
+const outcomes = (entries: Record<string, unknown[]>): Outcomes =>
+  new Map(Object.entries(entries).map(([name, results]) => [name, results.map((result) => ({ input: {}, result }))]));
 
-describe("generalist agent tool policy", () => {
-  it("offers a choice instead of forcing a tool sequence for every turn", () => {
-    for (const kind of kinds) {
-      const stage = nextToolStage(kind, new Map());
-      expect(stage.toolChoice).toBe("auto");
-      expect(stage.activeTools).toEqual(expect.arrayContaining(["set_session_objective", "set_training_target", "create_question", "teach_lesson", "ask_user_question"]));
-      expect(stage.activeTools).not.toContain("read_session");
-      expect(stage.activeTools).not.toContain("search_practice_problems");
+describe("coachTools", () => {
+  it("always offers the core tools and the visualiser", () => {
+    const tools = coachTools({});
+    for (const name of [...CORE_TOOLS, ...VISUALIZER_TOOLS]) expect(tools.has(name)).toBe(true);
+  });
+
+  it("offers web tools only when web search is configured", () => {
+    for (const name of WEB_TOOLS) {
+      expect(coachTools({}).has(name)).toBe(false);
+      expect(coachTools({ webSearch: false }).has(name)).toBe(false);
+      expect(coachTools({ webSearch: true }).has(name)).toBe(true);
     }
   });
 
-  it("makes a correction to an active challenge possible without a text classifier", () => {
-    for (const kind of kinds) {
-      const priorObjective = new Map<string, unknown[]>([["set_session_objective", [{ committed: true, objective: "Old scope" }]]]);
-      const stage = nextToolStage(kind, priorObjective, 1, { hasActiveQuestion: true });
-      expect(stage.toolChoice).toBe("auto");
-      expect(stage.activeTools).toEqual(expect.arrayContaining(["set_session_objective", "set_training_target", "replace_current_question"]));
-      expect(stage.activeTools).not.toContain("create_question");
+  it("offers source tools only with a practice source, and never runs or submits there", () => {
+    for (const name of SOURCE_TOOLS) {
+      expect(coachTools({}).has(name)).toBe(false);
+      expect(coachTools({ practiceSource: true }).has(name)).toBe(true);
     }
+    const connected = coachTools({ practiceSource: true });
+    expect(connected.has("run_practice_problem")).toBe(false);
+    expect(connected.has("submit_practice_problem")).toBe(false);
   });
 
-  it("offers source and web research only when configured, never as a prerequisite", () => {
-    const plain = nextToolStage("session-start", new Map());
-    expect(plain.activeTools).not.toContain("web_search");
-    expect(plain.activeTools).not.toContain("search_practice_problems");
-    const connected = nextToolStage("session-start", new Map(), 1, { webSearch: true, practiceSource: true });
-    expect(connected.toolChoice).toBe("auto");
-    expect(connected.activeTools).toEqual(expect.arrayContaining(["web_search", "search_practice_problems", "read_practice_problem", "assign_practice_problem", "create_question"]));
-    expect(connected.activeTools).not.toContain("run_practice_problem");
-    expect(connected.activeTools).not.toContain("submit_practice_problem");
+  it("offers set_challenge unless Spar authoring is switched off", () => {
+    expect(coachTools({}).has("set_challenge")).toBe(true);
+    expect(coachTools({ sparAuthoring: true }).has("set_challenge")).toBe(true);
+    const providerOnly = coachTools({ sparAuthoring: false, practiceSource: true });
+    expect(providerOnly.has("set_challenge")).toBe(false);
+    expect(providerOnly.has("assign_practice_problem")).toBe(true);
   });
 
-  it("offers completed-attempt tools only for that event", () => {
-    for (const kind of kinds) {
-      const tools = allowedTools(kind);
-      expect(tools.has("review_solution")).toBe(kind === "attempt-complete");
-      expect(tools.has("propose_ability_update")).toBe(kind === "attempt-complete");
-      expect(tools.has("commit_session_decision")).toBe(kind === "attempt-complete");
-    }
+  it("offers load_skill only when skills exist", () => {
+    expect(coachTools({}).has(SKILL_TOOL)).toBe(false);
+    expect(coachTools({ skills: true }).has(SKILL_TOOL)).toBe(true);
   });
 
-  it("can inspect an earlier question during planning without forcing the read", () => {
-    for (const kind of kinds) expect(allowedTools(kind).has("read_challenge")).toBe(true);
-    expect(nextToolStage("session-start", new Map()).toolChoice).toBe("auto");
-  });
-
-  it("continues from one answered question without asking it again", () => {
-    const answered = new Map<string, unknown[]>([["ask_user_question", [{ result: { status: "answered", answer: "Python with real Minecraft references" } }]]]);
-    const stage = nextToolStage("learner-message", answered);
-    expect(stage.toolChoice).toBe("auto");
-    expect(stage.activeTools).not.toContain("ask_user_question");
-    expect(stage.activeTools).toContain("set_training_target");
-  });
-
-  it("exposes only the visualizer gate until it has been opened", () => {
-    const initial = nextToolStage("learner-message", new Map()).activeTools;
-    expect(initial).toContain(VISUALIZER_GATE);
-    for (const name of VISUALIZER_SKILL_TOOLS) expect(initial).not.toContain(name);
-    const opened = nextToolStage("learner-message", new Map([[VISUALIZER_GATE, result("loaded")]])).activeTools;
-    expect(opened).not.toContain(VISUALIZER_GATE);
-    for (const name of VISUALIZER_SKILL_TOOLS) expect(opened).toContain(name);
-  });
-
-  it("keeps teaching and evidence tools available around a published challenge", () => {
-    for (const kind of kinds) {
-      const afterLesson = nextToolStage(kind, new Map([["teach_lesson", result("taught")]]), 1, { hasActiveQuestion: true });
-      expect(afterLesson.toolChoice).toBe("auto");
-      expect(afterLesson.activeTools).toContain("replace_current_question");
-      expect(afterLesson.activeTools).toContain("teach_lesson");
-      for (const name of ["create_question", "replace_current_question", "assign_practice_problem"]) {
-        const afterChallenge = nextToolStage(kind, new Map([[name, result("playable")]]));
-        expect(afterChallenge.toolChoice).toBe("auto");
-        expect(afterChallenge.activeTools).toContain("teach_lesson");
-        expect(afterChallenge.activeTools).not.toContain("create_question");
-        expect(afterChallenge.activeTools).not.toContain("replace_current_question");
-        expect(afterChallenge.activeTools).not.toContain("assign_practice_problem");
-      }
-    }
-    expect(nextToolStage("attempt-complete", new Map([["review_solution", [{ result: { review: "rework" } }]]])).activeTools).toContain("teach_lesson");
-  });
-
-  it("lets the agent revise a rejected candidate while keeping other teaching choices available", () => {
-    const outcomes = new Map<string, unknown[]>([["create_question", [{ result: { status: "invalid", report: { checks: [{ name: "reference", passed: false, detail: "exit 1" }] } } }]]]);
-    const stage = nextToolStage("session-start", outcomes, 2, { practiceSource: true });
-    expect(stage.toolChoice).toBe("auto");
-    expect(stage.activeTools).toContain("create_question");
-    expect(stage.activeTools).toEqual(expect.arrayContaining(["teach_lesson", "assign_practice_problem", "search_practice_problems"]));
-    outcomes.get("create_question")!.push({ result: { status: "invalid" } });
-    expect(nextToolStage("session-start", outcomes, 2).activeTools).not.toContain("create_question");
-  });
-
-  it("lets the agent choose another problem or author one after a source refusal", () => {
-    const outcomes = new Map<string, unknown[]>([["assign_practice_problem", result("already-solved")]]);
-    const stage = nextToolStage("session-start", outcomes, 1, { practiceSource: true });
-    expect(stage.toolChoice).toBe("auto");
-    expect(stage.activeTools).toEqual(expect.arrayContaining(["assign_practice_problem", "create_question"]));
-  });
-
-  it("deduplicates compiler mutations within a phase", () => {
-    expect(phaseExecutionKey("create_question", "one")).toBe("create_question");
-    expect(phaseExecutionKey("replace_current_question", "two")).toBe("replace_current_question");
-    expect(phaseExecutionKey("read_attempt", "one")).toBe("read_attempt:one");
-  });
-
-  it("describes only the artifact actually delivered", () => {
-    const taught = new Map<string, unknown[]>([["teach_lesson", result("taught")]]);
-    expect(completionInstruction("session-start", taught)).toContain("[[lesson:");
-    const playable = new Map<string, unknown[]>([["replace_current_question", result("playable")]]);
-    expect(completionInstruction("learner-message", playable)).toContain("why this problem and why now");
-    expect(completionInstruction("learner-message", new Map())).not.toContain("why this problem and why now");
-  });
-
-  it("keeps an attempt-complete turn open until a next challenge is published", () => {
-    const rejected = new Map<string, unknown[]>([["create_question", [{ result: { status: "invalid", report: { checks: [{ name: "reference solution", passed: false, detail: "expected: 2 | actual: 3" }] } } }]]]);
-    const owed = owedChallenge("attempt-complete", rejected, false, "(1) reference solution: expected: 2 | actual: 3");
-    expect(owed).toContain("expected: 2 | actual: 3");
-    expect(owed).toContain("owes the learner their next challenge");
-    /* An answered question is a result inside this same turn, not an ending. */
-    expect(owedChallenge("attempt-complete", new Map([["ask_user_question", [{ result: { status: "answered", answer: "x" } }]]]), false)).not.toBe("");
-    expect(owedChallenge("attempt-complete", new Map([["ask_user_question", [{ result: { status: "cancelled" } }]]]), false)).toBe("");
-    expect(owedChallenge("attempt-complete", new Map([["review_solution", [{ result: { review: "rework" } }]]]), false)).toBe("");
-    expect(owedChallenge("attempt-complete", new Map([["create_question", result("playable")]]), false)).toBe("");
-    expect(owedChallenge("attempt-complete", new Map([["create_fallback_question", result("playable")]]), false)).toBe("");
-  });
-
-  it("owes a retry only on other turns that already tried to author", () => {
-    expect(owedChallenge("learner-message", new Map(), false)).toBe("");
-    expect(owedChallenge("session-start", new Map([["create_question", result("invalid")]]), false)).toContain("Call the authoring tool again");
-    expect(owedChallenge("session-start", new Map([["create_question", result("invalid")]]), false, "(1) session lifecycle: already active")).toBe("");
-  });
-
-  it("closes authoring once the host fallback publishes and names it as a standard exercise", () => {
-    const outcomes = new Map<string, unknown[]>([["create_question", result("invalid")], ["create_fallback_question", result("playable")]]);
-    expect(nextToolStage("attempt-complete", outcomes, 3).activeTools).not.toContain("create_question");
-    expect(completionInstruction("attempt-complete", outcomes)).toContain("standard local tracing exercise");
+  it("does not offer tools removed with the phase table", () => {
+    const tools = coachTools({ webSearch: true, practiceSource: true, skills: true });
+    for (const name of ["read_session", "create_question", "replace_current_question", "set_training_target", "commit_session_decision", "propose_ability_update"]) expect(tools.has(name)).toBe(false);
   });
 });
 
-describe("sessions that take provider problems only", () => {
-  it("never offers the authoring tools", () => {
-    for (const kind of kinds) {
-      for (const active of [false, true]) {
-        const tools = allowedTools(kind, active, false, true, false);
-        expect(tools.has("create_question")).toBe(false);
-        expect(tools.has("replace_current_question")).toBe(false);
-        expect(tools.has("assign_practice_problem")).toBe(true);
-      }
+describe("publishedChallenge", () => {
+  it("counts only a playable result from a publishing tool", () => {
+    for (const name of CHALLENGE_PUBLISHING_TOOLS) {
+      expect(publishedChallenge(outcomes({ [name]: [{ status: "playable" }] }))).toBe(true);
+      expect(publishedChallenge(outcomes({ [name]: [{ status: "invalid" }] }))).toBe(false);
     }
+    expect(publishedChallenge(outcomes({ teach_lesson: [{ status: "playable" }] }))).toBe(false);
+    expect(publishedChallenge(outcomes({ set_challenge: [{ status: "invalid" }, { status: "playable" }] }))).toBe(true);
+  });
+});
+
+describe("owesChallenge", () => {
+  it("owes a challenge only after a completed attempt", () => {
+    for (const kind of kinds) expect(owesChallenge(kind, new Map(), false)).toBe(kind === "attempt-complete");
   });
 
-  it("owes a provider problem after an attempt, quoting the last refusal", () => {
-    const outcomes = new Map<string, unknown[]>([["assign_practice_problem", [{ result: { status: "invalid", report: { checks: [{ passed: false, detail: "subscription-only" }] } } }]]]);
-    const owed = owedChallenge("attempt-complete", outcomes, false, "", false);
-    expect(owed).toContain("assign_practice_problem");
-    expect(owed).toContain("subscription-only");
-    expect(owed).not.toContain("create_question");
-    expect(owedChallenge("learner-message", new Map(), false, "", false)).toBe("");
+  it("still owes after a rejected draft or an answered question", () => {
+    expect(owesChallenge("attempt-complete", outcomes({ set_challenge: [{ status: "invalid" }] }), false)).toBe(true);
+    expect(owesChallenge("attempt-complete", outcomes({ ask_user_question: [{ status: "answered", answer: "x" }] }), false)).toBe(true);
+  });
+
+  it("owes nothing while a question is still active", () => {
+    expect(owesChallenge("attempt-complete", new Map(), true)).toBe(false);
+  });
+
+  it("owes nothing once a challenge is published", () => {
+    expect(owesChallenge("attempt-complete", outcomes({ set_challenge: [{ status: "playable" }] }), false)).toBe(false);
+    expect(owesChallenge("attempt-complete", outcomes({ assign_practice_problem: [{ status: "playable" }] }), false)).toBe(false);
+  });
+
+  it("owes nothing after a review sent the solution back", () => {
+    expect(owesChallenge("attempt-complete", outcomes({ review_solution: [{ review: "rework" }] }), false)).toBe(false);
+    expect(owesChallenge("attempt-complete", outcomes({ review_solution: [{ review: "rework" }, { review: "accepted" }] }), false)).toBe(true);
+  });
+
+  it("owes nothing after the learner dismissed the latest question", () => {
+    expect(owesChallenge("attempt-complete", outcomes({ ask_user_question: [{ status: "cancelled" }] }), false)).toBe(false);
+  });
+
+  it("owes nothing after a lesson was taught", () => {
+    expect(owesChallenge("attempt-complete", outcomes({ teach_lesson: [{ status: "taught" }] }), false)).toBe(false);
+    expect(owesChallenge("attempt-complete", outcomes({ teach_lesson: [{ status: "invalid" }] }), false)).toBe(true);
   });
 });

@@ -30,15 +30,24 @@ describe("session problem sources", () => {
       const payload = agentTurnPayload({ store, sessionId, message: "go", turnKind: "session-start", webSearch: false, practiceSource: true, practiceSummary: null, accountId: "a" });
       expect(payload.sparAuthoring).toBe(false);
       expect(payload.problemSources).toEqual(["leetcode"]);
-      expect(JSON.parse(payload.context).problemSources).toEqual(["leetcode"]);
+      expect(payload.context).toContain("take challenges only from: LeetCode.");
+      expect(payload.context).toContain("Spar-written challenges: no");
+      expect(payload.context).toContain("Provider problems: yes");
+
+      const open = store.createSession("Anything goes");
+      const allSources = agentTurnPayload({ store, sessionId: open.sessionId, message: "go", turnKind: "session-start", webSearch: false, practiceSource: false, practiceSummary: null, accountId: "a" });
+      expect(allSources.sparAuthoring).toBe(true);
+      expect(allSources.problemSources).toEqual(["spar", "leetcode", "codeforces"]);
+      expect(allSources.context).not.toContain("take challenges only from");
+      expect(allSources.context).toContain("Spar-written challenges: yes");
     } finally { store.close(); }
   });
 
-  it("refuses every authoring call, the fallback included, when Spar is deselected", async () => {
+  it("refuses every authoring call when Spar is deselected", async () => {
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Practise graphs", undefined, ["leetcode", "codeforces"]);
-      for (const name of ["create_question", "replace_current_question", "create_fallback_question"]) {
+      for (const name of ["create_question", "replace_current_question"]) {
         const result = await executeTrainingTool(name, { title: "Mine" }, sessionId, store, noWorkspace, noRunner) as { status: string; report: { checks: Array<{ name: string }> } };
         expect(result.status).toBe("invalid");
         expect(result.report.checks[0]?.name).toBe("session sources");

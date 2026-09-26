@@ -1,10 +1,10 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { AgentUsageRow, UsageReport, UsageTotals } from "../shared/api.js";
+import type { AgentUsageRow, CoachNotebookVersion, UsageReport, UsageTotals } from "../shared/api.js";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { challengeFileEntries, codePreview } from "./challengeFiles.js";
 import { foldSubmissions, submissionSummary, type SubmissionContext, type SubmissionRecord, type SubmissionRow } from "../shared/submissions.js";
-import { decay as decayRating, updateRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, INITIAL_RATING, INITIAL_VOLATILITY, type Rating } from "@spar/domain";
+import { challengeItemRating, decay as decayRating, updateRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, INITIAL_RATING, INITIAL_VOLATILITY, type Rating } from "@spar/domain";
 import { challengeResult, elapsedDays } from "./rating.js";
 import { ReviewLedger } from "./reviews.js";
 import { DEFAULT_FSRS, DEFAULT_PROBLEM_SOURCES, problemSourcesSchema, type ProblemSource } from "@spar/domain";
@@ -213,6 +213,11 @@ export class LocalStore {
     /* Where a challenge came from, as one JSON column rather than eight. Null for
        everything Spar wrote, which is every row that existed before this. */
     this.ensureColumn("questions", "source_ref", "TEXT");
+    /* The coach's notebook: one markdown document per Track that the agent keeps
+       about this learner and reads at the start of every turn. Versioned rather
+       than overwritten, so the learner can see what changed and when, and edit it
+       themselves. `track_key` is the Track id, or '' for sessions outside one. */
+    this.db.exec("CREATE TABLE IF NOT EXISTS coach_notebooks (track_key TEXT NOT NULL, version INTEGER NOT NULL, markdown TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', author TEXT NOT NULL, session_id TEXT, created_at TEXT NOT NULL, PRIMARY KEY (track_key, version));");
     this.ensureColumn("questions", "introduction_reason", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("ability_documents", "evidence_ids", "TEXT NOT NULL DEFAULT '[]'");
     /* An ability is something the learner can be told they have, so it carries
@@ -339,7 +344,7 @@ export class LocalStore {
     const windowStart=Math.max(0,rows.length-TRANSCRIPT_ACTIVITY_WINDOW);
     const messages=rows.map((m,index)=>{
       if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0,workedMs:m.worked_ms,rating:m.rating};
-      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,rating:m.rating,activity:parseActivity(m.activity).filter((step)=>step.kind==="tool" && step.ok && (["create_question","replace_current_question","assign_practice_problem"].includes(step.tool) || (step.tool==="teach_lesson" && /"lessonId"\s*:\s*"[^"\s]+"/.test(step.output)))),activityCount:countActivity(m.activity),workedMs:m.worked_ms};
+      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,rating:m.rating,activity:parseActivity(m.activity).filter((step)=>step.kind==="tool" && step.ok && (["set_challenge","create_question","replace_current_question","assign_practice_problem"].includes(step.tool) || (step.tool==="teach_lesson" && /"lessonId"\s*:\s*"[^"\s]+"/.test(step.output)))),activityCount:countActivity(m.activity),workedMs:m.worked_ms};
     });
     return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
@@ -1056,6 +1061,39 @@ export class LocalStore {
    */
   private stamp(){const now=new Date().toISOString();const next=now>this.lastStamp?now:new Date(Date.parse(this.lastStamp)+1).toISOString();this.lastStamp=next;return next;}
 
+  /* ---- Coach's notebook ---------------------------------------------------- */
+  readNotebook(trackId:string|null):CoachNotebookVersion|null{const row=this.db.prepare("SELECT * FROM coach_notebooks WHERE track_key=? ORDER BY version DESC LIMIT 1").get(trackId??"") as NotebookRow|undefined;return row?toNotebook(row):null;}
+  notebookHistory(trackId:string|null,limit=40):CoachNotebookVersion[]{return (this.db.prepare("SELECT * FROM coach_notebooks WHERE track_key=? ORDER BY version DESC LIMIT ?").all(trackId??"",limit) as NotebookRow[]).map(toNotebook);}
+  writeNotebook(trackId:string|null,input:{markdown:string;note?:string;author:"coach"|"learner";sessionId?:string|null}):{saved:CoachNotebookVersion;previous:CoachNotebookVersion|null}{
+    const previous=this.readNotebook(trackId);
+    const markdown=input.markdown.replace(/\r\n/g,"\n").trim();
+    if(previous&&previous.markdown===markdown)return{saved:previous,previous};
+    const version=(previous?.version??0)+1;const now=new Date().toISOString();
+    this.db.prepare("INSERT INTO coach_notebooks (track_key,version,markdown,note,author,session_id,created_at) VALUES (?,?,?,?,?,?,?)").run(trackId??"",version,markdown,(input.note??"").trim().slice(0,300),input.author,input.sessionId??null,now);
+    return{saved:{trackId,version,markdown,note:(input.note??"").trim().slice(0,300),author:input.author,sessionId:input.sessionId??null,createdAt:now},previous};
+  }
+  /**
+   * The learner's journey through a Track, oldest first: every challenge with
+   * where it came from, what it was worth, how it ended, and the code shape it
+   * was handed out with. This is what the coach reads to decide the next step,
+   * so it carries the facts a person would want side by side — not a digest.
+   */
+  journey(trackId:string|null,limit=14){
+    const sessionIds=new Set(this.listSessions().filter((session)=>session.trackId===trackId).map((session)=>session.id));
+    const rows=this.listChallenges().filter((row)=>sessionIds.has(row.sessionId)).sort((a,b)=>a.createdAt.localeCompare(b.createdAt));
+    const recent=rows.slice(-limit);
+    if(!recent.length)return{total:rows.length,challenges:[] as JourneyChallenge[]};
+    const details=this.db.prepare(`SELECT id,statement,design FROM questions WHERE id IN (${recent.map(()=>"?").join(",")})`).all(...recent.map((row)=>row.id)) as Array<{id:string;statement:string;design:string}>;
+    const byId=new Map(details.map((row)=>[row.id,row]));
+    const challenges=recent.map((row):JourneyChallenge=>{
+      const detail=byId.get(row.id);let design:Partial<QuestionDesign>={};try{design=JSON.parse(detail?.design??"{}") as Partial<QuestionDesign>;}catch{design={};}
+      const item=challengeItemRating({difficulty:row.difficulty,source:row.source?{source:row.source.source,difficulty:row.source.difficulty,sourceRating:row.source.sourceRating??null}:null});
+      const task=(detail?.statement??"").split(/\n\s*(?:\*\*Examples\*\*|Examples|## How this must be solved|\*\*Constraints\*\*|Constraints)/i)[0]?.trim().slice(0,420)??"";
+      const starter=Object.entries(design.starterFiles??{})[0];
+      return{id:row.id,title:row.title,sessionId:row.sessionId,createdAt:row.createdAt,source:row.source?row.source.source:"spar",difficulty:row.difficulty,itemRating:item.rating,language:row.language,outcome:row.lastOutcome,assistance:row.assistance??"unknown",elapsedMs:row.elapsedMs??null,testRuns:row.testRunCount,passedCases:row.passedCases??null,totalCases:row.totalCases??null,replacesTitle:row.replacesQuestionTitle,replacedByTitle:row.replacedByQuestionTitle,concepts:row.concepts.map((tag)=>tag.slug),why:row.introductionReason,task,requirements:Array.isArray(design.solutionRequirements)?design.solutionRequirements:[],starter:starter?{path:starter[0],text:String(starter[1]).split("\n").slice(0,40).join("\n")}:null};
+    });
+    return{total:rows.length,challenges};
+  }
   recentChallengeCoverage(limit=12,trackId?:string|null){
     const recent=this.searchChallenges("",limit,trackId);
     if(!recent.length)return [];
@@ -1563,7 +1601,7 @@ export class LocalStore {
    * the moment the status started being derived from their polarity. An event
    * that does not say how it went is now neutral, which is what it is: linked,
    * recorded, and evidence for nothing in particular until somebody interprets
-   * it. `propose_ability_update` requires that interpretation, and it upserts
+   * it. `update_ability` requires that interpretation, and it upserts
    * over whatever this wrote.
    */
   private recordAbilityEvidence(abilityId:string,eventIds:string[],summary:string){const insert=this.db.prepare("INSERT OR IGNORE INTO learner_evidence (id,ability_id,attempt_id,event_id,statement,polarity,independence,strength,occurred_at) VALUES (?,?,?,?,?,?,?,?,?)");for(const eventId of eventIds){const row=this.db.prepare("SELECT e.id,e.attempt_id,e.occurred_at,e.type,e.payload FROM attempt_events e WHERE e.id=?").get(eventId) as {id:string;attempt_id:string;occurred_at:string;type:string;payload:string}|undefined;const payload=row?JSON.parse(row.payload) as Record<string,unknown>:{};const outcome=String(payload.outcome??"");const polarity=outcome==="failed"?"contradictory":outcome==="passed"?"supporting":"neutral";const independence=payload.assisted===true?"assisted":"unknown";insert.run(randomUUID(),abilityId,row?.attempt_id??null,eventId,summary||`Evidence from ${row?.type??"an attempt"}.`,polarity,independence,polarity==="neutral"?0.45:0.7,row?.occurred_at??new Date().toISOString());}}
@@ -1748,6 +1786,9 @@ function conceptStandingOf(summary:ConceptSummary){return CONCEPT_STANDING_LABEL
 function trackTitle(goal:string){const clean=goal.replace(/^(i want to|i'd like to|help me)\s+/i,"").trim();return clean.length>52?`${clean.slice(0,49).trimEnd()}…`:clean.replace(/^./,(letter)=>letter.toUpperCase());}
 function firstNarrativeLine(markdown:string){return markdown.split("\n").map((line)=>line.replace(/^#+\s*/,"").trim()).find((line)=>line.length>8)??"Spar is still forming a reliable belief.";}
 function intentCopy(intent:TrainingTarget["action"]){return({diagnose:"Spar needs cleaner evidence before treating this as a weakness.",teach:"A prerequisite needs a short, explicit intervention.",practise:"Repeated evidence makes deliberate practice worthwhile.",transfer:"Direct execution looks reliable; the next question tests transfer.",advance:"The current level is supported strongly enough to raise the constraint.",retain:"This was previously reliable but has not been observed recently."} as const)[intent];}
+type NotebookRow={track_key:string;version:number;markdown:string;note:string;author:string;session_id:string|null;created_at:string};
+function toNotebook(row:NotebookRow):CoachNotebookVersion{return{trackId:row.track_key||null,version:row.version,markdown:row.markdown,note:row.note,author:row.author==="learner"?"learner":"coach",sessionId:row.session_id,createdAt:row.created_at};}
+export type JourneyChallenge={id:string;title:string;sessionId:string;createdAt:string;source:"spar"|"leetcode"|"codeforces";difficulty:string;itemRating:number;language:string;outcome:string|null;assistance:string;elapsedMs:number|null;testRuns:number;passedCases:number|null;totalCases:number|null;replacesTitle:string|null;replacedByTitle:string|null;concepts:string[];why:string;task:string;requirements:string[];starter:{path:string;text:string}|null};
 type AbilityRow={id:string;track_id:string|null;title:string;markdown:string;version:number;status:AbilityStatus;updated_at:string;evidence_ids:string;summary:string;practice:string;earned_at:string|null};
 
 /* Versioned, and bumped whenever the arithmetic behind the curve changes. The

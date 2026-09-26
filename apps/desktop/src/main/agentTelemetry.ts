@@ -10,6 +10,8 @@ export type AgentRunStart = {
   turnKind: string;
   input: Record<string, unknown>;
   appVersion: string;
+  /** The prompt versions the run was given, as id@vN#hash. */
+  prompts?: Record<string, string>;
 };
 
 type RunState = AgentRunStart & { sequence: number; startedAt: string };
@@ -42,7 +44,7 @@ export class AgentTelemetry {
       schemaVersion: 1,
       appVersion: value.appVersion,
       input: value.input,
-      metadata: { runtime: "pi", transport: "spar-outbox" },
+      metadata: { runtime: "pi", transport: "spar-outbox", ...(value.prompts ? { prompts: value.prompts } : {}) },
       startedAt: state.startedAt,
     });
     this.trace.start({ ...value, startedAt: state.startedAt });

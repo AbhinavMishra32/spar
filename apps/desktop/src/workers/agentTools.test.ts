@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { agentToolSchemas } from "./agentTools.js";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import { agentToolSchemas, internalToolDefinitions, setChallengeInputSchema } from "./agentTools.js";
 import contract from "./agentTools.contract.json" with { type: "json" };
 
 /**
@@ -38,8 +39,15 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * bounced the whole call and cost a full re-send of the design. They also say
  * that a known-incorrect implementation must be genuinely wrong and must pass
  * every visible case, which the visible-tests text used to contradict.
+ *
+ * The v0.7 coach rewrite replaced the phase table with one fixed tool set:
+ * fourteen retrieval tools became `search_record` and `read_record`, the two
+ * ability writes became `update_ability`, `update_notebook` is new, and the
+ * coach sets challenges with a brief to `set_challenge` while the builder's
+ * `create_question` / `replace_current_question` became host-only. The whole
+ * file was regenerated from agentToolSchemas() in that change.
  */
-describe("the tool contract, against what Mastra sent", () => {
+describe("the tool contract, against the pinned reference", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;
   const current = agentToolSchemas();
 
@@ -54,20 +62,70 @@ describe("the tool contract, against what Mastra sent", () => {
 
   /* The one thing the JSON Schema cannot carry. zod applies `.default()` when it
      parses, and a JSON Schema validator does not — so a `limit` the model left
-     out reached the host as 4 under Mastra and would reach it as undefined
-     under a validator alone. The wire contract is identical either way; this is
-     about what the host is handed after it. */
+     out reached the host as 6 under zod and would reach it as undefined under a
+     validator alone. The wire contract is identical either way; this is about
+     what the host is handed after it. */
   it("still fills in the defaults the schema only advertises", () => {
-    const search = agentToolSchemas().search_learner_model;
-    expect((search?.inputSchema as { properties: { limit: { default: number } } }).properties.limit.default).toBe(4);
-    expect(search?.parse({ query: "arrays", actionTitle: "Checking arrays" })).toMatchObject({ query: "arrays", limit: 4 });
+    const search = current.search_record;
+    expect((search?.inputSchema as { properties: { limit: { default: number } } }).properties.limit.default).toBe(6);
+    expect(search?.parse({ query: "arrays", actionTitle: "Checking arrays" })).toMatchObject({ query: "arrays", limit: 6 });
   });
 
-  it("makes the author classify whether complexity is useful evidence", () => {
-    const create = current.create_question?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
-    const replace = current.replace_current_question?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
-    expect(create.required).toContain("requiresComplexityAnalysis");
-    expect(replace.required).toContain("requiresComplexityAnalysis");
-    expect(create.properties).toHaveProperty("requiresComplexityAnalysis");
+  it("gives every tool a required action title", () => {
+    for (const [name, tool] of Object.entries(current)) {
+      const schema = tool.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
+      expect(schema.properties, name).toHaveProperty("actionTitle");
+      expect(schema.required, name).toContain("actionTitle");
+    }
+  });
+
+  it("does not offer the host-only publishing tools to the coach", () => {
+    for (const name of Object.keys(internalToolDefinitions)) expect(current).not.toHaveProperty(name);
+  });
+});
+
+describe("set_challenge", () => {
+  const current = agentToolSchemas();
+  const brief = {
+    mode: "new",
+    aim: { ability: "Sliding window", gap: "Whether they shrink only on violation", evidence: "A pass shows the invariant is held" },
+    stretch: "Variable-size window instead of fixed-size",
+    brief: "Given an array of non-negative ints and a target, return the length of the shortest contiguous subarray whose sum is at least target, or 0.",
+    language: "python",
+    kind: "function",
+    difficulty: "developing",
+    concepts: [{ slug: "window-invariant-restoration", role: "primary" }],
+    requiresComplexityAnalysis: true,
+    why: "They passed the fixed window cleanly last time.",
+    actionTitle: "Setting a variable window challenge",
+  };
+
+  it("hands the coach the teaching decision, not the test harness", () => {
+    const schema = current.set_challenge?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
+    expect(schema.required).toEqual(expect.arrayContaining(["mode", "aim", "stretch", "brief", "language", "kind", "difficulty", "concepts", "requiresComplexityAnalysis", "why"]));
+    for (const optional of ["solutionRequirements", "skills", "reason"]) expect(schema.required).not.toContain(optional);
+    for (const harness of ["starterFiles", "referenceFiles", "visibleTests", "hiddenTests", "knownIncorrectFiles"]) expect(schema.properties).not.toHaveProperty(harness);
+  });
+
+  it("parses a brief and fills concept roles", () => {
+    expect(setChallengeInputSchema.parse(brief).concepts[0]).toMatchObject({ slug: "window-invariant-restoration", role: "primary" });
+    expect(current.set_challenge?.parse(brief)).toMatchObject({ mode: "new", actionTitle: "Setting a variable window challenge" });
+    expect(setChallengeInputSchema.parse({ ...brief, concepts: [{ slug: "window-invariant-restoration" }] }).concepts[0]?.role).toBe("supporting");
+  });
+
+  it("rejects an unknown mode and a too-short brief", () => {
+    expect(() => setChallengeInputSchema.parse({ ...brief, mode: "append" })).toThrow();
+    expect(() => setChallengeInputSchema.parse({ ...brief, brief: "too short" })).toThrow();
+    expect(() => setChallengeInputSchema.parse({ ...brief, concepts: [] })).toThrow();
+  });
+});
+
+describe("the host-only publishing schemas", () => {
+  it("make the builder classify whether complexity is useful evidence", () => {
+    for (const schema of Object.values(internalToolDefinitions)) {
+      const json = zodToJsonSchema(schema) as { required?: string[] };
+      expect(json.required).toContain("requiresComplexityAnalysis");
+    }
+    expect((zodToJsonSchema(internalToolDefinitions.replace_current_question) as { required?: string[] }).required).toContain("reason");
   });
 });

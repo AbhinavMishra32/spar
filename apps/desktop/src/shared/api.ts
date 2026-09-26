@@ -8,7 +8,7 @@ import { attemptEventSchema, baselineStateSchema, problemSourcesSchema, reviewTa
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
-  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
+  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", notebookRead: "notebook:read", notebookHistory: "notebook:history", notebookWrite: "notebook:write", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
   /* The window reports its own state; the main process decides when that becomes
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
@@ -238,6 +238,9 @@ export type ProviderAccount = { email: string | null; label: string };
 export type AgentUsageRow = { runId: string; sessionId: string; provider: string; model: string; turnKind: string; status: string; inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number; latencyMs: number; startedAt: string; completedAt: string };
 /** Token counts are pi's: `inputTokens` excludes cache reads and writes. `costUsd`
  *  is estimated from list prices, so on a subscription it is the API-equivalent. */
+/** One saved version of the coach's notebook. `author` says who wrote this
+ *  version: the coach through update_notebook, or the learner from Track settings. */
+export type CoachNotebookVersion = { trackId: string | null; version: number; markdown: string; note: string; author: "coach" | "learner"; sessionId: string | null; createdAt: string };
 export type UsageTotals = { runs: number; inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number };
 export type UsageReport = {
   since: string | null;
@@ -605,6 +608,11 @@ export interface SparApi {
   deleteTrack(trackId: string): Promise<void>;
   createTrack(input: z.infer<typeof createTrackInput>): Promise<{ track: Track; sessionId: string }>;
   setActiveTrack(trackId: string): Promise<Track | null>;
+  /** The coach's notebook for a Track (null for sessions outside one): the
+   *  latest version, its history newest first, and a learner edit. */
+  readNotebook(trackId: string | null): Promise<CoachNotebookVersion | null>;
+  notebookHistory(trackId: string | null): Promise<CoachNotebookVersion[]>;
+  writeNotebook(input: { trackId: string | null; markdown: string; note?: string }): Promise<CoachNotebookVersion>;
   setTrainingMode(mode: z.infer<typeof trainingModeSchema>): Promise<TrainingMode>;
   setBaseline(input: Partial<z.infer<typeof baselineStateSchema>>): Promise<BaselineState>;
   startBaseline(): Promise<{ sessionId: string }>;

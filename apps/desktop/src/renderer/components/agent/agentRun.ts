@@ -201,7 +201,7 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       if (index >= 0) return run;
       /* The call the draft was the arguments of. Its row takes the draft's
          place: the same files, now under the stages that validate them. */
-      const drafted = tool === "create_question" || tool === "replace_current_question" ? dropDrafts(parts) : undefined;
+      const drafted = isChallengeAuthoringTool(tool) ? dropDrafts(parts) : undefined;
       parts.push({
         kind: "tool",
         id,
@@ -228,10 +228,10 @@ export function reduceRun(current: AgentRun | null, event: AgentStreamEvent): Ag
       if (body.startsWith("tool-error:")) {
         const [, tool, ...fault] = body.split(":");
         const reason = fault.join(":").split("Receive a single")[0]!.replace(/\s+/g, " ").trim();
-        body = `${tool === "create_question" || tool === "replace_current_question" ? "Challenge draft rejected" : "Tool call rejected"}: ${reason.slice(0, 200)}`;
+        body = `${isChallengeAuthoringTool(tool ?? "") ? "Challenge draft rejected" : "Tool call rejected"}: ${reason.slice(0, 200)}`;
         /* A design the schema refused never becomes a call, so its draft row
            would otherwise stay on screen still claiming to be written. */
-        if (tool === "create_question" || tool === "replace_current_question") dropDrafts(parts);
+        if (isChallengeAuthoringTool(tool ?? "")) dropDrafts(parts);
       }
       /* Read before the noise filter drops it. `active:none` is the phase that
          has no tools to call, which is the phase that answers. */
@@ -453,7 +453,7 @@ function isToolPreparationStatus(body: string, next: RunPart | undefined): boole
   if (next?.kind !== "tool") return false;
   if (body === `Preparing ${next.tool.replaceAll("_", " ")}`) return true;
   return body.startsWith("Drafting challenge input")
-    && (next.tool === "create_question" || next.tool === "replace_current_question");
+    && isChallengeAuthoringTool(next.tool);
 }
 
 function isPreparation(body: string): boolean {
@@ -486,6 +486,11 @@ const TOOL_VERBS: Record<string, string> = {
   set_training_target: "Set the training target",
   create_question: "Created challenge",
   replace_current_question: "Replaced challenge",
+  set_challenge: "Built challenge",
+  search_record: "Searched your record",
+  read_record: "Read a record",
+  update_ability: "Updated ability",
+  update_notebook: "Updated notebook",
   search_challenge_history: "Searched challenge history",
   read_challenge: "Read challenge history",
   upsert_ability: "Updated ability",
@@ -509,7 +514,7 @@ const TOOL_VERBS: Record<string, string> = {
 
 /** Present tense while a call is open, past tense once it settles. */
 export function toolVerb(tool: string, running: boolean, rejected = false): string {
-  if ((tool === "create_question" || tool === "replace_current_question") && rejected) return "Rejected challenge candidate";
+  if (isChallengeAuthoringTool(tool) && rejected) return "Rejected challenge candidate";
   const settled = TOOL_VERBS[tool];
   if (!settled) {
     const spaced = tool.replace(/[_-]+/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
@@ -523,6 +528,7 @@ export function toolVerb(tool: string, running: boolean, rejected = false): stri
     .replace(/^Asked/, "Asking")
     .replace(/^Set\b/, "Setting")
     .replace(/^Created/, "Creating")
+    .replace(/^Built/, "Building")
     .replace(/^Inspected/, "Inspecting")
     .replace(/^Evaluated/, "Evaluating")
     .replace(/^Updated/, "Updating")
@@ -552,6 +558,13 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   commit_session_decision: ["Choose next step", "Chose next step"],
   create_question: ["Build challenge", "Built challenge"],
   replace_current_question: ["Build replacement challenge", "Built replacement challenge"],
+  /* v0.7's one challenge tool. It writes a new challenge, revises the open one
+     or replaces it, and says which in its `mode` — see `safeToolLabel`. */
+  set_challenge: ["Building challenge", "Built challenge"],
+  search_record: ["Searching your record", "Searched your record"],
+  read_record: ["Reading a record", "Read a record"],
+  update_ability: ["Updating ability", "Updated ability"],
+  update_notebook: ["Updating notebook", "Updated notebook"],
   create_fallback_question: ["Set a standard challenge", "Set a standard challenge"],
   /* Named for the thing the learner watched happen. "Prepared a question" is
      the tool's own view of itself — the question had already been asked, and
@@ -565,13 +578,23 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
 };
 
 /** Transcript-safe labels never expose tool arguments, database IDs, or queries. */
-export function safeToolLabel(tool: string, running: boolean, failed = false): string {
+export function safeToolLabel(tool: string, running: boolean, failed = false, input = ""): string {
   // A rejected candidate is the compiler doing its job and the agent iterating,
   // so it is named as a rejection rather than as a failure the learner should
   // read as breakage.
   if (failed && tool === "replace_current_question") return "Replacement candidate rejected";
-  if (failed && (tool === "create_question" || tool === "create_fallback_question")) return "Challenge candidate rejected";
+  if (failed && (isChallengeAuthoringTool(tool) || tool === "create_fallback_question")) return "Challenge candidate rejected";
   if (failed) return "Could not complete tool step";
+  if (tool === "set_challenge") {
+    const mode = challengeMode(input);
+    if (mode === "revise") return running ? "Revising challenge" : "Revised challenge";
+    if (mode === "replace") return running ? "Replacing challenge" : "Replaced challenge";
+  }
+  if (tool === "read_record") {
+    const kind = /"kind"\s*:\s*"(challenge|ability|lesson|concept)"/.exec(input)?.[1];
+    const noun = kind === "ability" ? "an ability" : kind ? `a ${kind}` : "a record";
+    return `${running ? "Reading" : "Read"} ${noun}`;
+  }
   const labels = SAFE_TOOL_LABELS[tool];
   if (labels) return labels[running ? 0 : 1];
   return running ? "Use a tool" : "Used a tool";
@@ -587,7 +610,7 @@ export function safeToolLabel(tool: string, running: boolean, failed = false): s
  * titles existed, and any turn where the model omitted one, still reads correctly.
  */
 export function toolRowTitle(part: Extract<RunPart, { kind: "tool" }>): string {
-  return part.actionTitle.trim() || safeToolLabel(part.tool, part.phase === "running", part.phase === "error");
+  return part.actionTitle.trim() || safeToolLabel(part.tool, part.phase === "running", part.phase === "error", part.input);
 }
 
 /** Every tool that reaches the connected practice source. The transcript marks
@@ -597,7 +620,24 @@ export function isSourceTool(tool: string): boolean {
   return tool.endsWith("_practice_problem") || tool.endsWith("_practice_problems") || tool.startsWith("read_practice_") || tool === "assign_practice_problem";
 }
 
-const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "create_fallback_question", "assign_practice_problem"];
+/** The tools the coach writes its own challenges with. `set_challenge` is
+ *  v0.7's; the other two are still in every transcript written before it, and
+ *  all three are drawn the same way. */
+const CHALLENGE_AUTHORING_TOOLS = new Set(["create_question", "replace_current_question", "set_challenge"]);
+
+export function isChallengeAuthoringTool(tool: string): boolean {
+  return CHALLENGE_AUTHORING_TOOLS.has(tool);
+}
+
+/** What a `set_challenge` call did to the session's challenge, read from its
+ *  arguments. Scraped rather than parsed: a design payload can be clipped, and
+ *  the mode is worth having even from half a design. */
+export function challengeMode(input: string): "new" | "revise" | "replace" | null {
+  const mode = /"mode"\s*:\s*"(new|revise|replace)"/.exec(input)?.[1];
+  return mode === "new" || mode === "revise" || mode === "replace" ? mode : null;
+}
+
+const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "set_challenge", "create_fallback_question", "assign_practice_problem"];
 
 /**
  * A challenge that actually reached durable storage. `phase === "done"` is the
@@ -605,7 +645,22 @@ const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "create_
  * "error" and stays an ordinary step, because nothing was published.
  */
 export function isChallengePublished(part: RunPart): boolean {
-  return part.kind === "tool" && part.phase === "done" && CHALLENGE_TOOLS.includes(part.tool);
+  return part.kind === "tool" && part.phase === "done" && CHALLENGE_TOOLS.includes(part.tool)
+    /* A candidate the compiler refused can still settle as a finished call —
+       it came back with a report rather than a challenge. Nothing was published. */
+    && !(isChallengeAuthoringTool(part.tool) && refusedCandidate(part.output));
+}
+
+/** The top-level `status` of an authoring result, from the whole object when it
+ *  parses and from its two-space-indented key when the payload was clipped. */
+function refusedCandidate(output: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(output);
+    return Boolean(parsed && typeof parsed === "object" && (parsed as Record<string, unknown>).status === "invalid");
+  } catch {
+    /* Pretty-printed at two spaces, so a top-level key is the only one at that indent. */
+    return /^ {2}"status": "invalid"/m.test(output);
+  }
 }
 
 export function isLessonPublished(part: RunPart): boolean {
@@ -667,7 +722,7 @@ export function runActivity(run: AgentRun | null | undefined): RunActivity | nul
     steps: settled.length,
     startedAt: run.startedAt,
     published: run.parts.some(isChallengePublished),
-    ...(settled.at(-1) ? { previous: safeToolLabel(settled.at(-1)!.tool, false, settled.at(-1)!.phase === "error") } : {}),
+    ...(settled.at(-1) ? { previous: safeToolLabel(settled.at(-1)!.tool, false, settled.at(-1)!.phase === "error", settled.at(-1)!.input) } : {}),
   };
 
   if (run.status === "error") {
@@ -676,7 +731,7 @@ export function runActivity(run: AgentRun | null | undefined): RunActivity | nul
   }
 
   const running = tools.find((part) => part.phase === "running");
-  if (running) return { ...base, state: "working", headlineKey: `tool:${running.id}`, headline: safeToolLabel(running.tool, true) };
+  if (running) return { ...base, state: "working", headlineKey: `tool:${running.id}`, headline: safeToolLabel(running.tool, true, false, running.input) };
 
   const last = run.parts.at(-1);
   // Thinking is a real state now, so a card says so rather than reporting the

@@ -910,7 +910,7 @@ describe("submissions",()=>{
 });
 
 
-it("rehydrates unfinished planning and a failed provider's lesson without restarting placement",()=>{
+it("rehydrates a failed provider's lesson and keeps unfinished planning in the journey",()=>{
   const store=new LocalStore(":memory:");
   try {
     const {sessionId}=store.createSession("Learn trees");
@@ -919,19 +919,20 @@ it("rehydrates unfinished planning and a failed provider's lesson without restar
     const input={store,sessionId,message:"Continue",turnKind:"session-start" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
     store.setPendingIntake(sessionId,{questions:[{header:"Experience",question:"Have you built a tree?",options:[{label:"New"},{label:"Some experience"}],multiple:false,custom:true}]});
     store.answerIntake(sessionId,"New to trees");
-    expect(agentTurnPayload({...input,turnKind:"cold-start"}).resumeState).toMatchObject({intake:{result:{status:"answered",answer:"New to trees"}}});
-    expect(agentTurnPayload({...input,turnKind:"attempt-complete"}).resumeState).not.toHaveProperty("intake");
-    expect(agentTurnPayload(input).resumeState).toMatchObject({objective:{committed:true},target:{committed:true}});
+    // Planning is not replayed as fake tool results any more; it is in the document.
+    const first=agentTurnPayload({...input,turnKind:"cold-start"});
+    expect(first.resumeState).toEqual({});
+    expect(first.context).toContain("## The learner's answer to your earlier question\nNew to trees");
+    expect(first.context).toContain("## Current training target\n- Ability: Tree nodes");
+    expect(first.context).toContain("- Gap: Links");
+    expect(first.context).toContain("- Evidence sought: Build a tree");
     const lessonId=randomUUID();
     store.saveLesson({id:lessonId,sessionId,title:"Trees",summary:"Links",concepts:[],payload:{}});
-    expect(agentTurnPayload(input).resumeState).not.toHaveProperty("lesson");
+    expect(agentTurnPayload(input).resumeState).toEqual({});
     expect(agentTurnPayload({...input,resumeSince:"2000-01-01T00:00:00.000Z"}).resumeState)
-      .toMatchObject({lesson:{result:{status:"taught",lessonId}}});
-    expect(agentTurnPayload({...input,resumeSince:"2999-01-01T00:00:00.000Z"}).resumeState).not.toHaveProperty("lesson");
-    // An old target must not satisfy the next attempt's obligation to choose one.
-    expect(agentTurnPayload({...input,turnKind:"attempt-complete"}).resumeState).not.toHaveProperty("target");
-    store.createQuestion(sessionId,design("First tree"),{});
-    expect(agentTurnPayload(input).resumeState).not.toHaveProperty("target");
+      .toEqual({lesson:{result:{status:"taught",lessonId,title:"Trees"}}});
+    expect(agentTurnPayload({...input,resumeSince:"2999-01-01T00:00:00.000Z"}).resumeState).toEqual({});
+    expect(agentTurnPayload(input).context).toContain("## Lessons you have taught\n- [[lesson:"+lessonId+"|Trees]] — Links");
   } finally {store.close();}
 });
 
@@ -944,10 +945,12 @@ it("keeps stored tool payloads and workspace checkpoints out of the agent prompt
       input:"PRIVATE LARGE TOOL INPUT ".repeat(500),output:"PRIVATE LARGE TOOL OUTPUT ".repeat(500),stages:[],
     }]);
     const payload=agentTurnPayload({store,sessionId,message:"Use actual renderer code",turnKind:"learner-message",webSearch:true,practiceSource:false,practiceSummary:null,accountId:"test"});
-    const context=JSON.parse(payload.context) as Record<string,unknown>;
-    expect(context).not.toHaveProperty("checkpoint");
-    expect(context.recentConversation).toEqual([expect.objectContaining({role:"agent",body:"I checked the prior challenge."})]);
+    expect(payload.context).toMatch(/## This session so far\n\n\*\*You\*\* \([^)]*\): I checked the prior challenge\./);
     expect(payload.context).not.toContain("PRIVATE LARGE TOOL");
+    expect(payload.context).not.toContain("read_concept_graph");
+    expect(payload.context.toLowerCase()).not.toContain("checkpoint");
+    expect(payload.context).toContain("- Web search: yes");
+    expect(payload.activeQuestion).toBeNull();
   } finally {store.close();}
 });
 
@@ -961,13 +964,103 @@ it("gives the agent enough recent challenge detail to compare two exercises",()=
     store.completeAttempt(previous.attemptId,"passed");
     const current=store.createQuestion(sessionId,{...design("Next Greater Positions"),statement:"For each item, return the position of the first later greater value.\n\n**Examples**\nInput: [2, 1, 4]",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},{valid:true});
     const payload=agentTurnPayload({store,sessionId,message:"What is different from the one I solved?",turnKind:"learner-message",webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"});
-    const context=JSON.parse(payload.context) as {recentChallenges:Array<Record<string,unknown>>};
-    expect(context.recentChallenges.slice(0,2)).toMatchObject([
-      {id:current.id,ordinal:2,title:"Next Greater Positions",task:"For each item, return the position of the first later greater value.",solutionRequirements:["Scan left to right with a stack of unresolved indices."]},
-      {id:previous.id,ordinal:1,title:"Next Greater Positions",task:"Return the index of the first strictly greater value to the right.",solutionRequirements:["Scan left to right with a stack of unresolved indices."],outcome:"passed"},
-    ]);
-    expect(JSON.stringify(context.recentChallenges)).not.toContain("Input: [2, 1, 4]");
+    expect(payload.activeQuestion).toEqual({id:current.id,attemptId:current.attemptId});
+    const context=payload.context;
+    expect(context).toContain("## Challenges on this Track (2, oldest first)");
+    const firstAt=context.indexOf("### 1. Next Greater Positions — passed");
+    const secondAt=context.indexOf("### 2. Next Greater Positions — not finished");
+    expect(firstAt).toBeGreaterThan(-1);
+    expect(secondAt).toBeGreaterThan(firstAt);
+    const firstEntry=context.slice(firstAt,secondAt);
+    const secondEntry=context.slice(secondAt,context.indexOf("\n## ",secondAt));
+    expect(firstEntry).toContain("Task: Return the index of the first strictly greater value to the right.");
+    expect(firstEntry).toContain("Requirements: Scan left to right with a stack of unresolved indices.");
+    expect(firstEntry).toContain(`Id: ${previous.id}`);
+    expect(secondEntry).toContain("Task: For each item, return the position of the first later greater value.");
+    expect(secondEntry).toContain(`Id: ${current.id}`);
+    // Recent challenges carry the starter they were handed out with.
+    expect(secondEntry).toContain("Starter (src/index.js):\n```\nexport function solve(){ throw new Error(\"implement\") }\n```");
+    // Examples, reference solutions and hidden tests stay out.
+    expect(context).not.toContain("Input: [2, 1, 4]");
+    expect(context).not.toContain("return true }");
+    expect(context).not.toContain("// hidden");
+    expect(context).toContain(`## Open challenge: Next Greater Positions\nChallenge id ${current.id}, attempt id ${current.attemptId}.`);
   }finally{store.close();}
+});
+
+describe("coach's notebook",()=>{
+  it("versions each change, returns the previous version unchanged when nothing changed, and keeps the author",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const {sessionId}=store.createSession("Practise graphs");
+      const trackId=store.readSession(sessionId)!.summary.trackId??null;
+      expect(store.readNotebook(trackId)).toBeNull();
+      expect(store.notebookHistory(trackId)).toEqual([]);
+      const first=store.writeNotebook(trackId,{markdown:"  # Learner\r\nForgets visited sets.  ",note:"first notes",author:"coach",sessionId});
+      expect(first.previous).toBeNull();
+      expect(first.saved).toMatchObject({trackId,version:1,markdown:"# Learner\nForgets visited sets.",note:"first notes",author:"coach",sessionId});
+      const same=store.writeNotebook(trackId,{markdown:"# Learner\nForgets visited sets.",author:"learner"});
+      expect(same.saved).toBe(same.previous);
+      expect(same.saved).toMatchObject({version:1,author:"coach"});
+      const edited=store.writeNotebook(trackId,{markdown:"# Learner\nRemembers visited sets now.",author:"learner"});
+      expect(edited.previous?.version).toBe(1);
+      expect(edited.saved).toMatchObject({version:2,author:"learner",sessionId:null,note:""});
+      expect(store.readNotebook(trackId)).toMatchObject({version:2,markdown:"# Learner\nRemembers visited sets now.",author:"learner"});
+      expect(store.notebookHistory(trackId).map((entry)=>[entry.version,entry.author])).toEqual([[2,"learner"],[1,"coach"]]);
+      expect(store.notebookHistory(trackId,1).map((entry)=>entry.version)).toEqual([2]);
+    }finally{store.close();}
+  });
+
+  it("keeps one notebook per Track, with a separate one for work outside a Track",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      store.writeNotebook("track-a",{markdown:"A notes",author:"coach"});
+      store.writeNotebook(null,{markdown:"Loose notes",author:"coach"});
+      expect(store.readNotebook("track-a")?.markdown).toBe("A notes");
+      expect(store.readNotebook(null)).toMatchObject({trackId:null,markdown:"Loose notes",version:1});
+      expect(store.readNotebook("track-b")).toBeNull();
+    }finally{store.close();}
+  });
+
+  it("puts the latest notebook in the journey document, and says when it is empty",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const {sessionId}=store.createSession("Practise graphs");
+      const input={store,sessionId,message:"hi",turnKind:"learner-message" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
+      expect(agentTurnPayload(input).context).toContain("## Coach's notebook\n_Empty.");
+      const trackId=store.readSession(sessionId)!.summary.trackId??null;
+      store.writeNotebook(trackId,{markdown:"Forgets visited sets.",author:"coach"});
+      store.writeNotebook(trackId,{markdown:"Forgets visited sets on grids.",author:"learner"});
+      const context=agentTurnPayload(input).context;
+      expect(context).toMatch(/## Coach's notebook \(v2, last edited by the learner [^)]*\)\nForgets visited sets on grids\./);
+      expect(context).not.toContain("_Empty.");
+    }finally{store.close();}
+  });
+});
+
+describe("journey",()=>{
+  it("lists a Track's challenges oldest first with outcome, replacement links, task and starter",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const {sessionId}=store.createSession("Practise loops");
+      const trackId=store.readSession(sessionId)!.summary.trackId??null;
+      expect(store.journey(trackId)).toEqual({total:0,challenges:[]});
+      store.setTrainingTarget(sessionId,{ability:"Loop control",specificGap:"Count matching values",desiredEvidence:"Uses one direct loop",avoidTesting:[]});
+      const first=store.createQuestion(sessionId,{...design("Count values"),statement:"Count the values.\n\n**Examples**\nInput: [1]",solutionRequirements:["One pass."]},{valid:true});
+      store.appendNextEvent({id:randomUUID(),attemptId:first.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",passed:false,exitCode:1},source:"runner",schemaVersion:1});
+      const second=store.replaceQuestion(sessionId,design("Count positive values"),{valid:true},"Too hard.",undefined,undefined,"Isolate the condition inside the loop.");
+      const journey=store.journey(trackId);
+      expect(journey.total).toBe(2);
+      expect(journey.challenges.map((item)=>item.id)).toEqual([first.id,second.id]);
+      expect(journey.challenges[0]).toMatchObject({title:"Count values",source:"spar",language:"javascript",testRuns:1,replacedByTitle:"Count positive values",task:"Count the values.",requirements:["One pass."],starter:{path:"src/index.js",text:"export function solve(){ throw new Error(\"implement\") }"}});
+      expect(journey.challenges[1]).toMatchObject({title:"Count positive values",replacesTitle:"Count values",why:"Isolate the condition inside the loop."});
+      expect(typeof journey.challenges[0]!.itemRating).toBe("number");
+      const limited=store.journey(trackId,1);
+      expect(limited.total).toBe(2);
+      expect(limited.challenges.map((item)=>item.id)).toEqual([second.id]);
+      expect(store.journey("some-other-track")).toEqual({total:0,challenges:[]});
+    }finally{store.close();}
+  });
 });
 
 it("rolls agent usage up by session and model, keeping spend for deleted sessions",()=>{

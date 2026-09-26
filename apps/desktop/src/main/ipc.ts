@@ -1,3 +1,4 @@
+import { promptRefs } from "../workers/prompts.js";
 import { BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
 import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
@@ -71,12 +72,19 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
      to clean up to make the error go away. */
-  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); if(!await deps.providers.available())throw new Error(NO_PROVIDER); const created=deps.store.createSession(input.goal,input.trackId,input.problemSources);const trackId=deps.store.trackIdForSession(created.sessionId);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,trackId);await startAgentTurn(created.sessionId,`Start a new adaptive session inside this Track workspace for the learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
-  ipcMain.handle(ipc.tracksCreate, async (_event,value)=>{const input=createTrackInput.parse(value);if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createTrack(input.goal,input.title,input.language??null,input.problemSources);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,created.track.id);await startAgentTurn(created.sessionId,`Establish the initial direction for this Track workspace: ${input.goal}. Its learner model and memory belong to this Track. Do not write a permanent syllabus; choose the next training intent and one well-matched challenge.`,"learner",coldStart?"cold-start":"session-start");return created;});
+  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); if(!await deps.providers.available())throw new Error(NO_PROVIDER); const created=deps.store.createSession(input.goal,input.trackId,input.problemSources);const trackId=deps.store.trackIdForSession(created.sessionId);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,trackId);await startAgentTurn(created.sessionId,`The learner started a new session: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
+  ipcMain.handle(ipc.tracksCreate, async (_event,value)=>{const input=createTrackInput.parse(value);if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createTrack(input.goal,input.title,input.language??null,input.problemSources);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,created.track.id);await startAgentTurn(created.sessionId,`The learner created this Track: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created;});
   ipcMain.handle(ipc.tracksActive,(_event,value)=>deps.store.setActiveTrack(zUuid(value)));
+  /* The coach's notebook, as the learner sees it from Track settings. A learner
+     edit is a version like any other, attributed to them, and the coach reads
+     it on its next turn. */
+  const notebookTrack=(value:unknown)=>value===null||value===undefined||value===""?null:zUuid(value);
+  ipcMain.handle(ipc.notebookRead,(_event,value)=>deps.store.readNotebook(notebookTrack(value)));
+  ipcMain.handle(ipc.notebookHistory,(_event,value)=>deps.store.notebookHistory(notebookTrack(value)));
+  ipcMain.handle(ipc.notebookWrite,(_event,value)=>{const input=value as {trackId?:unknown;markdown?:unknown;note?:unknown};if(typeof input.markdown!=="string")throw new Error("Notebook text is required");if(input.markdown.length>40_000)throw new Error("The notebook is too long");return deps.store.writeNotebook(notebookTrack(input.trackId),{markdown:input.markdown,note:typeof input.note==="string"?input.note:"Edited by you",author:"learner"}).saved;});
   ipcMain.handle(ipc.trainingMode,(_event,value)=>deps.store.setTrainingMode(trainingModeSchema.parse(value)));
   ipcMain.handle(ipc.baselineState,(_event,value)=>deps.store.setBaseline(baselineStateSchema.partial().parse(value) as Partial<BaselineState>));
-  ipcMain.handle(ipc.baselineStart,async()=>{if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createBaselineSession();const detail=deps.store.readSession(created.sessionId);if(detail&&!detail.question&&!detail.pendingLearnerQuestion&&!detail.messages.length)await startAgentTurn(created.sessionId,"Begin the dedicated adaptive baseline. This is calibration, not an ordinary training conversation and not a Track. Read the learner profile, imported provider history, prior baseline evidence, and uncertainty first. Ask at most one concise contextual question only when it materially changes the first probe. Then set a diagnostic Training Target and create one foundation or developing coding challenge in the preferred language. Isolate one broadly informative problem-solving ability, keep unrelated difficulty low, and do not produce a syllabus.","system","cold-start");return created;});
+  ipcMain.handle(ipc.baselineStart,async()=>{if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createBaselineSession();const detail=deps.store.readSession(created.sessionId);if(detail&&!detail.question&&!detail.pendingLearnerQuestion&&!detail.messages.length)await startAgentTurn(created.sessionId,"The learner started their baseline: short diagnostic probes, one at a time, to calibrate their level. Set the first probe.","system","cold-start");return created;});
   ipcMain.handle(ipc.learningEngine,()=>deps.store.learningEngineSnapshot());
   /**
    * SQLite is the durable owner of an active challenge. A workspace can be
@@ -111,9 +119,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     if(!mayAutoResume(id))return detail;
     const placementAnswer=deps.store.answeredIntake(id);
     countAutoResume(id);
-    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal,detail.summary.trackId)&&!placementAnswer){void startAgentTurn(id,`Resume placement for this learner goal inside its Track: ${detail.summary.originalGoal}. Use the supplied context and persisted decisions. Ask a prerequisite question only if its answer would change the next lesson or challenge.`,"system","cold-start");return detail;}
-    if(placementAnswer){void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. The learner already answered the placement question: ${placementAnswer}. Use that answer as explicit prerequisite and confidence evidence; do not ask placement again. Continue from any persisted objective and target; do not repeat completed planning. Create a validated question or teach a missing prerequisite.`,"system","session-start");return detail;}
-    void startAgentTurn(id,`Resume this persisted planning session for goal: ${detail.summary.originalGoal}. Continue from the persisted objective and target. Use the supplied context and retrieve only missing evidence; do not repeat completed planning.` ,"system","session-start");
+    if(!deps.store.hasRelevantLearnerEvidence(detail.summary.originalGoal,detail.summary.trackId)&&!placementAnswer){void startAgentTurn(id,`The learner reopened this session (goal: ${detail.summary.originalGoal}). Nothing is set for them yet.`,"system","cold-start");return detail;}
+    if(placementAnswer){void startAgentTurn(id,`The learner reopened this session (goal: ${detail.summary.originalGoal}). They already answered your opening question: ${placementAnswer}. Nothing is set for them yet.`,"system","session-start");return detail;}
+    void startAgentTurn(id,`The learner reopened this session (goal: ${detail.summary.originalGoal}). Nothing is set for them yet.` ,"system","session-start");
     return ensureLiveWorkspace(id, detail);
   });
   ipcMain.handle(ipc.workspaceStateSave, (_event, value) => { const { sessionId, ...state } = workspaceStateInput.parse(value); deps.checkpoints.remember(sessionId, state); });
@@ -244,7 +252,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       const startedAt=Date.now();
       const claim=(runId:string)=>{activeAgentRuns.set(sessionId,runId);deps.agentRunSessions.set(runId,sessionId);return runId;};
       const release=(runId:string)=>{activeAgentRuns.delete(sessionId);deps.agentRunSessions.delete(runId);};
-      const beginTelemetry=(runId:string,index:number)=>deps.telemetry.start({runId,sessionId,provider:providers[index]!.provider,model:providers[index]!.model,turnKind,input:{message,visibleMessage,role,context:payload.context,activeQuestion:payload.activeQuestion??null},appVersion:deps.appVersion});
+      const beginTelemetry=(runId:string,index:number)=>deps.telemetry.start({runId,sessionId,provider:providers[index]!.provider,model:providers[index]!.model,turnKind,input:{message,visibleMessage,role,context:payload.context,activeQuestion:payload.activeQuestion??null},prompts:promptRefs(),appVersion:deps.appVersion});
       const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);beginTelemetry(first.id,0);
       const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string;usage?:unknown;finishReason?:string;phaseSteps?:number};
         /* The turn's own steps go into storage with the reply they produced. The
@@ -287,7 +295,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     deps.store.setSessionStatus(sessionId, "planning");
     clearAutoResume(sessionId);
     const baseline=deps.store.readSession(sessionId)?.summary.context==="baseline";
-    return startAgentTurn(sessionId, baseline?"The learner ended that baseline probe. Treat the trajectory as partial calibration evidence, identify a materially different diagnostic target that is fairer or more informative, and create exactly one next validated probe. Stay inside the baseline; do not create a Track or open general chat.":"The learner asked for the next challenge. Use the existing evidence, including any challenge they gave up on, to choose one training target and create the next validated question.", "learner", "session-start");
+    return startAgentTurn(sessionId, baseline?"The learner ended that baseline probe without solving it. Its attempt is partial calibration evidence. Set the next probe.":"The learner asked for their next challenge.", "learner", "session-start");
   });
 
   /* Reads over the learner's own recorded history, so neither starts a turn and
@@ -357,7 +365,6 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       `The learner started this session from ${ability ? `their "${subject}" ability` : `the "${subject}" concept`} rather than by typing a goal, so it is a deliberate drill on that and not a new direction.`,
       ability ? `That ability is currently ${ability.ability.status} across ${ability.ability.evidenceCount} linked evidence event${ability.ability.evidenceCount === 1 ? "" : "s"}${ability.ability.concepts.length ? `, covering ${ability.ability.concepts.map((tag) => tag.slug).join(", ")}` : ""}.` : "",
       concept ? `Recorded evidence for that concept: ${concept.concept.passedCount} passed, ${concept.concept.failedCount} failed, ${concept.concept.abandonedCount} abandoned across ${concept.concept.challengeCount} challenge${concept.concept.challengeCount === 1 ? "" : "s"}.${concept.children.length ? ` Sub-concepts with evidence: ${concept.children.map((child) => `${child.slug} (${child.passedCount}/${child.passedCount + child.failedCount + child.abandonedCount} passed)`).join(", ")}.` : ""}` : "",
-      `Read the concept evidence first and aim the target at what is still uncertain there. Do not repeat a challenge title the learner has already seen.`,
     ].filter(Boolean).join(" ");
     await startAgentTurn(created.sessionId, `${goal}\n\n${aim}`, "learner", "session-start");
     return created;
@@ -739,8 +746,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        prompt. The ordinary live path above never creates a second run. */
     const session = deps.store.readSession(sessionId);
     const body = session && openQuestion(session)
-      ? `The learner answered your pending question: ${answer}\nUse it as evidence about the active challenge. Do not create another challenge.`
-      : `The learner answered your pending question: ${answer}\nContinue the session from that answer.`;
+      ? `The learner answered your question: ${answer}\nTheir challenge is still open.`
+      : `The learner answered your question: ${answer}`;
     const started = await startAgentTurn(sessionId, body, "learner", session?.question ? "learner-message" : "session-start", answer);
     return { ...started, resumed: false };
   });
@@ -826,10 +833,10 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       const answered=deps.store.readSession(sessionId);
       const deliverIntake=(body:string)=>deliver(body,"session-start",said);
       if(answered&&openQuestion(answered)){
-        return deliver(`The learner answered your question: ${said}\nUse it as evidence about the challenge they are working on now. A challenge is already active, so do not create another one.`,"learner-message",said);
+        return deliver(`The learner answered your question: ${said}\nTheir challenge is still open.`,"learner-message",said);
       }
-      if(answered?.summary.context==="baseline")return deliverIntake(`The learner answered the baseline context question: ${said}\nUse only what materially changes calibration. Set one diagnostic Training Target and create exactly one fair coding probe in their preferred language. Stay inside the dedicated baseline; do not create a Track, syllabus, or general chat.`);
-      return deliverIntake(`The learner answered the cold-start placement question: ${said}\nUse this as explicit prerequisite and confidence evidence. Now set an accessible session objective and first Training Target, then create a foundation-level question that teaches or calibrates before assuming advanced knowledge.`);
+      if(answered?.summary.context==="baseline")return deliverIntake(`The learner answered your baseline question: ${said}`);
+      return deliverIntake(`The learner answered your opening question: ${said}`);
     }
     return deliver(contextual,"learner-message",said);
   });
@@ -860,21 +867,21 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   const finishPassedAttempt=(input:{sessionId:string;attemptId:string;bundle:NonNullable<ReturnType<LocalStore["submissionBundle"]>>;source?:NonNullable<NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"]>})=>{
     const {sessionId,attemptId,bundle}=input;
     const complexity=[...deps.store.readAttempt(attemptId)].reverse().find((event)=>event.type==="learner_remark"&&event.payload.kind==="complexity-claim");
-    const complexityNote=complexity?` The learner claimed time ${String(complexity.payload.timeComplexity??"")} and space ${String(complexity.payload.spaceComplexity??"")}; the quick complexity review is recorded in the attempt and conversation. Take whether they understood those bounds into account.`:"";
+    const complexityNote=complexity?` They claimed time ${String(complexity.payload.timeComplexity??"")} and space ${String(complexity.payload.spaceComplexity??"")}; the quick review of that claim is in the attempt.`:"";
     deps.store.appendNextEvent({id:randomUUID(),attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed",...(input.source?{judge:input.source.source}:{})},source:"system",schemaVersion:1});
     deps.store.completeAttempt(attemptId,"passed");
     const calibration=noteBaselineEvidence(sessionId);
     if(calibration.baseline){
-      if(!calibration.complete)void startAgentTurn(sessionId,`Baseline probe ${attemptId} passed every visible and hidden test.${complexityNote} Replay the full trajectory and interpret it as calibration evidence, not as proof of mastery. Update the relevant ability state and readable memory, then choose one materially different diagnostic target that reduces the largest remaining uncertainty. Create exactly one next probe; do not open a general chat or create a Track.`,"system","attempt-complete");
+      if(!calibration.complete)void startAgentTurn(sessionId,`Baseline probe attempt ${attemptId} passed every visible and hidden test.${complexityNote} It is calibration evidence, not proof of mastery.`,"system","attempt-complete");
       return;
     }
     const source=input.source;
     /* The learner chose to say what their reviews ask about. The question goes
        through the same ask_user_question as any other, and record_insight is
        refused without their answer, so the choice holds even if this is missed. */
-    const askToRemember=reviewTargetMode(deps.store)==="ask"?" (the learner decides what their reviews ask about: before record_insight, ask them with ask_user_question what they want to remember from this problem — one question, multiple answers allowed, custom answers on, and options named from this solve: the step that cracked it, the general pattern, the problem itself. Then read the attempt for what they pointed at, write the card about that, set targets from their answer and pass their words as remember)":"";
+    const askToRemember=reviewTargetMode(deps.store)==="ask"?" The learner chose to decide what their reviews ask about: before record_insight, ask them with ask_user_question what they want to remember from this problem (multiple answers and custom answers on, options named from this solve: the step that cracked it, the general pattern, the problem itself), write the card about what they pointed at, and pass their words as remember.":"";
     const verdict=source?`${source.source==="leetcode"?"LeetCode":"Codeforces"} accepted the submission against every hidden case it has`:`every visible and hidden test passes${requirementsNote(bundle.design)}`;
-    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId} — ${verdict}.${complexityNote} Replay attempt ${attemptId} first and read how they got here, including their complexity claim and its quick review — the turning points show which change made it pass and what was said just before it. Update the relevant ability document, file what cracked it with record_insight so Spar can bring the idea back for spaced review,${askToRemember} commit exactly one next pedagogical action, and either ask about a specific moment the replay could not explain or aim the next target and validated question. The new target and question must explicitly respond to this attempt without overreacting to it.${source?" Prefer another real problem when one fits the target.":""}`,"system","attempt-complete");
+    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId}: ${verdict}.${complexityNote}${askToRemember}`,"system","attempt-complete");
   };
   const submitToSource = async (input: { sessionId: string; attemptId: string; bundle: NonNullable<ReturnType<LocalStore["submissionBundle"]>>; source: NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"] }) => {
     const { sessionId, attemptId, bundle } = input;

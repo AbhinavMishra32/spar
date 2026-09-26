@@ -1,5 +1,5 @@
 import { languageSchema, type Language, type Question } from "@spar/domain";
-import type { ToolPart } from "./agentRun";
+import { challengeMode, type ToolPart } from "./agentRun";
 
 /**
  * What the transcript knows about a challenge the moment it lands.
@@ -173,7 +173,9 @@ export function readPublishedChallenge(part: ToolPart): PublishedChallenge {
     displayId: text(published, "displayId") || null,
     concepts: concepts(sent.concepts),
     starter: starterFile(sent.starterFiles),
-    replaced: part.tool === "replace_current_question" || typeof back.replacedQuestionId === "string",
+    replaced: part.tool === "replace_current_question"
+      || (part.tool === "set_challenge" && (challengeMode(part.input) === "revise" || challengeMode(part.input) === "replace"))
+      || typeof back.replacedQuestionId === "string",
     replacedQuestionId: typeof back.replacedQuestionId === "string" && back.replacedQuestionId ? back.replacedQuestionId : null,
     cases: sourced ? null : caseCount(back.report),
     questionId: questionId(back.question),

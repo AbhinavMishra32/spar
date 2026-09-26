@@ -2,55 +2,49 @@
   "ask_user_question": {
     "description": "Suspend the session for one focused learner answer. Offer 2-3 mutually exclusive choices. Each option is one self-contained line the learner can scan — no subtitle, no second sentence — so write the whole choice into the label. Always allow a custom answer.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "questions": {
+          "type": "array",
           "items": {
-            "additionalProperties": false,
+            "type": "object",
             "properties": {
-              "custom": {
-                "default": true,
-                "type": "boolean"
-              },
               "header": {
-                "maxLength": 40,
+                "type": "string",
                 "minLength": 1,
-                "type": "string"
+                "maxLength": 40
               },
-              "multiple": {
-                "default": false,
-                "type": "boolean"
+              "question": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 1000
               },
               "options": {
+                "type": "array",
                 "items": {
-                  "additionalProperties": false,
+                  "type": "object",
                   "properties": {
                     "label": {
-                      "maxLength": 120,
+                      "type": "string",
                       "minLength": 1,
-                      "type": "string"
+                      "maxLength": 120
                     }
                   },
                   "required": [
                     "label"
                   ],
-                  "type": "object"
+                  "additionalProperties": false
                 },
-                "maxItems": 3,
                 "minItems": 2,
-                "type": "array"
+                "maxItems": 3
               },
-              "question": {
-                "maxLength": 1000,
-                "minLength": 3,
-                "type": "string"
+              "multiple": {
+                "type": "boolean",
+                "default": false
+              },
+              "custom": {
+                "type": "boolean",
+                "default": true
               }
             },
             "required": [
@@ -58,174 +52,45 @@
               "question",
               "options"
             ],
-            "type": "object"
+            "additionalProperties": false
           },
-          "maxItems": 3,
           "minItems": 1,
-          "type": "array"
+          "maxItems": 3
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "questions",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "assign_practice_problem": {
-    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. Use learnerStanding.setProblemsRated as context, then decide what level serves this step. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
+    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. Use the learner's rating in the journey document to decide what level serves this step. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "concepts": {
-          "description": "What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and names what this problem actually exercises. A prerequisite or transfer problem can use a different concept from the current target; explain the connection in your reply.",
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "kind": {
-                "enum": [
-                  "dsa",
-                  "engineering",
-                  "craft"
-                ],
-                "type": "string"
-              },
-              "parentSlug": {
-                "description": "the area a new sub-concept belongs under, e.g. sliding-window",
-                "maxLength": 60,
-                "minLength": 2,
-                "type": "string"
-              },
-              "role": {
-                "default": "supporting",
-                "enum": [
-                  "primary",
-                  "supporting"
-                ],
-                "type": "string"
-              },
-              "slug": {
-                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation",
-                "maxLength": 60,
-                "minLength": 2,
-                "type": "string"
-              },
-              "title": {
-                "description": "only needed for a concept Spar has not seen before",
-                "maxLength": 80,
-                "minLength": 2,
-                "type": "string"
-              }
-            },
-            "required": [
-              "slug"
-            ],
-            "type": "object"
-          },
-          "maxItems": 5,
-          "minItems": 1,
-          "type": "array"
-        },
-        "language": {
-          "description": "The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn.",
-          "enum": [
-            "javascript",
-            "typescript",
-            "python",
-            "java",
-            "c",
-            "cpp",
-            "go",
-            "rust",
-            "swift",
-            "ruby"
-          ],
-          "type": "string"
-        },
-        "replaceReason": {
-          "description": "Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave.",
-          "maxLength": 500,
-          "minLength": 3,
-          "type": "string"
-        },
-        "slug": {
-          "description": "The problem's URL slug, exactly as the source gave it.",
-          "maxLength": 120,
-          "minLength": 1,
-          "type": "string"
-        },
         "source": {
-          "description": "The provider identity returned by search. A slug is only unique inside its provider.",
+          "type": "string",
           "enum": [
             "leetcode",
             "codeforces"
           ],
-          "type": "string"
+          "description": "The provider identity returned by search. A slug is only unique inside its provider."
         },
-        "why": {
-          "description": "One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns.",
-          "maxLength": 400,
-          "minLength": 20,
-          "type": "string"
-        }
-      },
-      "required": [
-        "source",
-        "slug",
-        "concepts",
-        "why",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "commit_session_decision": {
-    "description": "Commit exactly one next pedagogical action.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "action": {
-          "enum": [
-            "diagnose",
-            "teach",
-            "practise",
-            "transfer",
-            "advance",
-            "retain"
-          ],
-          "type": "string"
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "The problem's URL slug, exactly as the source gave it."
         },
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "reason": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "action",
-        "reason",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "create_question": {
-    "description": "Review fit against recent solved work, then compile and validate a complete question. A new trainingTarget can be supplied with the candidate when the existing one is stale. The host repairs recoverable validation failures within this call. All paths are relative and the reference implementation must replace starter implementation files.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
         "concepts": {
           "type": "array",
           "items": {
@@ -273,12 +138,13 @@
           },
           "minItems": 1,
           "maxItems": 5,
-          "description": "What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."
+          "description": "What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and names what this problem actually exercises. A prerequisite or transfer problem can use a different concept from the current target; explain the connection in your reply."
         },
-        "title": {
+        "why": {
           "type": "string",
-          "minLength": 3,
-          "description": "A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."
+          "minLength": 20,
+          "maxLength": 400,
+          "description": "One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns."
         },
         "language": {
           "type": "string",
@@ -293,141 +159,14 @@
             "rust",
             "swift",
             "ruby"
-          ]
-        },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "function",
-            "module",
-            "repair",
-            "extension",
-            "repository"
-          ]
-        },
-        "difficulty": {
-          "type": "string",
-          "enum": [
-            "foundation",
-            "developing",
-            "proficient",
-            "advanced"
           ],
-          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Use context.learnerStanding.writeProblemsAt as evidence, then choose the level that serves your teaching purpose. Explain a surprising choice when it matters."
+          "description": "The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn."
         },
-        "requiresComplexityAnalysis": {
-          "type": "boolean",
-          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence."
-        },
-        "statement": {
+        "replaceReason": {
           "type": "string",
-          "minLength": 30,
-          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details."
-        },
-        "starterFiles": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "referenceFiles": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "visibleTests": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one and each boundary. Every known-incorrect implementation must pass all of them, so the case that exposes the plausible wrong idea belongs in hiddenTests, not here. No generated sweep here."
-        },
-        "hiddenTests": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "The unseen grading contract. For a function, execute at least twenty-four cases, preferably a seeded sweep checked against a simple oracle. For a module, execute at least twelve cases. For a repair, extension, or repository task, execute at least eight meaningful scenarios covering the defect, boundaries, and interactions. Emit one verdict per case and show input, expected, and actual on failure. Choose the tests that prove this task, rather than padding case counts."
-        },
-        "knownIncorrectFiles": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "minItems": 1,
-          "description": "Plausible wrong implementations at the reference's own path. Each must be genuinely wrong: it returns a different answer from the reference on at least one input the statement allows, which a hidden case contains, and it passes every visible case. A change that cannot alter any allowed answer is not a misconception, for example a shrinking `while` turned into `if` in a sliding window over non-negative values. The host executes each one beside the reference and replaces one that never disagrees."
-        },
-        "runCommand": {
-          "type": "string",
-          "minLength": 1,
-          "description": "A descriptive command for the challenge. The host uses its fixed language runner for validation and learner tests; this value cannot select pytest or change execution. Python test files execute directly with python3 and must call any defined test functions themselves."
-        },
-        "accidentalDifficulty": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 3,
-          "default": []
-        },
-        "expectedFailureSignatures": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Observable ways the known-incorrect implementations fail."
-        },
-        "solutionRequirements": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 4,
-            "maxLength": 160
-          },
-          "maxItems": 4,
-          "description": "How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely."
-        },
-        "why": {
-          "type": "string",
-          "minLength": 10,
+          "minLength": 3,
           "maxLength": 500,
-          "description": "Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."
-        },
-        "trainingTarget": {
-          "type": "object",
-          "properties": {
-            "ability": {
-              "type": "string",
-              "minLength": 2
-            },
-            "specificGap": {
-              "type": "string",
-              "minLength": 8
-            },
-            "desiredEvidence": {
-              "type": "string",
-              "minLength": 8
-            },
-            "avoidTesting": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "ability",
-            "specificGap",
-            "desiredEvidence",
-            "avoidTesting"
-          ],
-          "additionalProperties": false,
-          "description": "Only when this candidate changes what the learner is practicing: persist a corrected evidence target with the question. Use this when the previous target is stale or contradicted by a passed challenge. Omit it to retain the current target."
+          "description": "Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."
         },
         "actionTitle": {
           "type": "string",
@@ -437,18 +176,9 @@
         }
       },
       "required": [
+        "source",
+        "slug",
         "concepts",
-        "title",
-        "language",
-        "kind",
-        "difficulty",
-        "requiresComplexityAnalysis",
-        "statement",
-        "starterFiles",
-        "referenceFiles",
-        "visibleTests",
-        "hiddenTests",
-        "knownIncorrectFiles",
         "why",
         "actionTitle"
       ],
@@ -457,7 +187,7 @@
     }
   },
   "load_skill": {
-    "description": "Load one of the skills listed under SKILLS in your instructions: returns that skill's full instructions. Load a skill before doing the work it describes, the first time in a turn you need it — its instructions are not in your context until you do. Loading the same skill twice in one turn returns the same text.",
+    "description": "Load one of the skills listed under Skills in the journey document: returns that skill's full instructions. Load a skill before doing the work it describes, the first time in a turn you need it — its instructions are not in your context until you do. Loading the same skill twice in one turn returns the same text.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -485,245 +215,20 @@
   "open_visualizer": {
     "description": "Load the execution visualiser: Spar can run code under a real tracer and draw every variable, structure and pointer at any step, inline in this conversation. Call this whenever the learner is confused about what their code is actually doing at some point in the run — a value that is not what they expect, a loop that ends early, a pointer somewhere surprising, an off-by-one — or when a small idea would land better shown than described. Returns instructions and the visualiser's tools.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
         "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
+          "type": "string",
           "minLength": 3,
-          "type": "string"
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "actionTitle"
       ],
-      "type": "object"
-    }
-  },
-  "propose_ability_update": {
-    "description": "Propose a versioned markdown ability change backed by evidence. Include summary, concepts and practice whenever the evidence now supports naming this as something the learner can do.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
       "additionalProperties": false,
-      "properties": {
-        "abilityId": {
-          "format": "uuid",
-          "type": "string"
-        },
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "concepts": {
-          "description": "The concepts this ability covers, which is how the learner reaches the challenges behind it.",
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "kind": {
-                "enum": [
-                  "dsa",
-                  "engineering",
-                  "craft"
-                ],
-                "type": "string"
-              },
-              "parentSlug": {
-                "description": "the area a new sub-concept belongs under, e.g. sliding-window",
-                "maxLength": 60,
-                "minLength": 2,
-                "type": "string"
-              },
-              "role": {
-                "default": "supporting",
-                "enum": [
-                  "primary",
-                  "supporting"
-                ],
-                "type": "string"
-              },
-              "slug": {
-                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation",
-                "maxLength": 60,
-                "minLength": 2,
-                "type": "string"
-              },
-              "title": {
-                "description": "only needed for a concept Spar has not seen before",
-                "maxLength": 80,
-                "minLength": 2,
-                "type": "string"
-              }
-            },
-            "required": [
-              "slug"
-            ],
-            "type": "object"
-          },
-          "maxItems": 6,
-          "type": "array"
-        },
-        "evidence": {
-          "description": "Nuanced interpretations of exact durable events, at least one. Describe the behavior observed, not a score: which step of the idea held and which did not, and whether it held again on the second occasion. \"Failed the window question\" is not an interpretation of anything.",
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "eventId": {
-                "format": "uuid",
-                "type": "string"
-              },
-              "independence": {
-                "enum": [
-                  "independent",
-                  "assisted",
-                  "unknown"
-                ],
-                "type": "string"
-              },
-              "polarity": {
-                "enum": [
-                  "supporting",
-                  "contradictory",
-                  "neutral"
-                ],
-                "type": "string"
-              },
-              "statement": {
-                "maxLength": 300,
-                "minLength": 8,
-                "type": "string"
-              },
-              "strength": {
-                "maximum": 1,
-                "minimum": 0,
-                "type": "number"
-              }
-            },
-            "required": [
-              "eventId",
-              "statement",
-              "polarity",
-              "independence",
-              "strength"
-            ],
-            "type": "object"
-          },
-          "maxItems": 8,
-          "minItems": 1,
-          "type": "array"
-        },
-        "evidenceEventIds": {
-          "items": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "markdown": {
-          "type": "string"
-        },
-        "pattern": {
-          "additionalProperties": false,
-          "description": "A mistake lifecycle update. The host will refuse to promote a pattern unless evidence links span at least two attempts.",
-          "properties": {
-            "description": {
-              "maxLength": 400,
-              "minLength": 10,
-              "type": "string"
-            },
-            "evidenceEventIds": {
-              "items": {
-                "format": "uuid",
-                "type": "string"
-              },
-              "maxItems": 12,
-              "type": "array"
-            },
-            "status": {
-              "enum": [
-                "observation",
-                "hypothesis",
-                "pattern",
-                "monitoring",
-                "resolved"
-              ],
-              "type": "string"
-            },
-            "title": {
-              "maxLength": 100,
-              "minLength": 3,
-              "type": "string"
-            }
-          },
-          "required": [
-            "title",
-            "description",
-            "status",
-            "evidenceEventIds"
-          ],
-          "type": "object"
-        },
-        "practice": {
-          "description": "Drills for going further on this exact ability, each phrased as the learner's own goal because each one starts a session. Vary the transfer context, not just the difficulty.",
-          "items": {
-            "maxLength": 180,
-            "minLength": 10,
-            "type": "string"
-          },
-          "maxItems": 4,
-          "type": "array"
-        },
-        "status": {
-          "description": "Omit to let the evidence count decide. Set it only to say something the count cannot, such as marking a long-untouched ability stale.",
-          "enum": [
-            "uncertain",
-            "developing",
-            "independent",
-            "stale"
-          ],
-          "type": "string"
-        },
-        "summary": {
-          "description": "One sentence in plain words: what the learner can now do. Written to them, not about them.",
-          "maxLength": 220,
-          "minLength": 10,
-          "type": "string"
-        }
-      },
-      "required": [
-        "abilityId",
-        "markdown",
-        "evidenceEventIds",
-        "evidence",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "read_ability": {
-    "description": "Read one versioned ability document, with the mistake patterns filed under it and its most recent behavioural evidence. The markdown is the claim; the patterns are what is still open about it. Read both before proposing an update — an update written from the document alone can only restate it.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "abilityId": {
-          "format": "uuid",
-          "type": "string"
-        },
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        }
-      },
-      "required": [
-        "abilityId",
-        "actionTitle"
-      ],
-      "type": "object"
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "read_attempt": {
@@ -817,94 +322,18 @@
       "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
-  "read_challenge": {
-    "description": "Read one stored challenge design, validation report, attempts, and test history.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "questionId": {
-          "format": "uuid",
-          "type": "string"
-        }
-      },
-      "required": [
-        "questionId",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "read_concept_graph": {
-    "description": "Read the concept vocabulary near a topic, with this learner's evidence against each one. Use it to choose what to tag and what to test next.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "limit": {
-          "default": 14,
-          "maximum": 24,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "query": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
   "read_daily_practice_problem": {
     "description": "The source's problem of the day, in full. Worth offering when the learner has no particular direction, and worth ignoring when they do — it is chosen for everybody, so it is unlikely to land on their gap.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "source": {
-          "description": "The provider identity returned by search. Keep it paired with the slug.",
+          "type": "string",
           "enum": [
             "leetcode",
             "codeforces"
           ],
-          "type": "string"
-        }
-      },
-      "required": [
-        "source",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "read_lesson": {
-    "description": "Read one lesson you have already taught: its pages, its takeaways and its reading list. Use it before teaching near something in your context's recentLessons, so the new lesson continues that one instead of repeating it, and before claiming you taught something specific, so what you say you showed them is what you showed them.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "lessonId": {
-          "type": "string",
-          "format": "uuid"
+          "description": "The provider identity returned by search. Keep it paired with the slug."
         },
         "actionTitle": {
           "type": "string",
@@ -914,7 +343,7 @@
         }
       },
       "required": [
-        "lessonId",
+        "source",
         "actionTitle"
       ],
       "additionalProperties": false,
@@ -924,33 +353,32 @@
   "read_practice_problem": {
     "description": "Read one problem in full: its statement, its signature, the languages it publishes starters for, the cases Spar can run locally, the concepts it maps onto, and the problems the source says it is related to. Read this before assigning a problem — the statement is the only way to know whether it actually exercises the gap you are aiming at, and the reply says plainly who will grade it.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "includeStatement": {
-          "default": true,
-          "description": "Set false when you only need the shape and the tags, which is most of a fit decision.",
-          "type": "boolean"
-        },
-        "slug": {
-          "description": "The problem's URL slug, e.g. \"two-sum\". Never its number or its title.",
-          "maxLength": 120,
-          "minLength": 1,
-          "type": "string"
-        },
         "source": {
-          "description": "The provider identity returned by search. Keep it paired with the slug.",
+          "type": "string",
           "enum": [
             "leetcode",
             "codeforces"
           ],
-          "type": "string"
+          "description": "The provider identity returned by search. Keep it paired with the slug."
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "The problem's URL slug, e.g. \"two-sum\". Never its number or its title."
+        },
+        "includeStatement": {
+          "type": "boolean",
+          "default": true,
+          "description": "Set false when you only need the shape and the tags, which is most of a fit decision."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
@@ -958,121 +386,121 @@
         "slug",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "read_practice_progress": {
     "description": "Problems this learner has already touched at the source, newest first. This is the one thing the source knows that Spar's own record cannot: what they attempted elsewhere and never finished. An unfinished attempt is a strong candidate for a target — it is a gap they have already met and walked away from.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "limit": {
-          "default": 20,
-          "maximum": 50,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "offset": {
-          "default": 0,
-          "maximum": 2000,
-          "minimum": 0,
-          "type": "integer"
-        },
         "source": {
-          "description": "The provider identity returned by search. Keep it paired with the slug.",
+          "type": "string",
           "enum": [
             "leetcode",
             "codeforces"
           ],
-          "type": "string"
+          "description": "The provider identity returned by search. Keep it paired with the slug."
         },
         "status": {
-          "default": "attempted",
+          "type": "string",
           "enum": [
             "attempted",
             "solved"
           ],
-          "type": "string"
+          "default": "attempted"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 20
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000,
+          "default": 0
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "source",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "read_practice_source": {
     "description": "What the connected practice source can do right now, and who it thinks the learner is: the account, how many problems they have solved at each difficulty, and the source's own per-topic solve counts. Read the solve counts as weak prior evidence beside Spar's own ledger — they say what the learner has been exposed to, never how well they understood it. Call this before relying on anything else here, because every learner-specific answer is empty while the source is not connected.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "source": {
-          "description": "The provider identity returned by search. Keep it paired with the slug.",
+          "type": "string",
           "enum": [
             "leetcode",
             "codeforces"
           ],
-          "type": "string"
+          "description": "The provider identity returned by search. Keep it paired with the slug."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "source",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "read_practice_submissions": {
     "description": "This learner's own past submissions for one problem, and optionally the code of one of them. An accepted solution they wrote themselves is the strongest possible statement about what they can do, and a rejected one shows exactly where they stalled. Use it when their history with a specific problem is what you are reasoning about.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "includeCode": {
-          "default": false,
-          "description": "Fetches the source of the most recent submission. Costs an extra request, so ask for it only when the code itself is what you need.",
-          "type": "boolean"
-        },
-        "limit": {
-          "default": 5,
-          "maximum": 20,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "slug": {
-          "description": "The problem's URL slug, e.g. \"two-sum\". Never its number or its title.",
-          "maxLength": 120,
-          "minLength": 1,
-          "type": "string"
-        },
         "source": {
-          "description": "The provider identity returned by search. Keep it paired with the slug.",
+          "type": "string",
           "enum": [
             "leetcode",
             "codeforces"
           ],
-          "type": "string"
+          "description": "The provider identity returned by search. Keep it paired with the slug."
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "The problem's URL slug, e.g. \"two-sum\". Never its number or its title."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "default": 5
+        },
+        "includeCode": {
+          "type": "boolean",
+          "default": false,
+          "description": "Fetches the source of the most recent submission. Costs an extra request, so ask for it only when the code itself is what you need."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
@@ -1080,31 +508,43 @@
         "slug",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
-  "read_session": {
-    "description": "Read the current session summary and decisions.",
+  "read_record": {
+    "description": "Read one record in full: a challenge (design, validation, attempts and test history), an ability (versioned document with its patterns and recent evidence), a lesson (its pages), or a concept (this learner's evidence under it, by sub-concept, with the challenges behind it).",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
+        "kind": {
+          "type": "string",
+          "enum": [
+            "challenge",
+            "ability",
+            "lesson",
+            "concept"
+          ]
         },
-        "sessionId": {
-          "format": "uuid",
-          "type": "string"
+        "id": {
+          "type": "string",
+          "minLength": 2,
+          "description": "The challenge, ability or lesson id, or the concept slug."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
-        "sessionId",
+        "kind",
+        "id",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "read_submissions": {
@@ -1332,292 +772,50 @@
       "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
-  "replace_current_question": {
-    "description": "Review fit and compile a validated replacement for the active challenge while preserving its attempt and replacement lineage. Supply a corrected trainingTarget when the existing one no longer describes this task.",
+  "review_solution": {
+    "description": "Judge HOW the passing solution was written, after the runner has already settled that it works. Send it back only for a requirement the challenge actually stated, or for a solution that defeats the point of the exercise — hardcoding the test inputs, calling a library that does the whole thing being taught, or a complexity class the challenge ruled out. A different-but-legitimate approach is not grounds for rework.",
     "inputSchema": {
       "type": "object",
       "properties": {
-        "concepts": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "slug": {
-                "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
-                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
-              },
-              "title": {
-                "type": "string",
-                "minLength": 2,
-                "maxLength": 80,
-                "description": "only needed for a concept Spar has not seen before"
-              },
-              "kind": {
-                "type": "string",
-                "enum": [
-                  "dsa",
-                  "engineering",
-                  "craft"
-                ]
-              },
-              "parentSlug": {
-                "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
-                "description": "the area a new sub-concept belongs under, e.g. sliding-window"
-              },
-              "role": {
-                "type": "string",
-                "enum": [
-                  "primary",
-                  "supporting"
-                ],
-                "default": "supporting"
-              }
-            },
-            "required": [
-              "slug"
-            ],
-            "additionalProperties": false
-          },
-          "minItems": 1,
-          "maxItems": 5,
-          "description": "What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."
-        },
-        "title": {
+        "attemptId": {
           "type": "string",
-          "minLength": 3,
-          "description": "A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."
+          "format": "uuid"
         },
-        "language": {
+        "verdict": {
           "type": "string",
           "enum": [
-            "javascript",
-            "typescript",
-            "python",
-            "java",
-            "c",
-            "cpp",
-            "go",
-            "rust",
-            "swift",
-            "ruby"
-          ]
-        },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "function",
-            "module",
-            "repair",
-            "extension",
-            "repository"
-          ]
-        },
-        "difficulty": {
-          "type": "string",
-          "enum": [
-            "foundation",
-            "developing",
-            "proficient",
-            "advanced"
+            "accepted",
+            "rework"
           ],
-          "description": "How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Use context.learnerStanding.writeProblemsAt as evidence, then choose the level that serves your teaching purpose. Explain a surprising choice when it matters."
+          "description": "`rework` reopens the challenge for the learner and ends your turn here — no ability update and no next challenge. Use it only when you can name the stated requirement it misses."
         },
-        "requiresComplexityAnalysis": {
-          "type": "boolean",
-          "description": "Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence."
-        },
-        "statement": {
+        "observedComplexity": {
           "type": "string",
-          "minLength": 30,
-          "description": "The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details."
+          "minLength": 2,
+          "maxLength": 80,
+          "description": "The time complexity of what they actually wrote, e.g. \"O(n)\" or \"O(n log n) from the sort\"."
         },
-        "starterFiles": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "referenceFiles": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "visibleTests": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one and each boundary. Every known-incorrect implementation must pass all of them, so the case that exposes the plausible wrong idea belongs in hiddenTests, not here. No generated sweep here."
-        },
-        "hiddenTests": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "The unseen grading contract. For a function, execute at least twenty-four cases, preferably a seeded sweep checked against a simple oracle. For a module, execute at least twelve cases. For a repair, extension, or repository task, execute at least eight meaningful scenarios covering the defect, boundaries, and interactions. Emit one verdict per case and show input, expected, and actual on failure. Choose the tests that prove this task, rather than padding case counts."
-        },
-        "knownIncorrectFiles": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "minItems": 1,
-          "description": "Plausible wrong implementations at the reference's own path. Each must be genuinely wrong: it returns a different answer from the reference on at least one input the statement allows, which a hidden case contains, and it passes every visible case. A change that cannot alter any allowed answer is not a misconception, for example a shrinking `while` turned into `if` in a sliding window over non-negative values. The host executes each one beside the reference and replaces one that never disagrees."
-        },
-        "runCommand": {
+        "approach": {
           "type": "string",
-          "minLength": 1,
-          "description": "A descriptive command for the challenge. The host uses its fixed language runner for validation and learner tests; this value cannot select pytest or change execution. Python test files execute directly with python3 and must call any defined test functions themselves."
+          "minLength": 10,
+          "maxLength": 300,
+          "description": "What they actually did, in one sentence, in their own terms."
         },
-        "accidentalDifficulty": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 3,
-          "default": []
-        },
-        "expectedFailureSignatures": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Observable ways the known-incorrect implementations fail."
-        },
-        "solutionRequirements": {
+        "reasons": {
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 4,
-            "maxLength": 160
+            "minLength": 8,
+            "maxLength": 220
           },
           "maxItems": 4,
-          "description": "How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely."
-        },
-        "why": {
-          "type": "string",
-          "minLength": 10,
-          "maxLength": 500,
-          "description": "Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."
-        },
-        "trainingTarget": {
-          "type": "object",
-          "properties": {
-            "ability": {
-              "type": "string",
-              "minLength": 2
-            },
-            "specificGap": {
-              "type": "string",
-              "minLength": 8
-            },
-            "desiredEvidence": {
-              "type": "string",
-              "minLength": 8
-            },
-            "avoidTesting": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "required": [
-            "ability",
-            "specificGap",
-            "desiredEvidence",
-            "avoidTesting"
-          ],
-          "additionalProperties": false,
-          "description": "Only when this candidate changes what the learner is practicing: persist a corrected evidence target with the question. Use this when the previous target is stale or contradicted by a passed challenge. Omit it to retain the current target."
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 500
+          "description": "For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner."
         },
         "actionTitle": {
           "type": "string",
           "minLength": 3,
           "maxLength": 70,
           "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
-        }
-      },
-      "required": [
-        "concepts",
-        "title",
-        "language",
-        "kind",
-        "difficulty",
-        "requiresComplexityAnalysis",
-        "statement",
-        "starterFiles",
-        "referenceFiles",
-        "visibleTests",
-        "hiddenTests",
-        "knownIncorrectFiles",
-        "why",
-        "reason",
-        "actionTitle"
-      ],
-      "additionalProperties": false,
-      "$schema": "http://json-schema.org/draft-07/schema#"
-    }
-  },
-  "review_solution": {
-    "description": "Judge HOW the passing solution was written, after the runner has already settled that it works. Send it back only for a requirement the challenge actually stated, or for a solution that defeats the point of the exercise — hardcoding the test inputs, calling a library that does the whole thing being taught, or a complexity class the challenge ruled out. A different-but-legitimate approach is not grounds for rework.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "approach": {
-          "description": "What they actually did, in one sentence, in their own terms.",
-          "maxLength": 300,
-          "minLength": 10,
-          "type": "string"
-        },
-        "attemptId": {
-          "format": "uuid",
-          "type": "string"
-        },
-        "observedComplexity": {
-          "description": "The time complexity of what they actually wrote, e.g. \"O(n)\" or \"O(n log n) from the sort\".",
-          "maxLength": 80,
-          "minLength": 2,
-          "type": "string"
-        },
-        "reasons": {
-          "description": "For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner.",
-          "items": {
-            "maxLength": 220,
-            "minLength": 8,
-            "type": "string"
-          },
-          "maxItems": 4,
-          "type": "array"
-        },
-        "verdict": {
-          "description": "`rework` reopens the challenge for the learner and ends your turn here — no ability update and no next challenge. Use it only when you can name the stated requirement it misses.",
-          "enum": [
-            "accepted",
-            "rework"
-          ],
-          "type": "string"
         }
       },
       "required": [
@@ -1626,153 +824,6 @@
         "observedComplexity",
         "approach",
         "reasons",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "search_attempt_history": {
-    "description": "Search attempts by ability or failure signature.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "limit": {
-          "default": 5,
-          "maximum": 10,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "query": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "query",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "search_challenge_history": {
-    "description": "Search the learner's durable challenge library, including outcomes and replacement lineage.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "limit": {
-          "default": 6,
-          "maximum": 12,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "query": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "query",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "search_concept_evidence": {
-    "description": "Read how this learner behaves under one concept, broken down by sub-concept, with the recent challenges and outcomes behind it. This is the tool for finding which specific sub-concept is failing inside an area that looks fine on average.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "concept": {
-          "description": "a concept slug or a topic in words",
-          "minLength": 2,
-          "type": "string"
-        },
-        "limit": {
-          "default": 3,
-          "maximum": 6,
-          "minimum": 1,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "concept",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "search_learner_model": {
-    "description": "Search this learner's memory at three resolutions at once: the ability documents (`passages`, the standing claims), the mistake patterns open under them, and the individual behavioural observations recorded from past attempts. The last two are your own earlier readings of this person — find the hypothesis you wrote before, and one matching observation now promotes it to a pattern instead of being written down a second time.",
-    "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
-      "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "limit": {
-          "default": 4,
-          "maximum": 8,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "query": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "query",
-        "actionTitle"
-      ],
-      "type": "object"
-    }
-  },
-  "search_lessons": {
-    "description": "Search what Spar has already taught this learner, by topic or concept. Cite what comes back with [[lesson:id|title]] rather than explaining it again.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "query": {
-          "type": "string",
-          "minLength": 2
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 12,
-          "default": 6
-        },
-        "actionTitle": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 70,
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
-        }
-      },
-      "required": [
-        "query",
         "actionTitle"
       ],
       "additionalProperties": false,
@@ -1856,69 +907,256 @@
       "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
-  "set_session_objective": {
-    "description": "Persist a lightweight session objective.",
+  "search_record": {
+    "description": "Search this learner's record on this Track: abilities (standing claims), patterns (your open hypotheses about how they go wrong, with observations), attempts (by failure signature), challenges (with outcomes and replacement lineage), concepts (the tag vocabulary with their evidence under each, split by sub-concept), and lessons you have taught. Use it to find what the journey document does not already show.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
+        "query": {
+          "type": "string",
+          "minLength": 2,
+          "description": "Words or a concept slug."
         },
-        "objective": {
-          "type": "string"
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "abilities",
+              "patterns",
+              "attempts",
+              "challenges",
+              "concepts",
+              "lessons"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 6,
+          "description": "Which parts of the record to search. Omit for all."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "default": 6
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
-        "objective",
+        "query",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
-  "set_training_target": {
-    "description": "Persist one primary evidence target.",
+  "set_challenge": {
+    "description": "Set the learner's next challenge from a brief. A builder writes the statement, starter, reference, tests and plausible wrong solutions; the host compiles and validates them and repairs recoverable failures before anything is published. Returns the published challenge, or the failed checks when it could not be validated — then adjust the brief (often simpler) and call again.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "ability": {
-          "type": "string"
+        "mode": {
+          "type": "string",
+          "enum": [
+            "new",
+            "revise",
+            "replace"
+          ],
+          "description": "new: no challenge is open. revise: change the open challenge while keeping its task and code shape (the learner asked for types, a clearer statement, another language, a fix). replace: swap the open challenge for a different problem, because the learner asked or it is clearly wrong for them."
+        },
+        "aim": {
+          "type": "object",
+          "properties": {
+            "ability": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 120,
+              "description": "The ability this trains, in a few words, stable across challenges that train it."
+            },
+            "gap": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 400,
+              "description": "The specific thing still uncertain about this learner that this challenge probes."
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 400,
+              "description": "What a pass or a fail will tell you."
+            }
+          },
+          "required": [
+            "ability",
+            "gap",
+            "evidence"
+          ],
+          "additionalProperties": false,
+          "description": "What this challenge should reveal. It becomes the session's training target, replacing the previous one."
+        },
+        "stretch": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 400,
+          "description": "What is new relative to the learner's last challenge — the one step up. For revise, say what changes."
+        },
+        "brief": {
+          "type": "string",
+          "minLength": 40,
+          "maxLength": 4000,
+          "description": "The task for the builder: the contract (inputs, outputs, rules), the idea it exercises, anything the learner asked for, and the code-shape convention to keep (for example: LeetCode-style TreeNode with a typed class Solution method, as in their previous challenges). Plain prose; no code needed."
+        },
+        "language": {
+          "type": "string",
+          "enum": [
+            "javascript",
+            "typescript",
+            "python",
+            "java",
+            "c",
+            "cpp",
+            "go",
+            "rust",
+            "swift",
+            "ruby"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "function",
+            "module",
+            "repair",
+            "extension",
+            "repository"
+          ]
+        },
+        "difficulty": {
+          "type": "string",
+          "enum": [
+            "foundation",
+            "developing",
+            "proficient",
+            "advanced"
+          ],
+          "description": "An absolute price on the learner's rating scale: foundation 900, developing 1200, proficient 1500, advanced 1800."
+        },
+        "concepts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "slug": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 60,
+                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "description": "only needed for a concept Spar has not seen before"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "dsa",
+                  "engineering",
+                  "craft"
+                ]
+              },
+              "parentSlug": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 60,
+                "description": "the area a new sub-concept belongs under, e.g. sliding-window"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "supporting"
+                ],
+                "default": "supporting"
+              }
+            },
+            "required": [
+              "slug"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "What this challenge is about, most specific first. Exactly one entry has role primary."
+        },
+        "requiresComplexityAnalysis": {
+          "type": "boolean",
+          "description": "True only when asymptotic time and space reasoning is part of what this trains."
+        },
+        "solutionRequirements": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 160
+          },
+          "maxItems": 4,
+          "description": "How the solution must be written when a different approach would defeat the exercise (\"recursive\", \"one pass\"). Shown to the learner and checked by review_solution. Omit when there is nothing to insist on."
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48
+          },
+          "maxItems": 3,
+          "description": "Skills from the skills list the builder should follow for this challenge, for example one about figures in statements."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 500,
+          "description": "Why this challenge for this learner now. Stored with the challenge for later turns."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 500,
+          "description": "For revise or replace: what the learner asked for, or why the open challenge has to change."
         },
         "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
+          "type": "string",
           "minLength": 3,
-          "type": "string"
-        },
-        "avoidTesting": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "desiredEvidence": {
-          "type": "string"
-        },
-        "specificGap": {
-          "type": "string"
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
-        "ability",
-        "specificGap",
-        "desiredEvidence",
-        "avoidTesting",
+        "mode",
+        "aim",
+        "stretch",
+        "brief",
+        "language",
+        "kind",
+        "difficulty",
+        "concepts",
+        "requiresComplexityAnalysis",
+        "why",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "teach_lesson": {
-    "description": "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem — the concept their attempt showed they are missing, a topic they asked about, the thing the next challenge is going to need. A request to clarify an existing explanation can be answered directly in chat; do not create another lesson merely to repeat it. Scale a new lesson to what is actually being taught: one or two pages for a single misconception, more only when the idea genuinely has that many parts. For a new mechanism, start with a tiny input, show each state change and why it happens, then name the invariant; defer complexity until the mechanism is clear. Each page is one thing, in their language, short enough to hold in mind at once; the body is markdown, may use fenced code, and may reference a concept as [[concept:slug|words]] or an earlier lesson as [[lesson:id|words]] exactly as a reply can. Every entry in `references` says why it is worth their time: use `url` only for a page you actually fetched this turn or know to exist, `reading` for a book or chapter you are naming from memory, and `concept`/`lesson` for Spar's own records. Tag `concepts` in the same vocabulary you tag challenges with, primary first. When you make a lesson, point at it as [[lesson:<the id this returns>|its title]] and give a brief concrete starting point in your reply.",
+    "description": "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem. Scale it to what is being taught: one or two pages for a single misconception, more only when the idea has that many parts. For a new mechanism start with a tiny input, show each state change and why, then name the invariant. Each page is one idea, markdown, may use fenced code and [[concept:slug|words]] or [[lesson:id|words]]. Every reference says why it is worth their time: url only for a page you actually fetched or know exists, reading for a book or chapter named from memory. Tag concepts in the same vocabulary as challenges. Point at it in your reply as [[lesson:<the id this returns>|its title]].",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2116,100 +1354,143 @@
       "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
-  "upsert_ability": {
-    "description": "Introduce an uncertain ability, or grant one: append an evidence-backed version and give it the summary, concepts and practice drills that make it something the learner can see and train.",
+  "update_ability": {
+    "description": "Introduce an ability as uncertain when you start training it, or append an evidence-backed version to one. Give it the summary, concepts and practice drills that make it something the learner can see and train once the evidence supports it. Never grant from one pass or from a challenge they walked away from.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
+        "abilityId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The ability to update. Omit to introduce one by title (an existing ability with the same title is updated)."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120,
+          "description": "Required when introducing an ability."
+        },
+        "markdown": {
+          "type": "string",
+          "minLength": 20,
+          "description": "The ability document: what the learner can and cannot yet do, with the evidence."
+        },
+        "evidenceEventIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "default": []
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 220,
+          "description": "One sentence in plain words: what the learner can now do. Written to them, not about them."
         },
         "concepts": {
-          "description": "The concepts this ability covers, which is how the learner reaches the challenges behind it.",
+          "type": "array",
           "items": {
-            "additionalProperties": false,
+            "type": "object",
             "properties": {
+              "slug": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 60,
+                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 80,
+                "description": "only needed for a concept Spar has not seen before"
+              },
               "kind": {
+                "type": "string",
                 "enum": [
                   "dsa",
                   "engineering",
                   "craft"
-                ],
-                "type": "string"
+                ]
               },
               "parentSlug": {
-                "description": "the area a new sub-concept belongs under, e.g. sliding-window",
-                "maxLength": 60,
+                "type": "string",
                 "minLength": 2,
-                "type": "string"
+                "maxLength": 60,
+                "description": "the area a new sub-concept belongs under, e.g. sliding-window"
               },
               "role": {
-                "default": "supporting",
+                "type": "string",
                 "enum": [
                   "primary",
                   "supporting"
                 ],
-                "type": "string"
-              },
-              "slug": {
-                "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation",
-                "maxLength": 60,
-                "minLength": 2,
-                "type": "string"
-              },
-              "title": {
-                "description": "only needed for a concept Spar has not seen before",
-                "maxLength": 80,
-                "minLength": 2,
-                "type": "string"
+                "default": "supporting"
               }
             },
             "required": [
               "slug"
             ],
-            "type": "object"
+            "additionalProperties": false
           },
           "maxItems": 6,
-          "type": "array"
+          "description": "The concepts this ability covers, which is how the learner reaches the challenges behind it."
+        },
+        "practice": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 180
+          },
+          "maxItems": 4,
+          "description": "Drills for going further on this exact ability, each phrased as the learner's own goal because each one starts a session. Vary the transfer context, not just the difficulty."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "uncertain",
+            "developing",
+            "independent",
+            "stale"
+          ],
+          "description": "Omit to let the evidence count decide. Set it only to say something the count cannot, such as marking a long-untouched ability stale."
         },
         "evidence": {
-          "description": "Nuanced interpretations of exact durable events. Describe the behavior observed, not a score.",
+          "type": "array",
           "items": {
-            "additionalProperties": false,
+            "type": "object",
             "properties": {
               "eventId": {
-                "format": "uuid",
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
-              "independence": {
-                "enum": [
-                  "independent",
-                  "assisted",
-                  "unknown"
-                ],
-                "type": "string"
+              "statement": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 300
               },
               "polarity": {
+                "type": "string",
                 "enum": [
                   "supporting",
                   "contradictory",
                   "neutral"
-                ],
-                "type": "string"
+                ]
               },
-              "statement": {
-                "maxLength": 300,
-                "minLength": 8,
-                "type": "string"
+              "independence": {
+                "type": "string",
+                "enum": [
+                  "independent",
+                  "assisted",
+                  "unknown"
+                ]
               },
               "strength": {
-                "maximum": 1,
+                "type": "number",
                 "minimum": 0,
-                "type": "number"
+                "maximum": 1
               }
             },
             "required": [
@@ -2219,54 +1500,41 @@
               "independence",
               "strength"
             ],
-            "type": "object"
+            "additionalProperties": false
           },
           "maxItems": 8,
-          "type": "array"
-        },
-        "evidenceEventIds": {
-          "default": [],
-          "items": {
-            "format": "uuid",
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "markdown": {
-          "minLength": 20,
-          "type": "string"
+          "description": "Nuanced interpretations of exact durable events. Describe the behavior observed, not a score."
         },
         "pattern": {
-          "additionalProperties": false,
-          "description": "A mistake lifecycle update. The host will refuse to promote a pattern unless evidence links span at least two attempts.",
+          "type": "object",
           "properties": {
-            "description": {
-              "maxLength": 400,
-              "minLength": 10,
-              "type": "string"
+            "title": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 100
             },
-            "evidenceEventIds": {
-              "items": {
-                "format": "uuid",
-                "type": "string"
-              },
-              "maxItems": 12,
-              "type": "array"
+            "description": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 400
             },
             "status": {
+              "type": "string",
               "enum": [
                 "observation",
                 "hypothesis",
                 "pattern",
                 "monitoring",
                 "resolved"
-              ],
-              "type": "string"
+              ]
             },
-            "title": {
-              "maxLength": 100,
-              "minLength": 3,
-              "type": "string"
+            "evidenceEventIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "maxItems": 12
             }
           },
           "required": [
@@ -2275,117 +1543,125 @@
             "status",
             "evidenceEventIds"
           ],
-          "type": "object"
+          "additionalProperties": false,
+          "description": "A mistake lifecycle update. The host will refuse to promote a pattern unless evidence links span at least two attempts."
         },
-        "practice": {
-          "description": "Drills for going further on this exact ability, each phrased as the learner's own goal because each one starts a session. Vary the transfer context, not just the difficulty.",
-          "items": {
-            "maxLength": 180,
-            "minLength": 10,
-            "type": "string"
-          },
-          "maxItems": 4,
-          "type": "array"
-        },
-        "status": {
-          "description": "Omit to let the evidence count decide. Set it only to say something the count cannot, such as marking a long-untouched ability stale.",
-          "enum": [
-            "uncertain",
-            "developing",
-            "independent",
-            "stale"
-          ],
-          "type": "string"
-        },
-        "summary": {
-          "description": "One sentence in plain words: what the learner can now do. Written to them, not about them.",
-          "maxLength": 220,
-          "minLength": 10,
-          "type": "string"
-        },
-        "title": {
-          "maxLength": 120,
-          "minLength": 2,
-          "type": "string"
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
-        "title",
         "markdown",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "update_notebook": {
+    "description": "Replace your notebook for this Track with a new version. The notebook is in your context every turn and the learner can read and edit it; keep it under about 600 words, rewrite rather than append, and delete what is no longer true. Use it when something durable changes: their goal, how they like to be taught, what clicked, what keeps tripping them, their code-shape conventions, the plan for the next few steps.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "markdown": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 12000,
+          "description": "The whole notebook, as markdown."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160,
+          "description": "One line saying what changed, shown to the learner."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "markdown",
+        "note",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "visualize_explain": {
     "description": "Direct the animation the learner sees. Pick the two to five steps that carry the explanation; for each, write one plain sentence, name what to draw, and say how long to hold on it. It plays inline in your reply at the pace you set, and they can pause and step through it. Afterwards write the one thing it is evidence for — do not describe the frames again in prose.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "autoplay": {
-          "description": "Defaults to true for more than one step. Set false when the sequence is meant to be read rather than watched.",
-          "type": "boolean"
-        },
         "runId": {
-          "minLength": 1,
-          "type": "string"
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 90,
+          "description": "What this shows, in the learner's language. Not the tool's name for it."
         },
         "steps": {
+          "type": "array",
           "items": {
-            "additionalProperties": false,
+            "type": "object",
             "properties": {
+              "step": {
+                "type": "integer",
+                "minimum": 0
+              },
               "caption": {
-                "description": "What to notice in this step, addressed to the learner. One sentence, no preamble.",
-                "maxLength": 200,
+                "type": "string",
                 "minLength": 3,
-                "type": "string"
+                "maxLength": 200,
+                "description": "What to notice in this step, addressed to the learner. One sentence, no preamble."
               },
               "focus": {
-                "description": "Draw only these: local names like \"counts\", or heap ids like \"@n2\". Use it — a picture of the two things your sentence is about lands, and a picture of every object in scope does not. Omit only when the whole state genuinely is the point.",
+                "type": "array",
                 "items": {
                   "type": "string"
                 },
                 "maxItems": 6,
-                "type": "array"
+                "description": "Draw only these: local names like \"counts\", or heap ids like \"@n2\". Use it — a picture of the two things your sentence is about lands, and a picture of every object in scope does not. Omit only when the whole state genuinely is the point."
               },
               "hold": {
-                "description": "Seconds to stay on this step while it plays. Give the step where the thing goes wrong longer than the ones setting it up. Defaults to the caption's reading time.",
-                "maximum": 6,
+                "type": "number",
                 "minimum": 0.6,
-                "type": "number"
-              },
-              "step": {
-                "minimum": 0,
-                "type": "integer"
+                "maximum": 6,
+                "description": "Seconds to stay on this step while it plays. Give the step where the thing goes wrong longer than the ones setting it up. Defaults to the caption's reading time."
               }
             },
             "required": [
               "step",
               "caption"
             ],
-            "type": "object"
+            "additionalProperties": false
           },
-          "maxItems": 8,
           "minItems": 1,
-          "type": "array"
+          "maxItems": 8
+        },
+        "autoplay": {
+          "type": "boolean",
+          "description": "Defaults to true for more than one step. Set false when the sequence is meant to be read rather than watched."
         },
         "takeaway": {
-          "description": "Optional: the one sentence the whole sequence adds up to, shown under it.",
+          "type": "string",
           "maxLength": 400,
-          "type": "string"
+          "description": "Optional: the one sentence the whole sequence adds up to, shown under it."
         },
-        "title": {
-          "description": "What this shows, in the learner's language. Not the tool's name for it.",
-          "maxLength": 90,
+        "actionTitle": {
+          "type": "string",
           "minLength": 3,
-          "type": "string"
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
@@ -2394,27 +1670,34 @@
         "steps",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "visualize_find": {
     "description": "Find the step that matters in a traced run. Every filter given must hold. Use this instead of guessing a step index or walking steps from zero — the interesting step in a 400-step run is never step 3.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "From visualize_run."
+        },
+        "variable": {
+          "type": "string",
+          "description": "Steps where this local changed value, including where it first appeared."
+        },
+        "line": {
+          "type": "integer",
+          "description": "Steps executing this source line."
         },
         "branch": {
-          "description": "Steps whose branch test evaluated this way — false is how you find where a loop stopped.",
-          "type": "boolean"
+          "type": "boolean",
+          "description": "Steps whose branch test evaluated this way — false is how you find where a loop stopped."
         },
         "event": {
-          "description": "Steps of this kind.",
+          "type": "string",
           "enum": [
             "call",
             "step",
@@ -2422,58 +1705,51 @@
             "exception",
             "condition"
           ],
-          "type": "string"
-        },
-        "limit": {
-          "maximum": 24,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "line": {
-          "description": "Steps executing this source line.",
-          "type": "integer"
-        },
-        "runId": {
-          "description": "From visualize_run.",
-          "minLength": 1,
-          "type": "string"
+          "description": "Steps of this kind."
         },
         "value": {
-          "description": "Steps where some local reads as this, matched as a substring of the formatted value.",
-          "type": "string"
+          "type": "string",
+          "description": "Steps where some local reads as this, matched as a substring of the formatted value."
         },
-        "variable": {
-          "description": "Steps where this local changed value, including where it first appeared.",
-          "type": "string"
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "runId",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "visualize_read_step": {
     "description": "Read one instant of a traced run exactly: every local in scope, the objects those locals point at, the branch decision if there was one, and what changed since the step before. Read the steps that carry the explanation, not the run — visualize_find names them, and a digest plus two or three read steps is a finished answer.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "runId": {
-          "minLength": 1,
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "step": {
-          "description": "The step index, from visualize_find or the digest.",
+          "type": "integer",
           "minimum": 0,
-          "type": "integer"
+          "description": "The step index, from visualize_find or the digest."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
@@ -2481,112 +1757,113 @@
         "step",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "visualize_run": {
     "description": "Trace one run. Either the learner's own file (from: \"attempt\") to explain why THEIR code does what it does, or a short snippet you write yourself (`code`) to illustrate an idea that is not in their file — a two-line snippet traced and drawn is a good answer to \"why does this give 4 and not 5\". Returns a compact digest of the run: which lines ran and how often, which way every branch went, what each variable started and ended as. Never trace a working solution to the challenge the learner is currently on.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
-        "code": {
-          "description": "The source to trace, when from is code. Keep it to the smallest program that shows the idea.",
-          "maxLength": 4000,
-          "type": "string"
-        },
         "from": {
-          "default": "code",
-          "description": "attempt reads the learner's own implementation file in this session; code traces what you pass below.",
+          "type": "string",
           "enum": [
             "attempt",
             "code"
           ],
-          "type": "string"
+          "default": "code",
+          "description": "attempt reads the learner's own implementation file in this session; code traces what you pass below."
         },
-        "maxSteps": {
-          "description": "Step budget. The default is ample; raise it only for a run you know is long.",
-          "maximum": 6000,
-          "minimum": 1,
-          "type": "integer"
+        "code": {
+          "type": "string",
+          "maxLength": 4000,
+          "description": "The source to trace, when from is code. Keep it to the smallest program that shows the idea."
         },
         "setup": {
-          "description": "The single call to trace, e.g. `search([1,3,9], 9)`. Without this nothing runs.",
-          "maxLength": 400,
+          "type": "string",
           "minLength": 1,
-          "type": "string"
+          "maxLength": 400,
+          "description": "The single call to trace, e.g. `search([1,3,9], 9)`. Without this nothing runs."
+        },
+        "maxSteps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6000,
+          "description": "Step budget. The default is ample; raise it only for a run you know is long."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "setup",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "web_fetch": {
     "description": "Read one or more web pages in full, by URL. Use it after web_search has told you which page is worth reading. http and https only.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "urls": {
+          "type": "array",
           "items": {
-            "format": "uri",
-            "type": "string"
+            "type": "string",
+            "format": "uri"
           },
-          "maxItems": 5,
           "minItems": 1,
-          "type": "array"
+          "maxItems": 5
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "urls",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "web_search": {
     "description": "Search the web for current, external information: what a company's interviews actually cover, what a library's current API is, what a topic's standard formulation is. Returns titles, URLs, and short extracts. Use it to ground a goal in reality when the learner's own record cannot answer the question, and prefer one focused query over several vague ones.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
+        "query": {
+          "type": "string",
+          "minLength": 2
         },
         "limit": {
-          "default": 5,
-          "maximum": 10,
+          "type": "integer",
           "minimum": 1,
-          "type": "integer"
+          "maximum": 10,
+          "default": 5
         },
-        "query": {
-          "minLength": 2,
-          "type": "string"
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "query",
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   }
 }

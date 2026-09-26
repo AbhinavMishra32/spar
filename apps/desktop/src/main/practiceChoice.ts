@@ -134,7 +134,7 @@ export async function openChosenProblem(
   const { sessionId } = deps.store.createSession(`Solve ${problem.title} on ${practiceSourceName(problem.source)}.`);
   deps.store.setObjective(sessionId, target.objective);
   /* The ability is opened and queued for sync here rather than left to the agent's
-     `set_training_target` handler, because on this path there is no agent turn to
+     challenge publish (which records the target from set_challenge's aim), because on this path there is no agent turn to
      run it — and an ability that exists only as a training-target row is one the
      Abilities page cannot show. */
   const persisted = deps.store.setTrainingTarget(sessionId, {

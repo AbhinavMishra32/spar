@@ -39,6 +39,9 @@ const VERBS: Record<string, [done: string, running: string]> = {
   /* Named by the card, because the card is what comes back later. */
   record_insight: ["Filed for review:", "Filing for review:"],
   load_skill: ["Used", "Using"],
+  search_record: ["Searched your record for", "Searching your record for"],
+  update_ability: ["Updated ability:", "Updating ability:"],
+  update_notebook: ["Updated notebook:", "Updating notebook:"],
 };
 
 /** A skill's name as a reader says it: `challenge-figures` → `Challenge Figures`. */
@@ -156,9 +159,18 @@ export function toolSubject(tool: string, input: string, running = false): ToolS
       const topics = memoryTopics(files);
       return { verb, subject: topics ? `about ${topics}` : "about everything it knows" };
     }
-    case "record_insight": {
+    case "record_insight":
+    case "update_ability": {
       const title = text(args.title);
       return title ? { verb, subject: oneLine(title, 56) } : null;
+    }
+    case "search_record": {
+      const query = text(args.query);
+      return query ? { verb, subject: oneLine(query, 48) } : null;
+    }
+    case "update_notebook": {
+      const note = text(args.note);
+      return note ? { verb, subject: oneLine(note, 64) } : null;
     }
     default:
       return null;

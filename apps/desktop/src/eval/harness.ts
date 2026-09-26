@@ -224,7 +224,7 @@ const RealNow = (() => { const real = Date.now.bind(Date); return () => real(); 
  * once, in the one place where trying it is not cheating.
  */
 function contractProbe(): { evidenceRequired: boolean } {
-  const schema = agentToolSchemas().propose_ability_update;
+  const schema = agentToolSchemas().update_ability;
   if (!schema) return { evidenceRequired: false };
   /* Real uuids, because the fields are typed as uuids and a probe rejected for
      the shape of its ids would say nothing about interpretation at all. */

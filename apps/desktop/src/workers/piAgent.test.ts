@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@earendil-works/pi-ai";
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { advanceTrainingConversation, createTrainingAgent, normalizePiAgentEvent, phaseToolChoice, piAgentTools, piCompleteText, setTrainingPhasePrompt, toolCallSpill, toolErrorText, type ToolChoiceRef } from "./piAgent.js";
+import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/pi-telemetry";
+import { advanceTrainingConversation, createTrainingAgent, normalizePiAgentEvent, piAgentTools, piCompleteText, toolCallSpill, toolErrorText } from "./piAgent.js";
 import type { PiProviderInput } from "./piProvider.js";
 
 const provider: PiProviderInput = { provider: "spar-faux", model: "training-faux", api: "spar-faux", baseUrl: "http://localhost:0", apiKey: "test" };
@@ -37,76 +38,65 @@ describe("the training agent, on pi's runtime", () => {
     } finally { faux.unregister(); }
   });
 
-  it("replaces phase guidance without repeating the standing instructions or losing tool history", async () => {
+  it("sets the system prompt once and keeps tool history across requests", async () => {
     const { faux, requests, scripted } = harness();
     try {
       faux.setResponses([
-        scripted(fauxAssistantMessage([fauxToolCall("search_learner_model", { query: "stacks", actionTitle: "Read evidence" }, { id: "first" })], { stopReason: "toolUse" })),
+        scripted(fauxAssistantMessage([fauxToolCall("search_record", { query: "stacks", actionTitle: "Read evidence" }, { id: "first" })], { stopReason: "toolUse" })),
         scripted(fauxAssistantMessage("Ready.")),
       ]);
-      const agent = createTrainingAgent(provider, "standing doctrine", { current: undefined });
-      agent.state.tools = piAgentTools((name) => name === "search_learner_model", async () => ({ passages: [] }));
-      setTrainingPhasePrompt(agent, "standing doctrine", "Read relevant evidence");
-      await advanceTrainingConversation(agent, "Learner asks for next challenge", "Read relevant evidence");
-      setTrainingPhasePrompt(agent, "standing doctrine", "Choose the next step");
-      await advanceTrainingConversation(agent, "Learner asks for next challenge", "Choose the next step");
+      const agent = createTrainingAgent(provider, "standing doctrine");
+      agent.state.tools = piAgentTools((name) => name === "search_record", async () => ({ results: [] }));
+      await advanceTrainingConversation(agent, "Learner asks for next challenge");
+      await advanceTrainingConversation(agent, "Learner asks for next challenge");
       expect(requests).toHaveLength(2);
       const system = requests[1]?.context.messages.filter((message) => message.role === "system").map((message) => String(message.content)).join("\n") ?? "";
       expect(system.match(/standing doctrine/g)).toHaveLength(1);
-      expect(system).toContain("Choose the next step");
-      expect(system).not.toContain("Read relevant evidence");
+      expect(requests[1]?.context.messages.filter((message) => message.role === "user")).toHaveLength(1);
       expect(requests[1]?.context.messages.some((message) => message.role === "toolResult")).toBe(true);
     } finally { faux.unregister(); }
   });
 
   it("recognizes a printed tool invocation without treating ordinary prose as one", () => {
-    const tools = ["replace_current_question", "read_attempt"];
-    expect(toolCallSpill('I changed it. to=functions.replace_current_question (json)\n{"title":"Voxel faces"}', tools))
-      .toBe("replace_current_question");
+    const tools = ["set_challenge", "read_attempt"];
+    expect(toolCallSpill('I changed it. to=functions.set_challenge (json)\n{"mode":"revise"}', tools))
+      .toBe("set_challenge");
+    expect(toolCallSpill("to=functions.read_record {}", tools)).toBe("unknown");
     expect(toolCallSpill('The code mentions functions and JSON.', tools)).toBeNull();
   });
 
-  it("carries the phase's forced tool choice all the way to the provider", async () => {
+  it("passes the telemetry context to the provider only when given one", async () => {
     const { faux, requests, scripted } = harness();
     try {
-      faux.setResponses([scripted(fauxAssistantMessage([fauxToolCall("read_ability", { abilityId: "6f1c9d34-0e1a-4a5b-9c3d-2f8e7a6b5c40", actionTitle: "Reading the ability" }, { id: "call-1" })], { stopReason: "toolUse" }))]);
-      const calls: Array<{ name: string; input: unknown }> = [];
-      const toolChoice: ToolChoiceRef = { current: phaseToolChoice("spar-faux", "required") };
-      const agent = createTrainingAgent(provider, "system", toolChoice);
-      agent.state.tools = piAgentTools((name) => name === "read_ability", async (name, input) => { calls.push({ name, input }); return { ok: true }; });
-      await agent.prompt("Phase 1.");
-
-      /* The fix this whole migration was for. Mastra asked for "required" and
-         the adapter dropped it, so twenty-one phases that are supposed to be
-         forced were running on prompt text alone. */
-      expect(requests[0]?.options?.toolChoice).toBe("required");
-      expect(calls).toEqual([{ name: "read_ability", input: { abilityId: "6f1c9d34-0e1a-4a5b-9c3d-2f8e7a6b5c40", actionTitle: "Reading the ability" } }]);
+      faux.setResponses([scripted(fauxAssistantMessage("one")), scripted(fauxAssistantMessage("two"))]);
+      await createTrainingAgent(provider, "system", NOOP_TELEMETRY_CONTEXT).prompt("Traced.");
+      await createTrainingAgent(provider, "system").prompt("Untraced.");
+      expect(requests[0]?.options).toHaveProperty("telemetryContext", NOOP_TELEMETRY_CONTEXT);
+      expect(requests[1]?.options).not.toHaveProperty("telemetryContext");
     } finally { faux.unregister(); }
   });
 
-  it("offers only the tools the phase opened, in the shape the provider reads", async () => {
+  it("offers only the allowed tools, in the shape the provider reads", async () => {
     const { faux, requests, scripted } = harness();
     try {
       faux.setResponses([scripted(fauxAssistantMessage("nothing to do"))]);
-      const toolChoice: ToolChoiceRef = { current: undefined };
-      const agent = createTrainingAgent(provider, "system", toolChoice);
-      agent.state.tools = piAgentTools((name) => name === "search_learner_model", async () => ({}));
+      const agent = createTrainingAgent(provider, "system");
+      agent.state.tools = piAgentTools((name) => name === "search_record", async () => ({}));
       await agent.prompt("Phase 1.");
 
       const tools = requests[0]?.context.messages.flatMap((message) => message.role === "system" ? message.toolsAdded ?? [] : []) ?? [];
-      expect(tools.map((tool) => tool.name)).toEqual(["search_learner_model"]);
+      expect(tools.map((tool) => tool.name)).toEqual(["search_record"]);
       expect(tools[0]?.parameters).toMatchObject({ type: "object", required: ["query", "actionTitle"] });
       expect(requests[0]?.context.messages[0]).toMatchObject({ role: "system", content: "system" });
       expect(requests[0]?.context.messages.filter((message) => message.role === "user")).toHaveLength(1);
     } finally { faux.unregister(); }
   });
 
-  it("sends the learner request and context after phase system guidance", async () => {
+  it("sends the journey prompt as the first user message and ignores the message on the first request", async () => {
     const { faux, requests, scripted } = harness();
     try {
       faux.setResponses([scripted(fauxAssistantMessage("They ask for the same result and method."))]);
-      const agent = createTrainingAgent(provider, "system", { current: undefined });
-      agent.state.messages = [{ role: "system", content: "Phase guidance", timestamp: Date.now() }];
+      const agent = createTrainingAgent(provider, "system");
       const fullPrompt = "Recent challenges: #2 passed next-greater positions; #3 repeats it. Latest learner action: Is this the same question?";
       await advanceTrainingConversation(agent, fullPrompt, "An active challenge exists.");
       const sent = requests[0]?.context.messages.filter((message) => message.role === "user");
@@ -119,14 +109,14 @@ describe("the training agent, on pi's runtime", () => {
     const { faux, requests, scripted } = harness();
     try {
       faux.setResponses([
-        scripted(fauxAssistantMessage([fauxToolCall("search_learner_model", { query: "trees", actionTitle: "Read evidence" }, { id: "c1" })], { stopReason: "toolUse" })),
-        scripted(fauxAssistantMessage([fauxToolCall("read_ability", { abilityId: "6f1c9d34-0e1a-4a5b-9c3d-2f8e7a6b5c40", actionTitle: "Read ability" }, { id: "c2" })], { stopReason: "toolUse" })),
+        scripted(fauxAssistantMessage([fauxToolCall("search_record", { query: "trees", actionTitle: "Read evidence" }, { id: "c1" })], { stopReason: "toolUse" })),
+        scripted(fauxAssistantMessage([fauxToolCall("read_record", { kind: "ability", id: "6f1c9d34-0e1a-4a5b-9c3d-2f8e7a6b5c40", actionTitle: "Read ability" }, { id: "c2" })], { stopReason: "toolUse" })),
         scripted(fauxAssistantMessage("Ready to practise.")),
       ]);
-      const agent = createTrainingAgent(provider, "system", { current: undefined });
+      const agent = createTrainingAgent(provider, "system");
       const results = { passages: [{ id: "6f1c9d34-0e1a-4a5b-9c3d-2f8e7a6b5c40" }] };
-      agent.state.tools = piAgentTools((name) => ["search_learner_model", "read_ability"].includes(name), async () => results);
-      for (let step = 0; step < 3; step++) await advanceTrainingConversation(agent, "Learn trees", "Continue");
+      agent.state.tools = piAgentTools((name) => ["search_record", "read_record"].includes(name), async () => results);
+      for (let step = 0; step < 3; step++) await advanceTrainingConversation(agent, "Learn trees");
       expect(requests).toHaveLength(3);
       expect(requests[2]?.context.messages.filter((message) => message.role !== "system").map((message) => message.role)).toEqual(["user", "assistant", "toolResult", "assistant", "toolResult"]);
       expect(requests[2]?.context.messages.filter((message) => message.role === "user")).toHaveLength(1);
@@ -138,57 +128,57 @@ describe("the training agent, on pi's runtime", () => {
     const { faux, requests, scripted } = harness();
     try {
       faux.setResponses([
-        scripted(fauxAssistantMessage([fauxToolCall("search_learner_model", { query: "trees", actionTitle: "Read evidence" }, { id: "c1" })], { stopReason: "toolUse" })),
+        scripted(fauxAssistantMessage([fauxToolCall("search_record", { query: "trees", actionTitle: "Read evidence" }, { id: "c1" })], { stopReason: "toolUse" })),
         scripted(fauxAssistantMessage("In Python.")),
       ]);
-      const agent = createTrainingAgent(provider, "system", { current: undefined });
-      agent.state.tools = piAgentTools((name) => name === "search_learner_model", async () => ({ passages: [] }));
-      await advanceTrainingConversation(agent, "Learn trees", "Continue");
-      await advanceTrainingConversation(agent, "Learn trees", "Continue", "Use Python");
+      const agent = createTrainingAgent(provider, "system");
+      agent.state.tools = piAgentTools((name) => name === "search_record", async () => ({ results: [] }));
+      await advanceTrainingConversation(agent, "Learn trees");
+      await advanceTrainingConversation(agent, "Learn trees", "Use Python");
       expect(requests[1]?.context.messages.filter((message) => message.role !== "system").map((message) => message.role)).toEqual(["user", "assistant", "toolResult", "user"]);
       expect(requests[1]?.context.messages.at(-1)).toMatchObject({ role: "user", content: [{ type: "text", text: "Use Python" }] });
     } finally { faux.unregister(); }
   });
 
   /* A call the host never sees. pi rejects it against the same JSON Schema the
-     model was shown, and the complaint is the only account of why the phase did
-     not advance — the retry quotes it back verbatim. */
+     model was shown, and the complaint is the only account of why the call did
+     not run — the retry quotes it back verbatim. */
   it("reports a rejected call with the fault the retry needs", async () => {
     const { faux, scripted } = harness();
     try {
-      faux.setResponses([scripted(fauxAssistantMessage([fauxToolCall("read_ability", { abilityId: "not-a-uuid", actionTitle: "Reading the ability" }, { id: "c1" })], { stopReason: "toolUse" }))]);
-      const agent = createTrainingAgent(provider, "system", { current: undefined });
+      faux.setResponses([scripted(fauxAssistantMessage([fauxToolCall("read_attempt", { attemptId: "not-a-uuid", actionTitle: "Reading the attempt" }, { id: "c1" })], { stopReason: "toolUse" }))]);
+      const agent = createTrainingAgent(provider, "system");
       let reached = false;
-      agent.state.tools = piAgentTools((name) => name === "read_ability", async () => { reached = true; return {}; });
+      agent.state.tools = piAgentTools((name) => name === "read_attempt", async () => { reached = true; return {}; });
       let fault = "";
       agent.subscribe((event) => { if (event.type === "tool_execution_end" && event.isError) fault = toolErrorText(event.result); });
       await agent.prompt("Phase 1.");
 
       expect(reached).toBe(false);
-      expect(fault).toContain("abilityId");
+      expect(fault).toContain("attemptId");
     } finally { faux.unregister(); }
   });
 
   /* zod applied `.default()` when it parsed arguments, and a JSON Schema
-     validator does not. A `limit` the model omits has to still arrive as 4. */
+     validator does not. A `limit` the model omits has to still arrive as 6. */
   it("hands the host the defaults the model left out", async () => {
     const { faux, scripted } = harness();
     try {
-      faux.setResponses([scripted(fauxAssistantMessage([fauxToolCall("search_learner_model", { query: "arrays", actionTitle: "Checking arrays" }, { id: "c1" })], { stopReason: "toolUse" }))]);
-      const agent = createTrainingAgent(provider, "system", { current: undefined });
+      faux.setResponses([scripted(fauxAssistantMessage([fauxToolCall("search_record", { query: "arrays", actionTitle: "Checking arrays" }, { id: "c1" })], { stopReason: "toolUse" }))]);
+      const agent = createTrainingAgent(provider, "system");
       let received: unknown = null;
-      agent.state.tools = piAgentTools((name) => name === "search_learner_model", async (_name, input) => { received = input; return {}; });
+      agent.state.tools = piAgentTools((name) => name === "search_record", async (_name, input) => { received = input; return {}; });
       await agent.prompt("Phase 1.");
 
-      expect(received).toEqual({ query: "arrays", limit: 4, actionTitle: "Checking arrays" });
+      expect(received).toEqual({ query: "arrays", limit: 6, actionTitle: "Checking arrays" });
     } finally { faux.unregister(); }
   });
 
-  it("stops a phase when the turn is abandoned", async () => {
+  it("stops when the turn is abandoned", async () => {
     const { faux } = harness();
     try {
       faux.setResponses([fauxAssistantMessage("a long answer")]);
-      const agent = createTrainingAgent(provider, "system", { current: undefined });
+      const agent = createTrainingAgent(provider, "system");
       const run = agent.prompt("Phase 1.");
       agent.abort();
       await run;
@@ -206,20 +196,20 @@ describe("provider events, in the transcript's own vocabulary", () => {
   });
 
   it("names the challenge-writing wait while tool arguments stream", () => {
-    const partial = { content: [{ type: "toolCall", id: "call", name: "create_question", arguments: {} }] };
+    const partial = { content: [{ type: "toolCall", id: "call", name: "set_challenge", arguments: {} }] };
     expect(normalizePiAgentEvent({ type: "toolcall_start", contentIndex: 0, partial } as never)).toEqual({
       type: "status",
       text: "",
-      detail: "Drafting challenge input",
+      detail: "Writing the challenge brief",
     });
   });
 
   it("gives other streamed tool arguments a readable activity label", () => {
-    const partial = { content: [{ type: "toolCall", id: "call", name: "search_challenge_history", arguments: {} }] };
+    const partial = { content: [{ type: "toolCall", id: "call", name: "search_record", arguments: {} }] };
     expect(normalizePiAgentEvent({ type: "toolcall_start", contentIndex: 0, partial } as never)).toEqual({
       type: "status",
       text: "",
-      detail: "Preparing search challenge history",
+      detail: "Preparing search record",
     });
   });
 
@@ -237,7 +227,7 @@ describe("provider events, in the transcript's own vocabulary", () => {
     const faux = registerFauxProvider({ api: "spar-faux", provider: "spar-faux", models: [{ id: "training-faux" }] });
     try {
       faux.setResponses([fauxAssistantMessage([fauxThinking("weighing the options"), fauxText("Here is the plan.")])]);
-      const agent = createTrainingAgent(provider, "system", { current: undefined });
+      const agent = createTrainingAgent(provider, "system");
       const parts: string[] = [];
       agent.subscribe((event) => {
         if (event.type !== "message_update") return;

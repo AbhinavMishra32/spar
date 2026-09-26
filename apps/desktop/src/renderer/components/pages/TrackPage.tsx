@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { ProblemSourcesPicker, problemSourcesNote } from "../common/ProblemSources";
+import { CoachNotebookDialog } from "./CoachNotebookDialog";
 
 /** A Track is the workspace around the original Sessions experience. The list,
  * filters, cards, and session workspace remain unchanged; only their ownership
@@ -34,7 +35,7 @@ export function TrackPage({ api, track, sessions, challenges, runs, busy, onCrea
     setOpen(false);
   };
 
-  const action = <Dialog onOpenChange={setOpen} open={open}>
+  const newSession = <Dialog onOpenChange={setOpen} open={open}>
     <DialogTrigger asChild><Button><Plus data-icon="inline-start" />New Session</Button></DialogTrigger>
     <DialogContent>
       <DialogHeader>
@@ -57,6 +58,11 @@ export function TrackPage({ api, track, sessions, challenges, runs, busy, onCrea
       <DialogFooter><Button disabled={busy || goal.trim().length < 3} onClick={() => void create()}>Start session <kbd className="font-sans text-[10px] opacity-60">⌘↵</kbd></Button></DialogFooter>
     </DialogContent>
   </Dialog>;
+
+  const action = <div className="flex shrink-0 items-center gap-2">
+    <CoachNotebookDialog api={api} trackId={track.id ?? null} />
+    {newSession}
+  </div>;
 
   return <SessionsPage action={action} api={api} challenges={challenges} description={track.goal} onOpen={onOpen} runs={runs} sessions={sessions} title={track.title} />;
 }

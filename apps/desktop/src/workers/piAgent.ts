@@ -3,18 +3,13 @@ import { completeSimple, streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, AssistantMessageEvent, Message, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { agentToolSchemas } from "./agentTools.js";
-import { piFastModeOptions, piModelFor, piReasoningSummaryForApi, piTransportForApi, piUsage, toolChoiceFor, type PiProviderInput } from "./piProvider.js";
+import { piFastModeOptions, piModelFor, piReasoningSummaryForApi, piTransportForApi, piUsage, type PiProviderInput } from "./piProvider.js";
 import type { NormalizedAgentStreamPart } from "./agentStream.js";
 import type { TelemetryContext } from "@earendil-works/pi-telemetry";
 
-/** Pi owns the native assistant/tool conversation. Spar yields between model
- * requests to enforce capability boundaries, cancellation and execution budgets. */
-
-/** What the model may do about tools on the next request. Kept as a live
- *  reference rather than a constructor argument because pi fixes the stream
- *  options when the run starts, and Spar's controller changes this every
- *  phase — which is the entire mechanism it is built on. */
-export type ToolChoiceRef = { current: unknown };
+/** Pi owns the native assistant/tool conversation. Spar yields after each
+ * model request so it can deliver learner steering, watch for silence, stop on
+ * request and record telemetry; the coach decides everything else. */
 
 /**
  * Spar's tools, as pi executes them.
@@ -53,62 +48,48 @@ export function piAgentTools(
 }
 
 /**
- * The agent, pointed at the provider the learner connected.
- *
- * `toolChoice` is read per request rather than captured, so the controller can
- * require a specific tool for one phase and leave the next one open. Everything
- * else is the request Spar was already making — the same transport pin for the
- * ChatGPT subscription route, the same reasoning directive, the same headers.
+ * The coach, pointed at the provider the learner connected: the same transport
+ * pin for the ChatGPT subscription route, the same reasoning directive, the same
+ * headers. The system prompt and the tool list are set once for the turn.
  */
-export function createTrainingAgent(input: PiProviderInput, systemPrompt: string, toolChoice: ToolChoiceRef, telemetryContext?:TelemetryContext): Agent {
+export function createTrainingAgent(input: PiProviderInput, systemPrompt: string, telemetryContext?: TelemetryContext): Agent {
   const transport = piTransportForApi(input.api);
   const reasoningSummary = piReasoningSummaryForApi(input.api);
   return new Agent({
     initialState: { systemPrompt, model: piModelFor(input), tools: [], messages: [] },
-    /* The transcript is already pi messages — Spar has no custom message kinds
-       — so there is nothing to convert. */
     convertToLlm: (messages) => messages as Message[],
     streamFn: (model, context, options) => streamSimple(model, context, {
       ...options,
-      ...(telemetryContext?{telemetryContext}:{}),
+      ...(telemetryContext ? { telemetryContext } : {}),
       apiKey: input.apiKey,
       ...(transport ? { transport } : {}),
       ...(input.headers ? { headers: input.headers } : {}),
       ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
-      /* Ask for the working, not just the chapter titles — see
-         `piReasoningSummaryForApi`. */
       ...(reasoningSummary ? { reasoningSummary } : {}),
       ...piFastModeOptions(input),
-      ...(toolChoice.current !== undefined ? { toolChoice: toolChoice.current as never } : {}),
     } as SimpleStreamOptions),
-    /* One phase's tools run one at a time. The controller's own de-duplication
-       is keyed on the phase a call was made in, and two calls racing inside one
-       phase would read that cache before either had written to it. */
+    /* One call at a time: a challenge build and a notebook write racing each
+       other would each read state the other is about to change. */
     toolExecution: "sequential",
-    /* Yield after each model request so the host can update capabilities,
-       cancellation and budgets. agent.continue() resumes the same native
-       conversation, including every tool result, without replaying the prompt. */
+    /* Yield after each model request (and the tools it called) so the host can
+       deliver steering, restart the idle clock and record the step. continue()
+       resumes the same native conversation without replaying anything. */
     finishTurn: () => ({ action: "end" }),
   });
 }
 
-/** Pi replays every system message cumulatively. Replace the phase message so
- * the standing instructions appear once even across a long tool conversation. */
-export function setTrainingPhasePrompt(agent: Agent, baseInstructions: string, instruction: string): void {
-  agent.state.messages = [
-    { role: "system", content: `${baseInstructions}\n\nCurrent phase: ${instruction}`, timestamp: Date.now() },
-    ...agent.state.messages.filter((message) => message.role !== "system"),
-  ];
+/** Whether the turn has said anything yet. pi keeps the system prompt as a
+ *  message of its own, so an unstarted conversation is not an empty list. */
+export function conversationStarted(agent: Agent): boolean {
+  return agent.state.messages.some((message) => (message.role as string) !== "system");
 }
 
-/** Advance the same conversation. A normal tool result needs no new user
- * message; corrections and learner steering do. Only overflow recovery resets it. */
-export async function advanceTrainingConversation(agent: Agent, initialPrompt: string, instruction: string, intervention?: string): Promise<void> {
-  // The controller may prepend phase system guidance before the first model
-  // request. System messages are not a conversation with the learner: the first
-  // user message must still carry their request and the full session context.
-  if (!agent.state.messages.some((message) => message.role !== "system")) await agent.prompt(initialPrompt);
-  else if (intervention || agent.state.messages.at(-1)?.role !== "toolResult") await agent.prompt(intervention || instruction);
+/** Advance the conversation one model request. The first request carries the
+ *  journey and the turn's event; a later one carries a message only when there
+ *  is something new to say (learner steering, a correction). */
+export async function advanceTrainingConversation(agent: Agent, initialPrompt: string, message?: string): Promise<void> {
+  if (!conversationStarted(agent)) await agent.prompt(initialPrompt);
+  else if (message) await agent.prompt(message);
   else await agent.continue();
 }
 
@@ -124,11 +105,6 @@ export async function advanceTrainingConversation(agent: Agent, initialPrompt: s
 export function turnOverflowed(message: AssistantMessage | null | undefined, input: PiProviderInput): boolean {
   return message ? isContextOverflow(message, piModelFor(input).contextWindow) : false;
 }
-
-/** How the controller spells a phase's tool rule for this provider. Named here
- *  so the phase loop never has to know which API family it is talking to. */
-export const phaseToolChoice = (api: string, choice: "auto" | "required" | "none") =>
-  toolChoiceFor(api, { type: choice } as never);
 
 /** What a rejected call said, for the retry to quote. pi puts the complaint in
  *  the result's content, which is also what the model was shown. */
@@ -181,7 +157,7 @@ function toolNameAt(message: AssistantMessage, index: number): string {
 }
 
 function draftingStatus(toolName: string): string {
-  if (toolName === "create_question" || toolName === "replace_current_question") return "Drafting challenge input";
+  if (toolName === "set_challenge") return "Writing the challenge brief";
   return toolName ? `Preparing ${toolName.replaceAll("_", " ")}` : "Preparing the next action";
 }
 
