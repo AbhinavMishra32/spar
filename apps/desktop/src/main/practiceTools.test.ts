@@ -125,7 +125,7 @@ describe("assign_practice_problem", () => {
       expect(result.status).toBe("playable");
       expect(notes.filter((check) => !check.passed).map((check) => check.name))
         .toEqual(expect.arrayContaining(["learner level", "provider concept", "target rationale"]));
-      expect(workspaces.writeAll).toHaveBeenCalled();
+      expect(workspaces.replaceAll).toHaveBeenCalled();
     } finally { store.close(); }
   });
 

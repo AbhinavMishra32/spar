@@ -109,19 +109,18 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
           interior, text at px-1.5 py-1 — so the question reads as the composer
           asking, not as a panel that has replaced it. */}
       <div className="composer-shell overflow-hidden p-2">
-        {/* The question leads; the header is metadata about it, so it rides
-            the top-right corner as a tag, carrying the step count when there
-            is more than one question. */}
-        <div className="flex items-start gap-3">
-          <h3 className="min-w-0 flex-1 px-1.5 py-1 text-thread font-medium leading-[1.55] text-foreground">
-            <Inline text={question.question} />
-          </h3>
-          <span className="mt-1 inline-flex shrink-0 items-center gap-1.5 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-thread-tool text-muted-foreground">
-            <span className="max-w-[12rem] truncate">{question.header}</span>
-            {many && <span aria-hidden className="size-0.5 rounded-full bg-muted-foreground/60" />}
-            {many && <span className="tabular-nums">{step + 1}/{request.questions.length}</span>}
-          </span>
-        </div>
+        {/* The header is metadata about the question, so it sits above it as a
+            small tag, carrying the step count when there is more than one
+            question. Above, not beside: a side tag takes a column the whole
+            height of a long question and squeezes the question into the rest. */}
+        <span className="ml-1.5 mt-1 inline-flex max-w-full items-center gap-1.5 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-thread-tool text-muted-foreground">
+          <span className="min-w-0 truncate">{question.header}</span>
+          {many && <span aria-hidden className="size-0.5 shrink-0 rounded-full bg-muted-foreground/60" />}
+          {many && <span className="shrink-0 tabular-nums">{step + 1}/{request.questions.length}</span>}
+        </span>
+        <h3 className="px-1.5 py-1 text-thread font-medium leading-[1.55] text-foreground">
+          <Inline text={question.question} />
+        </h3>
 
         <div className="mt-1 flex flex-col" role={question.multiple ? "group" : "radiogroup"}>
           {question.options.map((option, index) => {

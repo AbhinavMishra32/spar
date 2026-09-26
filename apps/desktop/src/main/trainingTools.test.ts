@@ -403,7 +403,7 @@ describe("challenge lifecycle after a solve", () => {
 
 /** Enough of the sandbox for a compilation to run without touching a disk. */
 function workspaceStub(): WorkspaceService {
-  return { writeValidation: async () => "/tmp/spar-test", removeValidation: async () => undefined, writeAll: async () => undefined } as unknown as WorkspaceService;
+  return { writeValidation: async () => "/tmp/spar-test", removeValidation: async () => undefined, writeAll: async () => undefined, replaceAll: async () => undefined } as unknown as WorkspaceService;
 }
 
 describe("reading one record", () => {

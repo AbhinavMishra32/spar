@@ -263,7 +263,10 @@ export async function executeTrainingTool(
     if (questionCreatedWhileCompiling) {
       return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${questionCreatedWhileCompiling.title}) was published while this candidate compiled. This candidate was discarded.` }] } };
     }
-    await workspaces.writeAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
+    /* Replaced, not overlaid: the previous challenge's files are finished work
+       (its code is kept in the attempt), and a test file left behind from it is
+       still picked up by the runner and fails every run of the new one. */
+    await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     commitCandidateTarget(local, sessionId, trackId, value);
     const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: conceptTags(value.concepts), introductionReason: String(value.why ?? "").trim() });
     rememberTrackLanguage(local, trackId, value);
@@ -417,7 +420,7 @@ async function assignPracticeProblem(
 
   const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: source.judge }] };
   const concepts = conceptTags(value.concepts);
-  await (activeQuestion ? workspaces.replaceAll(sessionId, mounted.files) : workspaces.writeAll(sessionId, mounted.files));
+  await workspaces.replaceAll(sessionId, mounted.files);
   const question = activeQuestion
     /* Recorded as a replacement, not as a fresh start: the abandoned attempt keeps
        its events and the new challenge keeps a pointer to what it superseded, so a
