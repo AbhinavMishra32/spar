@@ -311,10 +311,13 @@ export async function executeTrainingTool(
   if (name === "update_ability") {
     const abilityId = typeof value.abilityId === "string" && value.abilityId ? value.abilityId : "";
     if (abilityId) {
-      if (!local.readAbility(abilityId)) return { committed: false, note: `No ability ${abilityId}. Search the record for its id, or omit abilityId and give a title to introduce one.` };
+      const before = local.readAbility(abilityId) as { markdown?: string } | null;
+      if (!before) return { committed: false, note: `No ability ${abilityId}. Search the record for its id, or omit abilityId and give a title to introduce one.` };
       const updated = local.updateAbility({ abilityId, markdown: String(value.markdown), evidenceEventIds: stringList(value.evidenceEventIds), ...abilityClaim(value) });
       local.queueAbilitySync(updated.id);
-      return { committed: true, ...updated };
+      /* The version it replaced, for the thread to draw what changed. The worker
+         keeps it out of the coach's context. */
+      return { committed: true, ...updated, ...(typeof before.markdown === "string" ? { previousMarkdown: before.markdown } : {}) };
     }
     const title = typeof value.title === "string" ? value.title.trim() : "";
     if (!title) return { committed: false, note: "Give a title to introduce an ability, or an abilityId to update one." };

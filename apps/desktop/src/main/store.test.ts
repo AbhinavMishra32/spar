@@ -1027,12 +1027,13 @@ describe("coach's notebook",()=>{
     try{
       const {sessionId}=store.createSession("Practise graphs");
       const input={store,sessionId,message:"hi",turnKind:"learner-message" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
-      expect(agentTurnPayload(input).context).toContain("## Coach's notebook\n_Empty.");
+      expect(agentTurnPayload(input).context).toContain("## Coach's notebook — read this first\n_Empty.");
+      expect(agentTurnPayload(input).context.indexOf("## Coach's notebook")).toBeLessThan(agentTurnPayload(input).context.indexOf("## Learner"));
       const trackId=store.readSession(sessionId)!.summary.trackId??null;
       store.writeNotebook(trackId,{markdown:"Forgets visited sets.",author:"coach"});
       store.writeNotebook(trackId,{markdown:"Forgets visited sets on grids.",author:"learner"});
       const context=agentTurnPayload(input).context;
-      expect(context).toMatch(/## Coach's notebook \(v2, last edited by the learner [^)]*\)\nForgets visited sets on grids\./);
+      expect(context).toMatch(/## Coach's notebook — read this first \(v2, last edited by the learner [^)]*\)\nForgets visited sets on grids\./);
       expect(context).not.toContain("_Empty.");
     }finally{store.close();}
   });

@@ -134,17 +134,51 @@ const TAB = "cursor-default rounded-[var(--radius-md)] px-1.5 py-0.5 outline-non
  */
 export function NotebookCard({ input, output }: { input: string; output: string }) {
   const call = useMemo(() => readNotebookCall(input, output), [input, output]);
-  const unchanged = call.status === "unchanged";
-  const [view, setView] = useState<"notes" | "changes">(call.previous !== null && !unchanged ? "changes" : "notes");
+  return <MarkdownRecordCard empty="The notebook is empty." label={call.note || "Coach's notebook"} markdown={call.markdown} pageTab="Notebook" previous={call.previous} unchanged={call.status === "unchanged"} version={call.version} />;
+}
+
+/** What one `update_ability` call wrote: the ability's document, and the version
+ *  it replaced when there was one. */
+export function readAbilityCall(input: string, output: string) {
+  const sent = record(input);
+  const back = record(output);
+  const markdown = typeof back.markdown === "string" ? back.markdown : typeof sent.markdown === "string" ? sent.markdown : "";
+  const previous = typeof back.previousMarkdown === "string" ? back.previousMarkdown : null;
+  return {
+    title: typeof back.title === "string" ? back.title : typeof sent.title === "string" ? sent.title : "Ability",
+    markdown,
+    previous,
+    version: typeof back.version === "number" ? back.version : null,
+    unchanged: previous !== null && previous.trim() === markdown.trim(),
+  };
+}
+
+/** The ability document an `update_ability` call left, drawn like the notebook:
+ *  the page, and what this turn changed on it. */
+export function AbilityCard({ input, output }: { input: string; output: string }) {
+  const call = useMemo(() => readAbilityCall(input, output), [input, output]);
+  return <MarkdownRecordCard empty="The ability document is empty." label={call.title} markdown={call.markdown} pageTab="Ability" previous={call.previous} unchanged={call.unchanged} version={call.version} />;
+}
+
+function MarkdownRecordCard({ label, markdown, previous, version, unchanged, pageTab, empty }: {
+  label: string;
+  markdown: string;
+  previous: string | null;
+  version: number | null;
+  unchanged: boolean;
+  pageTab: string;
+  empty: string;
+}) {
+  const [view, setView] = useState<"notes" | "changes">(previous !== null && !unchanged ? "changes" : "notes");
   return (
     <div className="pb-1.5 pt-0.5">
       <div className="transcript-block min-w-0 overflow-hidden">
         <div className="flex min-w-0 items-center gap-2 border-b border-border/50 px-3 py-1.5 text-thread-tool">
-          {call.version !== null && (
-            <span className="shrink-0 rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 font-mono tabular-nums text-muted-foreground">v{call.version}</span>
+          {version !== null && (
+            <span className="shrink-0 rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 font-mono tabular-nums text-muted-foreground">v{version}</span>
           )}
-          <span className="min-w-0 flex-1 truncate text-[var(--transcript-step)]" title={call.note || undefined}>
-            {call.note || "Coach's notebook"}
+          <span className="min-w-0 flex-1 truncate text-[var(--transcript-step)]" title={label}>
+            {label}
             {unchanged && <span className="ml-1.5 text-muted-foreground">· unchanged</span>}
           </span>
           <div className="flex shrink-0 items-center gap-0.5" role="tablist">
@@ -157,19 +191,19 @@ export function NotebookCard({ input, output }: { input: string; output: string 
                 role="tab"
                 type="button"
               >
-                {option === "notes" ? "Notebook" : "Changes"}
-                {option === "changes" && <DiffCounts after={call.markdown} before={call.previous} className="ml-1" />}
+                {option === "notes" ? pageTab : "Changes"}
+                {option === "changes" && <DiffCounts after={markdown} before={previous} className="ml-1" />}
               </button>
             ))}
           </div>
         </div>
         <div className="app-scroll max-h-80 overflow-y-auto">
           {view === "changes" ? (
-            <LineDiffView after={call.markdown} before={call.previous} />
-          ) : call.markdown.trim() ? (
-            <Markdown className="px-3.5 py-2.5" source={call.markdown} />
+            <LineDiffView after={markdown} before={previous} />
+          ) : markdown.trim() ? (
+            <Markdown className="px-3.5 py-2.5" source={markdown} />
           ) : (
-            <p className="px-3 py-2 text-thread-tool text-muted-foreground">The notebook is empty.</p>
+            <p className="px-3 py-2 text-thread-tool text-muted-foreground">{empty}</p>
           )}
         </div>
       </div>

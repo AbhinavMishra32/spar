@@ -20,7 +20,7 @@ import { SaveProblem } from "../common/SaveProblem";
 import { readPublishedChallenge } from "./publishedChallenge";
 import { useRevealOnExpand } from "./useRevealOnExpand";
 import { challengeMode, diffTotals, isChallengeAuthoringTool, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
-import { NotebookCard } from "./NotebookView";
+import { AbilityCard, NotebookCard } from "./NotebookView";
 import { solveStats, spentOn, type SolveStats } from "./solveStats";
 import { Clock, DraftTree, InsightTree, QuestionTitle, Reveal, StageTree, draftFromCall, type QuestionMark } from "./StageTree";
 import type { ChallengeDraft } from "../../../shared/api";
@@ -406,7 +406,9 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
   const insight = part.tool === "record_insight" && part.phase === "done" && hasCall;
   /* So does the notebook a write left behind: the page, and what changed on it. */
   const notebook = part.tool === "update_notebook" && part.phase === "done" && hasCall;
-  const treed = staged || insight || notebook;
+  /* And an ability document, which is the same kind of page. */
+  const ability = part.tool === "update_ability" && part.phase === "done" && hasCall;
+  const treed = staged || insight || notebook || ability;
   const design = useMemo(() => (staged ? draftFromCall(part.input, part.files) : null), [staged, part.input, part.files]);
   /* A staged call's row folds its stages, not a panel of JSON: the tree is the
      account of what the call did, and its arguments and result are already
@@ -445,7 +447,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
   }, [question, landed]);
   /* A notebook is a page long; it opens when asked for rather than pushing the
      rest of the turn down every time the coach takes a note. */
-  const treeOpen = treeChoice ?? (notebook ? false : !(question && landed));
+  const treeOpen = treeChoice ?? (notebook || ability ? false : !(question && landed));
   const setTreeOpen = (next: (value: boolean) => boolean) => setTreeChoice(next(treeOpen));
 
   const label = (
@@ -558,6 +560,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           )}
           {insight && <Reveal show={treeOpen}><InsightTree input={part.input} output={part.output} /></Reveal>}
           {notebook && <Reveal show={treeOpen}><NotebookCard input={part.input} output={part.output} /></Reveal>}
+          {ability && <Reveal show={treeOpen}><AbilityCard input={part.input} output={part.output} /></Reveal>}
           {staged && <Reveal show={treeOpen}><StageTree draft={design} language={design?.language} question={question} stages={part.stages} /></Reveal>}
           {/* One rounded box, not two. The surface lives on the element that
               clips, because that element is also the one animating the height —

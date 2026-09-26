@@ -88,6 +88,13 @@ export function journeyDocument(input: TurnPayloadInput): string {
 
   sections.push(`# Journey\nNow: ${new Date().toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (the learner's local time).`);
 
+  /* First, because it is the coach's own running account of this learner:
+     everything below is the record, and this is what the record means. */
+  const notebook = store.readNotebook(trackId);
+  sections.push(notebook
+    ? `## Coach's notebook — read this first (v${notebook.version}, ${notebook.author === "learner" ? "last edited by the learner" : "last written by you"} ${ago(notebook.createdAt)})\n${notebook.markdown}`
+    : "## Coach's notebook — read this first\n_Empty. Start it with update_notebook this turn: who they are, what they are working towards, and what you have seen so far._");
+
   sections.push([
     "## Learner",
     profile ? `- ${[profile.name, profile.experience ? `${profile.experience} programmer` : "", profile.focus ? `focus: ${profile.focus}` : ""].filter(Boolean).join(" · ")}` : "- No profile yet.",
@@ -104,11 +111,6 @@ export function journeyDocument(input: TurnPayloadInput): string {
     sources ? `Problem sources: ${sources}` : "",
     practiceLine(input.practiceSummary),
   ].filter(Boolean).join("\n"));
-
-  const notebook = store.readNotebook(trackId);
-  sections.push(notebook
-    ? `## Coach's notebook (v${notebook.version}, ${notebook.author === "learner" ? "last edited by the learner" : "last written by you"} ${ago(notebook.createdAt)})\n${notebook.markdown}`
-    : "## Coach's notebook\n_Empty. Start it with update_notebook once you know something durable about this learner._");
 
   const journey = store.journey(trackId, 14);
   if (!journey.challenges.length) {
