@@ -81,7 +81,7 @@ function DialogOverlay({
       <motion.div
         animate="visible"
         className={cn(
-          "fixed inset-0 isolate z-50 bg-black/10 supports-backdrop-filter:backdrop-blur-xs",
+          "fixed inset-0 isolate z-50 bg-[var(--modal-scrim)] supports-backdrop-filter:backdrop-blur-xs",
           className
         )}
         data-slot="dialog-overlay"
@@ -114,7 +114,10 @@ function DialogContent({
         <motion.div
           animate="visible"
           className={cn(
-            "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 outline-none sm:max-w-sm data-[state=closed]:pointer-events-none",
+            /* One surface, no bands: a hairline ring for the edge, a soft
+               two-layer shadow for the lift, and generous padding carrying the
+               structure the old grey footer used to. */
+            "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-5 rounded-2xl bg-popover p-5 text-sm text-popover-foreground shadow-[0_24px_48px_-12px_oklch(0%_0_0/0.22),0_4px_12px_-4px_oklch(0%_0_0/0.08)] ring-1 ring-foreground/[0.08] outline-none will-change-transform sm:max-w-sm data-[state=closed]:pointer-events-none",
             className
           )}
           data-slot="dialog-content"
@@ -127,7 +130,7 @@ function DialogContent({
             <DialogPrimitive.Close data-slot="dialog-close" asChild>
               <Button
                 variant="ghost"
-                className="absolute top-2 right-2"
+                className="absolute top-3.5 right-3.5 size-6 rounded-full text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
                 size="icon-sm"
               >
                 <XIcon
@@ -146,7 +149,9 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2", className)}
+      /* Clear of the close button in the corner, so a long title wraps
+         before it rather than running underneath it. */
+      className={cn("flex flex-col gap-2 pr-7", className)}
       {...props}
     />
   )
@@ -164,7 +169,7 @@ function DialogFooter({
     <div
       data-slot="dialog-footer"
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "flex flex-col-reverse gap-2 pt-1 sm:flex-row sm:justify-end",
         className
       )}
       {...props}
@@ -187,7 +192,7 @@ function DialogTitle({
     <DialogPrimitive.Title
       data-slot="dialog-title"
       className={cn(
-        "font-heading text-base leading-none font-medium",
+        "font-heading text-[15px] leading-snug font-semibold tracking-[-0.01em]",
         className
       )}
       {...props}
@@ -203,7 +208,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot="dialog-description"
       className={cn(
-        "text-sm text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
+        "text-sm leading-relaxed text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground",
         className
       )}
       {...props}

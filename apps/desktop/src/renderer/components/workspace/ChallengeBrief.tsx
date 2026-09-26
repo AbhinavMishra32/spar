@@ -118,7 +118,7 @@ export function ChallengeBrief({
       )}
 
       <div className="mt-5">
-        <ProblemStatement language={brief.language} source={presented.statement} />
+        <ProblemStatement asWritten={brief.source !== null} language={brief.language} source={presented.statement} />
       </div>
 
       {brief.source?.localRunNote && (

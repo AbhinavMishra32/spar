@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
@@ -152,6 +152,12 @@ export function RunFold({
      the waiting line is the only thing in it and hiding that would leave the
      turn showing nothing at all. */
   const open = connected ? (override ?? working) : true;
+  /* Closed by the reply arriving rather than by a click — the only close that
+     compacts. A click sets the override, and from then on the fold is the
+     learner's and behaves like any other fold. */
+  const sawWorking = useRef(false);
+  if (working) sawWorking.current = true;
+  const compacting = !open && override === undefined && sawWorking.current;
   /* Unknown durations still fold — that is every turn recorded before this
      existed, and burying their steps would be a worse trade than a fold that
      cannot name its length. */
@@ -224,20 +230,27 @@ export function RunFold({
           outside the fold, kept its lift. The padding is what the clip is taken
           at; the matching negative margin gives it back, so the column and the
           gap under the fold are exactly where they were in both states. */}
+      {/* Two closes. Clicking the header shut is the ordinary fold: the contents
+          fade ahead of the height. The fold shutting by itself, the moment the
+          reply starts, is the turn handing over to the answer, and that one is
+          the lid closing — the contents hang from the bottom of the clip, stay
+          legible, and are pushed up under the header by the height shrinking,
+          with a slight squeeze, so the last lines of the work are seen being
+          shut into "Worked for" while the reply unfolds beneath. The anchor only
+          changes at full height, where either draws the same frame. */}
       <motion.div
-        className="-mx-2 -mb-1.5 overflow-hidden px-2 pb-1.5"
+        className={`-mx-2 -mb-1.5 overflow-hidden px-2 pb-1.5${compacting ? " flex flex-col justify-end" : ""}`}
         initial={false}
-        animate={{ height: open ? "auto" : 0, opacity: open ? 1 : 0 }}
-        /* Folding is the turn putting its working away, and it is watched more
-           often than it is asked for — it happens by itself the moment the reply
-           starts. So the close is unhurried enough to read as the steps being
-           filed rather than deleted, and the contents fade out ahead of the
-           height so nothing is legible while it is being squashed. */
+        animate={{ height: open ? "auto" : 0, opacity: open || compacting ? 1 : 0 }}
         transition={reduced ? { duration: 0 } : {
           height: open
             ? { type: "spring", visualDuration: 0.46, bounce: 0.05 }
-            : { type: "tween", duration: 0.36, ease: [0.32, 0.72, 0, 1] },
-          opacity: open ? { duration: 0.3, delay: 0.04 } : { duration: 0.16 },
+            : compacting
+              ? { type: "spring", visualDuration: 0.9, bounce: 0 }
+              : { type: "tween", duration: 0.55, ease: [0.32, 0.72, 0, 1] },
+          /* The click close keeps the contents readable for most of the fold and
+             only lets them go in its last stretch. */
+          opacity: open ? { duration: 0.3, delay: 0.04 } : compacting ? { duration: 0 } : { duration: 0.2, delay: 0.3, ease: "easeIn" },
         }}
       >
         {/* React 19 takes `inert` as a boolean. A closed fold is zero pixels
@@ -246,7 +259,14 @@ export function RunFold({
         {/* No clip of its own: the box above already owns the one the animation
             needs, and a second one at the column's exact edge put the shadows
             back where they were. */}
-        <div className={`min-w-0${connected ? " pt-2" : ""}`} inert={!open}>
+        <motion.div
+          animate={{ scale: compacting ? 0.97 : 1 }}
+          className={`min-w-0 shrink-0${connected ? " pt-2" : ""}`}
+          initial={false}
+          inert={!open}
+          style={{ transformOrigin: "50% 100%" }}
+          transition={reduced || !compacting ? { duration: 0 } : { type: "spring", visualDuration: 0.9, bounce: 0 }}
+        >
           {!bodyLoaded && loading && <p className="py-1 text-thread text-muted-foreground" role="status">Loading the steps…</p>}
           {!bodyLoaded && failed && (
             <button className="py-1 text-thread text-muted-foreground transition-colors hover:text-foreground" onClick={() => void load()} type="button">
@@ -254,7 +274,7 @@ export function RunFold({
             </button>
           )}
           {children}
-        </div>
+        </motion.div>
       </motion.div>
     </div>
   );

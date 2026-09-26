@@ -48,7 +48,14 @@ export type ReplayRun = {
   broke: string[];
   /** Kept only where a run produced no cases at all — C++, or a crash. */
   rawSummary?: string;
+  /** The code this run ran, path to text, when it was recorded. Snapshotted at
+   *  the moment of the run because the workspace keeps moving: without it the
+   *  only answer to "what changed between the failing run and the passing one"
+   *  was to ask the learner, who had already told the tests. */
+  code?: CodeSnapshot;
 };
+
+export type CodeSnapshot = Record<string, string>;
 
 /** One test case, followed across every run of the attempt. */
 export type ReplayCase = {
@@ -123,6 +130,9 @@ export type AttemptReplay = {
   challenge: { title: string; language: string; statement?: string };
   startedAt: number;
   endedAt: number;
+  /** When the fold was taken, so relative phrasing ("12 minutes ago") has
+   *  something to be relative to. */
+  now: number;
   open: boolean;
   /** The log itself, in recorded order. Nothing is dropped in the fold. */
   events: LogEntry[];
@@ -134,7 +144,7 @@ export type AttemptReplay = {
 };
 
 export type CaseFilter = "all" | "failed-ever" | "still-failing" | "fixed";
-export type ReplaySection = "log" | "cases" | "runs" | "timings";
+export type ReplaySection = "log" | "cases" | "runs" | "code" | "timings" | "turning-points";
 
 export type ReplayFilters = {
   sections: ReplaySection[];
@@ -148,7 +158,7 @@ export type ReplayFilters = {
   maxLines: number;
 };
 
-export const DEFAULT_SECTIONS: ReplaySection[] = ["log", "cases", "runs"];
+export const DEFAULT_SECTIONS: ReplaySection[] = ["log", "cases", "runs", "code", "turning-points"];
 
 export function foldAttempt(
   events: ReplayEvent[],
@@ -175,6 +185,10 @@ export function foldAttempt(
   let saves = 0;
   let longestGapMs = 0;
   let previous: number | null = null;
+  /* The code a run executed is written onto the command that started it (saved
+     just before), or onto the submission that it grades; the run itself lands
+     seconds later, by which time the learner may already be typing again. */
+  let pendingCode: CodeSnapshot | undefined;
 
   for (const event of ordered) {
     const offsetMs = at(event);
@@ -216,8 +230,15 @@ export function foldAttempt(
       continue;
     }
 
+    if (event.type === "command_executed" || event.type === "submission_created") {
+      pendingCode = codeSnapshot(event.payload.code) ?? pendingCode;
+      continue;
+    }
+
     if (event.type === "test_run") {
       openEdit = null;
+      const code = codeSnapshot(event.payload.code) ?? pendingCode;
+      pendingCode = undefined;
       const scope: RunScope = event.payload.scope === "visible-and-hidden" ? "visible-and-hidden" : "visible";
       const records = caseList(event.payload.cases);
       for (const record of records) {
@@ -243,6 +264,7 @@ export function foldAttempt(
         fixed: [],
         broke: [],
         ...(records.length ? {} : { rawSummary: firstLine(text(event.payload.summary) ?? "") }),
+        ...(code ? { code } : {}),
       };
       // Deltas are read against the previous run that actually saw each case: a
       // visible run cannot say whether a hidden case regressed, so comparing
@@ -303,7 +325,7 @@ export function foldAttempt(
       continue;
     }
 
-    if (event.type === "command_executed" || event.type === "file_opened" || event.type === "submission_created") continue;
+    if (event.type === "file_opened") continue;
     moments.push({ eventId: event.id, offsetMs, order: event.sequence, kind: "said", text: event.type.replace(/_/g, " ") });
   }
 
@@ -349,6 +371,7 @@ export function foldAttempt(
     },
     startedAt,
     endedAt: completion ? endedAt : now,
+    now,
     open: !completion,
     events: log,
     runs,
@@ -381,7 +404,15 @@ function describePayload(event: ReplayEvent): string {
     const summary = firstLine(text(payload.summary) ?? "");
     return `${parts.join(" ")}${!cases.length && summary ? ` output="${summary}"` : ""}`;
   }
-  if (event.type === "learner_remark") return `"${firstLine(text(payload.body) ?? "")}"`;
+  if (event.type === "learner_remark") {
+    const kind = text(payload.kind);
+    if (kind === "complexity-claim") return `claimed time ${text(payload.timeComplexity) ?? "?"}, space ${text(payload.spaceComplexity) ?? "?"}`;
+    return `${kind === "asked-agent" ? "asked the agent " : ""}"${firstLine(text(payload.body) ?? "")}"`;
+  }
+  if (event.type === "agent_message") {
+    const kind = text(payload.kind);
+    return `${kind === "reply" ? "replied " : kind ? `${kind} ` : ""}"${clip(text(payload.body) ?? "", 400)}"`;
+  }
   if (event.type === "attempt_completed" || event.type === "submission_evaluated") {
     const reason = text(payload.reason);
     const rest = pairs(payload, ["outcome", "reason"]);
@@ -503,10 +534,16 @@ export function formatSolveLog(replay: AttemptReplay, filters: Partial<ReplayFil
 
   const lines: string[] = [];
   const { stats, challenge } = replay;
+  /* Times are the learner's own wall clock, because whatever this log calls a
+     moment is what the agent will call it back to the learner. It used to be
+     "+29:12", an offset from the attempt opening that nobody but this file
+     could decode, and the agent quoted it verbatim. */
+  const at = (ms: number) => clock(replay.startedAt + ms, true);
   lines.push(`SOLVE LOG — ${challenge.title} (${challenge.language})`);
-  lines.push(`opened ${new Date(replay.startedAt).toISOString()} · ${outcomeWord(replay)} · ${stats.events} events · ${stats.runs} runs · ${stats.submissions} submissions · ${stats.saves} saves · ${stats.casesTracked} distinct test cases`);
-  lines.push(`Offsets are +mm:ss from the moment the attempt opened. Nothing here is inferred; it is what was recorded.`);
-  if (cut > 0) lines.push(`Filtered to events after the last submission at ${offset(cut)}.`);
+  lines.push(`opened ${ago(replay.startedAt, replay.now)} (${dayAndClock(replay.startedAt, replay.now)}) · it is now ${clock(replay.now)} · ${outcomeWord(replay)} · ${stats.events} events · ${stats.runs} runs · ${stats.submissions} submissions · ${stats.saves} saves · ${stats.casesTracked} distinct test cases`);
+  lines.push(`Times are the learner's local clock. Nothing here is inferred; it is what was recorded.`);
+  lines.push(`When you mention a moment to the learner, say it the way a person would — "at 6:20pm", "about 10 minutes ago", "on your third run" — never with seconds, an offset or a timestamp.`);
+  if (cut > 0) lines.push(`Filtered to events after the last submission at ${at(cut)}.`);
   if (types) lines.push(`Filtered to event types: ${[...types].join(", ")}.`);
 
   const runs = replay.runs.filter((run) => run.offsetMs >= cut);
@@ -517,11 +554,11 @@ export function formatSolveLog(replay: AttemptReplay, filters: Partial<ReplayFil
     lines.push("", `LOG (${entries.length} event${entries.length === 1 ? "" : "s"})`);
     const written: string[] = [];
     for (const event of entries) {
-      written.push(`  ${offset(event.offsetMs).padEnd(8)} #${String(event.sequence).padEnd(3)} ${event.source.padEnd(7)} ${event.type.padEnd(20)} ${event.detail}`);
+      written.push(`  ${at(event.offsetMs).padEnd(10)} #${String(event.sequence).padEnd(3)} ${event.source.padEnd(7)} ${event.type.padEnd(20)} ${event.detail}`);
       // Indented to the detail column of the line above, so a run's cases read
       // as belonging to that run rather than as events of their own.
       for (const line of event.caseLines) {
-        written.push(`  ${" ".repeat(43)}${caseDetail === "brief" ? line.replace(/ {2,}(expected|error) .*$/, "") : line}`);
+        written.push(`  ${" ".repeat(45)}${caseDetail === "brief" ? line.replace(/ {2,}(expected|error) .*$/, "") : line}`);
       }
     }
     if (written.length > maxLines) {
@@ -537,7 +574,7 @@ export function formatSolveLog(replay: AttemptReplay, filters: Partial<ReplayFil
     const width = Math.min(46, Math.max(0, ...cases.map((item) => item.name.length + 2)));
     for (const item of cases) {
       const strip = item.verdicts.filter((_, index) => (replay.runs[index]?.offsetMs ?? 0) >= cut).map(symbol).join(" ");
-      lines.push(`  ${`"${item.name}"`.padEnd(width)} ${strip.padEnd(12)}  ${caseCounts(item)}`);
+      lines.push(`  ${`"${item.name}"`.padEnd(width)} ${strip.padEnd(12)}  ${caseCounts(item, at)}`);
     }
   }
 
@@ -548,7 +585,46 @@ export function formatSolveLog(replay: AttemptReplay, filters: Partial<ReplayFil
       const extras: string[] = [];
       if (run.fixed.length) extras.push(`newly passing: ${quoteList(run.fixed)}`);
       if (run.broke.length) extras.push(`newly failing: ${quoteList(run.broke)}`);
-      lines.push(`  ${offset(run.offsetMs).padEnd(8)} ${(run.submission ? "submission" : "visible").padEnd(12)} ${run.totalCases ? `${run.passedCases}/${run.totalCases}` : run.passed ? "passed" : "failed"}${extras.length ? `   ${extras.join("   ")}` : ""}`);
+      lines.push(`  ${at(run.offsetMs).padEnd(10)} ${(run.submission ? "submission" : "visible").padEnd(12)} ${run.totalCases ? `${run.passedCases}/${run.totalCases}` : run.passed ? "passed" : "failed"}${extras.length ? `   ${extras.join("   ")}` : ""}`);
+    }
+  }
+
+  if (sections.includes("code")) {
+    lines.push("", "CODE CHANGES BETWEEN RUNS (what the learner changed before each run, against the code the previous run ran)");
+    const recorded = replay.runs.filter((run) => run.code);
+    if (!recorded.length) lines.push("  (no code was recorded with these runs — they predate snapshots; the current files are all there is)");
+    let before: CodeSnapshot | undefined;
+    for (const run of replay.runs) {
+      if (!run.code) continue;
+      const previous = before;
+      before = run.code;
+      if (run.offsetMs < cut) continue;
+      const score = run.totalCases ? `${run.passedCases}/${run.totalCases}` : run.passed ? "passed" : "failed";
+      const delta = [run.fixed.length ? `newly passing: ${quoteList(run.fixed)}` : "", run.broke.length ? `newly failing: ${quoteList(run.broke)}` : ""].filter(Boolean).join("   ");
+      lines.push(`  run ${run.ordinal} at ${at(run.offsetMs)} · ${run.submission ? "submission" : "visible"} ${score}${delta ? `   ${delta}` : ""}`);
+      if (!previous) {
+        lines.push(`    first recorded code: ${Object.entries(run.code).map(([path, body]) => `${path} (${body.split("\n").length} lines)`).join(", ")}`);
+        continue;
+      }
+      const changes = codeDiff(previous, run.code, 80);
+      lines.push(...(changes.length ? changes.map((line) => `    ${line}`) : ["    (no change to the code since the previous run)"]));
+    }
+  }
+
+  if (sections.includes("turning-points")) {
+    lines.push("", "TURNING POINTS (the runs where the score moved most, what changed in the code just before, and anything asked or said in between)");
+    const points = turningPoints(replay);
+    if (!replay.runs.length) lines.push("  (no runs recorded, so there is no point at which anything turned)");
+    else if (!points.length) lines.push("  (the score never moved between runs — read the code section and the log instead)");
+    for (const point of points) {
+      const run = point.run;
+      const label = point.kind === "first-try" ? "passed first try" : point.kind === "breakthrough" ? "breakthrough" : "jump";
+      lines.push(`  ${label} · run ${run.ordinal} at ${at(run.offsetMs)} · ${run.submission ? "submission" : "visible"} ${point.before} → ${point.after}${run.fixed.length ? `   newly passing: ${quoteList(run.fixed)}` : ""}${run.broke.length ? `   newly failing: ${quoteList(run.broke)}` : ""}`);
+      if (point.kind === "first-try") lines.push("    Nothing failed before this, so there was no stuck phase: the idea was there from the first draft. Ask what they recognised, rather than reading a change.");
+      lines.push(`    between the previous run and this one: ${point.elapsed}${point.said.length ? "" : ", nothing asked or said"}`);
+      for (const said of point.said) lines.push(`      ${said}`);
+      if (point.diff.length) lines.push(...point.diff.map((line) => `    ${line}`));
+      else if (point.kind !== "first-try") lines.push("    (no code was recorded for one side of this run, so the change itself is not available)");
     }
   }
 
@@ -557,25 +633,84 @@ export function formatSolveLog(replay: AttemptReplay, filters: Partial<ReplayFil
     lines.push(`  total on this attempt: ${duration(stats.elapsedMs)}${replay.open ? " and still open" : ""}`);
     if (stats.timeToFirstRunMs !== undefined) lines.push(`  attempt opened to first run: ${duration(stats.timeToFirstRunMs)}`);
     lines.push(`  longest gap between two recorded events: ${duration(stats.longestGapMs)}`);
-    for (const run of runs) lines.push(`  run at ${offset(run.offsetMs)}: ${run.durationMs === undefined ? "duration not recorded" : `${Math.round(run.durationMs)}ms`}`);
+    for (const run of runs) lines.push(`  run at ${at(run.offsetMs)}: ${run.durationMs === undefined ? "duration not recorded" : `${Math.round(run.durationMs)}ms`}`);
     for (const edit of replay.edits.filter((edit) => edit.lastMs >= cut)) {
-      lines.push(`  ${offset(edit.firstMs)} → ${offset(edit.lastMs)}: ${edit.path}, ${edit.saves} save${edit.saves === 1 ? "" : "s"}${edit.bytes === undefined ? "" : `, ${edit.bytes} bytes at the end`}`);
+      lines.push(`  ${at(edit.firstMs)} → ${at(edit.lastMs)}: ${edit.path}, ${edit.saves} save${edit.saves === 1 ? "" : "s"}${edit.bytes === undefined ? "" : `, ${edit.bytes} bytes at the end`}`);
     }
   }
 
   return lines.join("\n");
 }
 
+/**
+ * Where an attempt turned.
+ *
+ * The one reading this module does make, because it is mechanical rather than
+ * interpretive: which runs moved the score most, what the code diff was right
+ * before each, and what was asked or said between it and the run before. The
+ * `breakthrough` is the first run that passed everything after at least one run
+ * that did not; `jump`s are the other runs that fixed a large share of cases.
+ * What the change *meant* is still the reader's job — this only puts the three
+ * pieces of evidence for it side by side.
+ */
+export type TurningPoint = {
+  kind: "breakthrough" | "jump" | "first-try";
+  run: ReplayRun;
+  before: string;
+  after: string;
+  /** How long passed since the previous run, as words. */
+  elapsed: string;
+  /** Asks, remarks and replies logged between the previous run and this one. */
+  said: string[];
+  diff: string[];
+};
+
+export function turningPoints(replay: AttemptReplay, diffLimit = 60): TurningPoint[] {
+  const runs = replay.runs;
+  if (!runs.length) return [];
+  const score = (run: ReplayRun) => run.totalCases ? `${run.passedCases}/${run.totalCases}` : run.passed ? "passed" : "failed";
+  const complete = (run: ReplayRun) => run.passed || (run.totalCases > 0 && run.passedCases === run.totalCases);
+  const points: TurningPoint[] = [];
+  const build = (kind: TurningPoint["kind"], index: number): TurningPoint => {
+    const run = runs[index]!;
+    const previous = index > 0 ? runs[index - 1] : undefined;
+    const priorCode = [...runs.slice(0, index)].reverse().find((item) => item.code)?.code;
+    const said = replay.events
+      .filter((event) => event.offsetMs <= run.offsetMs && event.offsetMs >= (previous?.offsetMs ?? 0) && (event.type === "hint_requested" || event.type === "learner_remark" || event.type === "agent_message"))
+      .map((event) => `${event.type === "agent_message" ? "agent" : event.type === "hint_requested" ? "hint" : "learner"} at ${clock(replay.startedAt + event.offsetMs)}: ${event.detail}`);
+    return {
+      kind,
+      run,
+      before: previous ? score(previous) : "nothing run",
+      after: score(run),
+      elapsed: previous ? duration(run.offsetMs - previous.offsetMs) : `${duration(run.offsetMs)} after opening`,
+      said,
+      diff: kind !== "first-try" && priorCode && run.code ? codeDiff(priorCode, run.code, diffLimit) : [],
+    };
+  };
+  const breakthrough = runs.findIndex((run, index) => complete(run) && runs.slice(0, index).some((earlier) => !complete(earlier)));
+  if (breakthrough >= 0) points.push(build("breakthrough", breakthrough));
+  else if (complete(runs[0]!)) points.push(build("first-try", 0));
+  const jumps = runs
+    .map((run, index) => ({ run, index }))
+    .filter(({ run, index }) => index !== breakthrough && run.fixed.length >= Math.max(2, Math.ceil(run.totalCases * 0.3)))
+    .sort((left, right) => right.run.fixed.length - left.run.fixed.length)
+    .slice(0, 2)
+    .sort((left, right) => left.index - right.index);
+  for (const jump of jumps) points.push(build("jump", jump.index));
+  return points.sort((left, right) => left.run.ordinal - right.run.ordinal);
+}
+
 const LEGEND = "P passed, F failed, S skipped, - not run in that run (a hidden case only runs on a submission).";
 
-function caseCounts(item: ReplayCase): string {
+function caseCounts(item: ReplayCase, at: (ms: number) => string): string {
   const facts = [
     item.hidden ? "hidden" : "visible",
     `${item.passes} pass${item.passes === 1 ? "" : "es"}`,
     `${item.failures} failure${item.failures === 1 ? "" : "s"}`,
   ];
-  if (item.fixedAtMs !== undefined) facts.push(`first passed after failing at ${offset(item.fixedAtMs)}`);
-  if (item.regressed) facts.push(`failed again at ${offset(item.lastFailure?.atMs ?? 0)}`);
+  if (item.fixedAtMs !== undefined) facts.push(`first passed after failing at ${at(item.fixedAtMs)}`);
+  if (item.regressed) facts.push(`failed again at ${at(item.lastFailure?.atMs ?? 0)}`);
   return facts.join(", ");
 }
 
@@ -609,6 +744,117 @@ function quoteList(names: string[]): string {
 
 /* ---- Shared formatting, used by the report and by the panel -------------- */
 
+/** A wall-clock time the way a person says it, in the machine's own zone:
+ *  "6:20pm", or "6:20:14pm" where the log needs to order a busy minute. */
+export function clock(ms: number, seconds = false): string {
+  const date = new Date(ms);
+  const hours = date.getHours();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${hours % 12 || 12}:${pad(date.getMinutes())}${seconds ? `:${pad(date.getSeconds())}` : ""}${hours < 12 ? "am" : "pm"}`;
+}
+
+/** "just now", "3 minutes ago", "2 hours ago", "yesterday", "5 days ago". */
+export function ago(ms: number, now = Date.now()): string {
+  const minutes = Math.max(0, Math.floor((now - ms) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24 && sameDay(ms, now)) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.max(1, Math.round((startOfDay(now) - startOfDay(ms)) / 86_400_000));
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** "today at 6:20pm", "yesterday at 6:20pm", "Sep 12 at 6:20pm". */
+export function dayAndClock(ms: number, now = Date.now()): string {
+  if (sameDay(ms, now)) return `today at ${clock(ms)}`;
+  if (sameDay(ms, now - 86_400_000)) return `yesterday at ${clock(ms)}`;
+  return `${new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ${clock(ms)}`;
+}
+
+function startOfDay(ms: number): number {
+  const date = new Date(ms);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function sameDay(left: number, right: number): boolean {
+  return startOfDay(left) === startOfDay(right);
+}
+
+/**
+ * What changed between two snapshots, file by file, as `-`/`+` lines with a line
+ * of context either side and `@@ line N` where each change starts. A plain LCS
+ * over lines: the files are one solution each, and a readable diff of forty
+ * lines matters here far more than speed. Capped at `limit` lines overall.
+ */
+export function codeDiff(before: CodeSnapshot, after: CodeSnapshot, limit = 80): string[] {
+  const out: string[] = [];
+  const paths = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+  for (const path of paths) {
+    const left = before[path];
+    const right = after[path];
+    if (left === right) continue;
+    if (left === undefined) { out.push(`${path}: new file`); continue; }
+    if (right === undefined) { out.push(`${path}: removed`); continue; }
+    out.push(`${path}:`);
+    out.push(...lineDiff(left.split("\n"), right.split("\n")));
+  }
+  if (out.length <= limit) return out;
+  return [...out.slice(0, limit), `(${out.length - limit} more diff line${out.length - limit === 1 ? "" : "s"} omitted)`];
+}
+
+function lineDiff(left: string[], right: string[]): string[] {
+  /* Only the stretch between the common head and tail goes through the table,
+     so its size is the part that moved rather than the whole file. */
+  let head = 0;
+  while (head < left.length && head < right.length && left[head] === right[head]) head += 1;
+  let tail = 0;
+  while (tail < left.length - head && tail < right.length - head && left[left.length - 1 - tail] === right[right.length - 1 - tail]) tail += 1;
+  const a = left.slice(head, left.length - tail);
+  const b = right.slice(head, right.length - tail);
+  type Op = { kind: " " | "-" | "+"; line: string; at: number };
+  const ops: Op[] = left.slice(0, head).map((line, index) => ({ kind: " ", line, at: index + 1 }));
+  if (a.length * b.length > 250_000) {
+    ops.push(...a.map((line) => ({ kind: "-" as const, line, at: head + 1 })), ...b.map((line, index) => ({ kind: "+" as const, line, at: head + index + 1 })));
+  } else {
+    const table = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+    for (let i = a.length - 1; i >= 0; i -= 1) {
+      for (let j = b.length - 1; j >= 0; j -= 1) {
+        table[i]![j] = a[i] === b[j] ? table[i + 1]![j + 1]! + 1 : Math.max(table[i + 1]![j]!, table[i]![j + 1]!);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i] === b[j]) { ops.push({ kind: " ", line: a[i]!, at: head + j + 1 }); i += 1; j += 1; }
+      else if (j < b.length && (i >= a.length || table[i]![j + 1]! > table[i + 1]![j]!)) { ops.push({ kind: "+", line: b[j]!, at: head + j + 1 }); j += 1; }
+      else { ops.push({ kind: "-", line: a[i]!, at: head + j + 1 }); i += 1; }
+    }
+  }
+  ops.push(...right.slice(right.length - tail).map((line, index) => ({ kind: " " as const, line, at: right.length - tail + index + 1 })));
+
+  // One line of context either side of each change; a gap starts a new hunk.
+  const keep = ops.map((op, index) => op.kind !== " " || ops[index - 1]?.kind === "-" || ops[index - 1]?.kind === "+" || ops[index + 1]?.kind === "-" || ops[index + 1]?.kind === "+");
+  const lines: string[] = [];
+  for (const [index, op] of ops.entries()) {
+    if (!keep[index]) continue;
+    if (!keep[index - 1]) lines.push(`@@ line ${op.at}`);
+    lines.push(`${op.kind} ${op.line}`);
+  }
+  return lines;
+}
+
+/** The code a payload carries: `{ files: { path: text } }` on a run, or a
+ *  submission's `{ path, text }`. */
+function codeSnapshot(value: unknown): CodeSnapshot | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const record = value as Record<string, unknown>;
+  if (typeof record.path === "string" && typeof record.text === "string") return { [record.path]: record.text };
+  const files = record.files;
+  if (!files || typeof files !== "object") return undefined;
+  const snapshot = Object.fromEntries(Object.entries(files as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  return Object.keys(snapshot).length ? snapshot : undefined;
+}
+
 export function offset(ms: number): string {
   const total = Math.max(0, Math.round(ms / 1_000));
   const hours = Math.floor(total / 3_600);
@@ -639,6 +885,11 @@ function text(value: unknown): string | undefined {
 
 function numeric(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function clip(value: string, limit: number): string {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
 }
 
 function firstLine(value: string): string {

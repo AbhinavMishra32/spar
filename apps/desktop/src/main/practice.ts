@@ -7,7 +7,7 @@ import {
 } from "@spar/practice";
 import { connectPracticeMcp, PRACTICE_READ_TOOLS, type PracticeMcpConnection } from "@spar/practice/mcp";
 import { practiceProblemSchema, practiceRegionSchema, PRACTICE_SOURCES } from "@spar/practice";
-import type { ChallengeSource, Language, QuestionDesign } from "@spar/domain";
+import { itemRating, type ChallengeSource, type Language, type QuestionDesign } from "@spar/domain";
 import { clearCodeforcesSignIn, clearLeetCodeSignIn, signInToCodeforces, signInToLeetCode } from "./practiceSignIn.js";
 import { launchCodeforcesSessionBrowser, type CodeforcesBrowser } from "./codeforcesBrowser.js";
 import type { AuthService } from "./auth.js";
@@ -366,6 +366,7 @@ export class PracticeService {
       url: problem.url,
       difficulty: problem.difficulty,
       languageSlug: sourceLanguage?.slug ?? language,
+      languages: [...new Set(problem.languages.map((entry) => entry.language))],
       remoteJudge,
       scratchRun: problem.source === "leetcode" && remoteJudge,
       localCaseCount: harness.supported ? harness.cases.length : 0,
@@ -458,19 +459,28 @@ export class PracticeService {
    * content blocks. The connection is built on first use and torn down whenever
    * the credential changes, so a reconnect is picked up without a restart.
    */
-  async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  async callTool(name: string, args: Record<string, unknown>, providers: PracticeSourceId[] = PRACTICE_SOURCES.map(({ id }) => id)): Promise<unknown> {
     if (!PRACTICE_READ_TOOLS.some((tool) => tool.name === name)) {
       /* Not a lookup failure — a refusal. The judging tools exist on the server
          for external clients; Spar's agent is not one of them. */
       throw new Error(`"${name}" is not a practice tool Spar's agent may call.`);
     }
     if (name === "search_practice_problems") {
-      const replies = await Promise.all(PRACTICE_SOURCES.map(async ({ id: source }) => {
-        const result = await (await this.mcp(source)).call(name, args) as Record<string, unknown>;
-        const problems = Array.isArray(result.problems)
-          ? result.problems.map((problem) => ({ ...(problem as Record<string, unknown>), source, sourceName: practiceSource(source).name }))
-          : [];
-        return { source, result, problems };
+      /* Only the providers the session allows. One failing provider is a note
+         on its row, not a failed search: the other can still answer. */
+      const searched = PRACTICE_SOURCES.filter(({ id }) => providers.includes(id));
+      const replies = await Promise.all(searched.map(async ({ id: source }) => {
+        try {
+          const calls = searchCallsFor(source, args);
+          const results = await Promise.all(calls.map(async (call) => await (await this.mcp(source)).call(name, call) as Record<string, unknown>));
+          const problems = interleaveProviderResults(results.map((result) => Array.isArray(result.problems)
+            ? result.problems.map((problem) => ({ ...(problem as Record<string, unknown>), source, sourceName: practiceSource(source).name }))
+            : []));
+          const result = { total: results.reduce((count, entry) => count + Number(entry.total ?? 0), 0), returned: problems.length, note: results.map((entry) => entry.note).filter(Boolean).join(" ") || undefined };
+          return { source, result, problems };
+        } catch (error) {
+          return { source, result: { total: 0, returned: 0, note: `${practiceSource(source).name} search failed: ${error instanceof Error ? error.message : String(error)}` } as Record<string, unknown>, problems: [] };
+        }
       }));
       const limit = Number(args.limit ?? 8);
       const problems = interleaveProviderResults(replies.map((reply) => reply.problems)).slice(0, limit);
@@ -480,8 +490,8 @@ export class PracticeService {
         problems,
         sources: replies.map(({ source, result }) => ({ source, name: practiceSource(source).name, returned: Number(result.returned ?? 0), note: result.note })),
         note: problems.length
-          ? "Results come from every registered problem provider; a connection adds account history and remote judging. Preserve `source` with the slug when reading or assigning one."
-          : "No provider matched. Loosen one filter or write the challenge yourself.",
+          ? `Results come from ${searched.map(({ id }) => practiceSource(id).name).join(" and ")}; a connection adds account history and remote judging. Preserve \`source\` with the slug when reading or assigning one.`
+          : "No provider matched. Loosen one filter at a time — the parent concept, a free-text query, or a neighbouring rating.",
       };
     }
     const source = args.source;
@@ -675,6 +685,35 @@ function casesFor(problem: PracticeProblem): PracticeCase[] {
 /** Round-robin rather than concatenation: when each provider returns a full page,
  * concatenating and trimming would make the registry's first provider the only
  * one the agent ever sees. Provider order is configuration, not relevance. */
+/**
+ * The calls one provider needs to answer a search.
+ *
+ * A rating window is native to Codeforces and passed through. LeetCode has no
+ * number, only three bands, and one difficulty per query — so a window becomes
+ * one query per band whose price falls inside it, or the nearest band when none
+ * does. An explicit difficulty always wins.
+ */
+export function searchCallsFor(source: PracticeSourceId, args: Record<string, unknown>): Array<Record<string, unknown>> {
+  const min = typeof args.minRating === "number" ? args.minRating : undefined;
+  const max = typeof args.maxRating === "number" ? args.maxRating : undefined;
+  if (source !== "leetcode" || (min === undefined && max === undefined)) return [args];
+  const { minRating: _min, maxRating: _max, ...rest } = args;
+  if (rest.difficulty) return [rest];
+  const bands = leetcodeBandsFor(min, max);
+  const limit = Number(rest.limit ?? 8);
+  return bands.map((difficulty) => ({ ...rest, difficulty, limit: Math.max(1, Math.ceil(limit / bands.length)) }));
+}
+
+export function leetcodeBandsFor(min: number | undefined, max: number | undefined): Array<"easy" | "medium" | "hard"> {
+  const bands = (["easy", "medium", "hard"] as const).map((difficulty) => ({ difficulty, price: itemRating({ source: "leetcode", difficulty }) }));
+  const low = min ?? 0;
+  const high = max ?? Number.POSITIVE_INFINITY;
+  const inside = bands.filter((band) => band.price >= low && band.price <= high).map((band) => band.difficulty);
+  if (inside.length) return inside;
+  const centre = Number.isFinite(high) ? (low + high) / 2 : low;
+  return [bands.reduce((best, band) => Math.abs(band.price - centre) < Math.abs(best.price - centre) ? band : best).difficulty];
+}
+
 export function interleaveProviderResults<T>(groups: T[][]): T[] {
   const rows: T[] = [];
   const longest = Math.max(0, ...groups.map((group) => group.length));

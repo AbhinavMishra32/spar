@@ -1,6 +1,6 @@
 {
   "name": "@spar/desktop",
-  "version": "0.6.11",
+  "version": "0.6.12",
   "private": true,
   "type": "module",
   "description": "An adaptive coding gym that writes your next exercise from your own attempt history.",
@@ -25,8 +25,13 @@
     "@earendil-works/pi-agent-core": "0.87.1",
     "@earendil-works/pi-ai": "0.87.1",
     "@earendil-works/pi-telemetry": "0.87.1",
+    "@fontsource-variable/fira-code": "^5.3.0",
     "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
     "@fontsource/poppins": "^5.3.0",
+    "@hpcc-js/wasm-graphviz": "^1.29.1",
     "@mariozechner/pi-ai": "^0.73.1",
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/react": "^2.1.7",
@@ -131,6 +136,10 @@
       {
         "from": "build/runtime-icons",
         "to": "runtime-icons"
+      },
+      {
+        "from": "build/skills",
+        "to": "skills"
       }
     ],
     "asarUnpack": [

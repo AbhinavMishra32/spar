@@ -24,6 +24,15 @@ export function presentSourcedStatement(sourceText: string, source: ChallengeSou
   const footerAt = statement.lastIndexOf(footer);
   if (footerAt >= 0) statement = statement.slice(0, footerAt);
 
+  if (source.source === "leetcode") {
+    /* LeetCode's worked examples are a `<pre>` of Input / Output / Explanation,
+       which arrive as a plain fence. Drawn as code they get line numbers, a
+       copy button and a horizontal scroll that cuts the explanation off
+       mid-sentence — none of which a worked example wants. Tagged here so the
+       renderer can draw them the way the site does: a quoted block that wraps. */
+    statement = statement.replace(/```[^\n]*\n(\s*Input\s*:[\s\S]*?)\n```/g, (_match, body: string) => `\`\`\`example\n${body}\n\`\`\``);
+  }
+
   if (source.source === "codeforces") {
     statement = stripLegacyCodeforcesHeader(statement);
     statement = statement.replace(/\${3}([\s\S]*?)\${3}/g, (_match, body: string) => `\`${readableLatex(body)}\``);

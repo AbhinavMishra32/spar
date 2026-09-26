@@ -12,7 +12,7 @@ import { duration } from "../../../shared/attemptReplay";
  * It stops the moment the attempt is graded — work after that is still recorded,
  * but it is no longer being timed against anything.
  */
-export function AttemptClock({ startedAt, completedAt }: { startedAt: string; completedAt: string | null }) {
+export function AttemptClock({ startedAt, completedAt, className }: { startedAt: string; completedAt: string | null; className?: string }) {
   const start = Date.parse(startedAt);
   const end = completedAt ? Date.parse(completedAt) : null;
   const [now, setNow] = useState(() => Date.now());
@@ -34,6 +34,7 @@ export function AttemptClock({ startedAt, completedAt }: { startedAt: string; co
       className={cn(
         "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 text-ui-sm tabular-nums",
         running ? "text-muted-foreground" : "text-muted-foreground/60",
+        className,
       )}
       title={running ? "Time on this attempt — every moment in your solve replay is measured from here" : "Time this attempt took"}
     >

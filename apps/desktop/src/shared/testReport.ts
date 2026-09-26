@@ -29,6 +29,12 @@ export type TestFailure = {
   actual?: string;
   operator?: string;
   location?: string;
+  /** What the case printed, when the judge captured it. */
+  stdout?: string;
+  /** The error the case died with — a traceback, a compile error — kept whole
+   *  rather than cut to a headline, because its later lines name the line that
+   *  threw. */
+  stderr?: string;
 };
 
 export type TestCaseResult = {
@@ -47,6 +53,12 @@ export type TestReport = {
   failed: number;
   skipped: number;
   durationMs?: number;
+  /** The whole suite's size, when the writer knows it is larger than the cases it
+   *  printed — a judge that stopped at its first failure out of 36. */
+  suiteSize?: number;
+  /** The judge's own word for a failure — "Runtime Error", "Time Limit Exceeded" —
+   *  when it said something more specific than a wrong answer. */
+  status?: string;
 };
 
 /**
@@ -68,7 +80,8 @@ export function stoppedAtFailure(output: string): boolean {
 export const EMPTY_REPORT: TestReport = { parsed: false, cases: [], passed: 0, failed: 0, skipped: 0 };
 
 const POINT = /^(not ok|ok)\s+(\d+)\s*-?\s*(.*)$/;
-const SUMMARY = /^#\s+(tests|pass|fail|skipped|todo|duration_ms)\s+([\d.]+)$/;
+const SUMMARY = /^#\s+(tests|pass|fail|skipped|todo|duration_ms|suite)\s+([\d.]+)$/;
+const STATUS = /^#\s+status\s+(.+)$/;
 
 export function parseTestOutput(output: string): TestReport {
   if (!output.includes("TAP version")) return parseCheckLines(output);
@@ -76,6 +89,7 @@ export function parseTestOutput(output: string): TestReport {
   const lines = output.replace(/\r\n/g, "\n").split("\n");
   const cases: TestCaseResult[] = [];
   let durationMs: number | undefined;
+  let judgeStatus: string | undefined;
   const totals: Record<string, number> = {};
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -88,6 +102,11 @@ export function parseTestOutput(output: string): TestReport {
         if (summary[1] === "duration_ms") durationMs = value;
         else totals[summary[1]!] = value;
       }
+      continue;
+    }
+    const said = STATUS.exec(line.trim());
+    if (said) {
+      judgeStatus = said[1]!.trim();
       continue;
     }
 
@@ -121,6 +140,10 @@ export function parseTestOutput(output: string): TestReport {
     if (operator) failure.operator = operator;
     const location = block.fields.location;
     if (location) failure.location = shortLocation(location);
+    const stdout = block.fields.stdout;
+    if (stdout) failure.stdout = stdout;
+    const stderr = block.fields.stderr;
+    if (stderr) failure.stderr = stderr;
 
     const duration = Number(block.fields.duration_ms);
 
@@ -143,6 +166,8 @@ export function parseTestOutput(output: string): TestReport {
     failed: totals.fail ?? cases.filter((item) => item.status === "failed").length,
     skipped: totals.skipped ?? cases.filter((item) => item.status === "skipped").length,
     ...(durationMs === undefined ? {} : { durationMs }),
+    ...(totals.suite && totals.suite > cases.length ? { suiteSize: totals.suite } : {}),
+    ...(judgeStatus ? { status: judgeStatus } : {}),
   };
 }
 

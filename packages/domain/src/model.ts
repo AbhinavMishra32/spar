@@ -85,6 +85,24 @@ export const questionSchema = z.object({
 });
 export type Question = z.infer<typeof questionSchema>;
 
+/**
+ * Where a session's challenges may come from.
+ *
+ * `spar` is a challenge the agent writes and the host validates; the other two
+ * are real problems taken from that provider. A session with `spar` left out is
+ * one whose learner asked for real problems only, so the agent has to find the
+ * best-fitting problem at a provider rather than writing one — and the host
+ * refuses every authoring call, its own fallback included, so the setting holds
+ * even when a turn goes wrong. Never empty: a session with nowhere to take a
+ * problem from could never be set one.
+ */
+export const PROBLEM_SOURCES = ["spar", "leetcode", "codeforces"] as const;
+export const problemSourceSchema = z.enum(PROBLEM_SOURCES);
+export type ProblemSource = z.infer<typeof problemSourceSchema>;
+export const problemSourcesSchema = z.array(problemSourceSchema).min(1).max(PROBLEM_SOURCES.length)
+  .transform((sources) => PROBLEM_SOURCES.filter((source) => sources.includes(source)));
+export const DEFAULT_PROBLEM_SOURCES: ProblemSource[] = [...PROBLEM_SOURCES];
+
 export const sessionSummarySchema = z.object({
   id,
   trackId: id.nullable().optional(),
@@ -102,7 +120,9 @@ export const sessionSummarySchema = z.object({
   /** How the learner filed this session. Both are shelf position rather than
    *  learning state, so neither is evidence and neither touches `updatedAt`. */
   pinnedAt: isoDate.nullable(),
-  archivedAt: isoDate.nullable()
+  archivedAt: isoDate.nullable(),
+  /** Where this session's challenges may come from — see `problemSourcesSchema`. */
+  problemSources: problemSourcesSchema.default(DEFAULT_PROBLEM_SOURCES),
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 
@@ -147,6 +167,10 @@ export const challengeSourceSchema = z.object({
   /** The source's language slug, so a submission is posted with the exact string
    *  the source handed over rather than one Spar guessed. */
   languageSlug: z.string(),
+  /** Every language the source publishes a starter for, which is every language
+   *  the learner can switch this problem to. Absent on challenges mounted before
+   *  it was recorded. */
+  languages: z.array(languageSchema).optional(),
   remoteJudge: z.boolean(),
   /** Whether the source offers a non-recording remote sample run. */
   scratchRun: z.boolean().default(false),

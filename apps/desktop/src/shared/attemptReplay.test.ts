@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { foldAttempt, formatSolveLog, type ReplayEvent } from "./attemptReplay.js";
+import { ago, codeDiff, foldAttempt, formatSolveLog, turningPoints, type ReplayEvent } from "./attemptReplay.js";
+
+// The log prints local wall-clock times; pin the zone so they are the same everywhere.
+process.env.TZ = "UTC";
 
 const START = Date.parse("2026-08-03T10:00:00.000Z");
 
@@ -211,13 +214,13 @@ describe("formatSolveLog", () => {
 
     expect(log).toMatch(/"shrinks on an equal value"\s+F P P F\s+visible, 2 passes, 2 failures/);
     expect(log).toMatch(/"restores after two removals"\s+- - F P\s+hidden, 1 pass, 1 failure/);
-    expect(log).toContain("failed again at +25:00");
+    expect(log).toContain("failed again at 10:25:00am");
   });
 
   it("reports each run's newly passing and newly failing cases", () => {
     const log = formatSolveLog(foldAttempt(attempt()), { sections: ["runs"] });
 
-    expect(log).toContain(`+09:00   visible      2/2   newly passing: "shrinks on an equal value"`);
+    expect(log).toContain(`10:09:00am visible      2/2   newly passing: "shrinks on an equal value"`);
     expect(log).toContain(`newly failing: "shrinks on an equal value"`);
     expect(log).not.toContain("LOG (");
   });
@@ -233,8 +236,8 @@ describe("formatSolveLog", () => {
   it("filters to what happened after the last submission", () => {
     const log = formatSolveLog(foldAttempt(attempt()), { scope: "since-last-submission", sections: ["log", "runs"] });
 
-    expect(log).toContain("Filtered to events after the last submission at +25:00");
-    expect(log).not.toContain("+06:00");
+    expect(log).toContain("Filtered to events after the last submission at 10:25:00am");
+    expect(log).not.toContain("10:06:00am");
   });
 
   it("filters the case history down to what is still failing", () => {
@@ -252,5 +255,77 @@ describe("formatSolveLog", () => {
     expect(body).toHaveLength(4);
     // The tail is kept, so the most recent thing that happened is always present.
     expect(body.at(-1)).toContain("PASS  handles a single element");
+  });
+});
+
+describe("code between runs", () => {
+  function coded(): ReplayEvent[] {
+    sequence = 0;
+    const before = "function f(xs) {\n  let best = 0;\n  for (const x of xs) {\n    shrink();\n  }\n  return best;\n}";
+    const after = "function f(xs) {\n  let best = 0;\n  for (const x of xs) {\n    best = Math.max(best, size());\n    shrink();\n  }\n  return best;\n}";
+    return [
+      event("attempt_started", 0, {}, "system"),
+      event("command_executed", 5, { command: "test", code: { files: { "src/w.js": before }, truncated: false } }),
+      event("test_run", 5, { scope: "visible", passed: false, cases: [testCase("records the window", "failed")] }, "runner"),
+      event("command_executed", 9, { command: "test", code: { files: { "src/w.js": after }, truncated: false } }),
+      event("test_run", 9, { scope: "visible", passed: true, cases: [testCase("records the window", "passed")] }, "runner"),
+    ];
+  }
+
+  it("shows what changed before a run beside the cases it fixed", () => {
+    const log = formatSolveLog(foldAttempt(coded()), { sections: ["code"] });
+
+    expect(log).toContain(`run 2 at 10:09:00am · visible 1/1   newly passing: "records the window"`);
+    expect(log).toContain("+     best = Math.max(best, size());");
+    expect(log).toContain("first recorded code: src/w.js (7 lines)");
+    expect(log).not.toContain("- ");
+  });
+
+  it("says so when runs carry no code", () => {
+    const log = formatSolveLog(foldAttempt(attempt()), { sections: ["code"] });
+    expect(log).toContain("no code was recorded with these runs");
+  });
+
+  it("diffs line by line with a line of context and where the change starts", () => {
+    expect(codeDiff({ a: "x\ny\nz" }, { a: "x\nY\nz" })).toEqual(["a:", "@@ line 1", "  x", "- y", "+ Y", "  z"]);
+    expect(codeDiff({ a: "same" }, { a: "same" })).toEqual([]);
+  });
+});
+
+describe("ago", () => {
+  it("says how long ago the way a person would", () => {
+    const now = Date.parse("2026-08-03T18:00:00.000Z");
+    expect(ago(now - 20_000, now)).toBe("just now");
+    expect(ago(now - 3 * 60_000, now)).toBe("3 minutes ago");
+    expect(ago(now - 2 * 3_600_000, now)).toBe("2 hours ago");
+    expect(ago(now - 26 * 3_600_000, now)).toBe("yesterday");
+  });
+});
+
+describe("turningPoints", () => {
+  it("names the first complete run after an incomplete one as the breakthrough, and big fixes as jumps", () => {
+    const points = turningPoints(foldAttempt(attempt()));
+    expect(points.map((point) => [point.kind, point.run.ordinal])).toEqual([["breakthrough", 2], ["jump", 4]]);
+    expect(points[0]).toMatchObject({ before: "1/2", after: "2/2" });
+  });
+
+  it("carries what was said between the two runs, so help is visible beside the fix", () => {
+    const events = attempt();
+    events.splice(4, 0, event("learner_remark", 7, { kind: "asked-agent", body: "why does it shrink too far?" }));
+    events.splice(5, 0, event("agent_message", 7.5, { kind: "reply", body: "Look at when the left edge moves." }, "agent"));
+    const [breakthrough] = turningPoints(foldAttempt(events));
+    expect(breakthrough?.said.join("\n")).toMatch(/why does it shrink too far/);
+    expect(breakthrough?.said.join("\n")).toMatch(/left edge moves/);
+  });
+
+  it("calls a pass on the very first run a first try, and prints the section", () => {
+    sequence = 0;
+    const events = [
+      event("attempt_started", 0, {}, "system"),
+      event("test_run", 3, { scope: "visible", exitCode: 0, passed: true, passedCases: 2, failedCases: 0, cases: [testCase("a", "passed"), testCase("b", "passed")] }, "runner"),
+    ];
+    const replay = foldAttempt(events);
+    expect(turningPoints(replay).map((point) => point.kind)).toEqual(["first-try"]);
+    expect(formatSolveLog(replay)).toMatch(/TURNING POINTS/);
   });
 });

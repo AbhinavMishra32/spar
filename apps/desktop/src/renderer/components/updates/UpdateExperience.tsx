@@ -116,7 +116,7 @@ export function UpdateExperience({ api }: { api: SparApi }) {
           <div className="app-scroll max-h-[19rem] overflow-y-auto px-6 py-4">
             {state?.notes ? <Markdown source={state.notes} /> : <p className="text-ui text-muted-foreground">This release includes improvements and fixes across Spar.</p>}
           </div>
-          <DialogFooter className="m-0 rounded-none px-6">
+          <DialogFooter className="px-6 pb-5">
             <Button onClick={() => setOffer(false)} variant="secondary">Later</Button>
             <Button onClick={() => void update()}><Download />Update and restart<ArrowRight /></Button>
           </DialogFooter>
@@ -138,7 +138,7 @@ export function UpdateExperience({ api }: { api: SparApi }) {
           <div className="app-scroll max-h-[22rem] overflow-y-auto px-6 py-5">
             {state?.changelog && <Markdown source={state.changelog.notes} />}
           </div>
-          <DialogFooter className="m-0 items-center rounded-none px-6 sm:justify-between">
+          <DialogFooter className="items-center px-6 pb-5 sm:justify-between">
             <span className="hidden items-center gap-1.5 text-ui text-muted-foreground sm:flex"><ShieldCheck className="size-3.5" />Installed and verified</span>
             <Button onClick={dismissChangelog}>Let’s spar <ArrowRight /></Button>
           </DialogFooter>

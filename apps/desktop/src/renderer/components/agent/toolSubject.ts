@@ -36,7 +36,15 @@ const VERBS: Record<string, [done: string, running: string]> = {
      the row is reporting a write to it, and the learner should be able to read
      the word "memory" and know that is what changed. */
   "flow-memory-patch": ["Updated memory", "Updating memory"],
+  /* Named by the card, because the card is what comes back later. */
+  record_insight: ["Filed for review:", "Filing for review:"],
+  load_skill: ["Used", "Using"],
 };
+
+/** A skill's name as a reader says it: `challenge-figures` → `Challenge Figures`. */
+export function skillTitle(name: string): string {
+  return name.split(/[-_\s]+/).filter(Boolean).map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+}
 
 /** What each memory file is *about*, in the learner's words.
  *
@@ -103,6 +111,10 @@ export function toolSubject(tool: string, input: string, running = false): ToolS
   }
 
   switch (tool) {
+    case "load_skill": {
+      const name = text(args.name);
+      return name ? { verb, subject: `${skillTitle(name)} skill` } : null;
+    }
     case "read-file":
     case "write-file": {
       const path = text(args.path);
@@ -143,6 +155,10 @@ export function toolSubject(tool: string, input: string, running = false): ToolS
       if (files.length === 0) return null;
       const topics = memoryTopics(files);
       return { verb, subject: topics ? `about ${topics}` : "about everything it knows" };
+    }
+    case "record_insight": {
+      const title = text(args.title);
+      return title ? { verb, subject: oneLine(title, 56) } : null;
     }
     default:
       return null;

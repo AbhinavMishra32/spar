@@ -102,3 +102,19 @@ export const IconChevronRight = (p: Props) => <Glyph {...p} d="M8.79295 5.29289C
  * identical hardware.
  */
 export const IconDot = ({ className }: { className?: string }) => <span className={className ?? "size-1.5 rounded-full bg-[currentColor] opacity-35"} />;
+
+/**
+ * Skill — a closed book with a spark cut out of its cover: instructions the
+ * agent reached for, not a file of the learner's. Even-odd, so the spark is a
+ * hole the row's colour shows through rather than a second shape to tint.
+ */
+export const IconSkill = (p: Props) => (
+  <svg aria-hidden="true" fill="none" focusable="false" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" {...p}>
+    <path
+      clipRule="evenodd"
+      d="M6 2H17a2 2 0 0 1 2 2v13a1 1 0 0 1-1 1H7a1 1 0 0 0 0 2h11a1 1 0 1 1 0 2H7a3 3 0 0 1-3-3V4a2 2 0 0 1 2-2ZM11.5 5.25l1.05 3.2 3.2 1.05-3.2 1.05-1.05 3.2-1.05-3.2-3.2-1.05 3.2-1.05 1.05-3.2Z"
+      fill="currentColor"
+      fillRule="evenodd"
+    />
+  </svg>
+);

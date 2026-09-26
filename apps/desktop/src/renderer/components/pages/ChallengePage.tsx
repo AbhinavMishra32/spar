@@ -13,13 +13,22 @@ import {
   RotateCcw,
   ShieldCheck,
   XCircle,
+  Lightbulb,
   WrapText,
+  Check,
+  Clock,
+  Flag,
+  Layers,
 } from "lucide-react";
-import type { ChallengeDetail, RatingPoint } from "@spar/domain";
-import type { SparApi } from "../../../shared/api";
+import type { ChallengeDetail, RatingPoint, ReviewCardDetail, ReviewOverview } from "@spar/domain";
+import type { ReviewFiled, SparApi } from "../../../shared/api";
+import { CardNotes, MemoryLine, ReviewTimeline } from "../review/InsightCard";
+import { RATING_LABEL, dueLabel } from "../review/schedule";
 import { cn } from "@/lib/utils";
 import { fileName, message, relativeTime } from "@/lib/format";
-import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
+import { EDITOR_OPTIONS, EDITOR_THEME_DARK, EDITOR_THEME_LIGHT, editorFontOptions, intellisenseOptions } from "@/lib/monaco-theme";
+import { useCodeFont } from "@/lib/code-font";
+import { useIntellisense } from "@/hooks/use-intellisense";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
 import { SETTLE_MS, useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
@@ -89,8 +98,15 @@ function Brief({
   learnerRating,
   onOpenExternal,
   onOpenSession,
+  reviewing,
+  reviewVersion,
 }: {
   api: SparApi | undefined;
+  /** Solving this again as a review: everything that would give the answer away
+   *  — the insight, past submissions, the run log — is held back. */
+  reviewing: boolean;
+  /** Bumped when a review of this card is filed, so the panel re-reads. */
+  reviewVersion: number;
   /** What the concept chips need to preview and open. */
   concepts?: ConceptContext | undefined;
   detail: ChallengeDetail;
@@ -105,6 +121,14 @@ function Brief({
 }) {
   const { summary } = detail;
   const scroller = useRef<HTMLDivElement>(null);
+  const [insight, setInsight] = useState<ReviewCardDetail | null>(null);
+  useEffect(() => {
+    if (!api || typeof api.reviewForChallenge !== "function") return;
+    let cancelled = false;
+    setInsight(null);
+    void api.reviewForChallenge(summary.id).then((value) => { if (!cancelled) setInsight(value); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [api, summary.id, reviewVersion]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -197,20 +221,49 @@ function Brief({
             only contains. Coming back to a challenge, "what did I send, and what
             did it fail on" is the whole of what is being asked; the log of saves
             and runs is the long version, for when the short one is not enough. */}
-        <Section title="SUBMISSIONS">
-          <ChallengeSubmissions api={api} challengeId={summary.id} focusId={focusSubmissionId} />
-        </Section>
+        {reviewing ? (
+          <p className="mt-6 flex items-start gap-2 rounded-lg border border-border bg-[var(--color-background-elevated-secondary)] px-3 py-2 text-ui leading-[1.6] text-muted-foreground">
+            <Clock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+            Your past submissions, the run log and what made it click are hidden until this review is filed — the point is to
+            find the idea again, not to read it.
+          </p>
+        ) : (
+          <>
+            {/* What the agent took from the solve, and every time it has come
+                back since. Above the submissions: the code is how it was solved
+                once, this is what is meant to stay. */}
+            {insight && (
+              <Section title="WHAT YOU LEARNED">
+                <div className="rounded-xl border border-border bg-card px-3.5 py-3">
+                  <MemoryLine card={insight.card} className="mb-2" />
+                  <CardNotes card={insight.card} />
+                  {insight.logs.length > 0 && (
+                    <div className="mt-4">
+                      <p className="mb-1 text-ui-sm font-medium tracking-[0.04em] text-muted-foreground/75">Review history</p>
+                      <ReviewTimeline logs={insight.logs} />
+                    </div>
+                  )}
+                </div>
+              </Section>
+            )}
 
-        {detail.timeline.length > 0 && (
-          <Section title="WHAT HAPPENED">
-            <ChallengeHistory entries={detail.timeline} />
-          </Section>
+            <Section title="SUBMISSIONS">
+              <ChallengeSubmissions api={api} challengeId={summary.id} focusId={focusSubmissionId} />
+            </Section>
+
+            {detail.timeline.length > 0 && (
+              <Section title="WHAT HAPPENED">
+                <ChallengeHistory entries={detail.timeline} />
+              </Section>
+            )}
+          </>
         )}
 
         <p className="mt-8 flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-ui-sm leading-[1.6] text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
-          This is a practice copy. Running and checking here proves nothing to Spar — no attempt is recorded, your
-          abilities do not move, and the session this came from is untouched.
+          {reviewing
+            ? "This is a review, not an attempt. Passing the full check files it — first check and quick is Easy, several checks or a long time is Hard. Your abilities and the session are untouched."
+            : "This is a practice copy. Running and checking here proves nothing to Spar — no attempt is recorded, your abilities do not move, and the session this came from is untouched."}
         </p>
         </ChallengeBrief>
       </ChallengeRoll>
@@ -230,11 +283,20 @@ export function ChallengePage({
   onError,
   onExpandSidebar,
   onOpenSession,
+  onReviewFiled,
+  onReviewEnd,
+  review,
   seed,
   trail,
 }: {
   api: SparApi | undefined;
   challengeId: string;
+  /** Set when this challenge was opened to be solved again as a spaced review. */
+  review?: { cardId: string; promptId?: string | undefined } | null | undefined;
+  onReviewFiled?: ((overview: ReviewOverview) => void) | undefined;
+  /** Leave review mode, back to the queue — or to this card's flashcard, when
+   *  the learner chose not to solve it after all. */
+  onReviewEnd?: ((options?: { flashcard?: boolean }) => void) | undefined;
   /** What the concept chips need to preview and open. */
   concepts?: ConceptContext | undefined;
   dark: boolean;
@@ -274,6 +336,8 @@ export function ChallengePage({
   const [terminal, setTerminal] = useState("");
   const [running, setRunning] = useState(false);
   const [wordWrap, setWordWrap] = useState(false);
+  const [intellisense, toggleIntellisense] = useIntellisense();
+  const [codeFont] = useCodeFont();
   const [checking, setChecking] = useState(false);
   /* Which suite produced what the result panel is showing — held past the end of
      the run, because the panel needs it while it is showing that output. */
@@ -282,6 +346,11 @@ export function ChallengePage({
   const [settled, setSettled] = useState(false);
   const [outcome, setOutcome] = useState<RunOutcome>(null);
   const [resultTab, setResultTab] = useState<ResultTab>("testcase");
+  /* A re-solve review in progress: when the blank copy opened, how many full
+     checks it has taken, and what was filed when it ended. */
+  const [reviewRun, setReviewRun] = useState<{ key: string; startedAt: number; checks: number; filed: ReviewFiled | null; filing: boolean } | null>(null);
+  const [reviewVersion, setReviewVersion] = useState(0);
+  const reviewing = Boolean(review && reviewRun && !reviewRun.filed);
 
   const resultPanel = useAnimatedResultPanel();
   const visibleRunId = useRef<string | null>(null);
@@ -440,6 +509,11 @@ export function ChallengePage({
       terminalRef.current = `${terminalRef.current}${result.output}${result.output.endsWith("\n") ? "" : "\n"}${result.summary}\n`;
       setTerminal(terminalRef.current);
       setOutcome({ kind: result.outcome, summary: result.summary });
+      if (reviewing && reviewRun) {
+        const checks = reviewRun.checks + 1;
+        if (result.outcome === "passed") void fileReview(true, checks);
+        else setReviewRun((current) => (current ? { ...current, checks } : current));
+      }
     } catch (error) {
       onError(message(error));
     } finally {
@@ -463,6 +537,39 @@ export function ChallengePage({
     }
   };
 
+  /* Entering review mode throws the practice edits away first, so the review
+     starts from the same blank files the challenge did, and starts the clock. */
+  const reviewKey = review && detail?.summary.id === challengeId ? `${challengeId}:${review.cardId}:${review.promptId ?? ""}` : null;
+  useEffect(() => {
+    if (!reviewKey || !api) {
+      if (!reviewKey) setReviewRun(null);
+      return;
+    }
+    if (reviewRun?.key === reviewKey) return;
+    setReviewRun({ key: reviewKey, startedAt: Date.now(), checks: 0, filed: null, filing: false });
+    void api.resetChallenge({ challengeId }).then((next) => {
+      if (next) adopt(next);
+      setOutcome(null);
+      terminalRef.current = "";
+      setTerminal("");
+    }).catch((error) => onError(message(error)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reviewKey]);
+
+  const fileReview = async (passed: boolean, checks: number) => {
+    if (!api || !review || !reviewRun || reviewRun.filed || reviewRun.filing) return;
+    setReviewRun({ ...reviewRun, checks, filing: true });
+    try {
+      const filed = await api.resolveReview({ cardId: review.cardId, ...(review.promptId ? { promptId: review.promptId } : {}), passed, checks, elapsedMs: Date.now() - reviewRun.startedAt });
+      setReviewRun((current) => (current ? { ...current, checks, filed, filing: false } : current));
+      setReviewVersion((value) => value + 1);
+      onReviewFiled?.(filed.overview);
+    } catch (error) {
+      setReviewRun((current) => (current ? { ...current, filing: false } : current));
+      onError(message(error));
+    }
+  };
+
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
@@ -481,7 +588,6 @@ export function ChallengePage({
 
   const mountedEditor = useRef<Parameters<OnMount>[0] | null>(null);
   const mount: OnMount = (editor, monaco) => {
-    editor.updateOptions({ fontLigatures: true });
     mountedEditor.current = editor;
     editors.current = monaco;
   };
@@ -558,7 +664,17 @@ export function ChallengePage({
         actions={
           <>
             {outcome && <Verdict outcome={outcome} />}
-            <button
+            {review && reviewRun && (
+              <ReviewActions
+                checks={reviewRun.checks}
+                filed={reviewRun.filed}
+                filing={reviewRun.filing}
+                onDone={() => onReviewEnd?.()}
+                onFlashcard={() => onReviewEnd?.({ flashcard: true })}
+                onGiveUp={() => void fileReview(false, reviewRun.checks)}
+              />
+            )}
+            {!reviewing && <button
               className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
               disabled={busy || !edited}
               onClick={() => void reset()}
@@ -567,7 +683,7 @@ export function ChallengePage({
             >
               {resetting ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
               Reset
-            </button>
+            </button>}
             <button
               className="inline-flex h-6 items-center gap-1.5 rounded-md border border-border px-2 text-ui transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
               disabled={busy}
@@ -580,7 +696,7 @@ export function ChallengePage({
             </button>
             <button
               className="inline-flex h-6 items-center gap-1.5 rounded-md bg-[var(--color-background-elevated-secondary)] px-2 text-ui font-medium transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
-              disabled={busy || detail.hiddenTestCount === 0}
+              disabled={busy || (detail.hiddenTestCount === 0 && !reviewing)}
               onClick={() => void check()}
               title={
                 detail.hiddenTestCount
@@ -604,7 +720,9 @@ export function ChallengePage({
            and the session is named in full on the card under the statement — a
            second, quieter copy of it here is the kind of difference that makes two
            views of one challenge read as two pages. */
-        title={trail && trail.stops.length > 1
+        title={review && reviewRun
+          ? <ReviewTitle checks={reviewRun.checks} filed={reviewRun.filed} startedAt={reviewRun.startedAt} />
+          : trail && trail.stops.length > 1
           ? <ChallengeStepper currentId={detail.summary.id} trail={trail} />
           : `Challenge ${detail.summary.ordinal}`}
       />
@@ -627,6 +745,8 @@ export function ChallengePage({
             learnerRating={learnerRating}
             onOpenExternal={(url) => void api?.openExternal(url)}
             onOpenSession={() => onOpenSession(detail.summary.sessionId)}
+            reviewing={reviewing}
+            reviewVersion={reviewVersion}
           />
         </Panel>
 
@@ -660,6 +780,16 @@ export function ChallengePage({
                   <div className="ml-auto flex items-center gap-1 pr-1">
                     <span className="mr-1 text-ui-sm text-muted-foreground/60">⌘S</span>
                     <button
+                      aria-label="IntelliSense"
+                      aria-pressed={intellisense}
+                      className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", intellisense && "bg-accent text-foreground")}
+                      onClick={toggleIntellisense}
+                      title={intellisense ? "Turn off suggestions and hints" : "Turn on suggestions and hints"}
+                      type="button"
+                    >
+                      <Lightbulb className="size-3.5" />
+                    </button>
+                    <button
                       aria-label="Word wrap"
                       aria-pressed={wordWrap}
                       className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", wordWrap && "bg-accent text-foreground")}
@@ -692,20 +822,7 @@ export function ChallengePage({
                       setDirty((current) => ({ ...current, [activePath]: true }));
                     }}
                     onMount={mount}
-                    options={{
-                      wordWrap: wordWrap ? "on" : "off",
-                      fontSize: 12.5,
-                      lineHeight: 1.65,
-                      fontFamily: "SF Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
-                      minimap: { enabled: false },
-                      padding: { top: 12, bottom: 12 },
-                      scrollBeyondLastLine: false,
-                      renderLineHighlight: "line",
-                      smoothScrolling: true,
-                      cursorBlinking: "smooth",
-                      readOnly: Boolean(activeFile?.readOnly),
-                      scrollbar: { verticalScrollbarSize: 9, horizontalScrollbarSize: 9 },
-                    }}
+                    options={{ ...EDITOR_OPTIONS, ...intellisenseOptions(intellisense), ...editorFontOptions(codeFont), wordWrap: wordWrap ? "on" : "off", readOnly: Boolean(activeFile?.readOnly) }}
                     /* Namespaced, and never empty. `@monaco-editor/react` keys
                        models by this path and disposes the one it is leaving when
                        it changes — and the workspace's editor passes no path at
@@ -766,6 +883,70 @@ export function ChallengePage({
         </Panel>
       </PanelGroup>
     </div>
+  );
+}
+
+/**
+ * A review in progress, as the toolbar's title: the clock and the checks spent,
+ * where the challenge's name and stepper would be. It sits in the row the page
+ * already has instead of a second strip under it — a review is a mode of this
+ * page, not something laid over it. Once filed, what it was filed as.
+ */
+function ReviewTitle({ startedAt, checks, filed }: { startedAt: number; checks: number; filed: ReviewFiled | null }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (filed) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [filed]);
+  if (filed) {
+    const rating = filed.log.rating as 1 | 2 | 3 | 4;
+    const next = `Next review ${dueLabel(filed.card.dueAt).toLowerCase()}`;
+    return (
+      <span className="flex min-w-0 items-center gap-2" title={`${filed.log.feedback ?? ""} ${next}.`.trim()}>
+        <Check className="size-3.5 shrink-0 text-[var(--success)]" />
+        <span className="shrink-0">Filed as {RATING_LABEL[rating]}</span>
+        <span className="truncate text-ui font-normal text-muted-foreground">{next}</span>
+      </span>
+    );
+  }
+  const seconds = Math.max(0, Math.floor((now - startedAt) / 1_000));
+  const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+  return (
+    <span className="flex min-w-0 items-center gap-2" title="Solve it from a blank file. Passing “Check all” files the review.">
+      <Clock className="size-3.5 shrink-0 text-[var(--warning)]" />
+      <span className="shrink-0">Review</span>
+      <span className="shrink-0 text-ui font-normal tabular-nums text-muted-foreground">
+        {clock} · {checks} check{checks === 1 ? "" : "s"}
+      </span>
+    </span>
+  );
+}
+
+/** The review's own controls, ahead of Run and Check all. */
+function ReviewActions({ checks, filed, filing, onGiveUp, onDone, onFlashcard }: { checks: number; filed: ReviewFiled | null; filing: boolean; onGiveUp(): void; onDone(): void; onFlashcard(): void }) {
+  const quiet = "inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45";
+  if (filed) {
+    return (
+      <button className="inline-flex h-6 items-center gap-1.5 rounded-md bg-foreground px-2 text-ui font-medium text-background transition-opacity hover:opacity-90" onClick={onDone} type="button">
+        Back to reviews <ArrowRight className="size-3" />
+      </button>
+    );
+  }
+  return (
+    <>
+      {/* Not solving it after all is not giving up: nothing is filed, and the
+          card is answered instead. Only before a check, while that is still true. */}
+      {checks === 0 && (
+        <button className={quiet} disabled={filing} onClick={onFlashcard} title="Leave without filing and answer this card's question instead" type="button">
+          <Layers className="size-3" /> Answer the card instead
+        </button>
+      )}
+      <button className={quiet} disabled={filing} onClick={onGiveUp} title="File this review as Again — it comes back tomorrow" type="button">
+        {filing ? <Loader2 className="size-3 animate-spin" /> : <Flag className="size-3" />} Give up
+      </button>
+      <span className="mx-1 h-4 w-px bg-border" />
+    </>
   );
 }
 

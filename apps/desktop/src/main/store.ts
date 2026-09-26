@@ -6,10 +6,12 @@ import { challengeFileEntries, codePreview } from "./challengeFiles.js";
 import { foldSubmissions, submissionSummary, type SubmissionContext, type SubmissionRecord, type SubmissionRow } from "../shared/submissions.js";
 import { decay as decayRating, updateRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, INITIAL_RATING, INITIAL_VOLATILITY, type Rating } from "@spar/domain";
 import { challengeResult, elapsedDays } from "./rating.js";
+import { ReviewLedger } from "./reviews.js";
+import { DEFAULT_FSRS, DEFAULT_PROBLEM_SOURCES, problemSourcesSchema, type ProblemSource } from "@spar/domain";
 import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, savedProblemSchema, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SavedProblem, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
 
-type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null };
-const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at";
+type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null; problem_sources:string|null };
+const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at,problem_sources";
 type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:Language; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; validation_report:string; replaces_question_id:string|null; source_ref:string|null; introduction_reason:string; created_at:string };
 type ConceptRow = { id:string; slug:string; title:string; kind:string; parent_slug:string|null; description:string };
 type TrackRow = { id:string;title:string;goal:string;status:Track["status"];language:string|null;emphasis:string;priorities:string;investigating:string;monitoring:string;created_at:string;updated_at:string };
@@ -105,6 +107,8 @@ export class LocalStore {
   private readonly db: Database.Database;
   /** The last timestamp `stamp()` handed out. See it for why this exists. */
   private lastStamp = "";
+  /** Insight cards and their spaced-review schedule. See reviews.ts. */
+  readonly reviews: ReviewLedger;
   constructor(path: string) {
     this.db = new Database(path);
     this.db.pragma("journal_mode = WAL");
@@ -197,6 +201,7 @@ export class LocalStore {
       CREATE TABLE IF NOT EXISTS agent_usage (run_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL, turn_kind TEXT NOT NULL, status TEXT NOT NULL, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, cached_input_tokens INTEGER NOT NULL DEFAULT 0, cache_write_tokens INTEGER NOT NULL DEFAULT 0, cost_usd REAL NOT NULL DEFAULT 0, latency_ms INTEGER NOT NULL DEFAULT 0, started_at TEXT NOT NULL, completed_at TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS agent_usage_completed_idx ON agent_usage(completed_at);
     `);
+    this.reviews = new ReviewLedger(this.db, () => ({ ...DEFAULT_FSRS, desiredRetention: Math.min(0.97, Math.max(0.75, Number(this.getSetting<number>("review-desired-retention", DEFAULT_FSRS.desiredRetention)) || DEFAULT_FSRS.desiredRetention)) }));
     this.ensureColumn("questions", "replaces_question_id", "TEXT");
     /* Indexed here rather than up in the schema block, because the column it
        indexes is added by the line above it. On a store that already had the
@@ -252,6 +257,9 @@ export class LocalStore {
     this.ensureColumn("sessions", "archived_at", "TEXT");
     this.ensureColumn("sessions", "track_id", "TEXT");
     this.ensureColumn("sessions", "context", "TEXT NOT NULL DEFAULT 'training'");
+    /* Null means every source, which is what a session written before this
+       column existed was allowed — and what one nobody narrowed still is. */
+    this.ensureColumn("sessions", "problem_sources", "TEXT");
     // Remove the exact prototype fixture; it was never learner data.
     this.db.prepare("DELETE FROM sessions WHERE title = ? AND original_goal = ? AND objective = ?").run("Deep JavaScript Runtime", "Understand JavaScript runtime behavior deeply", "Build reliable reasoning about reference ownership and asynchronous state.");
     // Earlier builds stored a pending question as plain text. Upgrade it once so
@@ -271,11 +279,11 @@ export class LocalStore {
   /** Pinned first, then last touched. Archived rows stay in the list — they are
    *  filed away, not deleted, and their attempts still count toward progress. */
   listSessions(): SessionSummary[] { return (this.db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY (pinned_at IS NULL), updated_at DESC`).all() as SessionRow[]).map(row => this.toSession(row)); }
-  createSession(goal: string, trackId?: string): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;const resolvedTrack=trackId??this.activeTrack()?.id??this.createTrackRecord(goal,title).id;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id) VALUES (?,?,?,?,?,'[]','[]',0,?,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now,resolvedTrack);this.setActiveTrack(resolvedTrack);this.enqueue("session-create",{sessionId,goal,title,trackId:resolvedTrack,createdAt:now});this.queueLearningState();return{sessionId}; }
+  createSession(goal: string, trackId?: string, problemSources?: ProblemSource[]): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;const resolvedTrack=trackId??this.activeTrack()?.id??this.createTrackRecord(goal,title).id;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,problem_sources) VALUES (?,?,?,?,?,'[]','[]',0,?,?,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now,resolvedTrack,storedProblemSources(problemSources));this.setActiveTrack(resolvedTrack);this.enqueue("session-create",{sessionId,goal,title,trackId:resolvedTrack,createdAt:now});this.queueLearningState();return{sessionId}; }
 
   createBaselineSession(){const baseline=this.getBaseline();if(baseline.sessionId&&this.readSession(baseline.sessionId))return{sessionId:baseline.sessionId};const sessionId=randomUUID();const now=new Date().toISOString();const goal="Establish a direct adaptive programming baseline.";this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,context) VALUES (?,?,?,?,?,'[]','[]',0,?,?,NULL,'baseline')").run(sessionId,"Baseline",goal,"Calibrate current problem-solving ability with the smallest useful sequence of direct coding probes.","planning",now,now);this.enqueue("session-create",{sessionId,goal,title:"Baseline",context:"baseline",createdAt:now});const importedEvidenceCount=Math.max(baseline.importedEvidenceCount,this.abilityStates().reduce((sum,item)=>sum+item.evidenceCount,0));this.setBaseline({status:"in-progress",sessionId,importedEvidenceCount});return{sessionId};}
 
-  createTrack(goal:string,title?:string,language?:Language|null){const track=this.createTrackRecord(goal,title,language);const session=this.createSession(goal,track.id);return{track,sessionId:session.sessionId};}
+  createTrack(goal:string,title?:string,language?:Language|null,problemSources?:ProblemSource[]){const track=this.createTrackRecord(goal,title,language);const session=this.createSession(goal,track.id,problemSources);return{track,sessionId:session.sessionId};}
   deleteTrack(trackId: string): boolean {
     return this.db.transaction(() => {
       if (!this.db.prepare("SELECT id FROM tracks WHERE id=?").get(trackId)) return false;
@@ -517,6 +525,10 @@ export class LocalStore {
    * search and replay shares the same hard visibility boundary. */
   readAttempt(id:string){return (this.db.prepare(`SELECT id,attempt_id,sequence,type,occurred_at,payload,source,schema_version FROM attempt_events
     WHERE attempt_id=? AND sequence>=(SELECT MAX(sequence) FROM attempt_events WHERE attempt_id=? AND type='attempt_started') ORDER BY sequence`).all(id,id) as Array<{id:string;attempt_id:string;sequence:number;type:string;occurred_at:string;payload:string;source:string;schema_version:number}>).map((event)=>({id:event.id,attemptId:event.attempt_id,sequence:event.sequence,type:event.type,occurredAt:event.occurred_at,payload:JSON.parse(event.payload),source:event.source,schemaVersion:event.schema_version}));}
+  /** Every segment of an attempt, resets and reopens included. Only for a reader
+   *  that asked for the earlier segments by name: the default boundary above is
+   *  what evidence is judged on. */
+  readAttemptHistory(id:string){return (this.db.prepare(`SELECT id,attempt_id,sequence,type,occurred_at,payload,source,schema_version FROM attempt_events WHERE attempt_id=? ORDER BY sequence`).all(id) as Array<{id:string;attempt_id:string;sequence:number;type:string;occurred_at:string;payload:string;source:string;schema_version:number}>).map((event)=>({id:event.id,attemptId:event.attempt_id,sequence:event.sequence,type:event.type,occurredAt:event.occurred_at,payload:JSON.parse(event.payload),source:event.source,schemaVersion:event.schema_version}));}
   /** What the challenge behind an attempt is, so a replay of the attempt can name
    *  it. Separate from `readChallenge`, which returns the whole design and every
    *  attempt at it — far more than a replay header needs. */
@@ -615,6 +627,10 @@ export class LocalStore {
      preference, so a session pinned on one machine is pinned on the next. */
   setSessionPinned(sessionId:string,pinned:boolean){const pinnedAt=pinned?new Date().toISOString():null;this.db.prepare("UPDATE sessions SET pinned_at=? WHERE id=?").run(pinnedAt,sessionId);this.enqueue("session-flags",{sessionId,pinnedAt});}
   /** Archiving also unpins: a session cannot be both put away and held at the top. */
+  /** Local only, like the rest of how a session is configured on this machine:
+   *  the server's session record has no field for it. */
+  setSessionProblemSources(sessionId:string,sources:ProblemSource[]){const parsed=problemSourcesSchema.parse(sources);const result=this.db.prepare("UPDATE sessions SET problem_sources=? WHERE id=?").run(storedProblemSources(parsed),sessionId);if(result.changes!==1)throw new Error("Session not found");return parsed;}
+  problemSourcesForSession(sessionId:string):ProblemSource[]{const row=this.db.prepare("SELECT problem_sources FROM sessions WHERE id=?").get(sessionId) as {problem_sources:string|null}|undefined;return parseProblemSources(row?.problem_sources??null);}
   setSessionArchived(sessionId:string,archived:boolean){const archivedAt=archived?new Date().toISOString():null;this.db.prepare("UPDATE sessions SET archived_at=?,pinned_at=CASE WHEN ? THEN NULL ELSE pinned_at END WHERE id=?").run(archivedAt,archived?1:0,sessionId);this.enqueue("session-flags",{sessionId,archivedAt,...(archived?{pinnedAt:null}:{})});}
   /* Permanent, and the learner is told so before it runs. Cascades cover the
      session's own children; attempt events and checkpoints are keyed on ids
@@ -1508,7 +1524,7 @@ export class LocalStore {
        reintroduce them one machine at a time. */
     });this.backfillTracks();this.backfillLearningTracks();this.reconcileEveryAbility();this.ensureRating();}
 
-  clearAccountData(){this.db.transaction(()=>{for(const table of ["sync_outbox","pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","learner_ability_state","tracks","ability_documents","learner_profile","practice_problems","practice_problem_links"])this.db.prepare(`DELETE FROM ${table}`).run();
+  clearAccountData(){this.db.transaction(()=>{this.reviews.clear();for(const table of ["sync_outbox","pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","learner_ability_state","tracks","ability_documents","learner_profile","practice_problems","practice_problem_links"])this.db.prepare(`DELETE FROM ${table}`).run();
     /* Seeded concepts are shipped vocabulary and stay. A concept the agent
        invented is not: it names something this learner was working on, and
        serving it to whoever signs in next would leak that. */
@@ -1720,7 +1736,7 @@ export class LocalStore {
      uploading the account to itself. */
   private restoring=false;
   private enqueue(kind:string,payload:unknown){if(this.restoring)return;this.db.prepare("INSERT INTO sync_outbox (id,kind,payload,created_at) VALUES (?,?,?,?)").run(randomUUID(),kind,JSON.stringify(payload),new Date().toISOString());}
-  private toSession(row:SessionRow):SessionSummary{const questions=this.db.prepare("SELECT id,title,status FROM questions WHERE session_id=? ORDER BY ordinal").all(row.id) as Array<{id:string;title:string;status:SessionSummary["questionTitles"][number]["status"]}>;const active=questions.find(q=>q.status==="active");const focus=(this.db.prepare("SELECT ability_title FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 3").all(row.id) as Array<{ability_title:string}>).map(v=>v.ability_title);return{id:row.id,trackId:row.track_id,context:row.context,title:row.title,originalGoal:row.original_goal,objective:row.objective,status:row.status,currentFocus:focus,completedQuestions:questions.filter(q=>q.status==="completed").length,activeQuestion:active?{id:active.id,title:active.title,ordinal:questions.indexOf(active)+1}:null,questionTitles:questions,totalSeconds:row.total_seconds,updatedAt:row.updated_at,pinnedAt:row.pinned_at,archivedAt:row.archived_at};}
+  private toSession(row:SessionRow):SessionSummary{const questions=this.db.prepare("SELECT id,title,status FROM questions WHERE session_id=? ORDER BY ordinal").all(row.id) as Array<{id:string;title:string;status:SessionSummary["questionTitles"][number]["status"]}>;const active=questions.find(q=>q.status==="active");const focus=(this.db.prepare("SELECT ability_title FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 3").all(row.id) as Array<{ability_title:string}>).map(v=>v.ability_title);return{id:row.id,trackId:row.track_id,context:row.context,title:row.title,originalGoal:row.original_goal,objective:row.objective,status:row.status,currentFocus:focus,completedQuestions:questions.filter(q=>q.status==="completed").length,activeQuestion:active?{id:active.id,title:active.title,ordinal:questions.indexOf(active)+1}:null,questionTitles:questions,totalSeconds:row.total_seconds,updatedAt:row.updated_at,pinnedAt:row.pinned_at,archivedAt:row.archived_at,problemSources:parseProblemSources(row.problem_sources)};}
 }
 
 /** A concept kind the agent named, or the safest default. "engineering" is that
@@ -1798,3 +1814,15 @@ const TRANSCRIPT_ACTIVITY_WINDOW=12;
 function countActivity(value:string|null):number{if(!value)return 0;try{const parsed=JSON.parse(value) as unknown;return Array.isArray(parsed)?parsed.length:0;}catch{return 0;}}
 
 function parseActivity(value:string|null):AgentActivityStep[]{if(!value)return[];try{const parsed=JSON.parse(value) as unknown;if(!Array.isArray(parsed))return[];return parsed.flatMap((entry)=>{const step=agentActivityStepSchema.safeParse(entry);return step.success?[step.data]:[];});}catch{return[];}}
+
+/** Every source is stored as null, so the default stays one spelling. */
+function storedProblemSources(sources: ProblemSource[] | undefined): string | null {
+  if (!sources) return null;
+  const parsed = problemSourcesSchema.parse(sources);
+  return parsed.length === DEFAULT_PROBLEM_SOURCES.length ? null : JSON.stringify(parsed);
+}
+
+function parseProblemSources(value: string | null): ProblemSource[] {
+  if (!value) return [...DEFAULT_PROBLEM_SOURCES];
+  try { return problemSourcesSchema.parse(JSON.parse(value)); } catch { return [...DEFAULT_PROBLEM_SOURCES]; }
+}

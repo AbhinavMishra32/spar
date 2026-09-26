@@ -29,6 +29,19 @@ describe("the window of problems worth setting", () => {
     expect(monitoring.minRating).toBeGreaterThan(diagnostic.minRating);
   });
 
+  /* Traced 2026-09-25: a new learner's band started above the "new" ceiling and
+     the window collapsed to 1282-1282, flagging a LeetCode easy (1200) — the
+     problem the cap exists to send them to — as too easy. */
+  it("ends a capped beginner's window at the ceiling instead of collapsing above it", () => {
+    // Provisional still, but risen past the start after a few passes.
+    const risen = { rating: 1700, deviation: 150, volatility: 0.06 };
+    const window = trainingWindow({ rating: risen, abilityStatus: "uncertain", experience: "new" });
+    const uncapped = trainingWindow({ rating: risen, abilityStatus: "uncertain", experience: "senior" });
+    expect(uncapped.minRating).toBeGreaterThan(1200);
+    expect(window.maxRating).toBe(1200);
+    expect(window.maxRating - window.minRating).toBeGreaterThanOrEqual(150);
+  });
+
   it("widens while the rating is still a guess, because more problems are plausibly the right one", () => {
     const unsure = trainingWindow({ rating: UNRATED, abilityStatus: "developing", experience: "senior" });
     const measured = trainingWindow({ rating: rated, abilityStatus: "developing", experience: "senior" });

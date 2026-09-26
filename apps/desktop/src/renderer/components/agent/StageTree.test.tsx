@@ -25,4 +25,11 @@ describe("a finished build", () => {
     const html = renderToStaticMarkup(<StageTree stages={[...build.slice(0, 3), stage("stage-9", "outcome", "Not published", "failed")]} />);
     expect(html).toContain("FIRST_FAILURE");
   });
+
+  it("tells a validate-and-repair loop as one line", () => {
+    const html = renderToStaticMarkup(<StageTree stages={build} />);
+    expect(html).toContain("Validation passed");
+    expect(html).toContain("after 1 repair");
+    expect(html).not.toContain(">Validation failed<");
+  });
 });

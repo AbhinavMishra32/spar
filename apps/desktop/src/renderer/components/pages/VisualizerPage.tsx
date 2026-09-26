@@ -25,7 +25,9 @@ import type { Language } from "@spar/domain";
 import { dialect } from "@spar/visualizer";
 import { cn } from "@/lib/utils";
 import { canvasSubject, traceVerdict } from "@/lib/visualizer";
-import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
+import { EDITOR_OPTIONS, EDITOR_THEME_DARK, EDITOR_THEME_LIGHT, editorFontOptions, intellisenseOptions } from "@/lib/monaco-theme";
+import { useCodeFont } from "@/lib/code-font";
+import { useIntellisense } from "@/hooks/use-intellisense";
 import type { SparApi } from "../../../shared/api";
 import { useVisualizer } from "../../hooks/use-visualizer";
 import { Button } from "@/components/ui/button";
@@ -90,6 +92,8 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
   const editorApi = useRef<Parameters<OnMount>[0] | null>(null);
   const lineMark = useRef<ReturnType<Parameters<OnMount>[0]["createDecorationsCollection"]> | null>(null);
   const [editorReady, setEditorReady] = useState(false);
+  const [intellisense] = useIntellisense();
+  const [codeFont] = useCodeFont();
 
   const frame = state.trace?.frames[state.index];
   const previous = state.index > 0 ? state.trace?.frames[state.index - 1] : undefined;
@@ -227,19 +231,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                 language={spoken.editorLanguage}
                 onChange={(value) => state.setCode(value ?? "")}
                 onMount={mountEditor}
-                options={{
-                  automaticLayout: true,
-                  fontLigatures: true,
-                  fontSize: 12.5,
-                  minimap: { enabled: false },
-                  overviewRulerLanes: 0,
-                  padding: { top: 10, bottom: 10 },
-                  renderLineHighlight: "none",
-                  scrollBeyondLastLine: false,
-                  scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
-                  tabSize: 4,
-                  wordWrap: "on",
-                }}
+                options={{ ...EDITOR_OPTIONS, ...intellisenseOptions(intellisense), ...editorFontOptions(codeFont), automaticLayout: true, padding: { top: 10, bottom: 10 }, renderLineHighlight: "none", tabSize: 4, wordWrap: "on" }}
                 theme={dark ? EDITOR_THEME_DARK : EDITOR_THEME_LIGHT}
                 value={state.code}
               />

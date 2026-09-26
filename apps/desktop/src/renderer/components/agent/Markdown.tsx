@@ -6,6 +6,7 @@ import { Check, Code2, Copy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 import { parseReference, Reference, REFERENCE_KINDS, useMarkdownLinks } from "./MarkdownLinks";
+import { Figure } from "./Figure";
 import { parse, type Block } from "./markdownBlocks";
 
 /** Inline spans: `code`, **bold**, *italic*, and real links.
@@ -188,7 +189,7 @@ function InlineCode({ body }: { body: string }) {
  * elements rather than as HTML — there is no markup to inject, only text and a
  * colour.
  */
-function Colorized({ body, language, follow = false, className }: { body: string; language: string; follow?: boolean; className?: string }) {
+export function Colorized({ body, language, follow = false, className }: { body: string; language: string; follow?: boolean; className?: string }) {
   const { theme } = useCodeTheme();
   const [colored, setColored] = useState<{ body: string; spans: Span[] } | null>(null);
   const pre = useRef<HTMLPreElement>(null);
@@ -229,7 +230,7 @@ function Colorized({ body, language, follow = false, className }: { body: string
   }, [body, spans]);
 
   return (
-    <pre className={cn("code-block-body app-scroll text-thread text-[var(--code-foreground)]", className)} ref={pre} tabIndex={0} aria-label={`${language || "Plain text"} code`}>
+    <pre className={cn("code-block-body app-scroll text-[calc(var(--text-thread)-1px)] leading-[1.6] text-[var(--code-foreground)]", className)} ref={pre} tabIndex={0} aria-label={`${language || "Plain text"} code`}>
       <code>
         {lines.map((line, index) => (
           <span className="code-block-line" key={index}>
@@ -303,6 +304,28 @@ export function FileCodeBlock({ path, body, language, live = false, className }:
   );
 }
 
+/**
+ * A problem's worked example — Input, Output, Explanation — drawn as the site
+ * draws it: a quoted block in the code face that wraps, labels in bold, values
+ * exactly as written. Not a code block: it is not code to copy or number, and a
+ * scrolling box cut the explanation off mid-sentence.
+ */
+function WorkedExample({ body }: { body: string }) {
+  return (
+    <blockquote className="font-mono text-[0.92em] break-words whitespace-pre-wrap">
+      {body.split("\n").map((line, index) => {
+        const label = /^(\s*(?:Input|Output|Explanation)\s*:)(.*)$/i.exec(line);
+        return (
+          <Fragment key={index}>
+            {index > 0 && "\n"}
+            {label ? <><strong className="font-semibold text-foreground">{label[1]}</strong><span className="text-foreground/75">{label[2]}</span></> : <span className="text-foreground/75">{line}</span>}
+          </Fragment>
+        );
+      })}
+    </blockquote>
+  );
+}
+
 export const Markdown = memo(function Markdown({ source, className }: { source: string; className?: string }) {
   const blocks = useMemo(() => parse(source), [source]);
 
@@ -317,6 +340,8 @@ export const Markdown = memo(function Markdown({ source, className }: { source: 
       {blocks.map((block, index) => {
         switch (block.kind) {
           case "code":
+            if (block.language === "example") return <WorkedExample key={index} body={block.body} />;
+            if (block.language === "figure") return <Figure key={index} source={block.body} />;
             return <CodeBlock key={index} body={block.body} language={block.language} />;
           case "heading": {
             /* A real heading element, not a bolded paragraph: the scale keys off
@@ -395,6 +420,21 @@ export const Markdown = memo(function Markdown({ source, className }: { source: 
             );
           case "rule":
             return <hr key={index} />;
+          case "image":
+            /* Drawn at its own size up to the column's width, never stretched
+               past it. No referrer, so the host serving a statement's figure is
+               not told which app is showing it. */
+            return (
+              <img
+                alt={block.alt}
+                className="my-3 block h-auto max-w-full rounded-md"
+                decoding="async"
+                key={index}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                src={block.src}
+              />
+            );
           default:
             return (
               <p key={index}>

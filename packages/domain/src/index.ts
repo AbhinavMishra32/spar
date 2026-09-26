@@ -5,3 +5,5 @@ export * from "./lessons.js";
 export * from "./checkpoint.js";
 export * from "./training.js";
 export * from "./rating.js";
+export * from "./fsrs.js";
+export * from "./review.js";

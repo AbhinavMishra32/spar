@@ -4,8 +4,41 @@
     {
       "name": "spar-renderer",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "apps/desktop", "exec", "--", "vite"],
+      "runtimeArgs": [
+        "--prefix",
+        "apps/desktop",
+        "exec",
+        "--",
+        "vite"
+      ],
       "port": 5173
+    },
+    {
+      "name": "spar-desktop-harness",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/abhinavmishra/solin/spar/apps/desktop && exec node_modules/.bin/vite --port 5175 --strictPort"
+      ],
+      "port": 5175
+    },
+    {
+      "name": "spar-hero",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/abhinavmishra/solin/spar-landing/apps/desktop && exec node_modules/.bin/vite --config vite.hero.config.ts"
+      ],
+      "port": 5174
+    },
+    {
+      "name": "spar-web",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/abhinavmishra/solin/spar-landing/apps/web && exec node_modules/.bin/next dev -p 4319"
+      ],
+      "port": 4319
     }
   ]
 }

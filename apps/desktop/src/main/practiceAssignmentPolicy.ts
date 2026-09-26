@@ -68,14 +68,14 @@ export function assessPracticeAssignment(input: {
          comparison is for, while the agent remains free to choose this problem. */
       detail: levelPassed
         ? `Priced at ${price}, inside the ${window.minRating}-${window.maxRating} window for a ${target.abilityStatus} ability. They would solve it about ${chance}% of the time, which is the range a result is worth reading.`
-        : `Priced at ${price}, outside the ${window.minRating}-${window.maxRating} window for a ${target.abilityStatus} ability — they would solve it about ${chance}% of the time, so ${price > window.maxRating ? "a failure would not say which gap it was" : "a pass would not say anything they have not already shown"}. Search that rating range instead.`,
+        : `Priced at ${price}, outside the ${window.minRating}-${window.maxRating} window for a ${target.abilityStatus} ability — they would solve it about ${chance}% of the time, so ${price > window.maxRating ? "a failure would say less about which gap it was" : "a pass says less than usual"}. Fine when that is deliberate (a first step on new ground, a confidence repeat); otherwise that range is where to search.`,
     },
     {
       name: "provider concept",
       passed: providerFit,
       detail: providerFit
         ? actualConcepts.length ? `The primary aim ${primary?.slug} belongs to the provider concept family ${actualConcepts.join(", ")}.` : "The provider has no mapped concept metadata; target rationale remains required."
-        : `The primary aim ${primary?.slug || "was not supplied"} does not belong to the provider's ${actualConcepts.join(", ") || "mapped concepts"}. Read the problem and choose one on the target's concept family.`,
+        : `The primary aim ${primary?.slug || "was not supplied"} is not among the provider's tags (${actualConcepts.join(", ") || "none mapped"}). Provider tags are coarse and named differently from Spar's concepts, so this is about naming as much as fit: the statement is what decides it.`,
     },
     {
       name: "ability alignment",
@@ -89,7 +89,7 @@ export function assessPracticeAssignment(input: {
       passed: rationaleFit,
       detail: rationaleFit
         ? "The assignment rationale names the persisted target it is meant to discriminate."
-        : `The rationale does not connect this problem to "${target.specificGap}" or the desired evidence "${target.desiredEvidence}". Pick a better-fitting problem or explain the concrete connection.`,
+        : `The rationale does not name "${target.specificGap}" or the desired evidence "${target.desiredEvidence}". Say the concrete connection when you explain it.`,
     },
   ];
 }
@@ -152,9 +152,13 @@ export function trainingWindow(input: { rating: Rating; abilityStatus: AbilitySt
   const minRating = Math.round(itemRatingFor(input.rating, easiest));
   const measured = input.rating.deviation <= ESTABLISHED_DEVIATION;
   const ceiling = measured ? Number.POSITIVE_INFINITY : EXPERIENCE_CEILING[input.experience ?? "new"];
-  /* The cap never closes the window: a beginner whose band starts above their
-     ceiling still gets the easiest thing the band allows rather than nothing. */
-  return { minRating, maxRating: Math.max(minRating, Math.round(Math.min(itemRatingFor(input.rating, hardest), ceiling))) };
+  const maxRating = Math.round(itemRatingFor(input.rating, hardest));
+  /* The cap never closes the window. A beginner whose band starts above their
+     ceiling gets a band of the same width ending at the ceiling — it used to
+     collapse to one point above the ceiling ("1282-1282"), which ruled out the
+     very easy problems the cap exists to send them to. */
+  if (ceiling < minRating) return { minRating: Math.round(ceiling - Math.max(150, maxRating - minRating)), maxRating: Math.round(ceiling) };
+  return { minRating, maxRating: Math.round(Math.min(maxRating, ceiling)) };
 }
 
 function relatedConcept(proposed: ConceptTagInput, actual: string): boolean {

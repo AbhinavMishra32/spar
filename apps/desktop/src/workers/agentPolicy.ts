@@ -53,8 +53,14 @@ function filedLesson(outcomes: Map<string, unknown[]>): boolean {
 
 export function completionInstruction(turnKind:AgentTurnKind,outcomes:Map<string,unknown[]>):string{
   const playable=(name:string)=>(outcomes.get(name)??[]).some((value)=>Boolean(value&&typeof value==="object"&&(value as {result?:{status?:unknown}}).result?.status==="playable"));
-  if(playable("create_question")||playable("replace_current_question")||playable("assign_practice_problem")){
-    const provenance=playable("assign_practice_problem")
+  if(playable("create_question")||playable("replace_current_question")||playable("assign_practice_problem")||playable("create_fallback_question")){
+    /* The host's fallback is checked first because it is the one whose
+       provenance is easiest to misstate: it is published after tailored
+       candidates were rejected, so the turn's other outcomes all describe a
+       challenge written for the learner that they did not get. */
+    const provenance=playable("create_fallback_question")&&!playable("create_question")&&!playable("replace_current_question")&&!playable("assign_practice_problem")
+      ? "A standard local tracing exercise, set by the host, is now playable. Call it a standard exercise rather than one written for their gap, say briefly what it will still show you about their reasoning, and never describe it as a real, sourced, or judged problem."
+      : playable("assign_practice_problem")
       ? "A connected-provider problem is now playable. Name it as a provider problem only from the successful assignment result."
       : "A tailored local prerequisite challenge is now playable. Call it local and tailored; never describe it as a real, sourced, judged, Codeforces, or LeetCode problem.";
     return `${provenance} ${filedLesson(outcomes) ? "A lesson was also published; point to it using its returned lesson id without restating its pages. " : ""}${WHY_THIS_PROBLEM} Explain the choice using evidence actually available, including the learner's latest correction when relevant. Give one concrete first action. Do not provide the solution or merely report a database write.`;
@@ -106,6 +112,14 @@ function visualizerOffer(outcomes: Map<string, unknown[]>): string[] {
   return (outcomes.get(VISUALIZER_GATE)?.length ?? 0) > 0 ? offered.filter((name) => name !== VISUALIZER_GATE) : offered;
 }
 
+/**
+ * Skills are instructions on disk that the agent pulls in by name. Offered on
+ * every turn that has at least one enabled skill; a turn may load several, but
+ * not endlessly — past the budget the tool drops out of the table.
+ */
+export const SKILL_TOOL = "load_skill";
+const SKILL_TURN_BUDGET = 4;
+
 /** Teaching is available when the agent finds it useful. */
 export const TEACH_TOOLS = ["teach_lesson", "read_lesson", "search_lessons"];
 
@@ -117,25 +131,33 @@ function teachOffer(_outcomes: Map<string, unknown[]>): string[] {
 export const SOURCE_READ_TOOLS = ["search_practice_problems", "read_practice_problem", "read_practice_source", "read_practice_progress", "read_practice_submissions"];
 export const SOURCE_TOOLS = [...SOURCE_READ_TOOLS, "assign_practice_problem"];
 
-export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false, webSearch = false, practiceSource = false): Set<string> {
+/**
+ * `sparAuthoring` is the session's own setting, not a fact about the machine.
+ * When the learner deselects Spar-written problems the authoring tools are not
+ * offered at all, so the only way to publish a challenge is to find one at a
+ * provider — the host refuses them too, but a tool the model cannot see is one
+ * it cannot spend a turn on.
+ */
+export function allowedTools(turnKind: AgentTurnKind, hasActiveQuestion = false, webSearch = false, practiceSource = false, sparAuthoring = true, skills = false): Set<string> {
   const web = webSearch ? WEB_TOOLS : [];
   const source = practiceSource ? SOURCE_TOOLS : [];
+  const authoring = sparAuthoring ? (hasActiveQuestion ? ["replace_current_question"] : ["create_question"]) : [];
   // A session setup event has no solve to inspect. Keep its tool table small;
   // the agent still chooses freely among evidence, teaching, and challenge work.
   if (turnKind === "cold-start" || turnKind === "session-start") return new Set([
-    ...TEACH_TOOLS, ...(hasActiveQuestion ? ["replace_current_question"] : ["create_question"]),
+    ...TEACH_TOOLS, ...authoring, ...(skills ? [SKILL_TOOL] : []),
     ...source, ...web, "search_learner_model", "search_attempt_history",
     "search_challenge_history", "read_challenge", "read_ability", "read_concept_graph",
     "search_concept_evidence", "ask_user_question", "set_session_objective",
     "set_training_target",
   ]);
   return new Set([...VISUALIZER_TOOLS, ...TEACH_TOOLS,
-    ...(hasActiveQuestion ? ["replace_current_question"] : ["create_question"]), ...source,
+    ...authoring, ...source, ...(skills ? [SKILL_TOOL] : []),
     "read_attempt", "read_submissions", "read_ability", "search_learner_model",
     "search_attempt_history", "search_challenge_history", "read_challenge",
     "read_concept_graph", "search_concept_evidence", "ask_user_question",
     "set_session_objective", "set_training_target", "upsert_ability", ...web,
-    ...(turnKind === "attempt-complete" ? ["review_solution", "propose_ability_update", "commit_session_decision"] : []),
+    ...(turnKind === "attempt-complete" ? ["review_solution", "propose_ability_update", "record_insight", "commit_session_decision"] : []),
   ]);
 }
 
@@ -149,26 +171,96 @@ export function phaseExecutionKey(name: string, inputSignature: string): string 
 }
 
 /** Tool availability follows durable state. The agent chooses actions and order. */
-export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unknown[]>, challengeCompilationLimit = 2, context: { hasActiveQuestion?: boolean; webSearch?: boolean; practiceSource?: boolean } = {}): ToolStage {
+export function nextToolStage(turnKind: AgentTurnKind, outcomes: Map<string, unknown[]>, challengeCompilationLimit = 2, context: { hasActiveQuestion?: boolean; webSearch?: boolean; practiceSource?: boolean; sparAuthoring?: boolean; skills?: boolean } = {}): ToolStage {
   const authored = [...(outcomes.get("create_question") ?? []), ...(outcomes.get("replace_current_question") ?? [])];
   const assignments = outcomes.get("assign_practice_problem") ?? [];
-  const playableQuestion = [...authored, ...assignments].some((value) => value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "playable");
+  const playableQuestion = [...authored, ...assignments, ...(outcomes.get("create_fallback_question") ?? [])].some((value) => value && typeof value === "object" && (value as { result?: { status?: unknown } }).result?.status === "playable");
   const authoringSpent = authored.length >= challengeCompilationLimit;
-  const available = allowedTools(turnKind, context.hasActiveQuestion, context.webSearch, context.practiceSource);
+  const available = allowedTools(turnKind, context.hasActiveQuestion, context.webSearch, context.practiceSource, context.sparAuthoring ?? true, context.skills ?? false);
   const offered = [...available].filter((name) => {
     if ((authoringSpent || playableQuestion) && (name === "create_question" || name === "replace_current_question")) return false;
-    if (playableQuestion && name === "assign_practice_problem") return false;
+    /* Once a problem is set, the search for one is over for this turn: the
+       searching tools went on being offered, and a turn that had just set a
+       problem spent sixteen more calls second-guessing it. */
+    if (playableQuestion && (name === "assign_practice_problem" || name === "search_practice_problems" || name === "read_practice_problem")) return false;
     if (name === VISUALIZER_GATE) return visualizerOffer(outcomes).includes(name);
     if (VISUALIZER_SKILL_TOOLS.includes(name)) return visualizerOffer(outcomes).includes(name);
     if (TEACH_TOOLS.includes(name)) return teachOffer(outcomes).includes(name);
     if (name === "ask_user_question") return !(outcomes.get(name)?.length);
-    if (name === "assign_practice_problem") return assignments.length < 3;
+    if (name === SKILL_TOOL) return (outcomes.get(name)?.length ?? 0) < SKILL_TURN_BUDGET;
+    /* With nothing else able to publish, a provider-only session gets a few more
+       tries at finding a problem that mounts: a refusal there is usually one
+       subscription-only or unparseable problem, not a sign to stop looking. */
+    if (name === "assign_practice_problem") return assignments.length < (context.sparAuthoring === false ? 5 : 3);
     // Review and ability decisions are single outcomes. Objectives and targets
     // remain editable because the learner may correct them during this turn.
     if (["upsert_ability", "propose_ability_update", "commit_session_decision", "review_solution"].includes(name)) {
       return !(outcomes.get(name)?.length);
     }
+    /* Filing an insight is for a solve that stands. After a rework verdict the
+       challenge is open again and there is nothing solved to file yet; a card
+       filed once is refined by the next solve, not by a second call now. */
+    if (name === "record_insight") {
+      const reworked = (outcomes.get("review_solution") ?? []).some((entry) => (entry as { result?: { review?: unknown } } | null)?.result?.review === "rework");
+      return !reworked && !(outcomes.get(name) ?? []).some((entry) => (entry as { result?: { status?: unknown } } | null)?.result?.status === "filed");
+    }
     return true;
   });
   return { activeTools: offered, toolChoice: "auto" };
+}
+
+/** The tools that can put a playable challenge in front of the learner. */
+export const CHALLENGE_PUBLISHING_TOOLS = ["create_question", "replace_current_question", "assign_practice_problem"];
+
+/** Whether any result this turn made a challenge playable, the host's fallback
+ *  included. */
+export function publishedChallenge(outcomes: Map<string, unknown[]>): boolean {
+  return [...CHALLENGE_PUBLISHING_TOOLS, "create_fallback_question"].some((name) =>
+    (outcomes.get(name) ?? []).some((entry) => (entry as { result?: { status?: unknown } } | null)?.result?.status === "playable"),
+  );
+}
+
+/**
+ * What the learner is still owed before this turn may end, as the instruction
+ * that tells the model so — or "" when the turn may finish as it is.
+ *
+ * Two turns owe a challenge. An attempt-complete turn always does: the learner
+ * just finished one, the host asked for "exactly one next pedagogical action",
+ * and the only actions that end such a turn without a new challenge are a
+ * review that reopened the attempt (the host says not to set one) or a question
+ * the learner dismissed. An answered ask_user_question is not one of them: the
+ * answer comes back as that call's result inside this same turn, so after it
+ * the turn still has to aim and publish the next challenge. And any turn that
+ * already tried to author one owes it, because the model has decided a
+ * challenge is the right move and a compiler rejection does not change that.
+ *
+ * `rejection` is the compiler's own account of the latest rejected candidate,
+ * quoted back in full so the next call can fix it.
+ */
+export function owedChallenge(turnKind: AgentTurnKind, outcomes: Map<string, unknown[]>, hasActiveQuestion: boolean, rejection = "", sparAuthoring = true): string {
+  if (publishedChallenge(outcomes)) return "";
+  const latest = (name: string) => ((outcomes.get(name)?.at(-1) as { result?: Record<string, unknown> } | undefined)?.result ?? {});
+  if (latest("review_solution").review === "rework") return "";
+  if (latest("ask_user_question").status === "cancelled") return "";
+  const authored = (outcomes.get("create_question")?.length ?? 0) + (outcomes.get("replace_current_question")?.length ?? 0);
+  /* Another challenge became active while this turn compiled. Nothing is owed:
+     the learner has one, and a retry would only be rejected the same way. */
+  if (rejection.includes("session lifecycle:")) return "";
+  const retry = rejection
+    ? `The last challenge candidate was rejected and nothing was published: ${rejection} Fix exactly those failures — or, if the same failures keep returning, choose a simpler task that exercises the same idea — and call the authoring tool again. `
+    : "";
+  const never = "Do not end the turn, and do not tell the learner that a challenge failed validation or was not published, while an authoring call remains.";
+  if (!sparAuthoring) {
+    /* Nothing can be authored, so the only thing owed is a provider problem, and
+       only after a completed attempt: a refused assignment is not a rejected
+       candidate, and there is no authoring call to "fix". */
+    if (turnKind !== "attempt-complete" || hasActiveQuestion) return "";
+    const refusal = ((outcomes.get("assign_practice_problem")?.at(-1) as { result?: { report?: { checks?: Array<{ passed?: boolean; detail?: string }> } } } | undefined)?.result?.report?.checks ?? []).find((check) => check.passed === false)?.detail;
+    return `${refusal ? `The last assignment was refused: ${refusal} ` : ""}This turn follows a completed attempt and still owes the learner their next challenge. This session only takes problems from its providers, so search them, read the best candidates, and assign one with assign_practice_problem before your final reply. If nothing matches the exact concept, widen to its parent area or a neighbouring rating before giving up.`;
+  }
+  if (turnKind === "attempt-complete" && !hasActiveQuestion) {
+    return `${retry}This turn follows a completed attempt and still owes the learner their next challenge. Publish one with create_question (or assign_practice_problem, when it is offered and a connected-provider problem fits) before you give your final reply. ${never}`;
+  }
+  if (authored > 0) return `${retry || "The last challenge candidate was not published. Call the authoring tool again with a corrected design. "}${never}`;
+  return "";
 }

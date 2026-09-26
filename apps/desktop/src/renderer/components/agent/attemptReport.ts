@@ -33,7 +33,7 @@ export type ReadCase = {
   marks: CaseMark[];
   passes: number;
   failures: number;
-  /** What became of it — "fixed at +02:10", "failed again at +04:02". */
+  /** What became of it — "fixed at 6:12:10pm", "failed again at 6:14:02pm". */
   story: string;
 };
 
@@ -64,7 +64,8 @@ export type ReadFile = { path: string; text: string };
 export type AttemptRead = {
   title: string;
   language: string;
-  /** As the report printed it: an ISO instant, or "" when it had none. */
+  /** As the report printed it: "today at 6:20pm" (an ISO instant in reports
+   *  written before times were local), or "" when it had none. */
   openedAt: string;
   outcome: string;
   totals: { events: number; runs: number; submissions: number; saves: number; cases: number } | null;
@@ -109,15 +110,20 @@ const SECTIONS = [
   { head: /^LOG \(/, name: "log" },
   { head: /^CASE HISTORY/, name: "cases" },
   { head: /^RUN DELTAS/, name: "runs" },
+  { head: /^CODE CHANGES/, name: "code" },
+  { head: /^TURNING POINTS/, name: "turning" },
   { head: /^TIMINGS$/, name: "timings" },
 ] as const;
 
 type Section = (typeof SECTIONS)[number]["name"] | "head";
 
-const LOG_LINE = /^ {2}(\+[\d:]+)\s+#(\d+)\s+(\S+)\s+(\S+)\s?(.*)$/;
+/* A moment is a local clock time, "6:20:14pm"; reports read back out of older
+   turns still carry the "+29:12" offsets they were written with. */
+const AT = String.raw`(\+[\d:]+|\d{1,2}:\d{2}(?::\d{2})?[ap]m)`;
+const LOG_LINE = new RegExp(String.raw`^ {2}${AT}\s+#(\d+)\s+(\S+)\s+(\S+)\s?(.*)$`);
 const LOG_CASE = /^\s{8,}(PASS|FAIL|SKIPPED|TODO)\s+(.*)$/;
 const CASE_ROW = /^ {2}"(.+)"\s+([PFS\- ]*?)\s*((?:hidden|visible),.*)$/;
-const RUN_ROW = /^ {2}(\+[\d:]+)\s+(submission|visible)\s+(\S+)(?:\s{2,}(.*))?$/;
+const RUN_ROW = new RegExp(String.raw`^ {2}${AT}\s+(submission|visible)\s+(\S+)(?:\s{2,}(.*))?$`);
 const OMITTED = /^ {2}\((\d+) earlier lines? omitted/;
 
 function fromReport(report: string, cut: boolean): AttemptRead {
@@ -184,6 +190,9 @@ function fromReport(report: string, cut: boolean): AttemptRead {
       continue;
     }
 
+    // The code diffs are the agent's reading; the panel shows the files.
+    if (section === "code" || section === "turning") continue;
+
     read.timings.push(line.trim());
   }
 
@@ -200,8 +209,9 @@ function head(read: AttemptRead, line: string) {
   }
   if (line.startsWith("opened ")) {
     const parts = line.split(" · ");
-    read.openedAt = parts[0]!.slice("opened ".length).trim();
-    read.outcome = (parts[1] ?? "").trim();
+    const opened = parts[0]!.slice("opened ".length).trim();
+    read.openedAt = /\(([^()]+)\)$/.exec(opened)?.[1] ?? opened;
+    read.outcome = (parts.slice(1).find((part) => !part.trim().startsWith("it is now")) ?? "").trim();
     const count = (word: string) => {
       const found = parts.find((part) => part.trim().endsWith(word));
       return found ? Number.parseInt(found.trim(), 10) || 0 : 0;
@@ -218,7 +228,7 @@ function head(read: AttemptRead, line: string) {
   /* The sentence about offsets is the report telling the model how to read
      itself; the panel is that explanation. Everything else in the header is a
      scope the learner should see. */
-  if (line.startsWith("Offsets are")) return;
+  if (line.startsWith("Offsets are") || line.startsWith("Times are") || line.startsWith("When you mention")) return;
   read.notes.push(line.trim());
 }
 
@@ -277,6 +287,7 @@ const FILTER_WORDS: Record<string, string> = {
   log: "full log",
   cases: "case history",
   runs: "run deltas",
+  "turning-points": "turning points",
   timings: "timings",
 };
 

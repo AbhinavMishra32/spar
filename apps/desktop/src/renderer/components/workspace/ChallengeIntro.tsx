@@ -56,7 +56,7 @@ export function ChallengeIntro({
               initial={{ scale: 0.6, opacity: 0, filter: "blur(16px)" }}
               transition={{ type: "spring", stiffness: 220, damping: 20, delay: 0.05 }}
             >
-              <ChallengeEmblem question={question} size={132} />
+              <ChallengeEmblem interactive={false} numbered={false} question={question} size={132} />
             </motion.div>
 
             <motion.p

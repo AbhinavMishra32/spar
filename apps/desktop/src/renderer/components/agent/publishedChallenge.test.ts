@@ -122,4 +122,20 @@ describe("reading a published challenge off its transcript row", () => {
     // No title in the arguments — the source owns it — so the slug stands in.
     expect(published.title).toBe("4-A");
   });
+
+  it("names a sourced problem by its title, not its slug", () => {
+    const titled = readPublishedChallenge(row({
+      tool: "assign_practice_problem",
+      input: JSON.stringify({ source: "leetcode", slug: "univalued-binary-tree" }),
+      output: JSON.stringify({ status: "playable", source: { slug: "univalued-binary-tree", title: "Univalued Binary Tree", difficulty: "easy" } }),
+    }));
+    expect(titled.title).toBe("Univalued Binary Tree");
+    // Filed before the result carried a title: a LeetCode slug is words, so it reads as one.
+    const older = readPublishedChallenge(row({
+      tool: "assign_practice_problem",
+      input: JSON.stringify({ source: "leetcode", slug: "univalued-binary-tree" }),
+      output: JSON.stringify({ status: "playable", source: { slug: "univalued-binary-tree", difficulty: "easy" } }),
+    }));
+    expect(older.title).toBe("Univalued Binary Tree");
+  });
 });

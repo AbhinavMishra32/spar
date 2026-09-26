@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { LocalStore } from "./store.js";
 import { executeTrainingTool } from "./trainingTools.js";
+import { REVIEW_TARGET_MODE_KEY, reviewTargetMode } from "./reviewSession.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 
@@ -213,7 +214,7 @@ describe("read_attempt", () => {
       expect(result.report).toContain("FAIL  handles an empty array  expected 0, got NaN");
       // A case only the submission ran is absent earlier rather than failing.
       expect(result.report).toMatch(/"handles an empty array"\s+- F/);
-      expect(result.report).toContain("first passed after failing at +05:00");
+      expect(result.report).toMatch(/first passed after failing at \d{1,2}:\d{2}:\d{2}[ap]m/);
       expect(result.stats.runs).toBe(2);
       expect(result.stats.regressions).toBe(0);
     } finally {
@@ -423,3 +424,50 @@ function design(title: string) {
     expectedFailureSignatures: ["off by one"],
   };
 }
+
+/** The learner chose to say what their reviews ask about: a new card needs their answer. */
+describe("filing an insight when the learner decides what to remember", () => {
+  const card = {
+    title: "Slide the window by one", trigger: "Aggregate over every block of the same length", insight: "Adjacent windows share all but one item, so update the sum instead of recomputing it.",
+    click: { summary: "Moved the comparison outside the first-window loop." }, independence: "independent", pitfalls: [],
+    rubric: ["add the incoming item", "drop the outgoing item"], transfer: ["Average of every block of k"], firstGrade: "good",
+  };
+
+  it("sends the agent to ask first, then keeps the learner's words on the card", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise windows");
+      store.setTrainingTarget(sessionId, { ability: "Windows", specificGap: "Sliding", desiredEvidence: "Linear pass", avoidTesting: [] });
+      const solved = store.createQuestion(sessionId, design("Window sums"), { valid: true });
+      store.appendNextEvent({ id: randomUUID(), attemptId: solved.attemptId, type: "attempt_completed", occurredAt: new Date().toISOString(), payload: { outcome: "passed" }, source: "system", schemaVersion: 1 });
+      store.setSetting(REVIEW_TARGET_MODE_KEY, "ask");
+
+      const refused = await executeTrainingTool("record_insight", { ...card, attemptId: solved.attemptId }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; note: string };
+      expect(refused.status).toBe("invalid");
+      expect(refused.note).toContain("ask_user_question");
+
+      const filed = await executeTrainingTool("record_insight", { ...card, attemptId: solved.attemptId, targets: ["turning-point"], remember: "Moving the max check after the first window is what fixed it" }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; cardId: string };
+      expect(filed.status).toBe("filed");
+      expect(store.reviews.card(filed.cardId)?.remember).toBe("Moving the max check after the first window is what fixed it");
+      expect(store.reviews.card(filed.cardId)?.targets).toEqual(["turning-point"]);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("decides for them by default", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise windows");
+      store.setTrainingTarget(sessionId, { ability: "Windows", specificGap: "Sliding", desiredEvidence: "Linear pass", avoidTesting: [] });
+      const solved = store.createQuestion(sessionId, design("Window sums"), { valid: true });
+      store.appendNextEvent({ id: randomUUID(), attemptId: solved.attemptId, type: "attempt_completed", occurredAt: new Date().toISOString(), payload: { outcome: "passed" }, source: "system", schemaVersion: 1 });
+      expect(reviewTargetMode(store)).toBe("auto");
+      const filed = await executeTrainingTool("record_insight", { ...card, attemptId: solved.attemptId }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; cardId: string };
+      expect(filed.status).toBe("filed");
+      expect(store.reviews.card(filed.cardId)?.remember).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+});

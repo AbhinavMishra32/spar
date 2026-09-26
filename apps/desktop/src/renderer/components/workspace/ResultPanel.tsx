@@ -86,7 +86,7 @@ function VerdictRail({
           report.failed ? "text-destructive" : "text-[var(--success)]",
         )}
       >
-        {report.failed ? "Wrong Answer" : "Accepted"}
+        {report.failed ? report.status || "Wrong Answer" : "Accepted"}
       </p>
       {failedAt ? (
         /* A stopped run has no pass rate to report — "2/3 passed" out of a suite
@@ -329,7 +329,15 @@ export function ResultPanel({
   /* Protocol results and source declarations have independent ids. Ordinal is
      their stable join key; name is a fallback for source judges that report a
      sparse subset and preserve the published case name instead. */
-  const declaredForResult = activeResult
+  /* A submission judged at the source walks the source's hidden suite, whose
+     case 2 is not this problem's Example 2 — joining them by ordinal would show
+     one case's call beside another's verdict. Its failing case carries its own
+     input, written here as the call it was. */
+  const sourceSubmission = suite === "hidden" && Boolean(question.source);
+  const shownResult = sourceSubmission && activeResult?.failure?.input && question.source?.entryName
+    ? { ...activeResult, failure: { ...activeResult.failure, input: `${question.source.entryName}(${activeResult.failure.input})` } }
+    : activeResult;
+  const declaredForResult = activeResult && !sourceSubmission
     ? declared.cases.find((item) => item.ordinal === activeResult.ordinal)
       ?? declared.cases.find((item) => item.name === activeResult.name)
     : undefined;
@@ -364,7 +372,9 @@ export function ResultPanel({
     if (suite !== "source" && !running && graded && !stoppedAtFailure(terminal)) {
       rememberSuiteSize(question.id, hiddenRun, report.cases.length);
     }
-  }, [graded, hiddenRun, question.id, report.cases.length, running, suite, terminal]);
+    /* A judge that stopped early still said how big its suite was. */
+    else if (hiddenRun && !running && report.suiteSize) rememberSuiteSize(question.id, true, report.suiteSize);
+  }, [graded, hiddenRun, question.id, report.cases.length, report.suiteSize, running, suite, terminal]);
   /* A local submission executes the visible contract and the private cases in
      one fail-fast process. The compiler measured the private half before the
      challenge was published; adding the declared visible half gives the exact
@@ -373,9 +383,11 @@ export function ResultPanel({
   const measuredSubmissionSize = question.hiddenTestCount > 0
     ? declared.cases.length + question.hiddenTestCount
     : 0;
-  const suiteSize = hiddenRun
+  /* A writer that knows the whole suite's size says so — a judge at the source
+     that stopped at case one of thirty-six — and that is the grid's size. */
+  const suiteSize = report.suiteSize || (hiddenRun
     ? measuredSubmissionSize || remembered.hidden
-    : declared.cases.length || remembered.visible;
+    : declared.cases.length || remembered.visible);
   /* The same element either way, so the wave is not restarted by the results it
      was waiting for. While it runs the dots carry no verdicts — see `CaseDots`;
      when it stops they are the verdicts themselves. */
@@ -616,7 +628,7 @@ export function ResultPanel({
                            dots have completed their animation. */
                         <div className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-700 ease-out motion-reduce:animate-none">
                           {cleared && !activeResult && <Cleared report={report} submitted={hiddenRun} />}
-                          {activeResult && <CaseDetail declared={declaredForResult} result={activeResult} />}
+                          {shownResult && <CaseDetail declared={declaredForResult} result={shownResult} status={report.status} />}
                           <OtherFailures activeId={activeResult?.id} cases={report.cases} declared={declared.cases} onSelect={setSelectedResult} />
                         </div>
                       ) : null}
@@ -849,7 +861,7 @@ function InputLine({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CaseDetail({ result, declared }: { result: TestCaseResult; declared: DeclaredCase | undefined }) {
+function CaseDetail({ result, declared, status }: { result: TestCaseResult; declared: DeclaredCase | undefined; status?: string | undefined }) {
   const failure = result.failure;
   const message = headline(failure?.message);
   const { label, input: named } = caseLabel(result.name);
@@ -904,6 +916,14 @@ function CaseDetail({ result, declared }: { result: TestCaseResult; declared: De
       {failure && (
         <>
           {message && <p className="mt-2 text-ui leading-[1.6] text-foreground/85">{message}</p>}
+          {/* What the case printed and what it died with, the way a judge shows
+              them: whole, because the line that threw is near the bottom. */}
+          {(failure.stdout || failure.stderr) && (
+            <div className="mt-2.5 space-y-2">
+              {failure.stdout && <ValueBlock label="Stdout" value={failure.stdout} />}
+              {failure.stderr && <ValueBlock label={status && status !== "Wrong Answer" ? status : "Error"} tone="actual" value={failure.stderr} />}
+            </div>
+          )}
           {shown.length === 0 && (failure.expected !== undefined || failure.actual !== undefined) && (
             <div className="mt-2.5 flex flex-wrap gap-x-3 gap-y-2">
               <ValueBlock label="Output" tone="actual" value={failure.actual ?? "—"} />

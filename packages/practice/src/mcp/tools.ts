@@ -47,6 +47,8 @@ export const PRACTICE_TOOLS: PracticeToolDefinition[] = [
       concepts: z.array(z.string().min(2).max(60)).max(5).optional().describe("Spar concept slugs, e.g. [\"window-invariant-restoration\"]. Translated to the source's own tags, walking up to the area when the sub-concept has no tag of its own."),
       query: z.string().trim().max(200).optional().describe("Free text, for when the concept vocabulary does not reach what you mean."),
       difficulty: z.enum(["easy", "medium", "hard"]).optional(),
+      minRating: z.number().int().min(0).max(4000).optional().describe("Lowest problem rating to return, on the Codeforces scale — use learnerStanding.setProblemsRated.minRating. Codeforces filters on each problem's own rating; LeetCode is narrowed to the difficulty bands whose price falls inside the window (easy 1200, medium 1600, hard 2100)."),
+      maxRating: z.number().int().min(0).max(4000).optional().describe("Highest problem rating to return — use learnerStanding.setProblemsRated.maxRating."),
       status: z.enum(["any", "todo", "attempted", "solved"]).default("todo").describe("`todo` for something they have not tried, `attempted` to return to something they left unfinished, `solved` to look at how they did it before."),
       limit: z.number().int().min(1).max(25).default(8),
       offset: z.number().int().min(0).max(2_000).default(0),

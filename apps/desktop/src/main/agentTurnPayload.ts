@@ -1,4 +1,5 @@
 import { ESTABLISHED_DEVIATION, generatedDifficultyFor } from "@spar/domain";
+import type { ProblemSource } from "@spar/domain";
 import type { LocalStore } from "./store.js";
 import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
@@ -35,6 +36,9 @@ export type TurnPayloadInput = {
   accountId: string;
   /** Rehydrate a successful handoff if the provider failed while writing its reply. */
   resumeSince?: string;
+  /** Enabled skills, name and description only — the bodies stay on disk until
+   *  the agent loads one. */
+  skills?: { name: string; description: string }[];
 };
 
 export type TurnPayload = {
@@ -43,6 +47,10 @@ export type TurnPayload = {
   turnKind: AgentTurnKind;
   webSearch: boolean;
   practiceSource: boolean;
+  /** Whether this session lets the agent write its own challenges. */
+  sparAuthoring: boolean;
+  problemSources: ProblemSource[];
+  skills: { name: string; description: string }[];
   activeQuestion: { id: string; attemptId: string } | null;
   resumeState: Record<string, unknown>;
   context: string;
@@ -72,6 +80,9 @@ export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
     turnKind,
     webSearch: input.webSearch,
     practiceSource: input.practiceSource,
+    sparAuthoring: session.summary.problemSources.includes("spar"),
+    problemSources: session.summary.problemSources,
+    skills: input.skills ?? [],
     activeQuestion: openQuestion(session) ? { id: session.question!.id, attemptId: session.question!.attemptId } : null,
     resumeState: {
       ...(intake ? { intake: { result: { status: "answered", answer: intake } } } : {}),
@@ -121,12 +132,27 @@ export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
          Codeforces problem carries its own number, and the three-band prices in
          `itemRating` put LeetCode on the same scale. */
       learnerStanding: learnerStanding(store, target, profile),
+      /* The spaced-review queue, so a turn can see that a pattern it is about to
+         set a challenge on is also coming due for review, and that a pattern the
+         learner keeps lapsing on in review is a gap rather than a solved topic. */
+      reviews: reviewContext(store),
       practiceSource: input.practiceSummary,
+      /* The learner's setting for this session, beside the providers it names:
+         which of Spar, LeetCode and Codeforces a challenge may come from. */
+      problemSources: session.summary.problemSources,
       accountId: input.accountId,
       preferredLanguage: track?.language ?? profile?.language ?? "javascript",
       learnerProfile: profile ? { name: profile.name, experience: profile.experience, focus: profile.focus, statedWeakness: profile.weakness } : null,
     }),
   };
+}
+
+function reviewContext(store: LocalStore) {
+  const due = store.reviews.due(new Date(), 6);
+  const lapsing = store.reviews.list().filter((card) => card.lapses >= 2).slice(0, 4);
+  if (!due.length && !lapsing.length) return { dueCount: 0 };
+  const brief = (card: (typeof due)[number]) => ({ cardId: card.id, pattern: card.title, challenge: card.questionTitle, concepts: card.concepts.map((tag) => tag.slug), recallChance: Math.round(card.retrievability * 100) / 100, lapses: card.lapses });
+  return { dueCount: store.reviews.overview().dueCount, due: due.map(brief), repeatedlyForgotten: lapsing.map(brief) };
 }
 
 /** Bound to the ability the session is actually training, because the window is

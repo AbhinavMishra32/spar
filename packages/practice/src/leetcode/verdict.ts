@@ -55,8 +55,12 @@ export function normalizeLeetCodeVerdict(
   const actual = strings(value.code_answer);
   const expected = strings(value.expected_code_answer);
   const stdout = strings(value.std_output_list);
-  const inputs = splitInputs(text(value.last_testcase) ?? "", Math.max(actual.length, expected.length));
-  const caseAnswers = Array.from({ length: Math.max(actual.length, expected.length) }, (_unused, index) => ({
+  /* The case count is the judge's own total, then `compare_result`'s length. LeetCode pads
+     `code_answer` and `expected_code_answer` with a trailing empty entry, and
+     counting the arrays drew a two-case run as three, the third a blank failure. */
+  const answered = number(value.total_testcases) || (compare ? compare.length : Math.max(trimEmptyTail(actual).length, trimEmptyTail(expected).length));
+  const inputs = splitInputs(text(value.last_testcase) ?? "", answered);
+  const caseAnswers = Array.from({ length: answered }, (_unused, index) => ({
     input: inputs[index] ?? "",
     expected: expected[index] ?? "",
     actual: actual[index] ?? "",
@@ -183,6 +187,12 @@ function number(value: unknown): number | null {
 function text(value: unknown): string | null {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function trimEmptyTail(values: string[]): string[] {
+  let end = values.length;
+  while (end > 0 && !values[end - 1]?.trim()) end -= 1;
+  return values.slice(0, end);
 }
 
 function strings(value: unknown): string[] {

@@ -141,6 +141,12 @@ function questionOrdinal(value: unknown): number | null {
   return typeof ordinal === "number" && Number.isInteger(ordinal) && ordinal > 0 ? ordinal : null;
 }
 
+/** "univalued-binary-tree" → "Univalued Binary Tree", for a sourced problem
+ *  filed before its result carried the title. */
+function slugTitle(slug: string): string {
+  return slug.split("-").filter(Boolean).map((word) => word[0]!.toUpperCase() + word.slice(1)).join(" ");
+}
+
 export function readPublishedChallenge(part: ToolPart): PublishedChallenge {
   const sent = fields(part.input);
   const back = fields(part.output);
@@ -157,7 +163,7 @@ export function readPublishedChallenge(part: ToolPart): PublishedChallenge {
        this card already used. A sourced problem has no title in its arguments —
        the title belongs to the source and arrives with the mount — so it falls
        back to the slug, which is the problem's own name on its own site. */
-    title: part.label.trim() || text(sent, "slug") || "Challenge",
+    title: part.label.trim() || text(published, "title") || (source === "leetcode" ? slugTitle(text(sent, "slug")) : text(sent, "slug")) || "Challenge",
     language: language.success ? language.data : null,
     /* Spar's four bands for a challenge it wrote; the source's three for one it
        mounted, because the source graded it and Spar did not. */

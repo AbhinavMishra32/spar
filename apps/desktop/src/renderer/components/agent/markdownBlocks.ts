@@ -15,6 +15,7 @@ export type Block =
   | { kind: "quote"; body: string }
   | { kind: "table"; header: string[]; rows: string[][] }
   | { kind: "rule" }
+  | { kind: "image"; alt: string; src: string }
   | { kind: "paragraph"; body: string };
 
 const FENCE = /^```(\w*)\s*$/;
@@ -22,6 +23,11 @@ const HEADING = /^(#{1,4})\s+(.*)$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const ORDERED = /^\s*\d+[.)]\s+(.*)$/;
 const QUOTE = /^>\s?(.*)$/;
+/* An image on a line of its own. Sourced statements carry their diagrams this
+   way — a LeetCode tree problem is half its picture — and without it the line
+   printed as markdown, or the statement read as if the figure never existed.
+   Remote https only: a statement has no business pointing at local files. */
+const IMAGE = /^\s*!\[([^\]]*)\]\((https:\/\/[^\s)]+)\)\s*$/;
 /* A table's second line is its rule: pipes, dashes, and the optional colons that
    set alignment. Alignment is parsed away rather than honoured — a chat column
    is too narrow for right-aligned prose to read as anything but a mistake. */
@@ -72,6 +78,13 @@ export function parse(source: string): Block[] {
     if (/^\s*(---|___|\*\*\*)\s*$/.test(line)) {
       flush();
       blocks.push({ kind: "rule" });
+      continue;
+    }
+
+    const image = IMAGE.exec(line);
+    if (image) {
+      flush();
+      blocks.push({ kind: "image", alt: image[1]!, src: image[2]! });
       continue;
     }
 

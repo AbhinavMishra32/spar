@@ -4,8 +4,11 @@ import { ThinkingOrb, type OrbState } from "thinking-orbs";
 import { Lock } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProviderGlyph, hasProviderGlyph } from "../common/ProviderGlyph";
-import { IconAlert, IconCheck, IconChevronRight, IconCircleX, IconEdit, IconFile, IconPlay, IconPuzzle, IconSearch, IconSparkle } from "./threadIcons";
+import { IconAlert, IconCheck, IconChevronRight, IconCircleX, IconEdit, IconFile, IconPlay, IconPuzzle, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
 import { FileCodeBlock } from "./Markdown";
+import { FadedScroll } from "./ToolPayload";
+import { LanguageGlyph } from "../common/LanguageGlyph";
+import type { Language } from "@spar/domain";
 import type { AgentActivityFile, ChallengeDraft, ToolStage, ToolStageRun } from "../../../shared/api";
 
 /**
@@ -177,16 +180,19 @@ export function TreeChildren({ nodes, inset = RAIL_X, lead = 4 }: { nodes: Node[
           const last = index === nodes.length - 1;
           return (
             <Grow appear={mounted} className="relative" key={node.id}>
-              {/* Straight through to the next sibling. It is drawn when a sibling
-                  arrives, extending down from this row's curve, so the line gets
-                  to the new row as the row opens. */}
+              {/* Straight through to the next sibling, the full height of this
+                  child. It has to start at the top, not at the curve's end: the
+                  curve bends away from the rail over its last 8px, and a line
+                  that began below it left that stretch of the rail empty above
+                  every row. Drawn when a sibling arrives, extending down, so the
+                  line gets to the new row as the row opens. */}
               {!last && (
                 <motion.span
                   animate={{ scaleY: 1 }}
                   aria-hidden
                   className="pointer-events-none absolute bottom-0 origin-top"
                   initial={mounted && !reduced ? { scaleY: 0 } : false}
-                  style={{ left: x - 10, top: MID, borderLeft: LINE, ...ink(index < lit) }}
+                  style={{ left: x - 10, top: 0, borderLeft: LINE, ...ink(index < lit) }}
                   transition={{ type: "tween", duration: 0.3, ease: EASE }}
                 />
               )}
@@ -258,9 +264,9 @@ function Pill({ children, tone, id }: { children: ReactNode; tone?: "good" | "ba
       animate={{ opacity: 1, scale: 1 }}
       className={cn(
         "inline-flex h-5 items-center gap-1 overflow-hidden rounded-full bg-[var(--accent)] px-2 font-medium text-thread-tool tabular-nums text-[var(--transcript-step)] transition-colors duration-300",
-        tone === "good" && "text-[var(--success)]",
-        tone === "bad" && "text-[var(--warning)]",
-        tone === "added" && "font-mono text-[var(--success)]",
+        tone === "good" && "bg-[color-mix(in_oklch,var(--success)_13%,transparent)] text-[var(--success)]",
+        tone === "bad" && "bg-[color-mix(in_oklch,var(--miss)_13%,transparent)] text-[var(--miss)]",
+        tone === "added" && "bg-[color-mix(in_oklch,var(--success)_13%,transparent)] font-mono text-[var(--success)]",
       )}
       initial={mounted && !reduced ? { opacity: 0, scale: 0.8 } : false}
       transition={POP}
@@ -309,8 +315,8 @@ const STAGE_ORB: Record<ToolStage["kind"], OrbState> = {
 
 function StageMark({ stage }: { stage: ToolStage }) {
   if (stage.state === "running") return <Orb state={STAGE_ORB[stage.kind]} />;
-  if (stage.kind === "outcome") return stage.state === "done" ? <IconPuzzle className="text-[var(--success)]" /> : <IconCircleX className="text-[var(--warning)]" />;
-  if (stage.state === "failed") return <IconAlert className="text-[var(--warning)]" />;
+  if (stage.kind === "outcome") return stage.state === "done" ? <IconPuzzle className="text-[var(--success)]" /> : <IconCircleX className="text-[var(--miss)]" />;
+  if (stage.state === "failed") return <IconAlert className="text-[var(--miss)]" />;
   if (stage.state === "skipped") return <IconSearch className="opacity-50" />;
   switch (stage.kind) {
     case "draft": return <IconFile />;
@@ -324,7 +330,7 @@ function StageMark({ stage }: { stage: ToolStage }) {
 
 function RunMark({ run }: { run: ToolStageRun }) {
   if (run.state === "running") return <Orb state="solving" />;
-  return run.state === "passed" ? <IconCheck className="text-[var(--success)]" /> : <IconCircleX className="text-[var(--warning)]" />;
+  return run.state === "passed" ? <IconCheck className="text-[var(--success)]" /> : <IconCircleX className="text-[var(--miss)]" />;
 }
 
 /** Lines under a child, aligned with its words. */
@@ -332,13 +338,55 @@ function Under({ children, className }: { children: ReactNode; className?: strin
   return <div className={cn("pb-1 pl-6 text-thread leading-[1.5] text-[var(--transcript-step-mark)]", className)}>{children}</div>;
 }
 
-/** What a stage said — the reviewer's reason, a failed check — set off by a
- *  rule so it reads as the stage's words and not as another step. */
-function Said({ children, live }: { children: ReactNode; live: boolean }) {
+/** Who is talking in a stage's words. */
+type Speaker = { name: string; note?: string | undefined; provider?: string | undefined; icon: ReactNode };
+
+function speakerFor(stage: ToolStage): Speaker {
+  const model = stage.model;
+  const provider = stage.provider;
+  switch (stage.kind) {
+    case "review": return { name: "Reviewer", note: model, provider, icon: <IconSearch /> };
+    case "revise": case "repair": case "redraft": return { name: stage.kind === "revise" ? "Revision" : "Repair", note: model, provider, icon: <IconEdit /> };
+    case "validate": return { name: "Sandbox", icon: <IconTerminal /> };
+    case "outcome": return { name: "Why it stopped", icon: <IconAlert /> };
+    default: return { name: "Note", icon: <IconFile /> };
+  }
+}
+
+/** A speaker's face, kept small and muted: the model's own mark when a model
+ *  said it, the stage's glyph when the sandbox did. */
+function Avatar({ speaker }: { speaker: Speaker }) {
   return (
-    <div className="pb-1.5 pl-6">
-      <div className={cn("border-l border-[var(--transcript-rail)] pl-2.5 text-thread-tool leading-[1.55] transition-colors duration-500", live ? "text-[var(--transcript-step)]" : "text-[var(--transcript-step-mark)]")}>
-        {children}
+    <span className="mt-[3px] grid size-3.5 shrink-0 place-items-center text-[var(--transcript-step-mark)] opacity-80 [&>svg]:size-3">
+      {speaker.provider && hasProviderGlyph(speaker.provider) ? <ProviderGlyph className="size-3" provider={speaker.provider} /> : speaker.icon}
+    </span>
+  );
+}
+
+/**
+ * What a stage said — the reviewer's reason, the sandbox's failed checks, what a
+ * repair changed — signed by whoever said it: a small mark and their name ahead
+ * of the words. A paragraph floating under a row read as text that had lost its
+ * owner; a name at the start of it is enough to say whose it is, without
+ * turning every reason into a chat bubble.
+ *
+ * Held to about five lines and scrolled past that, with the edges faded where
+ * there is more. While it is still being written it follows its newest line.
+ */
+function Said({ children, live, watch, speaker }: { children: ReactNode; live: boolean; watch: unknown; speaker: Speaker }) {
+  return (
+    <div className="flex min-w-0 gap-1.5 pb-1.5 pl-6">
+      <Avatar speaker={speaker} />
+      <div className={cn("min-w-0 flex-1 text-thread-tool leading-[1.55] transition-colors duration-500", live ? "text-[var(--transcript-step)]" : "text-[var(--transcript-step-mark)]")}>
+        <FollowHeight>
+          <FadedScroll className="pr-1 [--agent-scroll-max:6.25rem]" follow={live} watch={watch}>
+            <span className="float-left mr-1.5 font-medium text-[var(--transcript-step)]">
+              {speaker.name}
+              {speaker.note ? <span className="font-normal text-[var(--transcript-step-mark)]"> · {speaker.note}</span> : null}
+            </span>
+            {children}
+          </FadedScroll>
+        </FollowHeight>
       </div>
     </div>
   );
@@ -348,22 +396,260 @@ function Said({ children, live }: { children: ReactNode; live: boolean }) {
    Stages
    ------------------------------------------------------------------------- */
 
-export function StageTree({ stages, draft, language }: { stages: ToolStage[]; draft?: ChallengeDraft | null | undefined; language?: string | undefined }) {
+export function StageTree({ stages, draft, language, question }: { stages: ToolStage[]; draft?: ChallengeDraft | null | undefined; language?: string | undefined; question?: QuestionMark | null | undefined }) {
+  const entries: Entry[] = stages.map((stage, index) => ({
+    stage,
+    current: index === stages.length - 1,
+    /* A failure stays open until a later stage of the same kind lands — the
+       revalidation that passed, the reviewer that accepted — and then it is
+       history, and folds with the rest. */
+    resolved: stage.state === "failed" && stages.slice(index + 1).some((later) => later.kind === stage.kind && later.state === "done"),
+  }));
   return (
     <TreeChildren
-      nodes={stages.map((stage, index) => {
-        /* A failure stays open until a later stage of the same kind lands — the
-           revalidation that passed, the reviewer that accepted — and then it is
-           history, and folds with the rest. */
-        const resolved = stage.state === "failed" && stages.slice(index + 1).some((later) => later.kind === stage.kind && later.state === "done");
-        return stageNode(stage, stage.kind === "draft" ? draft : undefined, language, index === stages.length - 1, resolved);
-      })}
+      nodes={cycles(entries).map((item) => item.kind === "cycle"
+        ? { id: item.entries[0]!.stage.id, active: item.entries.some((entry) => entry.stage.state === "running"), row: <CycleRow entries={item.entries} flavor={item.flavor} language={language} /> }
+        : stageNode(item.entry.stage, item.entry.stage.kind === "draft" ? draft : undefined, language, item.entry.current, item.entry.resolved, item.entry.stage.kind === "outcome" && item.entry.stage.state === "done" ? question : undefined))}
     />
   );
 }
 
-function stageNode(stage: ToolStage, draft: ChallengeDraft | null | undefined, language: string | undefined, current: boolean, resolved: boolean): Node {
+type Entry = { stage: ToolStage; current: boolean; resolved: boolean };
+type Flavor = "validate" | "review";
+type Item = { kind: "single"; entry: Entry } | { kind: "cycle"; flavor: Flavor; entries: Entry[] };
+
+const FAMILY: Partial<Record<ToolStage["kind"], Flavor>> = { validate: "validate", repair: "validate", redraft: "validate", review: "review", revise: "review" };
+const LEAD: Record<Flavor, ToolStage["kind"]> = { validate: "validate", review: "review" };
+
+/**
+ * Loops, told as loops. Validate → repair → validate → repair → validate is one
+ * piece of work that took three rounds, and five rows of the same two verbs made
+ * it read as five things. A run of one family becomes a cycle as soon as it has
+ * started to loop — the moment a fix follows a check — and keeps the first
+ * stage's id, so the row that was already there turns into the cycle in place
+ * rather than being replaced.
+ */
+function cycles(entries: Entry[]): Item[] {
+  const out: Item[] = [];
+  let index = 0;
+  while (index < entries.length) {
+    const flavor = FAMILY[entries[index]!.stage.kind];
+    if (!flavor) {
+      out.push({ kind: "single", entry: entries[index]! });
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < entries.length && FAMILY[entries[end]!.stage.kind] === flavor) end += 1;
+    const run = entries.slice(index, end);
+    if (run.length >= 2 && run[0]!.stage.kind === LEAD[flavor]) out.push({ kind: "cycle", flavor, entries: run });
+    else for (const entry of run) out.push({ kind: "single", entry });
+    index = end;
+  }
+  return out;
+}
+
+/** `15/19 checks` → 15/19. */
+function checkFraction(badge: string | undefined): number | null {
+  const match = badge ? /(\d+)\s*\/\s*(\d+)/.exec(badge) : null;
+  if (!match) return null;
+  const total = Number(match[2]);
+  return total > 0 ? Number(match[1]) / total : null;
+}
+
+/**
+ * The rounds of a loop, as a meter you can read without reading: each check is
+ * a capsule filled to how much of it passed — amber while it falls short, green
+ * when it clears — and each fix is a dot between two capsules. Fail, fix, fail,
+ * fix, pass reads left to right at a glance, and grows while it happens.
+ */
+function RoundTrack({ entries, flavor }: { entries: Entry[]; flavor: Flavor }) {
+  const mounted = useMounted();
+  const reduced = useReducedMotion();
+  const appear = mounted && !reduced;
+  return (
+    <span aria-hidden className="flex items-center gap-[3px]">
+      {entries.map(({ stage }) => {
+        const running = stage.state === "running";
+        if (stage.kind !== LEAD[flavor]) {
+          return (
+            <motion.span
+              animate={{ opacity: 1, scale: 1 }}
+              className={cn("size-[5px] rounded-full", running ? "bg-[var(--transcript-step)] animate-pulse" : "bg-[var(--transcript-step-mark)] opacity-70")}
+              initial={appear ? { opacity: 0, scale: 0 } : false}
+              key={stage.id}
+              title={`${stage.verb} ${stage.subject}`.trim()}
+              transition={POP}
+            />
+          );
+        }
+        return <Capsule appear={appear} flavor={flavor} key={stage.id} stage={stage} />;
+      })}
+    </span>
+  );
+}
+
+/** One check, as a capsule filled to how much of it passed. Shared by the
+ *  loop's track and its round pager, so a round looks the same in both. */
+function Capsule({ stage, flavor, appear = false, selected = false }: { stage: ToolStage; flavor: Flavor; appear?: boolean; selected?: boolean }) {
+  const reduced = useReducedMotion();
+  const running = stage.state === "running";
+  const fraction = flavor === "validate" ? checkFraction(stage.badge) : null;
+  const fill = running ? 0.35 : fraction ?? 1;
+  const passed = stage.state === "done";
+  return (
+    <motion.span
+      animate={{ opacity: 1, scaleX: 1 }}
+      className={cn(
+        /* The picked round is told by size, not by a ring: a ring drawn round a
+           capsule that is only partly filled framed its empty end as a gap. */
+        "relative block h-[7px] overflow-hidden rounded-full bg-[var(--accent)] shadow-[inset_0_0_0_0.5px_var(--border-surface-strong)] transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]",
+        selected ? "w-[34px]" : "w-[22px]",
+      )}
+      initial={appear && !reduced ? { opacity: 0, scaleX: 0.3 } : false}
+      style={{ transformOrigin: "left" }}
+      title={`${stage.verb}${stage.badge ? ` · ${stage.badge}` : ""}`}
+      transition={POP}
+    >
+      <motion.span
+        animate={running && !reduced ? { x: ["-100%", "190%"] } : { x: "0%", width: `${Math.max(fill, 0.08) * 100}%` }}
+        className={cn(
+          "absolute inset-y-0 left-0 rounded-full transition-colors duration-500",
+          running ? "w-[45%] bg-[var(--transcript-step-mark)]" : passed ? "bg-[var(--success)]" : "bg-[var(--miss)]",
+        )}
+        initial={appear && !reduced ? { width: "0%" } : false}
+        transition={running ? { duration: 1.1, repeat: Infinity, ease: "easeInOut" } : { type: "spring", visualDuration: 0.5, bounce: 0.1 }}
+      />
+    </motion.span>
+  );
+}
+
+/** A loop's entries split at each check: a round is a check and the fixes
+ *  that followed it. */
+function roundsOf(entries: Entry[], flavor: Flavor): Entry[][] {
+  const rounds: Entry[][] = [];
+  for (const entry of entries) {
+    if (entry.stage.kind === LEAD[flavor] || !rounds.length) rounds.push([entry]);
+    else rounds[rounds.length - 1]!.push(entry);
+  }
+  return rounds;
+}
+
+/**
+ * Which round is on show, and the way to the others: "Round 3 of 4", the
+ * rounds as capsules you can press — the same capsules as the track on the
+ * loop's row, so the one you pick is the one you saw — and a step either way.
+ */
+function RoundPager({ rounds, index, onPick, flavor }: { rounds: Entry[][]; index: number; onPick: (index: number) => void; flavor: Flavor }) {
+  const step = (by: number) => onPick(Math.max(0, Math.min(rounds.length - 1, index + by)));
+  const arrow = "grid size-5 place-items-center rounded-md text-[var(--transcript-step-mark)] outline-none transition-colors hover:bg-[var(--accent)] hover:text-[var(--transcript-step-strong)] disabled:pointer-events-none disabled:opacity-30";
+  return (
+    <div className="flex h-6 min-w-0 items-center gap-2 text-thread-tool">
+      <span className={cn(CHILD_MARK, "font-mono text-[10px] tabular-nums text-[var(--transcript-step-mark)]")}>{index + 1}</span>
+      <span className="min-w-0 flex-1 truncate text-[var(--transcript-step)]">
+        Round <Settle className="inline-block text-[var(--transcript-step-strong)] tabular-nums" id={String(index)}>{index + 1}</Settle> of {rounds.length}
+      </span>
+      <span className="flex items-center gap-1">
+        {rounds.map((round, at) => {
+          const lead = round[0]!.stage;
+          return (
+            <button
+              aria-label={`Round ${at + 1}`}
+              aria-pressed={at === index}
+              className={cn("rounded-full p-[3px] outline-none transition-opacity duration-200", at === index ? "opacity-100" : "opacity-45 hover:opacity-80")}
+              key={lead.id}
+              onClick={() => onPick(at)}
+              type="button"
+            >
+              <Capsule flavor={flavor} selected={at === index} stage={lead} />
+            </button>
+          );
+        })}
+      </span>
+      <span className="flex items-center">
+        <button aria-label="Previous round" className={arrow} disabled={index === 0} onClick={() => step(-1)} type="button"><IconChevronRight className="size-3.5 rotate-180" /></button>
+        <button aria-label="Next round" className={arrow} disabled={index === rounds.length - 1} onClick={() => step(1)} type="button"><IconChevronRight className="size-3.5" /></button>
+      </span>
+    </div>
+  );
+}
+
+/**
+ * A loop as one line: what it came to, how many fixes it took, the rounds as a
+ * track, and the whole time it cost. While it runs the line says what is
+ * happening now. It opens — on its own while it is the live edge, or on a click
+ * — to the rounds themselves, hanging off it on the same rail.
+ */
+const CycleRow = memo(function CycleRow({ entries, flavor, language }: { entries: Entry[]; flavor: Flavor; language: string | undefined }) {
+  const leads = entries.filter((entry) => entry.stage.kind === LEAD[flavor]);
+  const fixes = entries.length - leads.length;
+  const last = leads[leads.length - 1]!.stage;
+  const live = entries.find((entry) => entry.stage.state === "running")?.stage;
+  const tail = entries[entries.length - 1]!;
+  const settled = !live;
+  const passed = settled && last.state === "done" && tail.stage.kind === LEAD[flavor];
+  const unresolved = settled && !passed;
+  const [chosen, setChosen] = useState<boolean | null>(null);
+  const open = chosen ?? (Boolean(live) || tail.current || unresolved);
+  const noun = flavor === "validate" ? (fixes === 1 ? "repair" : "repairs") : fixes === 1 ? "revision" : "revisions";
+  /* While it runs, this line says where the loop is and the open child says
+     what that step is doing — the same words twice read as a stutter. */
+  const verb = live ? (flavor === "validate" ? "Validating" : "Reviewing") : flavor === "validate" ? (passed ? "Validation passed" : "Validation failed") : passed ? "Reviewer accepted" : "Reviewer asked for changes";
+  const subject = live ? (live.kind === LEAD[flavor] ? `round ${leads.length}` : `fixing round ${leads.length}`) : `after ${fixes} ${noun}`;
+  const endedAt = settled ? Math.max(...entries.map((entry) => entry.stage.endedAt ?? 0)) : undefined;
+  /* One round at a time. Four rounds drawn in full were four copies of the
+     same five runs; the pager shows the round you are on — the newest, and it
+     follows along while the loop runs, unless you have gone back to another. */
+  const rounds = roundsOf(entries, flavor);
+  const [picked, setPicked] = useState<number | null>(null);
+  const index = Math.min(picked ?? rounds.length - 1, rounds.length - 1);
+  const round = rounds[index] ?? [];
+  const nodes: Node[] = open
+    ? [
+        ...(rounds.length > 1 ? [{ id: "pager", row: <RoundPager flavor={flavor} index={index} onPick={setPicked} rounds={rounds} /> }] : []),
+        /* The round on show is read in full — its check open to its runs and
+           what the sandbox said, its fix open to what changed. */
+        ...round.map((entry) => ({ id: entry.stage.id, active: entry.stage.state === "running", row: <StageRow current draft={undefined} language={language} resolved={false} stage={entry.stage} /> })),
+      ]
+    : [];
+  return (
+    <>
+      <ChildRow
+        corner={(
+          <>
+            <RoundTrack entries={entries} flavor={flavor} />
+            {flavor === "validate" && last.badge ? <Pill id={last.badge} tone={last.state === "running" ? undefined : last.state === "done" ? "good" : "bad"}>{last.badge}</Pill> : null}
+            <Clock since={entries[0]!.stage.startedAt} until={endedAt} />
+          </>
+        )}
+        mark={live ? <Orb state={STAGE_ORB[live.kind]} /> : <StageMark stage={last} />}
+        markKey={live ? `running-${live.kind}` : last.state}
+        onToggle={() => setChosen(!open)}
+        open={open}
+        running={Boolean(live)}
+        subject={subject}
+        verb={verb}
+      />
+      <Reveal show={nodes.length > 0}><Nested nodes={nodes} /></Reveal>
+    </>
+  );
+});
+
+function stageNode(stage: ToolStage, draft: ChallengeDraft | null | undefined, language: string | undefined, current: boolean, resolved: boolean, question: QuestionMark | null | undefined): Node {
+  if (question) return { id: stage.id, row: <PublishedRow question={question} /> };
   return { id: stage.id, active: stage.state === "running", row: <StageRow current={current} draft={draft} language={language} resolved={resolved} stage={stage} /> };
+}
+
+/** The build's last line, when it made a question: the question, not its title
+ *  repeated as plain text. */
+function PublishedRow({ question }: { question: QuestionMark }) {
+  return (
+    <div className="flex h-6 min-w-0 items-center gap-2 text-thread">
+      <span className={cn(CHILD_MARK, "text-[var(--success)]")}><SwapMark id="published"><IconPuzzle /></SwapMark></span>
+      <Settle className="shrink-0 text-[var(--transcript-step)]" id="Published">Published</Settle>
+      <QuestionTitle glyph question={question} />
+    </div>
+  );
 }
 
 /**
@@ -413,11 +699,15 @@ const StageRow = memo(function StageRow({ stage, draft, language, current, resol
         subject={stage.subject}
         verb={stage.verb}
       />
+      {/* The children first, hanging straight off this row's mark; what the
+          stage said goes under them. With the words in between, the line from
+          the mark to its runs had nothing to run through. */}
+      <Reveal show={nodes.length > 0}><Nested nodes={nodes} /></Reveal>
       <Reveal show={open && Boolean(detail)}>
-        <Said live={running}><FollowHeight><p className="break-words">{detail}</p></FollowHeight></Said>
+        <Said live={running} speaker={speakerFor(stage)} watch={detail}><p className="break-words">{detail}</p></Said>
       </Reveal>
       <Reveal show={open && findings.length > 1}>
-        <Said live={running}>
+        <Said live={running} speaker={speakerFor(stage)} watch={findings.length}>
           <ul className="space-y-0.5">{findings.map((finding, index) => <li className="break-words" key={index}>{finding}</li>)}</ul>
         </Said>
       </Reveal>
@@ -426,7 +716,6 @@ const StageRow = memo(function StageRow({ stage, draft, language, current, resol
           <div className="pb-1 pl-6"><FollowHeight><FileCodeBlock body={stage.writing.content} language={language ?? "text"} live path={stage.writing.path} /></FollowHeight></div>
         ) : null}
       </Reveal>
-      <Reveal show={nodes.length > 0}><Nested nodes={nodes} /></Reveal>
     </>
   );
 });
@@ -472,7 +761,7 @@ const RunRow = memo(function RunRow({ run }: { run: ToolStageRun }) {
                 key={index}
                 transition={{ duration: 0.25, delay: Math.min(index, 12) * 0.03, ease: EASE }}
               >
-                {entry.passed ? <IconCheck className="size-3 shrink-0 text-[var(--success)]" /> : <IconCircleX className="size-3 shrink-0 text-[var(--warning)]" />}
+                {entry.passed ? <IconCheck className="size-3 shrink-0 text-[var(--success)]" /> : <IconCircleX className="size-3 shrink-0 text-[var(--miss)]" />}
                 <span className="truncate">{entry.name}</span>
               </motion.li>
             ))}
@@ -575,7 +864,7 @@ const StatementRow = memo(function StatementRow({ body, writing }: { body: strin
         verb={writing ? "Writing" : "Wrote"}
       />
       <Reveal show={expanded}>
-        <Said live={writing}><FollowHeight><p className="line-clamp-6 whitespace-pre-wrap break-words">{body}</p></FollowHeight></Said>
+        <Said live={writing} speaker={{ name: "Problem statement", icon: <IconFile /> }} watch={body}><p className="whitespace-pre-wrap break-words">{body}</p></Said>
       </Reveal>
     </>
   );
@@ -696,4 +985,180 @@ export function draftFromCall(input: string, files: AgentActivityFile[]): Challe
   };
 }
 
+/* ---------------------------------------------------------------------------
+   The question itself
+   ------------------------------------------------------------------------- */
+
+/** What a build made, in the few words that say it is a question. */
+export type QuestionMark = { title: string; ordinal: number | null; language: Language | null; detail: string };
+
+/**
+ * The question a build made, written as a line of the thread rather than as a
+ * badge: its number, its title in the strong tone, how hard it is in the muted
+ * one.
+ */
+export function QuestionTitle({ question, glyph = false, className }: { question: QuestionMark; glyph?: boolean; className?: string }) {
+  return (
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
+      {glyph && question.language ? <LanguageGlyph className="size-3.5 shrink-0" language={question.language} /> : null}
+      <span className="flex min-w-0 items-baseline gap-1.5">
+        {question.ordinal ? <span className="shrink-0 font-mono text-thread-tool tabular-nums text-[var(--transcript-step-mark)]">#{question.ordinal}</span> : null}
+        <span className="min-w-0 truncate text-[var(--transcript-step-strong)]">{question.title}</span>
+      </span>
+      {question.detail ? <span className="shrink-0 text-[var(--transcript-step-mark)]">· {question.detail}</span> : null}
+    </span>
+  );
+}
+
 export { ChildRow, Clock, Orb, Pill, Reveal };
+
+/* ---------------------------------------------------------------------------
+   A filed insight card: one thing, drawn as one thing. A single row off the
+   call's line says it was scheduled; under it, the idea itself, what reviews
+   will ask about — which the learner can change right here — and the rest of
+   the card behind one disclosure, as a list rather than as rows that each look
+   like a step of their own.
+   ------------------------------------------------------------------------- */
+
+const str = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+const obj = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+
+function parsed(body: string): Record<string, unknown> {
+  try { return obj(JSON.parse(body)); } catch { return {}; }
+}
+
+/** A model-written diff, with blank added or removed lines dropped and the
+ *  indentation both sides share taken off, so the change is what reads. */
+function tidyDiff(diff: string): string {
+  const lines = diff.replace(/\s+$/, "").split("\n").filter((line) => !/^[+\-]?\s*$/.test(line));
+  const body = lines.map((line) => /^[+\- ]/.test(line) ? line.slice(1) : line);
+  const indent = Math.min(...body.filter((line) => line.trim()).map((line) => /^\s*/.exec(line)![0].length));
+  return lines.map((line, index) => `${/^[+\-]/.test(line) ? line[0] : " "} ${body[index]!.slice(Number.isFinite(indent) ? indent : 0)}`).join("\n");
+}
+
+const RECALL = ["problem", "pattern", "concept", "turning-point", "pitfall"] as const;
+type Recall = (typeof RECALL)[number];
+const RECALL_WORD: Record<Recall, string> = { problem: "The problem", pattern: "The pattern", concept: "The concept", "turning-point": "What clicked", pitfall: "The mistake" };
+const isRecall = (value: unknown): value is Recall => RECALL.includes(value as Recall);
+
+/** What reviews of this card ask about. Lit chips are the card's; the rest
+ *  are one click away, and the card always keeps at least one. */
+function RecallChips({ cardId, initial }: { cardId: string; initial: Recall[] }) {
+  const [targets, setTargets] = useState<Recall[]>(initial);
+  const [saving, setSaving] = useState(false);
+  const editable = Boolean(cardId && window.spar?.setReviewTargets);
+  const toggle = (target: Recall) => {
+    const on = targets.includes(target);
+    if (on && targets.length === 1) return;
+    const next = on ? targets.filter((entry) => entry !== target) : RECALL.filter((entry) => entry === target || targets.includes(entry));
+    const before = targets;
+    setTargets(next);
+    setSaving(true);
+    void Promise.resolve(window.spar?.setReviewTargets({ cardId, targets: next }))
+      .catch(() => setTargets(before))
+      .finally(() => setSaving(false));
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {RECALL.map((target) => {
+        const on = targets.includes(target);
+        return (
+          <button
+            aria-pressed={on}
+            className={cn(
+              "inline-flex h-5 items-center rounded-full px-2 text-thread-tool transition-colors duration-200",
+              on ? "bg-[var(--accent)] text-[var(--transcript-step-strong)]" : "text-[var(--transcript-step-mark)] hover:text-[var(--transcript-step)]",
+              !editable && !on && "hidden",
+            )}
+            disabled={!editable || saving || (on && targets.length === 1)}
+            key={target}
+            onClick={() => toggle(target)}
+            title={on ? "Reviews will ask about this — click to stop" : "Click to be asked about this too"}
+            type="button"
+          >
+            {RECALL_WORD[target]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Fact({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <>
+      <dt className="text-[var(--transcript-step-mark)]">{label}</dt>
+      <dd className="min-w-0 break-words text-[var(--transcript-step)]">{children}</dd>
+    </>
+  );
+}
+
+export function InsightTree({ input, output }: { input: string; output: string }) {
+  const [more, setMore] = useState(false);
+  const args = parsed(input);
+  const result = parsed(output);
+  const click = obj(args.click);
+  const pitfalls = Array.isArray(args.pitfalls) ? args.pitfalls.map(obj).filter((row) => str(row.mistake)) : [];
+  const transfer = Array.isArray(args.transfer) ? args.transfer.map(str).filter(Boolean) : [];
+  const filed = str(result.status) === "filed";
+  const days = typeof result.firstReviewInDays === "number" ? result.firstReviewInDays : null;
+  const dueAt = str(result.dueAt);
+  const independence = str(args.independence);
+  const asked = (Array.isArray(result.targets) ? result.targets : Array.isArray(args.targets) ? args.targets : []).filter(isRecall);
+  const targets: Recall[] = asked.length ? asked : ["turning-point", "pattern"];
+  const hasMore = Boolean(str(args.trigger) || str(args.invariant) || str(click.summary) || pitfalls.length || transfer.length);
+
+  const row = (
+    <>
+      <ChildRow
+        corner={dueAt ? <Pill tone={filed ? "good" : "bad"}>{new Date(dueAt).toLocaleDateString([], { month: "short", day: "numeric" })}</Pill> : undefined}
+        mark={filed ? <IconCheck className="text-[var(--success)]" /> : <IconCircleX className="text-[var(--miss)]" />}
+        markKey="done"
+        subject={days !== null ? `in ${days} day${days === 1 ? "" : "s"}` : filed ? "card refined, schedule unchanged" : str(result.note) || "not filed"}
+        verb={filed ? (days !== null ? "First review" : "Updated") : "Not filed"}
+      />
+      {filed && (
+        <div className="flex min-w-0 flex-col gap-1.5 pb-1.5 pl-6 text-thread-tool leading-[1.55]">
+          {str(args.insight) && <p className="break-words text-[var(--transcript-step)]">{str(args.insight)}</p>}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="text-[var(--transcript-step-mark)]">Reviews ask about</span>
+            <RecallChips cardId={str(result.cardId)} initial={targets} />
+          </div>
+          {hasMore && (
+            <>
+              <button className="group/more flex w-fit cursor-default items-center gap-0.5 text-[var(--transcript-step-mark)] outline-none hover:text-[var(--transcript-step)]" onClick={() => setMore((value) => !value)} type="button">
+                <IconChevronRight className={cn("size-3.5 transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]", more && "rotate-90")} />
+                {more ? "Hide the card" : "The whole card"}
+                {!more && pitfalls.length ? <span className="ml-1 text-[var(--miss)]">· {pitfalls.length} slip{pitfalls.length === 1 ? "" : "s"}</span> : null}
+              </button>
+              <Reveal show={more}>
+                <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 pb-0.5 pl-4">
+                  {str(args.trigger) && <Fact label="When you see">{str(args.trigger)}</Fact>}
+                  {str(args.invariant) && <Fact label="Why it holds">{str(args.invariant)}</Fact>}
+                  {str(click.summary) && (
+                    <Fact label={independence === "assisted" ? "Clicked, with help" : independence === "independent" ? "Clicked, on your own" : "What clicked"}>
+                      {str(click.summary)}
+                      {str(click.diff) && <FileCodeBlock body={tidyDiff(str(click.diff))} className="!mt-1.5" language="diff" path="the change" />}
+                    </Fact>
+                  )}
+                  {pitfalls.length > 0 && (
+                    <Fact label="Where you slipped">
+                      {pitfalls.map((pitfall, index) => (
+                        <p className="[&+&]:mt-1" key={index}>
+                          {str(pitfall.mistake)}
+                          {str(pitfall.fix) ? <span className="text-[var(--transcript-step-mark)]"> — {str(pitfall.fix)}</span> : null}
+                        </p>
+                      ))}
+                    </Fact>
+                  )}
+                  {transfer.length > 0 && <Fact label="Also works for">{transfer.join(" · ")}</Fact>}
+                </dl>
+              </Reveal>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+  return <TreeChildren nodes={[{ id: "card", row }]} />;
+}

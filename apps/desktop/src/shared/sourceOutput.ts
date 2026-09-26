@@ -1,5 +1,6 @@
 import type { PracticeVerdict } from "@spar/practice";
 import type { SourceRunReport } from "./api.js";
+import { STOPPED_AT_FAILURE } from "./testReport.js";
 
 /**
  * A judged run at the source, written as the notation the result panel reads.
@@ -20,44 +21,45 @@ export function sourceRunOutput(report: SourceRunReport, sourceName: string): st
   if (report.cases.length) {
     /* Every case the judge answered. It returns the input, the expected value and
        what the learner's code produced for each one, which is everything a case
-       is; writing that as prose was throwing the structure away at the last step. */
+       is; writing that as prose was throwing the structure away at the last step.
+       A runtime error belongs to the first case that failed — that is the one it
+       killed. */
+    const firstFailed = report.cases.findIndex((entry) => !entry.passed);
     lines.push(
       "TAP version 13",
       ...report.cases.flatMap((entry, index) => [
         `${entry.passed ? "ok" : "not ok"} ${index + 1} - Case ${index + 1}${entry.input ? ` · ${oneLine(entry.input)}` : ""}`,
         ...(entry.passed
           ? []
-          : ["  ---", `  expected: '${tapScalar(entry.expected)}'`, `  actual: '${tapScalar(entry.actual)}'`, "  ..."]),
+          : diagnostics({
+            input: entry.input,
+            expected: entry.expected,
+            actual: entry.actual,
+            stdout: entry.stdout ?? "",
+            error: index === firstFailed ? report.error ?? "" : "",
+          })),
       ]),
       `1..${report.cases.length}`,
       `# tests ${report.cases.length}`,
       `# pass ${report.cases.filter((entry) => entry.passed).length}`,
       `# fail ${report.cases.filter((entry) => !entry.passed).length}`,
+      report.outcome === "failed" ? `# status ${report.status}` : "",
     );
   } else if (report.failedCase) {
-    /* No per-case answers, but the judge named the case it rejected. That is one
-       case and it is written as one, rather than as the three loose lines it used
-       to be — which parsed as nothing and rendered as a log. */
-    const total = report.totalCases || 1;
-    lines.push(
-      "TAP version 13",
-      `not ok 1 - the first case ${sourceName} rejected${report.failedCase.input ? ` · ${oneLine(report.failedCase.input)}` : ""}`,
-      "  ---",
-      `  error: 'expected ${tapScalar(report.failedCase.expected)}, got ${tapScalar(report.failedCase.actual)}'`,
-      `  expected: '${tapScalar(report.failedCase.expected)}'`,
-      `  actual: '${tapScalar(report.failedCase.actual)}'`,
-      ...(report.failedCase.stdout ? [`  stdout: '${tapScalar(report.failedCase.stdout)}'`] : []),
-      "  ...",
-      "1..1",
-      `# tests ${total}`,
-      `# pass ${report.passedCases}`,
-      `# fail ${Math.max(1, total - report.passedCases)}`,
-    );
+    lines.push(...stoppedSuite({
+      failedCase: report.failedCase,
+      passed: report.passedCases,
+      total: report.totalCases,
+      status: report.status,
+      error: report.error ?? "",
+      label: "Case",
+    }));
   } else {
     /* Nothing ran: the judge refused the request, or the code did not build. There
        are no cases to write, and inventing one would report a verdict nobody
        reached — the panel draws the challenge's own cases as ungraded instead. */
     lines.push(`# ${report.status}`, report.totalCases ? `# cases ${report.passedCases}/${report.totalCases}` : "");
+    if (report.error) lines.push("", report.error);
   }
 
   lines.push(report.runtime ? `# runtime ${report.runtime}` : "", "", report.message);
@@ -67,43 +69,107 @@ export function sourceRunOutput(report: SourceRunReport, sourceName: string): st
 /**
  * A submission judged at the source, in the same notation.
  *
- * A submission is run against every hidden case the source holds and it names
- * exactly one of them — the first it rejected — so that is the only case there is
- * to draw, and the counts carry the rest. When it accepted the solution there is
- * no case to name at all, and the single passing point stands for the whole
- * hidden suite.
+ * A submission is run against every hidden case the source holds, in order, and
+ * stops at the first it rejects. So the cases before that one passed, that one
+ * failed with the values the judge names, and the rest were never reached — the
+ * whole suite is drawn, with its unreached tail grey, rather than one dot
+ * standing in for thirty-six. An accepted submission passed every one of them.
  */
 export function sourceSubmissionOutput(verdict: PracticeVerdict, sourceName: string): string {
   const lines = ["TAP version 13"];
-  const cases = verdict.totalCases || (verdict.failedCase ? 1 : 0);
-  const passed = verdict.totalCases ? verdict.passedCases : verdict.outcome === "passed" ? cases : 0;
+  const error = verdict.runtimeError || verdict.compileError;
 
   if (verdict.failedCase) {
-    lines.push(
-      `not ok 1 - the first case ${sourceName} rejected${verdict.failedCase.input ? ` · ${oneLine(verdict.failedCase.input)}` : ""}`,
-      "  ---",
-      `  error: 'expected ${tapScalar(verdict.failedCase.expected)}, got ${tapScalar(verdict.failedCase.actual)}'`,
-      `  expected: '${tapScalar(verdict.failedCase.expected)}'`,
-      `  actual: '${tapScalar(verdict.failedCase.actual)}'`,
-      ...(verdict.failedCase.stdout ? [`  stdout: '${tapScalar(verdict.failedCase.stdout)}'`] : []),
-      "  ...",
-      "1..1",
-    );
+    lines.push(...stoppedSuite({
+      failedCase: verdict.failedCase,
+      passed: verdict.passedCases,
+      total: verdict.totalCases,
+      status: verdict.status,
+      error,
+      label: "Hidden case",
+    }).slice(1));
   } else if (verdict.outcome === "passed") {
-    lines.push(`ok 1 - every hidden case at ${sourceName}`, "1..1");
+    const total = Math.max(1, verdict.totalCases);
+    lines.push(
+      ...(verdict.totalCases
+        ? Array.from({ length: total }, (_unused, index) => `ok ${index + 1} - Hidden case ${index + 1}`)
+        : [`ok 1 - every hidden case at ${sourceName}`]),
+      `1..${total}`,
+      `# tests ${total}`,
+      `# pass ${total}`,
+      "# fail 0",
+    );
+  } else {
+    /* Rejected without naming a case — a compile error, most often. Nothing was
+       judged, so no case is drawn; the error stays readable underneath. */
+    lines.push(`# ${verdict.status}`, verdict.totalCases ? `# cases ${verdict.passedCases}/${verdict.totalCases}` : "");
   }
 
   lines.push(
-    `# tests ${cases || 1}`,
-    `# pass ${passed}`,
-    `# fail ${Math.max(0, (cases || 1) - passed)}`,
     verdict.runtime ? `# runtime ${verdict.runtime}${verdict.runtimePercentile !== null ? ` (beats ${verdict.runtimePercentile.toFixed(1)}%)` : ""}` : "",
     verdict.memory ? `# memory ${verdict.memory}${verdict.memoryPercentile !== null ? ` (beats ${verdict.memoryPercentile.toFixed(1)}%)` : ""}` : "",
-    verdict.compileError ? `\n${verdict.compileError}` : "",
-    verdict.runtimeError ? `\n${verdict.runtimeError}` : "",
+    !verdict.failedCase && error ? `\n${error}` : "",
   );
   if (verdict.submissionUrl) lines.push("", `# ${verdict.submissionUrl}`);
   return `${lines.filter(Boolean).join("\n")}\n`;
+}
+
+/**
+ * A fail-fast suite at the source: the cases it passed, the one it stopped on,
+ * and how big the whole suite was. `# suite` carries the size past the cases
+ * printed, and the stop marker tells the panel the tail was unreached rather
+ * than missing.
+ */
+function stoppedSuite(input: {
+  failedCase: { input: string; expected: string; actual: string; stdout: string };
+  passed: number;
+  total: number;
+  status: string;
+  error: string;
+  /** What a passed case is called: a run's are the problem's own cases, a
+   *  submission's are the source's hidden ones. */
+  label: string;
+}): string[] {
+  const at = input.passed + 1;
+  const total = Math.max(at, input.total);
+  const { failedCase } = input;
+  return [
+    "TAP version 13",
+    ...Array.from({ length: input.passed }, (_unused, index) => `ok ${index + 1} - ${input.label} ${index + 1}`),
+    `not ok ${at} - Case ${at}${failedCase.input ? ` · ${oneLine(failedCase.input)}` : ""}`,
+    ...diagnostics({ ...failedCase, error: input.error }),
+    ...(at < total ? [`# ${STOPPED_AT_FAILURE}`] : []),
+    `1..${at}`,
+    `# tests ${at}`,
+    `# pass ${input.passed}`,
+    "# fail 1",
+    `# suite ${total}`,
+    `# status ${input.status}`,
+  ];
+}
+
+/** A failing case's diagnostic block. Empty values are left out, so a case that
+ *  crashed shows its error rather than a blank Output box. */
+function diagnostics(value: { input: string; expected: string; actual: string; stdout: string; error: string }): string[] {
+  return [
+    "  ---",
+    ...(value.input ? [`  input: '${tapScalar(args(value.input))}'`] : []),
+    ...(value.expected ? [`  expected: '${tapScalar(value.expected)}'`] : []),
+    ...(value.actual ? [`  actual: '${tapScalar(value.actual)}'`] : []),
+    ...(value.stdout.trim() ? block("stdout", value.stdout) : []),
+    ...(value.error.trim() ? block("stderr", value.error) : []),
+    "  ...",
+  ];
+}
+
+/** A multi-line value as a YAML block scalar, so its line breaks survive. */
+function block(key: string, value: string): string[] {
+  return [`  ${key}: |-`, ...value.replace(/\r\n/g, "\n").trimEnd().split("\n").map((line) => `    ${line}`)];
+}
+
+/** A case's arguments, one per line from the source, as a call's argument list. */
+function args(value: string): string {
+  return value.split("\n").map((line) => line.trim()).filter(Boolean).join(", ");
 }
 
 /** A case's arguments on one line, short enough to name the case by. The source

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BrainCircuit, ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sun, Trash2, UserRound } from "lucide-react";
+import { ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sparkle, Sun, Trash2, UserRound } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type BaselineState, type Language } from "@spar/domain";
-import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ThemePreference, UsageWindow } from "../../../shared/api";
+import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ReviewTargetMode, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -30,12 +30,14 @@ import { SparWordmark } from "../common/SparWordmark";
 import { AboutSpar } from "../settings/AboutSpar";
 import { PracticeSourceGroup } from "../settings/PracticeSource";
 import { UpdateSettings } from "../settings/UpdateSettings";
+import { EditorSettings } from "../settings/EditorSettings";
 import { UsageSettings } from "../settings/UsageSettings";
+import { SkillsSettings } from "../settings/SkillsSettings";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
-type SettingsSection = "account" | "models" | "usage" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
+type SettingsSection = "account" | "agent" | "usage" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
 type NavItem = SidebarGroup<SettingsSection>["items"][number];
 
 /**
@@ -47,18 +49,21 @@ type NavItem = SidebarGroup<SettingsSection>["items"][number];
  * Spar and the person signed into it, four about the machinery that reads and
  * teaches and what it spends, two about what is kept.
  */
+/* Lucide draws its sparkle as an outline; the Agent row wants it solid. */
+const SparkleFilled = ({ className }: { className?: string }) => <Sparkle className={className} fill="currentColor" />;
+
 const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
   {
     label: "Spar",
     items: [
       { id: "account", label: "Account", icon: UserRound, sections: ["Account", "About"] },
-      { id: "appearance", label: "Appearance", icon: Palette, sections: ["Appearance", "Updates"] },
+      { id: "appearance", label: "Appearance", icon: Palette, sections: ["Appearance", "Editor", "Updates"] },
     ],
   },
   {
     label: "Training",
     items: [
-      { id: "models", label: "Models", icon: BrainCircuit, sections: ["Providers", "Agent", "Web search"] },
+      { id: "agent", label: "Agent", icon: SparkleFilled, sections: ["Model", "Providers", "Tools", "Skills"] },
       { id: "usage", label: "Usage", icon: ChartColumn, sections: ["Overview", "Plan limits", "Models", "Sessions"] },
       { id: "learning", label: "Learning", icon: Settings2, sections: ["Baseline", "Training preferences"] },
       { id: "connections", label: "Connections", icon: Link2, sections: ["Practice sources"] },
@@ -148,10 +153,10 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
             {source === "loading"
               ? "Checking…"
               : !held
-                ? "Needs an Exa key. Without one the agent works entirely from your own record."
+                ? "Needs an Exa key."
                 : enabled
-                  ? "The agent can look up what a company's interviews cover or what a library's current API is."
-                  : "Off. The agent works entirely from your own record."}
+                  ? "Looks things up online when your record isn't enough."
+                  : "Off."}
           </p>
         </div>
         <Switch
@@ -231,6 +236,31 @@ function ComplexityCheckRow({api}:{api:SparApi|undefined}){
       {failure&&<p className="mt-1 text-ui text-destructive">{failure}</p>}
     </div>
     <Switch aria-label="Complexity check after a solve" checked={enabled} disabled={busy||!api} onCheckedChange={change}/>
+  </Row>;
+}
+
+/**
+ * What a new review card rehearses: decided by the agent from how the solve
+ * went, or asked of the learner after each solve, in the thread, before the card
+ * is filed — their answer then decides what the card and its reviews are about.
+ */
+function ReviewTargetsRow({api}:{api:SparApi|undefined}){
+  const [mode,setMode]=useState<ReviewTargetMode>("auto");
+  const [busy,setBusy]=useState(false);
+  const [failure,setFailure]=useState("");
+  useEffect(()=>{void api?.reviewSettings().then((value)=>setMode(value.targets)).catch((cause)=>setFailure(message(cause)));},[api]);
+  const change=(next:ReviewTargetMode)=>{if(!api)return;setBusy(true);setFailure("");setMode(next);void api.saveReviewSettings({targets:next}).then((value)=>setMode(value.targets)).catch((cause)=>setFailure(message(cause))).finally(()=>setBusy(false));};
+  return <Row className="items-center gap-4 py-3">
+    <div className="min-w-0 flex-1">
+      <p className="text-content font-medium">What reviews ask about</p>
+      <p className="mt-0.5 max-w-[28rem] text-ui leading-[1.55] text-muted-foreground">
+        {mode==="ask"
+          ? "After each solve, Spar asks what you want to remember — the step that cracked it, the general pattern, the problem itself — and builds the card around your answer."
+          : "Spar picks from how the solve went: the step that cracked it, the pattern, the problem itself. You can change it on any card."}
+      </p>
+      {failure&&<p className="mt-1 text-ui text-destructive">{failure}</p>}
+    </div>
+    <Segmented ariaLabel="What reviews ask about" disabled={busy||!api} onChange={change} options={[{value:"auto",label:"Decide for me"},{value:"ask",label:"Ask me"}]} value={mode}/>
   </Row>;
 }
 
@@ -572,6 +602,8 @@ export function SettingsPage({
   const [languageBusy, setLanguageBusy] = useState(false);
   const [accountAction, setAccountAction] = useState<"sign-out" | "delete" | null>(null);
   const [section, setSection] = useState<SettingsSection>("account");
+  /* A skill's own page replaces the Agent page under it, title included. */
+  const [skillOpen, setSkillOpen] = useState(false);
   /* Both the rail in the margin and the sidebar's search read the rendered
      tree, so the page has to hand them the two nodes it owns: the thing that
      scrolls, and the thing inside it the sections live in. */
@@ -704,9 +736,9 @@ export function SettingsPage({
                 which is what makes it read as the page's name rather than as the
                 first row of the list under it. */}
             <main className="mx-auto w-full max-w-2xl px-8 pt-16 pb-40 text-left" ref={content}>
-        <SettingsHeader>
+        {!(section === "agent" && skillOpen) && <SettingsHeader>
           <h1>{SETTINGS_PAGES.find((item) => item.id === section)?.label ?? "Settings"}</h1>
-        </SettingsHeader>
+        </SettingsHeader>}
 
         {error && !selected && (
           <p className="mb-6 rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui text-destructive">{error}</p>
@@ -739,6 +771,10 @@ export function SettingsPage({
               value={theme}
             />
           </Row>
+        </Group>}
+
+        {section === "appearance" && <Group label="Editor">
+          <EditorSettings />
         </Group>}
 
         {section === "learning" && <><Group label="Baseline">
@@ -784,9 +820,28 @@ export function SettingsPage({
               ))}
             </div>
           </Row>
+        </Group><Group label="Reviews">
+          <ReviewTargetsRow api={api}/>
         </Group></>}
 
-        {section === "models" && <><Group label="Providers">
+        {/* Four stops, most-touched first: which model runs, where it comes
+            from, what it can reach, and what it can read up on. Each section
+            is one card whose rows each say one thing — no card repeats its
+            section's name as its first row. */}
+        {section === "agent" && !skillOpen && <>
+        {defaultProvider && (
+          <Group label="Model">
+            <Row className="gap-4">
+              <div className="min-w-0 flex-1 px-1">
+                <p className="text-content font-medium">Default model</p>
+                <p className="mt-0.5 text-ui text-muted-foreground">New runs start here.</p>
+              </div>
+              <ModelPicker onSelect={(model) => void setDefault(defaultProvider, model)} provider={defaultProvider} />
+            </Row>
+          </Group>
+        )}
+
+        <Group label="Providers">
           {!inventory && (
             <Row>
               <SparDots className="text-muted-foreground" pattern="pulse" size={16} />
@@ -809,25 +864,11 @@ export function SettingsPage({
           {available.length > 0 && <ConnectRow available={available} onPick={open} />}
         </Group>
 
-        {defaultProvider && (
-          <Group label="Agent">
-            <Row className="gap-4">
-              <div className="min-w-0 flex-1">
-                <p className="text-content font-medium">Default model</p>
-                <p className="mt-0.5 text-ui text-muted-foreground">Every new run starts here until you switch provider.</p>
-              </div>
-              <ModelPicker onSelect={(model) => void setDefault(defaultProvider, model)} provider={defaultProvider} />
-            </Row>
-          </Group>
-        )}
-
-        {/* Not under Providers, and deliberately above Web search: this is where
-            the problems come from, which is a bigger fact about how Spar behaves
-            than either of the things below it. */}
-        <Group label="Web search">
+        <Group label="Tools">
           <WebSearchRow api={api} />
         </Group></>}
 
+        {section === "agent" && <SkillsSettings api={api} onDetail={setSkillOpen} />}
         {section === "usage" && <UsageSettings api={api} providers={inventory?.providers ?? []} />}
 
         {section === "connections" && <Group label="Practice sources">

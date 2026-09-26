@@ -102,4 +102,12 @@ describe("splitExampleInput", () => {
   it("handles a string value that contains the other parameter's name", () => {
     expect(splitExampleInput('s = "target = 3", target = 3', ["s", "target"])).toEqual(['"target = 3"', "3"]);
   });
+
+  it("keeps a statement's figure as a markdown image on its own line", () => {
+    const html = '<p>Find the node.</p>\n<p><strong class="example">Example 1:</strong></p>\n<img alt="" src="https://assets.leetcode.com/uploads/tree1.jpg" style="width: 422px; height: 302px;" />\n<pre><strong>Input:</strong> root = [4,2,7,1,3], val = 2\n<strong>Output:</strong> [2,1,3]\n</pre>';
+    const markdown = statementToMarkdown(html);
+    expect(markdown).toContain("Find the node.");
+    expect(markdown).toMatch(/^!\[\]\(https:\/\/assets\.leetcode\.com\/uploads\/tree1\.jpg\)$/m);
+  });
 });
+

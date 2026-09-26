@@ -1,5 +1,5 @@
+import { Figure } from "../agent/Figure";
 import { useMemo } from "react";
-import { ArrowRight } from "lucide-react";
 import { Markdown } from "../agent/Markdown";
 import { MarkdownLinkProvider, useMarkdownLinks } from "../agent/MarkdownLinks";
 import { parseStatement } from "@/lib/statement";
@@ -9,8 +9,20 @@ import { parseStatement } from "@/lib/statement";
  * the rules it must satisfy, and worked examples you can scan. When the agent's
  * text already has its own structure this steps aside and renders the markdown.
  */
-export function ProblemStatement({ source, language }: { source: string; language?: string | undefined }) {
-  const parsed = useMemo(() => parseStatement(source), [source]);
+export function ProblemStatement({ source, language, asWritten = false }: {
+  source: string;
+  language?: string | undefined;
+  /** Render the markdown exactly as given. For a problem from LeetCode or
+   *  Codeforces: the regrouping below exists to give an agent's run-on prose a
+   *  shape, and a site's own statement already has one — its paragraphs,
+   *  figures, worked examples and constraints, in the order it chose. Taking
+   *  that apart is how a statement lost everything but its first sentence. */
+  asWritten?: boolean;
+}) {
+  const parsed = useMemo(
+    () => (asWritten ? { structured: false, lead: source, requirements: [], examples: [], note: "" } : parseStatement(source)),
+    [asWritten, source],
+  );
   /* The challenge's language, so `nums[i]` in a statement is coloured the way
      the same text is in the editor beside it. A fenced block names its own
      language; an inline span cannot, and the statement's language is the only
@@ -40,31 +52,37 @@ export function ProblemStatement({ source, language }: { source: string; languag
         </ul>
       )}
 
+      {/* Each example its own card, named, the way a problem page numbers
+          them. A figure is the card's top band — the picture of the input —
+          and the rows under it read Input, Output, then why. One border per
+          example: a framed figure inside a framed card was a box in a box. */}
       {parsed.examples.length > 0 && (
-        <div className="mt-4">
-          <p className="mb-1.5 text-content-sm font-medium tracking-[0.06em] text-muted-foreground/80">EXAMPLES</p>
-          <div className="overflow-hidden rounded-lg border border-border">
-            {parsed.examples.map((example, index) => (
-              <div
-                key={index}
-                className="flex min-w-0 flex-col gap-1 border-b border-border/60 bg-[var(--color-background-elevated-secondary)] px-2.5 py-2 last:border-b-0"
-              >
-                <code className="min-w-0 break-words font-mono text-content-sm text-foreground">{example.call}</code>
-                <span className="flex min-w-0 items-start gap-1.5">
-                  <ArrowRight className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
-                  <code className="min-w-0 break-words font-mono text-content-sm text-[var(--success)]">{example.result}</code>
-                </span>
-                {/* Why this one is the answer. The agent writes it and it is
-                    often the whole point of the example — which case the
-                    boundary lands on, why the obvious answer is wrong — so it
-                    travels with the example rather than being dropped for
-                    tidiness. */}
+        <div className="mt-5 space-y-3">
+          {parsed.examples.map((example, index) => (
+            <section key={index} className="min-w-0">
+              <p className="mb-1.5 text-content-sm font-medium text-foreground/85">Example {index + 1}</p>
+              <div className="overflow-hidden rounded-lg border border-border bg-[var(--color-background-elevated-secondary)]">
+                {example.figure && (
+                  <div className="border-b border-border/60 px-3 py-4">
+                    <Figure bare source={example.figure} />
+                  </div>
+                )}
+                <dl className="grid min-w-0 grid-cols-[3.75rem_minmax(0,1fr)] gap-x-3 gap-y-1 px-3 py-2.5 text-content-sm">
+                  <dt className="text-muted-foreground">Input</dt>
+                  <dd className="min-w-0"><code className="break-words font-mono text-foreground">{example.call}</code></dd>
+                  <dt className="text-muted-foreground">Output</dt>
+                  <dd className="min-w-0"><code className="break-words font-mono text-[var(--success)]">{example.result}</code></dd>
+                </dl>
+                {/* Why this one is the answer — often the whole point of the
+                    example, so it travels with it. */}
                 {example.note && (
-                  <Markdown className="md-prose-content mt-0.5 min-w-0 text-foreground/75" source={example.note} />
+                  <div className="border-t border-border/60 px-3 py-2.5">
+                    <Markdown className="md-prose-content min-w-0 text-foreground/75" source={example.note} />
+                  </div>
                 )}
               </div>
-            ))}
-          </div>
+            </section>
+          ))}
         </div>
       )}
 

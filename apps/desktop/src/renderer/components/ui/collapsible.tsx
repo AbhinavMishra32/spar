@@ -42,15 +42,24 @@ function CollapsibleContent({
   children,
   className,
   expandDuration,
+  gap = 0,
   ...props
-}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleContent> & { expandDuration?: number }) {
+}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleContent> & {
+  expandDuration?: number
+  /** Space between the trigger and the open panel, in px. Animated with the
+   *  height rather than set as a margin class, because a closed panel is still
+   *  in the document and a static margin on it is space under every row that
+   *  has something to open — which set those rows further apart than the ones
+   *  that do not. */
+  gap?: number
+}) {
   const expanded = useContext(Expanded)
   const reduced = useReducedMotion()
   return (
       <motion.div
         className={className}
         initial={false}
-        animate={{ height: expanded ? "auto" : 0, opacity: expanded ? 1 : 0 }}
+        animate={{ height: expanded ? "auto" : 0, marginTop: expanded ? gap : 0, opacity: expanded ? 1 : 0 }}
         /* One curve, both directions, and the panel is the thing that carries
            it: height leads and everything else is timed off it. Opening is a
            spring so the last few pixels decelerate instead of stopping dead —
@@ -67,6 +76,9 @@ function CollapsibleContent({
         transition={reduced ? { duration: 0 } : {
           height: expanded
             ? { type: "spring", visualDuration: expandDuration ?? 0.52, bounce: 0.06 }
+            : { type: "tween", duration: 0.34, ease: EASE },
+          marginTop: expanded
+            ? { type: "spring", visualDuration: expandDuration ?? 0.52, bounce: 0 }
             : { type: "tween", duration: 0.34, ease: EASE },
           opacity: expanded
             ? { duration: 0.34, delay: 0.05, ease: EASE }

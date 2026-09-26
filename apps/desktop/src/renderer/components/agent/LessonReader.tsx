@@ -19,7 +19,7 @@ export function LessonReader({ lessonId, onClose }: { lessonId: string | null; o
       <AnimatePresence onExitComplete={() => setFull(false)}>
         {lessonId && <Dialog.Portal forceMount>
           <Dialog.Overlay asChild forceMount>
-            <motion.div className="fixed inset-0 z-[80] bg-black/25" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.14 }} />
+            <motion.div className="fixed inset-0 z-[80] bg-[var(--modal-scrim)]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.14 }} />
           </Dialog.Overlay>
           <motion.div layoutRoot className="pointer-events-none fixed inset-0 z-[81] grid place-items-center">
             <Dialog.Content asChild forceMount aria-describedby={undefined}

@@ -104,11 +104,11 @@ function Header({ read }: { read: AttemptRead }) {
   );
 }
 
-/** When they sat down to it. The report prints an instant; a learner reads a
- *  day and a time. */
+/** When they sat down to it. The report prints "today at 6:20pm" already;
+ *  one written before that printed an instant, which is turned into the same. */
 function opened(at: string): string {
   const when = Date.parse(at);
-  if (!Number.isFinite(when)) return "";
+  if (!Number.isFinite(when)) return at;
   return new Date(when).toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
 

@@ -18,9 +18,9 @@ import type { SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../common/EmptyState";
 import {
+  clock,
   duration,
   foldAttempt,
-  offset,
   type AttemptReplay,
   type CaseVerdict,
   type ReplayCase,
@@ -104,7 +104,7 @@ export function AttemptsPanel({
         {replay.cases.length > 0 && (
           <div className="hairline-t space-y-px py-1">
             {replay.cases.map((item) => (
-              <CaseRow key={item.name} item={item} />
+              <CaseRow key={item.name} item={item} startedAt={replay.startedAt} />
             ))}
           </div>
         )}
@@ -118,7 +118,7 @@ export function AttemptsPanel({
                 className="flex items-baseline gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-accent/50"
               >
                 <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/55">
-                  {offset(moment.offsetMs)}
+                  {clock(replay.startedAt + moment.offsetMs)}
                 </span>
                 <Icon
                   className={cn(
@@ -161,7 +161,7 @@ function Stat({ value, label }: { value: string; label: string }) {
 /** One case: its name, what became of it, and its mark in every run. Kept to a
  *  single line, with the expected/actual pair only where it is still failing —
  *  a case that is passing has nothing left to explain. */
-function CaseRow({ item }: { item: ReplayCase }) {
+function CaseRow({ item, startedAt }: { item: ReplayCase; startedAt: number }) {
   const failing = item.finalVerdict === "failed";
   return (
     <div className="rounded-lg px-2 py-1 transition-colors hover:bg-accent/50">
@@ -179,7 +179,7 @@ function CaseRow({ item }: { item: ReplayCase }) {
         <span className={cn("min-w-0 flex-1 truncate text-ui", failing ? "text-foreground" : "text-foreground/80")}>
           {item.name}
         </span>
-        <span className="shrink-0 text-ui-sm text-muted-foreground/65">{story(item)}</span>
+        <span className="shrink-0 text-ui-sm text-muted-foreground/65">{story(item, startedAt)}</span>
         <span className="flex shrink-0 items-center gap-0.5">
           {item.verdicts.map((verdict, index) => (
             <Mark key={index} verdict={verdict} />
@@ -197,10 +197,10 @@ function CaseRow({ item }: { item: ReplayCase }) {
 }
 
 /** What became of one case, in as few words as carry it. */
-function story(item: ReplayCase): string {
+function story(item: ReplayCase, startedAt: number): string {
   if (item.neverPassed) return item.failures > 1 ? `failed ${item.failures}×` : "failed";
-  if (item.regressed) return `broke again at ${offset(item.lastFailure?.atMs ?? 0)}`;
-  if (item.fixedAtMs !== undefined) return `fixed at ${offset(item.fixedAtMs)}`;
+  if (item.regressed) return `broke again at ${clock(startedAt + (item.lastFailure?.atMs ?? 0))}`;
+  if (item.fixedAtMs !== undefined) return `fixed at ${clock(startedAt + item.fixedAtMs)}`;
   return "";
 }
 

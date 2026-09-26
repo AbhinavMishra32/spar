@@ -198,7 +198,7 @@ function providerError(event: Extract<AssistantMessageEvent, { type: "error" }>)
  * one step, and a stream drained only for its final text. This is the same
  * request without the apparatus.
  */
-export async function piCompleteText(input: PiProviderInput, systemPrompt: string, message: string, signal: AbortSignal, timedOut: string, recordUsage?: (usage: ReturnType<typeof piUsage>) => void, onText?: (delta: string) => void): Promise<string> {
+export async function piCompleteText(input: PiProviderInput, systemPrompt: string, message: string, signal: AbortSignal, timedOut: string, recordUsage?: (usage: ReturnType<typeof piUsage>) => void, onText?: (delta: string) => void, onActivity?: () => void): Promise<string> {
   const transport = piTransportForApi(input.api);
   const context = {
     systemPrompt,
@@ -213,11 +213,16 @@ export async function piCompleteText(input: PiProviderInput, systemPrompt: strin
     ...piFastModeOptions(input),
   } as SimpleStreamOptions;
   /* Streamed when someone is watching the answer arrive — the private challenge
-     reviewer and repairs draw it live — and a plain request otherwise. */
+     reviewer and repairs draw it live — or when the caller is watching for
+     silence rather than for a deadline: every stream event, thinking included,
+     is proof the provider is still working. A plain request otherwise. */
   let result: AssistantMessage;
-  if (onText) {
+  if (onText || onActivity) {
     const stream = streamSimple(piModelFor(input), context, options);
-    for await (const event of stream) if (event.type === "text_delta") onText(event.delta);
+    for await (const event of stream) {
+      onActivity?.();
+      if (event.type === "text_delta") onText?.(event.delta);
+    }
     result = await stream.result();
   } else {
     result = await completeSimple(piModelFor(input), context, options);

@@ -38,6 +38,7 @@ export const PALETTE_PLACES: PalettePlace[] = [
   { page: "home", label: "Home", keywords: "today recommendation next practice abilities rating patterns evidence progress" },
   { page: "tracks", label: "Tracks", keywords: "goals training direction" },
   { page: "history", label: "History", keywords: "attempts challenges completed incomplete" },
+  { page: "review", label: "Start review", keywords: "spaced repetition flashcards due recall remember patterns review" },
   { page: "problems", label: "Problems", keywords: "practice browse library leetcode codeforces solve pick" },
   { page: "visualizer", label: "Visualize", keywords: "visualizer debugger trace step through animation memory linked list tree pointers watch run python" },
   { page: "sessions", label: "Sessions", keywords: "all list" },

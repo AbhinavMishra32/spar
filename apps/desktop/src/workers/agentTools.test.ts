@@ -30,7 +30,14 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * round trip on each of them in turn. `read_attempt` now returns all of it at
  * once and the other three are gone from the table. `read_submissions` is new:
  * a submission became a thing with an id the reply can cite, so there is a call
- * that lists them and returns the code and cases of one.
+ * that lists them and returns the code and cases of one. `read_attempt` gained
+ * a turning-points section and can read every segment across resets, and
+ * `record_insight` is new: after a pass the agent files what made it click as a
+ * spaced-review card, and it takes `targets` — what later reviews ask about — and `remember`, the learner's own words when they chose what to remember. The two authoring tools no longer require `runCommand`,
+ * `accidentalDifficulty` or `expectedFailureSignatures`: leaving one out
+ * bounced the whole call and cost a full re-send of the design. They also say
+ * that a known-incorrect implementation must be genuinely wrong and must pass
+ * every visible case, which the visible-tests text used to contradict.
  */
 describe("the tool contract, against what Mastra sent", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;

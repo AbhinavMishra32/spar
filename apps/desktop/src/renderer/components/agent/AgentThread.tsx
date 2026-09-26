@@ -106,6 +106,7 @@ function LiveRun({ run, phase, currentQuestionId, trail }: { run: AgentRun; phas
      only thing saying the turn is alive. */
   const waiting = streaming && run.finalStartedAt === undefined;
   const shows = waiting || work.length > 0;
+  const replyReady = useReplyReady(run.finalStartedAt, work.length > 0);
   return (
     /* The turn opening. A send used to be answered by a header, a rule and a
        waiting line all appearing in one frame in the empty space under the
@@ -144,36 +145,42 @@ function LiveRun({ run, phase, currentQuestionId, trail }: { run: AgentRun; phas
       </RunFold>
       )}
       {published.length > 0 && <div style={{ marginTop: PROSE_GAP }}><Rows currentQuestionId={currentQuestionId} parts={published} trail={trail} /></div>}
-      {reply.length > 0 && <FinalReply gap={shows || published.length > 0}><Rows currentQuestionId={currentQuestionId} parts={reply} trail={trail} /></FinalReply>}
+      {replyReady && reply.length > 0 && (
+        <div className="min-w-0" style={{ marginTop: shows || published.length > 0 ? FINAL_GAP : 0 }}>
+          <Rows currentQuestionId={currentQuestionId} parts={reply} trail={trail} />
+        </div>
+      )}
     </motion.div>
   );
 }
 
 /**
- * The answer arriving, once.
- *
- * The moment the work stops and the reply starts is the one the learner has been
- * waiting through a minute of tool rows for, and it used to be the least marked
- * thing on screen: the fold collapsed and text was simply there, in the space
- * the steps had been, with no frame between the two states. So the reply rises
- * the same few pixels the fold falls, on the fold's own timing — the two read as
- * one exchange rather than as a disappearance followed by an appearance.
- *
- * Only on mount, and only here. The settled turn draws the same words from
- * storage a moment later, and animating those too would play the arrival twice
- * for one answer.
+ * How long the work fold takes to shut by itself when the reply starts — the
+ * compacting close in `RunFold`. The reply waits this long before it is drawn.
  */
-function FinalReply({ children, gap }: { children: React.ReactNode; gap: boolean }) {
+const FOLD_CLOSE_MS = 900;
+
+/**
+ * Whether the reply may be drawn yet.
+ *
+ * The end of the work is one event and the start of the answer is another, and
+ * drawn at the same time they were one blur: steps fading out while text faded
+ * in over the space they left. So they happen in order. The fold collapses into
+ * "Worked for" first, and only once it has shut does the reply start writing —
+ * whatever streamed in during the close appears with it, then the rest follows
+ * token by token as usual. A turn with no fold to close answers straight away.
+ */
+function useReplyReady(finalStartedAt: number | undefined, folds: boolean): boolean {
   const reduced = useReducedMotion();
-  return (
-    <motion.div
-      animate={{ opacity: 1, y: 0 }}
-      className="min-w-0"
-      initial={reduced ? false : { opacity: 0, y: 10 }}
-      style={{ marginTop: gap ? FINAL_GAP : 0 }}
-      transition={{ type: "spring", visualDuration: 0.5, bounce: 0 }}
-    >{children}</motion.div>
-  );
+  const wait = folds && !reduced;
+  const [ready, setReady] = useState(finalStartedAt !== undefined && !wait);
+  useEffect(() => {
+    if (finalStartedAt === undefined) { setReady(false); return; }
+    if (!wait) { setReady(true); return; }
+    const timer = window.setTimeout(() => setReady(true), Math.max(0, finalStartedAt + FOLD_CLOSE_MS - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [finalStartedAt, wait]);
+  return ready;
 }
 
 /**
@@ -196,7 +203,10 @@ function FinalReply({ children, gap }: { children: React.ReactNode; gap: boolean
  */
 function hasGutter(row: ReturnType<typeof groupParts>[number] | undefined, compact = false): boolean {
   return row?.kind === "tool-row" || row?.kind === "draft" || row?.kind === "status"
-    || (compact && row?.kind === "challenge" && row.part.stages.length > 0);
+    || (compact && row?.kind === "challenge" && row.part.stages.length > 0)
+    /* Inside the fold a lesson and a question are drawn as ordinary rows too,
+       so they sit on the thread rather than a card's distance from it. */
+    || (compact && (row?.kind === "lesson" || row?.kind === "question-exchange"));
 }
 
 /** Cards need breathing room, but the gap belongs between rows so adjacent
@@ -322,7 +332,7 @@ function WaitingLine({ parts }: { parts: RunPart[] }) {
  * of storing them. A turn with no reply is still a turn worth seeing; that is
  * what an attempt-complete turn is, and it used to leave nothing behind at all.
  */
-export function AgentMessage({ body, createdAt, activity, activityCount, messageId, workedMs, landing = false, latest = false, rating = null, currentQuestionId, trail }: {
+export function AgentMessage({ body, createdAt, activity, activityCount, messageId, workedMs, latest = false, rating = null, currentQuestionId, trail }: {
   body: string;
   createdAt?: string | number;
   activity: AgentActivityStep[];
@@ -360,7 +370,6 @@ export function AgentMessage({ body, createdAt, activity, activityCount, message
   const open = async () => {
     setFetched(await window.spar!.messageActivity({ messageId }));
   };
-  const reduced = useReducedMotion();
   return (
     /* No `space-y` here. It reaches every row `Rows` emits — they are direct
        children of this element, not of the fragment — and put a margin between
@@ -369,16 +378,11 @@ export function AgentMessage({ body, createdAt, activity, activityCount, message
        line into a column of dashes on every settled turn while a live one
        looked right. Spacing between steps belongs to `Rows`; the only gap this
        element owns is the one before the reply. */
-    <motion.div
-      animate={{ opacity: 1 }}
-      className="min-w-0"
-      /* Not from zero. The turn underneath this one is the same turn, so the
-         crossing only has to cover the seam between them — starting from
-         invisible would be the answer fading in over itself, which is a longer
-         and more conspicuous event than the swap it is hiding. */
-      initial={landing && !reduced ? { opacity: 0.35 } : false}
-      transition={{ duration: 0.28, ease: "linear" }}
-    >
+    /* No crossing on the swap. The live turn this replaces is drawn from the
+       same rows in the same places, and the fold has already closed and the
+       reply already unfolded by the time it lands — a fade here was the answer
+       dimming and brightening over itself right after it arrived. */
+    <div className="min-w-0">
       {shows && (
         <RunFold bodyLoaded={!deferred} live={false} onOpen={open} workedMs={workedMs}>
           <Rows compactChallenges currentQuestionId={currentQuestionId} parts={parts} trail={trail} />
@@ -392,7 +396,7 @@ export function AgentMessage({ body, createdAt, activity, activityCount, message
           <ResponseFooter body={body} createdAt={createdAt} latest={latest} messageId={messageId} rating={rating} />
         </div>
       )}
-    </motion.div>
+    </div>
   );
 }
 

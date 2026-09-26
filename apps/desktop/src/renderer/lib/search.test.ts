@@ -13,6 +13,7 @@ function session(over: Partial<SessionSummary> & { id: string; title: string }):
     activeQuestion: null,
     questionTitles: [],
     totalSeconds: 0,
+    problemSources: ["spar", "leetcode", "codeforces"],
     updatedAt: "2026-08-01T00:00:00.000Z",
     pinnedAt: null,
     archivedAt: null,

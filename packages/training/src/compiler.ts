@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { questionDesignSchema, type QuestionDesign } from "@spar/domain";
 import { runLimits } from "./limits.js";
+import { materializeFiles, parseMaterialized, parseProbe, probeFiles, probeTarget, pythonMutants, settleMisconceptions } from "./pythonProbe.js";
 
 export type ValidationRun = { exitCode: number; stdout: string; stderr: string; durationMs: number };
 export type ValidationRunner = (files: Record<string,string>, command: string, limits: { timeoutMs: number; memoryMb: number }) => Promise<ValidationRun>;
@@ -43,6 +44,8 @@ export type CompileObserver = (event: CompileProgress) => void;
 const MIN_EXECUTED_CASES = { function: 24, module: 12, repair: 8, extension: 8, repository: 8 } as const;
 /** Named, readable cases in the visible file: the contract the learner reads. */
 const MIN_VISIBLE_CASES = 4;
+/** Wall-clock the Python probe gives itself, inside the runner's own limit. */
+const PROBE_BUDGET_SECONDS = 7;
 
 /**
  * Who wrote the candidate, which is the one thing the case-volume bar depends
@@ -98,24 +101,93 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
     differentialDiagnostics = differential.diagnostics;
   }
   const checks: ValidationReport["checks"] = [...structural];
-  const reference = await observed("Reference solution against every test", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
+  let reference = await observed("Reference solution against every test", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
+  /* The most common first rejection of a Python candidate: hidden expected
+     values worked out by hand, and wrong — `(5, [2, 2, 2, 1])` expected 2 when
+     `[2, 2, 1]` sums to exactly 5. When the reference passes every visible case,
+     it is the learner's contract made executable, so it is the oracle for the
+     hidden table: the host puts its answers in place of the literals that
+     disagree, the same thing the JavaScript path does above. Visible
+     expectations are never touched, and the rewrite is kept only if the
+     reference then passes everything; otherwise the original failure stands. */
+  if (design.language === "python" && reference.exitCode !== 0) {
+    const target = probeTarget(design);
+    if (target) {
+      const materialized = parseMaterialized((await run(materializeFiles(design, target), design.runCommand, runLimits(design.language))).stdout);
+      if (materialized?.visible && materialized.rewrites > 0) {
+        const corrected = { ...design, hiddenTests: { ...design.hiddenTests, ...materialized.files } };
+        const retried = await observed("Reference solution against every test (hidden expectations from the reference)", "pass", { ...corrected.starterFiles, ...corrected.referenceFiles, ...corrected.visibleTests, ...corrected.hiddenTests }, corrected.runCommand, runLimits(corrected.language));
+        if (retried.exitCode === 0) {
+          design = corrected;
+          reference = retried;
+          checks.push({ name: "hidden expectations from the reference", passed: true, detail: `${materialized.rewrites} hand-written hidden expected value${materialized.rewrites === 1 ? "" : "s"} disagreed with the reference, which passes every visible case. The host replaced ${materialized.rewrites === 1 ? "it" : "them"} with the reference's answers. Compute expected values by running an oracle rather than by hand.` });
+        }
+      }
+    }
+  }
   checks.push({ name: "reference solution", passed: reference.exitCode === 0, detail: summarize(reference) });
   checks.push(structuredResultCheck("reference case results", reference, "passed"));
   // Whether each misconception replaces the implementation was already settled
   // structurally, so this loop only measures behaviour.
-  for (const [index, incorrect] of design.knownIncorrectFiles.entries()) {
+  const misconception = async (index: number, incorrect: Record<string, string>, suffix = ""): Promise<ValidationReport["checks"]> => {
     const which = design.knownIncorrectFiles.length > 1 ? ` ${index + 1}` : "";
-    const visibleResult = await observed(`Plausible wrong solution${which} passes the visible tests`, "pass", { ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language));
-    checks.push({ name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : summarize(visibleResult) });
-    checks.push(structuredResultCheck(`known incorrect ${index + 1} visible case results`, visibleResult, "passed"));
-    const hiddenResult = await observed(`Hidden tests catch the wrong solution${which}`, "fail", { ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
-    checks.push({ name: `known incorrect ${index + 1} fails hidden`, passed: hiddenResult.exitCode !== 0, detail: hiddenResult.exitCode !== 0 ? "Targeted hidden tests rejected the misconception" : differentialDiagnostics[index] ?? "Incorrect implementation passed visible and hidden tests" });
-    checks.push(structuredResultCheck(`known incorrect ${index + 1} failure case results`, hiddenResult, "failed"));
+    const visibleResult = await observed(`Plausible wrong solution${which} passes the visible tests${suffix}`, "pass", { ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language));
+    const hiddenResult = await observed(`Hidden tests catch the wrong solution${which}${suffix}`, "fail", { ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
+    return [
+      { name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : `${summarize(visibleResult)}${differentialDiagnostics[index] ? ` — ${differentialDiagnostics[index]}` : ""}` },
+      structuredResultCheck(`known incorrect ${index + 1} visible case results`, visibleResult, "passed"),
+      { name: `known incorrect ${index + 1} fails hidden`, passed: hiddenResult.exitCode !== 0, detail: hiddenResult.exitCode !== 0 ? "Targeted hidden tests rejected the misconception" : differentialDiagnostics[index] ?? uncaughtMisconception(hiddenResult) },
+      structuredResultCheck(`known incorrect ${index + 1} failure case results`, hiddenResult, "failed"),
+    ];
+  };
+  const perMisconception: ValidationReport["checks"][] = [];
+  for (const [index, incorrect] of design.knownIncorrectFiles.entries()) perMisconception.push(await misconception(index, incorrect));
+  /* Python has no oracle rewriting or differential search of its own inside the
+     tests, and it is where nearly every rejected candidate was. When a
+     misconception check fails, settle it by execution: find the input the hidden
+     tests missed, or prove the misconception equivalent and replace it. See
+     pythonProbe.ts. Only paid when something failed, and only once the
+     reference passes, because a probe measured against a broken reference
+     measures nothing. */
+  const failing = new Set(perMisconception.flatMap((group, index) => group.some((check) => !check.passed) ? [index] : []));
+  if (design.language === "python" && failing.size && reference.exitCode === 0) {
+    const target = probeTarget(design);
+    if (target) {
+      const mutants = pythonMutants(design.referenceFiles[target.path] ?? "");
+      const probeRun = await observed("Searching for inputs that separate the wrong solution", "pass", probeFiles(design, target, mutants, PROBE_BUDGET_SECONDS), design.runCommand, runLimits(design.language));
+      const probe = parseProbe(probeRun.stdout);
+      if (probe) {
+        const settled = settleMisconceptions(design, target, mutants, probe, failing);
+        design = settled.design;
+        checks.push(...settled.notes);
+        for (const [index, detail] of settled.equivalent) differentialDiagnostics[index] = detail;
+        for (const index of failing) {
+          const waived = settled.waived.get(index);
+          if (waived) {
+            perMisconception[index] = [{ name: `known incorrect ${index + 1} gate`, passed: true, detail: waived }];
+            continue;
+          }
+          if (settled.changed.has(index) || settled.equivalent.has(index)) {
+            perMisconception[index] = settled.equivalent.has(index)
+              ? [
+                  { name: `known incorrect ${index + 1} is a real misconception`, passed: false, detail: settled.equivalent.get(index)! },
+                  // The hidden-coverage advice would send the repair back to the tests.
+                  ...perMisconception[index]!.map((check) => check.name === `known incorrect ${index + 1} fails hidden` && !check.passed ? { ...check, detail: `No test can catch it — see "known incorrect ${index + 1} is a real misconception".` } : check),
+                ]
+              : await misconception(index, design.knownIncorrectFiles[index]!, " (host revision)");
+          }
+        }
+      }
+    }
   }
+  checks.push(...perMisconception.flat());
   const visibleOnly = await observed("Visible tests against the reference", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, runLimits(design.language), true);
   checks.push({ name: "visible test agreement", passed: visibleOnly.exitCode === 0, detail: summarize(visibleOnly) });
   checks.push(structuredResultCheck("visible case results", visibleOnly, "passed"));
-  checks.push({ name: "targeted hidden coverage", passed: design.hiddenTests && Object.keys(design.hiddenTests).length > 0 && design.expectedFailureSignatures.length > 0, detail: `${Object.keys(design.hiddenTests).length} hidden files cover ${design.expectedFailureSignatures.length} expected signatures` });
+  /* Whether the hidden tests catch the misconception is measured above. The
+     declared signatures are the author's description of it: useful context,
+     never a reason to reject a candidate that demonstrably works. */
+  checks.push({ name: "targeted hidden coverage", passed: Object.keys(design.hiddenTests).length > 0, detail: `${Object.keys(design.hiddenTests).length} hidden files${design.expectedFailureSignatures.length ? ` cover ${design.expectedFailureSignatures.length} expected signatures` : ""}` });
   /**
    * How many cases actually ran.
    *
@@ -193,8 +265,32 @@ function structuredResultCheck(name: string, run: ValidationRun, expected: Verdi
       ? `${verdicts.total} structured case verdict${verdicts.total === 1 ? "" : "s"} (${verdicts.passed} passed, ${verdicts.failed} failed)`
       : expected === "passed"
         ? "The run emitted no passing case verdicts. Emit TAP, or one `ok - case name` / `not ok - case name` line per case; silent assert-only tests cannot power the structured Test Result UI."
-        : "The targeted misconception failed but emitted no failing case verdict. Catch each comparison, print `not ok - case name` with expected/actual values, continue the remaining cases, and exit non-zero after reporting them.",
+        /* The misconception did not fail at all. This used to say it "failed but
+           emitted no failing case verdict", which is false whenever the run
+           passed, and it sent every repair round off to rework how the harness
+           prints — six rounds in the traced case, each leaving the hidden tests
+           exactly as unable to catch the mistake as before. Say which of the two
+           it actually is. */
+        : run.exitCode === 0
+          ? `No hidden case failed (${verdicts.passed} ok, 0 not ok), so there is no failing verdict to report. This is the same fault as the "fails hidden" check, not a harness-format fault: do not change how cases are printed, change what the hidden cases test.`
+          : "The targeted misconception failed but emitted no failing case verdict. Catch each comparison, print `not ok - case name` with expected/actual values, continue the remaining cases, and exit non-zero after reporting them.",
   };
+}
+
+/**
+ * What to say when the known-incorrect implementation passes every hidden case.
+ *
+ * "Incorrect implementation passed visible and hidden tests" is true and does
+ * not say what to do, and a repair model reading it tends to add more of the
+ * same cases — another sweep over inputs that never reach the mistake. The
+ * actionable fact is that no hidden input distinguishes the two
+ * implementations, and there are only two ways out: find an input that does, or
+ * admit the "incorrect" implementation is not wrong.
+ */
+function uncaughtMisconception(run: ValidationRun): string {
+  const verdicts = structuredVerdicts(`${run.stdout}\n${run.stderr}`);
+  const counted = verdicts.total ? ` — all ${verdicts.passed} hidden case verdicts were ok` : "";
+  return `Incorrect implementation passed visible and hidden tests${counted}. No hidden input reaches its mistake, so adding more cases of the same shape will not help. Read the known-incorrect implementation beside the reference, name the exact input condition where they diverge, trace both on one small concrete input that meets it, and add that input to hiddenTests as a named case expecting the reference's answer (keep any sweep, but make its generator produce that condition). If no input makes them differ, the known-incorrect implementation is actually correct: replace it with one whose mistake a specific hidden case exposes.`;
 }
 
 function structuredVerdicts(output: string): { total: number; passed: number; failed: number } {
@@ -314,17 +410,38 @@ const LANGUAGE_RULES = {
 function normalizeDesign(design: QuestionDesign): QuestionDesign {
   const cleanPath = (file: string) => file.replace(/^\.\/+/, "").replace(/^\/+/, "").replace(/\\/g, "/");
   const cleanMap = (files: Record<string, string>) => Object.fromEntries(Object.entries(files).map(([file, content]) => [cleanPath(file), content]));
+  /* A test file the runner will not discover is decidable from its name alone.
+     `tests/visible.test.py` is plainly a Python test that wants to be
+     `tests/visible_test.py`, and nothing imports a test file, so renaming it
+     costs nothing. Rejecting it cost a repair round. */
+  const discoverable = (files: Record<string, string>) => Object.fromEntries(Object.entries(cleanMap(files)).map(([file, content]) => [testPath(design.language, file), content]));
   return {
     ...design,
     starterFiles: cleanMap(design.starterFiles),
     referenceFiles: cleanMap(design.referenceFiles),
-    visibleTests: cleanMap(design.visibleTests),
-    hiddenTests: cleanMap(design.hiddenTests),
+    visibleTests: discoverable(design.visibleTests),
+    hiddenTests: discoverable(design.hiddenTests),
     knownIncorrectFiles: design.knownIncorrectFiles.map(cleanMap),
     // The host runner selects the toolchain from `language`; the declared
     // command is descriptive only, so a wrong one is corrected, never rejected.
     runCommand: LANGUAGE_RULES[design.language].runCommand,
   };
+}
+
+/** The discoverable spelling of a misnamed test path, where one is obvious. */
+function testPath(language: QuestionDesign["language"], file: string): string {
+  const rules = LANGUAGE_RULES[language];
+  if (rules.test.test(file)) return file;
+  const slash = file.lastIndexOf("/");
+  const directory = file.slice(0, slash + 1);
+  const name = file.slice(slash + 1);
+  // Only a name that says it is a test. A helper module the tests import keeps its name.
+  if (!/(?:^|[._-])(?:test|tests|spec|visible|hidden)(?:[._-]|$)/i.test(name)) return file;
+  let renamed: string | null = null;
+  if (language === "python" && name.endsWith(".py")) renamed = `${name.slice(0, -3).replace(/[.-](?:test|spec)$/, "").replace(/[^\w]/g, "_")}_test.py`;
+  if (language === "javascript" && /\.(?:m|c)?js$/.test(name)) renamed = name.replace(/(?:\.spec)?\.(?:m|c)?js$/, ".test.js");
+  if (language === "typescript" && /\.tsx?$/.test(name)) renamed = name.replace(/(?:\.spec)?\.tsx?$/, ".test.ts");
+  return renamed && rules.test.test(`${directory}${renamed}`) ? `${directory}${renamed}` : file;
 }
 
 /**
@@ -376,8 +493,6 @@ function preflight(design: QuestionDesign): ValidationReport["checks"] {
   else checks.push(...preflightNode(design, testPaths, rules.test));
   if (design.language === "python") checks.push(...preflightStandalonePythonTests(design));
 
-  if (!design.expectedFailureSignatures.length) fail("expected failure signatures declared", "expectedFailureSignatures is empty. Name at least one observable way the targeted misconception fails.");
-  else pass("expected failure signatures declared", `${design.expectedFailureSignatures.length} declared`);
 
   return checks;
 }

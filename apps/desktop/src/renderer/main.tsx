@@ -2,6 +2,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor/esm/vs/editor/editor.api";
+// `editor.api` is the bare core: no find, folding, suggest, hover, bracket
+// matching, comment toggling or semantic tokens. The contributions are what make
+// it an editor rather than a textarea with colours.
+import "monaco-editor/esm/vs/editor/editor.all";
 import "monaco-editor/esm/vs/language/typescript/monaco.contribution";
 // The TypeScript language service supplies IntelliSense; colorization needs the
 // Monarch grammars, which are separate entry points.
@@ -17,6 +21,8 @@ import { App } from "./App";
 import { UpdateExperience } from "./components/updates/UpdateExperience";
 import { CrashBoundary } from "./components/common/CrashScreen";
 import { defineEditorThemes } from "./lib/monaco-theme";
+import { registerSemanticHighlighting } from "./lib/monaco-semantic";
+import { applyCodeFont, getCodeFont, onCodeFontChange, primaryFamily } from "./lib/code-font";
 import { CodeThemeProvider } from "./hooks/use-code-theme";
 import { TooltipProvider } from "./components/ui/tooltip";
 import "./theme.css";
@@ -47,7 +53,17 @@ window.spar?.onNativeSurface((surface) => {
 });
 // The themes read resolved CSS variables, so they are defined after the stylesheet applies.
 defineEditorThemes(monaco);
+registerSemanticHighlighting(monaco);
 loader.config({ monaco });
+/* The code face goes onto the document before first paint. Monaco measures
+   character widths with whatever face is ready, and the shipped fonts load a
+   moment after the stylesheet, so a caret placed with the fallback's metrics
+   would drift off the glyphs — it measures again once the face lands, and again
+   whenever the choice changes. */
+applyCodeFont();
+const remeasure = () => void document.fonts.load(`13px ${primaryFamily(getCodeFont())}`).then(() => monaco.editor.remeasureFonts());
+remeasure();
+onCodeFontChange(remeasure);
 
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

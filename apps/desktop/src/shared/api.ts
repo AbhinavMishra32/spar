@@ -4,7 +4,7 @@ import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spa
 import type { AgentActivityStep } from "@spar/domain";
 export type { VisualizerSpec, VisualizerTrace };
 import type { SubmissionRecord, SubmissionRow } from "./submissions.js";
-import { attemptEventSchema, baselineStateSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode } from "@spar/domain";
+import { attemptEventSchema, baselineStateSchema, problemSourcesSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
@@ -25,7 +25,7 @@ export const ipc = {
   attemptComplexityStatus: "attempt:complexity-status", attemptComplexityReview: "attempt:complexity-review", attemptComplexityAcknowledge: "attempt:complexity-acknowledge",
   attemptAbandon: "attempt:abandon", attemptReset: "attempt:reset", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
-  sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive",
+  sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive", sessionsSources: "sessions:sources",
   sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
   challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
   challengeSubmissions: "challenges:submissions", submissionRead: "submissions:read", sessionSubmissions: "sessions:submissions",
@@ -38,9 +38,14 @@ export const ipc = {
      worse trade than a comment. */
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
-  sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run",
+  sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run", sourceLanguage: "source:language", sourceLanguages: "source:languages",
+  skillsList: "skills:list", skillsRead: "skills:read", skillsSave: "skills:save", skillsRemove: "skills:remove", skillsEnabled: "skills:enabled", skillsReveal: "skills:reveal", skillsImport: "skills:import", skillsCustomize: "skills:customize",
   visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity", messageRate: "messages:rate",
   lessonRead: "lesson:read",
+  /* Spaced review of what each solve taught. See main/reviews.ts. */
+  reviewQueue: "reviews:queue", reviewCard: "reviews:card", reviewForChallenge: "reviews:for-challenge",
+  reviewStart: "reviews:start", reviewCue: "reviews:cue", reviewReveal: "reviews:reveal", reviewAbandon: "reviews:abandon", reviewAnswer: "reviews:answer", reviewCommit: "reviews:commit",
+  reviewResolve: "reviews:resolve", reviewSuspend: "reviews:suspend", reviewTargets: "reviews:targets", reviewSettings: "reviews:settings", reviewSettingsSave: "reviews:settings-save",
   restoreRetry: "restore:retry",
   updateState: "update:state", updateCheck: "update:check", updateDownload: "update:download",
   updateDismissChangelog: "update:dismiss-changelog",
@@ -81,12 +86,14 @@ export type AuthRequest = z.infer<typeof authRequestInput>;
  *  confirmation code. */
 export type AuthResult = { status: "signed-in" } | { status: "code-sent"; purpose: AuthCodePurpose };
 
-export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000), trackId: z.string().uuid().optional() });
-export const createTrackInput = z.object({ goal: z.string().trim().min(3).max(1000), title: z.string().trim().min(1).max(80).optional(), language: languageSchema.optional() });
+export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000), trackId: z.string().uuid().optional(), problemSources: problemSourcesSchema.optional() });
+export const createTrackInput = z.object({ goal: z.string().trim().min(3).max(1000), title: z.string().trim().min(1).max(80).optional(), language: languageSchema.optional(), problemSources: problemSourcesSchema.optional() });
 /* Sidebar housekeeping. Titles are capped where the generated one is capped, so a
    renamed session cannot outgrow the row it has to fit in. */
 export const sessionRenameInput = z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(80) });
 export const sessionFlagInput = z.object({ sessionId: z.string().uuid(), value: z.boolean() });
+/* Which sources a session may take its challenges from. Never empty. */
+export const sessionSourcesInput = z.object({ sessionId: z.string().uuid(), sources: problemSourcesSchema });
 /* Only the two the learner can mean by hand. `planning` and `active` are the
    agent's to set — they promise a turn or a live challenge behind them. */
 export const sessionStatusInput = z.object({ sessionId: z.string().uuid(), status: z.enum(["completed", "paused"]) });
@@ -133,6 +140,20 @@ export const practiceInput = z.object({
   drill: z.string().trim().min(3).max(400).optional(),
 }).refine((value) => Boolean(value.abilityId ?? value.conceptSlug), "A practice session needs an ability or a concept to aim at");
 export const workspaceWriteInput = workspacePathInput.extend({ content: z.string().max(2_000_000) });
+export const reviewStartInput = z.object({ cardId: z.string().uuid(), fresh: z.boolean().optional(), target: reviewTargetSchema.optional() });
+export const reviewAnswerInput = z.object({ promptId: z.string().uuid(), answer: z.string().max(8_000) });
+export const reviewCommitInput = z.object({ promptId: z.string().uuid(), rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]) });
+export const reviewResolveInput = z.object({ cardId: z.string().uuid(), promptId: z.string().uuid().optional(), passed: z.boolean(), checks: z.number().int().min(0).max(1_000), elapsedMs: z.number().min(0).max(86_400_000) });
+export const reviewSuspendInput = z.object({ cardId: z.string().uuid(), suspended: z.boolean() });
+export const reviewTargetsInput = z.object({ cardId: z.string().uuid(), targets: z.array(reviewTargetSchema).min(1).max(5) });
+/** `targets`: whether the agent decides what a new card rehearses (`auto`) or
+ *  asks the learner what they want to remember from the problem (`ask`). */
+export const reviewTargetModeSchema = z.enum(["auto", "ask"]);
+export type ReviewTargetMode = z.infer<typeof reviewTargetModeSchema>;
+export const reviewSettingsInput = z.object({ desiredRetention: z.number().min(0.75).max(0.97), reminders: z.boolean(), targets: reviewTargetModeSchema }).partial();
+export type ReviewSettings = { desiredRetention: number; reminders: boolean; targets: ReviewTargetMode };
+export type ReviewFiled = { card: ReviewCard; log: ReviewLog; siblings: number; overview: ReviewOverview };
+export type { FsrsRating };
 /** How the window has this session arranged. Everything else in a checkpoint is
  *  read from disk or from the store by the main process, so this is the whole of
  *  the renderer's contribution to one. */
@@ -266,6 +287,28 @@ export const sourceRegionInput = sourceConnectionInput.extend({ region: sourceRe
 export const sourceJudgeInput = sourceConnectionInput.extend({ preference: sourceJudgeSchema });
 /** Starting a session on a specific problem the learner picked themselves. */
 export const sourceStartInput = sourceSlugInput.extend({ language: languageSchema.optional() });
+/** Moving the open sourced problem to another of the languages its source publishes. */
+/** A skill as Settings lists it. The body is fetched separately, on open. */
+export type SkillSummary = {
+  name: string;
+  description: string;
+  source: "built-in" | "user";
+  enabled: boolean;
+  /** A built-in the learner has their own copy of. Listed, never used. */
+  overridden: boolean;
+  path: string;
+};
+export const skillDraftInput = z.object({
+  name: z.string().min(1).max(48),
+  description: z.string().min(1).max(1024),
+  body: z.string().max(200_000),
+  /** The name being edited, when the edit renames it. */
+  previous: z.string().max(48).optional(),
+});
+export type SkillDraft = z.infer<typeof skillDraftInput>;
+export const skillEnabledInput = z.object({ name: z.string().min(1).max(48), enabled: z.boolean() });
+
+export const sourceLanguageInput = z.object({ sessionId: z.string().uuid(), attemptId: z.string().uuid(), language: languageSchema });
 export const sourceRunInput = z.object({ sessionId: z.string().uuid(), attemptId: z.string().uuid() });
 
 export type PracticeSourceState = "connected" | "expired" | "disconnected";
@@ -331,12 +374,15 @@ export type SourceRunReport = {
   memory: string;
   message: string;
   failedCase: { input: string; expected: string; actual: string; stdout: string } | null;
+  /** The runtime or compile error the judge reported, whole. Empty when the code
+   *  ran to completion. */
+  error?: string;
   /** Every case the source's judge answered, in order: what it was given, what it
    *  expected, and what the learner's code returned. The result panel draws these
    *  as cases, so a run at the source reads like a run here rather than like a log
    *  of one. Empty on a submission, where the cases are the source's and stay
    *  there. */
-  cases: Array<{ input: string; expected: string; actual: string; passed: boolean }>;
+  cases: Array<{ input: string; expected: string; actual: string; passed: boolean; stdout?: string }>;
   url: string;
 };
 /** Emitted whenever a source's connection changes under the app's feet. */
@@ -403,6 +449,8 @@ export type VisualizerProblem = {
 };
 
 export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; saved: SavedProblem[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+  /** The spaced-review queue and each challenge's place in it. */
+  reviews: ReviewOverview;
   /** How far the pull half of sync has got. The shell gates on this before it
    *  gates on `profile`: a signed-in device with no local profile has either not
    *  finished restoring or could not reach the server, and treating either as "no
@@ -616,6 +664,8 @@ export interface SparApi {
   renameSession(input: z.infer<typeof sessionRenameInput>): Promise<{ title: string }>;
   setSessionPinned(input: z.infer<typeof sessionFlagInput>): Promise<void>;
   setSessionArchived(input: z.infer<typeof sessionFlagInput>): Promise<void>;
+  /** Where this session's challenges may come from. Read by the next agent turn. */
+  setSessionProblemSources(input: z.input<typeof sessionSourcesInput>): Promise<z.infer<typeof problemSourcesSchema>>;
   setSessionStatus(input: z.infer<typeof sessionStatusInput>): Promise<void>;
   /** Permanent: the session, its challenges, its attempt evidence and its workspace. */
   deleteSession(sessionId: string): Promise<void>;
@@ -653,6 +703,31 @@ export interface SparApi {
      are fetched on demand rather than carried in the bootstrap: the concept
      summaries are, because chips need them everywhere, but the challenge lists
      behind a chip are only wanted once someone looks. */
+  /* ---- Spaced review ------------------------------------------------------
+     Insight cards the agent filed after each solve, and the FSRS schedule that
+     brings them back. A review is written by the agent, answered in free text,
+     graded against the card's rubric, and only filed once the learner confirms
+     the grade. */
+  reviewQueue(): Promise<{ due: ReviewCard[]; cards: ReviewCard[]; overview: ReviewOverview }>;
+  readReviewCard(cardId: string): Promise<ReviewCardDetail | null>;
+  reviewForChallenge(challengeId: string): Promise<ReviewCardDetail | null>;
+  /** The question waiting on a card, or a new one. `fresh` asks for a different question. */
+  startReview(input: z.infer<typeof reviewStartInput>): Promise<ReviewPending>;
+  /** The nudge for an open question. Seeing it caps that review at Hard. */
+  revealReviewCue(promptId: string): Promise<string | null>;
+  /** Flip the card: its back and what each grade would schedule. */
+  revealReviewAnswer(promptId: string): Promise<ReviewReveal>;
+  /** Leave a review without filing it; the card stays due. */
+  abandonReview(promptId: string): Promise<void>;
+  answerReview(input: z.infer<typeof reviewAnswerInput>): Promise<ReviewGradeResult>;
+  commitReview(input: z.infer<typeof reviewCommitInput>): Promise<ReviewFiled>;
+  /** A challenge solved again from a blank file, as a review. */
+  resolveReview(input: z.infer<typeof reviewResolveInput>): Promise<ReviewFiled>;
+  suspendReview(input: z.infer<typeof reviewSuspendInput>): Promise<void>;
+  /** What a card rehearses, as the learner set it. */
+  setReviewTargets(input: z.infer<typeof reviewTargetsInput>): Promise<ReviewCard>;
+  reviewSettings(): Promise<ReviewSettings>;
+  saveReviewSettings(input: Partial<ReviewSettings>): Promise<ReviewSettings>;
   readConcept(slug: string): Promise<ConceptDetail | null>;
   readAbility(abilityId: string): Promise<AbilityDetail | null>;
   /** Opens a new session aimed at an ability or a concept, and returns it so the
@@ -672,6 +747,22 @@ export interface SparApi {
   searchPracticeProblems(input: z.infer<typeof sourceSearchInput>): Promise<PracticeSearchResult>;
   /** Opens a session on one specific problem the learner chose. */
   startPracticeProblem(input: z.infer<typeof sourceStartInput>): Promise<{ sessionId: string }>;
+  /** Re-mounts the open sourced problem in another language: a fresh starter,
+   *  and a new attempt that records the one it replaced. */
+  switchSourceLanguage(input: z.infer<typeof sourceLanguageInput>): Promise<void>;
+  /** The languages a sourced problem publishes starters for. For challenges
+   *  mounted before the list was stored on the challenge. */
+  sourceLanguages(input: z.infer<typeof sourceSlugInput>): Promise<Language[]>;
+  listSkills(): Promise<SkillSummary[]>;
+  readSkill(name: string): Promise<(SkillSummary & { body: string }) | null>;
+  saveSkill(draft: SkillDraft): Promise<SkillSummary>;
+  removeSkill(name: string): Promise<void>;
+  setSkillEnabled(input: z.infer<typeof skillEnabledInput>): Promise<void>;
+  /** Opens the folder user skills live in, or one skill's own folder. */
+  revealSkills(name?: string): Promise<void>;
+  /** Asks for a folder holding a SKILL.md and copies it in. Null if cancelled. */
+  importSkill(): Promise<SkillSummary | null>;
+  customizeSkill(name: string): Promise<SkillSummary>;
   /** A scratch run of the open challenge at its source. Records a test run as
    *  evidence, but nothing on the learner's account there. */
   runAtSource(input: z.infer<typeof sourceRunInput>): Promise<SourceRunReport>;
@@ -741,6 +832,8 @@ export interface SparApi {
   build: BuildInfo;
   onNativeSurface(listener: (surface: NativeSurface) => void): () => void;
   onSyncState(listener: (state: SyncState) => void): () => void;
+  /** A review reminder was clicked; the shell starts the due reviews on History. */
+  onReviewsOpen(listener: () => void): () => void;
   onRestoreState(listener: (state: RestoreState) => void): () => void;
   /* ---- Code visualiser ---------------------------------------------------
      `visualize` runs the learner's code under a tracer and returns every step

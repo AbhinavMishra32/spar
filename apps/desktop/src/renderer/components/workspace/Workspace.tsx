@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import Editor from "@monaco-editor/react";
 import { Panel, PanelGroup } from "react-resizable-panels";
-import { Check, FileCode2, Flag, FolderTree, Loader2, PanelBottom, Play, RotateCcw, Send, WrapText } from "lucide-react";
-import type { ActiveQuestion, AttemptEvent, RatingPoint, SessionDetail } from "@spar/domain";
+import { ChevronDown, FileCode2, Flag, FolderTree, Languages, Lightbulb, Loader2, PanelBottom, RotateCcw, WrapText } from "lucide-react";
+import type { ActiveQuestion, AttemptEvent, Language, RatingPoint, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { runEvidence } from "../../../shared/testReport";
 import { sourceRunOutput } from "../../../shared/sourceOutput";
@@ -11,14 +11,20 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { fileName, languageFor, message } from "@/lib/format";
-import { EDITOR_THEME_DARK, EDITOR_THEME_LIGHT } from "@/lib/monaco-theme";
+import { EDITOR_OPTIONS, EDITOR_THEME_DARK, EDITOR_THEME_LIGHT, editorFontOptions, intellisenseOptions } from "@/lib/monaco-theme";
+import { useCodeFont } from "@/lib/code-font";
+import { useIntellisense } from "@/hooks/use-intellisense";
 import { splitSolutionScaffold, withSolutionBody } from "../../../shared/solutionScaffold";
 import { SETTLE_MS, useAnimatedResultPanel } from "../../hooks/use-animated-result-panel";
 import { Toolbar } from "../shell/Toolbar";
 import { ChallengeStepper, type ChallengeTrail } from "./ChallengeStepper";
 import { FileTab } from "../common/FileTab";
 import { FileGlyph } from "../common/LanguageGlyph";
-import { SourceGlyph } from "../common/SourceGlyph";
+import { LANGUAGE_LABEL } from "../common/LanguageGlyph";
+import { declaredCases, sourcedCases } from "@/lib/testCases";
+import { knownSuiteSize } from "@/lib/suiteSize";
+import { preferredEngine, rememberEngine, type TestEngine } from "./RunControls";
+import { ChallengeActions } from "./ChallengeActions";
 import type { AgentRun } from "../agent/agentRun";
 import { AgentPanel } from "./AgentPanel";
 import { useEditMessage } from "@/hooks/use-edit-message";
@@ -28,7 +34,6 @@ import { FileTree } from "./FileTree";
 import { FloatingFileTree } from "./FloatingFileTree";
 import { introSeen, markIntroSeen } from "@/lib/introSeen";
 import { ChallengeIntro } from "./ChallengeIntro";
-import { AttemptClock } from "./AttemptClock";
 import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "./ResultPanel";
 import type { ComplexityCheckpointState } from "./ComplexityCheckpoint";
 import { expandMentions } from "../agent/Mentions";
@@ -91,6 +96,8 @@ export function Workspace({
   const [terminal, setTerminal] = useState("");
   const [running, setRunning] = useState(false);
   const [wordWrap, setWordWrap] = useState(false);
+  const [intellisense, toggleIntellisense] = useIntellisense();
+  const [codeFont] = useCodeFont();
   // One rim sweep when a run lands, so finishing is felt without leaving a
   // second animation running against the busy state forever.
   const [settled, setSettled] = useState(false);
@@ -110,6 +117,10 @@ export function Workspace({
   const [giveUpReason, setGiveUpReason] = useState("");
   const [resetOpen, setResetOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [engine, setEngine] = useState<TestEngine>(() => preferredEngine(question.source));
+  useEffect(() => setEngine(preferredEngine(question.source)), [question.id]);
+  const [languageTarget, setLanguageTarget] = useState<Language | null>(null);
+  const [switchingLanguage, setSwitchingLanguage] = useState(false);
   const [complexityCheckpoint, setComplexityCheckpoint] = useState<ComplexityCheckpointState | null>(null);
   /* A checkpoint the submission has earned but the panel has not finished
      announcing. The dots wave, the verdict fades up, and only then does the card
@@ -143,7 +154,21 @@ export function Workspace({
      attempt used to come back as "Active attempt not found", because the store
      only bundles an active one. */
   const graded = Boolean(question.attemptCompletedAt);
+  /* What each action runs, as numbers the buttons can carry: the examples on
+     disk (or published with the problem), and the hidden cases once anything has
+     measured them. */
+  const exampleCount = useMemo(
+    () => (question.source?.cases.length ? sourcedCases(question.source) : declaredCases(testFiles, question.visibleTestFiles)).cases.length,
+    [question.source, question.visibleTestFiles, testFiles],
+  );
+  const hiddenCount = question.source?.remoteJudge
+    ? knownSuiteSize(question.id, true)
+    : question.hiddenTestCount;
   const agentBusy = sending || run?.status === "streaming";
+  /* Settled once graded; held while anything is running or the agent is
+     already mid-reply to a conversion it was asked for. */
+  const attemptLocked = running || submitting || givingUp || resetting || graded || Boolean(complexityCheckpoint);
+  const languageLocked = busy || graded || switchingLanguage || (!question.source && agentBusy);
   const { undoable, edit } = useEditMessage(detail, run?.status === "streaming", onRefresh, onError);
 
   /* Tell the main process which file the learner is in, so the checkpoint it
@@ -438,13 +463,48 @@ export function Workspace({
     }
   };
 
+  /* Test runs the examples wherever the learner chose to run them; the engine
+     is a setting on the one action, not a second action. */
+  const testExamples = () => (engine === "source" && question.source?.scratchRun ? runAtSource() : runTests());
+
+  /**
+   * Changing the challenge's language.
+   *
+   * A sourced problem has a starter in each language its source publishes, so it
+   * is re-mounted in place — after a confirmation, because that is a fresh file
+   * and a fresh attempt. A problem Spar wrote has no other-language version
+   * until one is written, so the agent is asked to convert it.
+   */
+  const chooseLanguage = (next: Language) => {
+    if (next === question.language) return;
+    if (question.source) {
+      setLanguageTarget(next);
+      return;
+    }
+    void send(`Switch this challenge to ${LANGUAGE_LABEL[next]}. Convert the current challenge as it is — same problem, same cases, same difficulty — with ${LANGUAGE_LABEL[next]} starter and tests, replacing the ${LANGUAGE_LABEL[question.language]} version.`);
+  };
+  const switchLanguage = async () => {
+    if (!api || !languageTarget) return;
+    try {
+      setSwitchingLanguage(true);
+      await save();
+      await api.switchSourceLanguage({ sessionId: detail.summary.id, attemptId: question.attemptId, language: languageTarget });
+      setLanguageTarget(null);
+      await onRefresh();
+    } catch (error) {
+      onError(message(error));
+    } finally {
+      setSwitchingLanguage(false);
+    }
+  };
+
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
       if(complexityCheckpoint)return;
       if (event.key === "Enter") {
         event.preventDefault();
-        void (event.shiftKey ? submit() : runTests());
+        void (event.shiftKey ? submit() : testExamples());
       }
       if (event.key.toLowerCase() === "s") {
         event.preventDefault();
@@ -468,8 +528,6 @@ export function Workspace({
     wasBusy.current = busy;
     return undefined;
   }, [busy]);
-
-  const mount: OnMount = (editor) => editor.updateOptions({ fontLigatures: true });
 
   return (
     <div className="work-canvas relative flex h-full min-h-0 flex-col">
@@ -524,73 +582,52 @@ export function Workspace({
         </DialogContent>
       </Dialog>
 
+      <Dialog onOpenChange={(open) => { if (!open && !switchingLanguage) setLanguageTarget(null); }} open={languageTarget !== null}>
+        <DialogContent className="sm:max-w-[24rem]" showCloseButton={!switchingLanguage}>
+          <DialogHeader>
+            <DialogTitle>Switch to {languageTarget ? LANGUAGE_LABEL[languageTarget] : ""}?</DialogTitle>
+            <DialogDescription>
+              You start from {question.source ? (question.source.source === "leetcode" ? "LeetCode" : "Codeforces") : "the source"}&apos;s {languageTarget ? LANGUAGE_LABEL[languageTarget] : ""} starter with a fresh timer. Your {LANGUAGE_LABEL[question.language]} code stays in this attempt&apos;s history.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button disabled={switchingLanguage} onClick={() => setLanguageTarget(null)} variant="secondary">Keep {LANGUAGE_LABEL[question.language]}</Button>
+            <Button disabled={switchingLanguage} onClick={() => void switchLanguage()}>
+              {switchingLanguage ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Languages data-icon="inline-start" />}
+              Switch
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Toolbar
         actions={
           <>
-            <AttemptClock completedAt={question.attemptCompletedAt} startedAt={question.attemptStartedAt} />
-            <button
-              className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
-              disabled={running || submitting || givingUp || resetting || graded || Boolean(complexityCheckpoint)}
-              onClick={() => setResetOpen(true)}
-              title="Reset the timer and hide earlier attempt activity from the agent"
-              type="button"
-            >
-              <RotateCcw className="size-3" />
-              <span className="sr-only">Reset attempt</span>
-            </button>
-            <button
-              className="inline-flex h-6 items-center gap-1.5 rounded-md px-2 text-ui text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-45"
-              disabled={running || submitting || givingUp || graded || Boolean(complexityCheckpoint)}
-              onClick={() => setGiveUpOpen(true)}
-              title={graded ? "You solved this one" : "Stop here without solving it and move on"}
-              type="button"
-            >
-              <Flag className="size-3" />
-              Give up
-            </button>
-            <button
-              className="inline-flex h-6 items-center gap-1.5 rounded-md border border-border px-2 text-ui transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
-              disabled={running || submitting || Boolean(complexityCheckpoint)}
-              onClick={() => void runTests()}
-              type="button"
-            >
-              {running ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
-              Run
-              <kbd className="font-sans text-ui-sm text-muted-foreground/70">⌘↵</kbd>
-            </button>
-            {question.source?.scratchRun && (
-              <button
-                className="inline-flex h-6 items-center gap-1.5 rounded-md border border-border px-2 text-ui transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-45"
-                disabled={running || submitting || Boolean(complexityCheckpoint)}
-                onClick={() => void runAtSource()}
-                title={`Runs your solution on ${SOURCE_NAME[question.source.source]} against the problem's published cases. Nothing is recorded on your account there.`}
-                type="button"
-              >
-                <SourceGlyph className="size-3" source={question.source.source} />
-                Run there
-              </button>
-            )}
-            <button
-              /* The default button, not a green one. `--success` is a muted green
-                 in light mode and a *light* one in dark, so hard-coded white text
-                 sat at roughly 1.4:1 against it after dark — and green here was
-                 claiming an outcome the submission has not had yet. Primary is
-                 the strongest emphasis this palette has, it inverts correctly with
-                 the theme, and it is what the rest of the app already uses for the
-                 one action a surface is about. */
-              className="inline-flex h-6 items-center gap-1.5 rounded-md bg-primary px-2 text-ui font-medium text-primary-foreground shadow-[var(--app-shadow-card)] transition-colors hover:bg-primary/85 active:translate-y-px disabled:pointer-events-none disabled:opacity-45"
-              disabled={running || submitting || graded || Boolean(complexityCheckpoint)}
-              onClick={() => void submit()}
-              title={graded
-                ? "Solved. Spar is setting up what comes next."
-                : question.source?.remoteJudge
-                  ? `Sends your solution to ${SOURCE_NAME[question.source.source]}, which runs every hidden case it has. It counts on your account there.`
-                  : "Runs the visible and hidden cases. If any still fail you can fix them and submit again."}
-              type="button"
-            >
-              {submitting ? <Loader2 className="size-3 animate-spin" /> : graded ? <Check className="size-3" /> : <Send className="size-3" />}
-              {submitting ? "Judging…" : complexityCheckpoint ? "Finalizing…" : graded ? "Solved" : "Submit"}
-            </button>
+            <ChallengeActions
+              attemptLocked={attemptLocked}
+              completedAt={question.attemptCompletedAt}
+              language={question.language}
+              languageLocked={languageLocked}
+              onGiveUp={() => setGiveUpOpen(true)}
+              loadLanguages={api && question.source ? () => api.sourceLanguages({ source: question.source!.source, slug: question.source!.slug }) : undefined}
+              onLanguage={chooseLanguage}
+              onRestartTimer={() => setResetOpen(true)}
+              run={{
+                disabled: Boolean(complexityCheckpoint) || switchingLanguage,
+                engine,
+                exampleCount,
+                finalizing: Boolean(complexityCheckpoint),
+                graded,
+                hiddenCount,
+                onEngine: (next) => { setEngine(next); rememberEngine(question.source, next); },
+                onSubmit: () => void submit(),
+                onTest: () => void testExamples(),
+                running,
+                submitting,
+              }}
+              source={question.source}
+              startedAt={question.attemptStartedAt}
+            />
           </>
         }
         nav={nav}
@@ -718,6 +755,16 @@ export function Workspace({
                     <div className="ml-auto flex items-center gap-1 pr-1">
                       <span className="mr-1 text-ui-sm text-muted-foreground/60">⌘S</span>
                       <button
+                        aria-label="IntelliSense"
+                        aria-pressed={intellisense}
+                        className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", intellisense && "bg-accent text-foreground")}
+                        onClick={toggleIntellisense}
+                        title={intellisense ? "Turn off suggestions and hints" : "Turn on suggestions and hints"}
+                        type="button"
+                      >
+                        <Lightbulb className="size-3.5" />
+                      </button>
+                      <button
                         aria-label="Word wrap"
                         aria-pressed={wordWrap}
                         className={cn("grid size-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground", wordWrap && "bg-accent text-foreground")}
@@ -753,21 +800,7 @@ export function Workspace({
                         setContent(scaffold ? withSolutionBody(scaffold, value ?? "") : value ?? "");
                         setDirty(true);
                       }}
-                      onMount={mount}
-                      options={{
-                        wordWrap: wordWrap ? "on" : "off",
-                        fontSize: 12.5,
-                        lineHeight: 1.65,
-                        fontFamily: "SF Mono, ui-monospace, SFMono-Regular, Menlo, monospace",
-                        minimap: { enabled: false },
-                        padding: { top: 12, bottom: 12 },
-                        scrollBeyondLastLine: false,
-                        renderLineHighlight: "line",
-                        smoothScrolling: true,
-                        cursorBlinking: "smooth",
-                        readOnly,
-                        scrollbar: { verticalScrollbarSize: 9, horizontalScrollbarSize: 9 },
-                      }}
+                      options={{ ...EDITOR_OPTIONS, ...intellisenseOptions(intellisense), ...editorFontOptions(codeFont), wordWrap: wordWrap ? "on" : "off", readOnly }}
                       theme={dark ? EDITOR_THEME_DARK : EDITOR_THEME_LIGHT}
                       value={scaffold?.body ?? content}
                     />

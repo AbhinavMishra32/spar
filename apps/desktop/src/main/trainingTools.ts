@@ -1,7 +1,9 @@
 import { normalizeStatementText } from "../shared/statementText.js";
+import { checkFigure } from "../shared/figure.js";
+import type { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { compileQuestion, fallbackDesign, type DesignOrigin } from "@spar/training";
-import { abilityStatusSchema, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput } from "@spar/domain";
+import { REVIEW_TARGETS, abilityStatusSchema, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput, type ReviewTarget } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
@@ -9,6 +11,7 @@ import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
 import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
+import { reviewTargetMode } from "./reviewSession.js";
 import { practiceSourceName } from "./practiceChoice.js";
 import { SOURCE_READ_TOOLS, VISUALIZER_TOOLS } from "../workers/agentPolicy.js";
 import type { VisualizerToolbox } from "./visualizerTools.js";
@@ -63,6 +66,20 @@ function followsLesson(local: LocalStore, concepts: ConceptTagInput[], trackId: 
   };
 }
 
+/** Each ```figure fence in a statement that does not check, as one sentence. */
+export function statementFigureProblems(statement: string): string[] {
+  const problems: string[] = [];
+  const fence = /^```figure\s*\n([\s\S]*?)^```\s*$/gm;
+  let match: RegExpExecArray | null;
+  let count = 0;
+  while ((match = fence.exec(statement))) {
+    count += 1;
+    const result = checkFigure(match[1]!.trim());
+    if (!result.ok) problems.push(`Figure ${count}: ${result.error}`);
+  }
+  return problems;
+}
+
 export async function executeTrainingTool(
   name: string,
   input: unknown,
@@ -79,6 +96,7 @@ export async function executeTrainingTool(
   questions?: AgentQuestions,
   /** Live compile runs for an authoring call, back to the worker that asked. */
   progress?: (value: unknown) => void,
+  skills?: SkillService,
 ) {
   if (!sessionId) throw new Error("Training tool call is missing its session context");
   const value = input as Record<string, unknown>;
@@ -87,13 +105,29 @@ export async function executeTrainingTool(
      owns their schemas and their failure wording. Nothing is unwrapped here: the
      agent gets exactly what the server said, including its "carry on without me"
      note when the source is unreachable. */
+  /* The session's own choice of where challenges come from, enforced here
+     rather than trusted to the prompt: a provider the learner left out is never
+     searched, read or assigned, and a session that left Spar out never has a
+     challenge written for it — the host's own fallback included. */
+  const problemSources = local.problemSourcesForSession(sessionId);
+  const providers = problemSources.filter((source): source is "leetcode" | "codeforces" => source !== "spar");
   if (SOURCE_READ_TOOLS.includes(name)) {
     if (!practice) return { error: "not-connected", message: "No practice source is available in this context." };
-    return practice.callTool(name, value);
+    if (!providers.length) return { error: "not-allowed", message: "This session does not take problems from any provider. Write the challenge yourself." };
+    if (name !== "search_practice_problems" && (value.source === "leetcode" || value.source === "codeforces") && !providers.includes(value.source)) {
+      return { error: "not-allowed", message: `This session does not take problems from ${practiceSourceName(value.source)}. Use ${providers.map(practiceSourceName).join(" or ")}.` };
+    }
+    return practice.callTool(name, value, providers);
   }
   if (name === "assign_practice_problem") {
     if (!practice) return { status: "invalid", report: { valid: false, checks: [{ name: "practice source", passed: false, detail: "No practice source is connected, so there is no problem to assign. Write the challenge yourself with create_question." }] } };
+    if ((value.source === "leetcode" || value.source === "codeforces") && !providers.includes(value.source)) {
+      return { status: "invalid", report: { valid: false, checks: [{ name: "session sources", passed: false, detail: `This session does not take problems from ${practiceSourceName(value.source)}. ${providers.length ? `Assign a ${providers.map(practiceSourceName).join(" or ")} problem instead.` : "Write the challenge yourself."}` }] } };
+    }
     return assignPracticeProblem(value, sessionId, local, workspaces, practice);
+  }
+  if ((name === "create_question" || name === "replace_current_question" || name === "create_fallback_question") && !problemSources.includes("spar")) {
+    return { status: "invalid", report: { valid: false, checks: [{ name: "session sources", passed: false, detail: `This session only takes real problems from ${providers.map(practiceSourceName).join(" and ")}, so Spar does not write challenges for it. Search for one and assign it with assign_practice_problem.` }] } };
   }
   /* Optional so the tool tests can call this without standing up a network
      service. Missing reads as unconfigured, which is already a result the agent
@@ -212,6 +246,25 @@ export async function executeTrainingTool(
     const found = local.searchLessons(String(value.query ?? ""), Number(value.limit ?? 6));
     return { lessons: found, note: found.length ? "Cite one of these with [[lesson:<id>|title]] rather than teaching it again." : "Nothing taught near this yet." };
   }
+  /* A skill's body, handed over whole. The agent was only told the name and one
+     sentence; this is the first time it sees the instructions, so they come back
+     as the result rather than as a summary of them. */
+  if (name === "load_skill") {
+    const wanted = String(value.name ?? "").trim();
+    const skill = skills?.read(wanted, { forAgent: true });
+    if (!skill) {
+      const known = skills?.catalog().map((entry) => entry.name) ?? [];
+      return { error: "not-found", note: known.length ? `No enabled skill is called "${wanted}". Available: ${known.join(", ")}.` : "No skills are enabled." };
+    }
+    return { name: skill.name, description: skill.description, source: skill.source, instructions: skill.body };
+  }
+  /* Figures are checked before the compiler runs: a statement whose picture
+     does not parse would otherwise publish with a broken box where the example
+     should be, and the agent — which cannot see it — would never know. */
+  if ((name === "create_question" || name === "replace_current_question") && typeof value.statement === "string") {
+    const broken = statementFigureProblems(value.statement);
+    if (broken.length) return { status: "invalid", report: { valid: false, checks: [{ name: "figures", passed: false, detail: `${broken.join(" ")} Fix the figure spec and publish again; load the challenge-figures skill if you have not.` }] } };
+  }
   if (name === "create_question") {
     const activeQuestion = openChallenge(local, sessionId);
     if (activeQuestion) {
@@ -274,6 +327,7 @@ export async function executeTrainingTool(
     const reopened = local.reopenAttempt(attemptId, reasons.join(" ") || "The solution did not meet the challenge's stated requirements.");
     return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
   }
+  if (name === "record_insight") return recordInsight(local, value, sessionId);
   if (name === "read_attempt") return readAttemptForAgent(local, value, sessionId, workspaces);
   if (name === "read_submissions") return readSubmissionsForAgent(local, value, sessionId);
   /* The document plus what is open under it. The markdown is the claim; the
@@ -395,9 +449,14 @@ async function assignPracticeProblem(
   return {
     status: "playable",
     question,
-    source: { slug: source.slug, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
+    source: { slug: source.slug, title: design.title, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
     judge: source.judge,
     localCases: source.localCaseCount,
+    /* Settled, and said so: the notes below are advisory comparisons, and read
+       as a to-do list they sent a turn back into searching for a replacement
+       for the problem it had just set — then telling the learner it was a poor
+       step while it sat in front of them. */
+    assigned: "This problem is now the learner's challenge. The selection notes are for explaining the fit honestly — say what in it is new or a stretch — not a reason to search again, replace it, or call it a poor next step. Do not search for or read other problems this turn.",
     selectionNotes: adaptiveChecks,
     ...followsLesson(local, concepts, local.trackIdForSession(sessionId)),
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
@@ -444,7 +503,7 @@ async function readAttemptForAgent(local: LocalStore, value: Record<string, unkn
      nearly always was. The model used to have to carry a uuid from the context
      into every call, and a call it got wrong came back empty. */
   const attemptId = String(value.attemptId ?? "") || activeAttemptId(local, sessionId);
-  const events = local.readAttempt(attemptId);
+  const events = value.segments === "all" ? local.readAttemptHistory(attemptId) : local.readAttempt(attemptId);
   /* The workspace is the live one, so it answers for the open attempt and not
      for an older one being read out of history. Never fails the read.
 
@@ -475,6 +534,72 @@ async function readAttemptForAgent(local: LocalStore, value: Record<string, unkn
   const evidence = events.map(({ id, sequence }) => ({ id, sequence }));
   return { stats: replay.stats, filters, solve: solveHead(files), report: formatSolveLog(replay, filters), files, events: evidence };
 
+}
+
+/**
+ * A solved challenge's insight, filed as a review card.
+ *
+ * Refused for anything but a pass: a card is a claim that there is an idea here
+ * the learner got to, and an abandoned or failing attempt has not got there yet.
+ * An assisted breakthrough is capped at Hard for its first grade, whatever the
+ * agent proposed — the idea arrived from outside, so the first review comes
+ * early enough to find out whether it stayed.
+ */
+function recordInsight(local: LocalStore, value: Record<string, unknown>, sessionId: string) {
+  const attemptId = String(value.attemptId ?? "") || activeAttemptId(local, sessionId);
+  const subject = attemptId ? local.attemptSubject(attemptId) : null;
+  if (!subject) return { status: "invalid", note: "No attempt to file an insight against. Name the solved attempt." };
+  const outcome = [...local.readAttempt(attemptId)].reverse().find((event) => event.type === "attempt_completed")?.payload.outcome;
+  if (outcome !== "passed") return { status: "invalid", note: "That attempt has not passed, so there is no solved idea to file yet. File the insight on the turn after they solve it." };
+  const remember = typeof value.remember === "string" ? value.remember.trim() : "";
+  if (!remember && reviewTargetMode(local) === "ask" && !local.reviews.cardForQuestion(subject.question_id)) {
+    return { status: "invalid", note: "This learner decides what their reviews ask about. Ask them with ask_user_question what they want to remember from this problem — options named from this solve (the step that cracked it, the general pattern, the problem itself), multiple allowed, custom on — then file the card about what they chose, with targets from their answer and their words as remember." };
+  }
+  const named = stringList(value.concepts);
+  const slugs = named.length
+    ? named.flatMap((slug) => { try { return [local.ensureConcept({ slug }).slug]; } catch { return []; } })
+    : [...local.questionConcepts(subject.question_id)].sort((left, right) => (left.role === "primary" ? 0 : 1) - (right.role === "primary" ? 0 : 1)).map((tag) => tag.slug);
+  const click = value.click && typeof value.click === "object" ? value.click as Record<string, unknown> : {};
+  const independence = value.independence === "independent" || value.independence === "assisted" ? value.independence : "unknown";
+  const proposed = ({ again: 1, hard: 2, good: 3, easy: 4 } as const)[String(value.firstGrade) as "again" | "hard" | "good" | "easy"] ?? 3;
+  const firstRating = independence === "assisted" ? Math.min(proposed, 2) as 1 | 2 : proposed;
+  const pitfalls = Array.isArray(value.pitfalls) ? value.pitfalls.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    return typeof row.mistake === "string" && typeof row.fix === "string" ? [{ mistake: row.mistake.trim(), fix: row.fix.trim() }] : [];
+  }).slice(0, 4) : [];
+  const { card, created } = local.reviews.recordInsight({
+    questionId: subject.question_id,
+    attemptId,
+    title: String(value.title ?? subject.title),
+    trigger: String(value.trigger ?? ""),
+    insight: String(value.insight ?? ""),
+    invariant: typeof value.invariant === "string" && value.invariant.trim() ? value.invariant : null,
+    click: { summary: String(click.summary ?? ""), runOrdinal: typeof click.runOrdinal === "number" ? click.runOrdinal : null, diff: typeof click.diff === "string" && click.diff.trim() ? click.diff : null },
+    independence,
+    pitfalls,
+    rubric: stringList(value.rubric).slice(0, 5),
+    transfer: stringList(value.transfer).slice(0, 4),
+    conceptSlugs: slugs,
+    targets: stringList(value.targets).filter((target): target is ReviewTarget => (REVIEW_TARGETS as readonly string[]).includes(target)),
+    remember: remember || null,
+    firstRating,
+  });
+  const related = local.reviews.related(slugs, subject.question_id, 4).map((entry) => ({ cardId: entry.id, title: entry.title, challenge: entry.questionTitle, insight: entry.insight, dueAt: entry.dueAt }));
+  const days = Math.max(1, Math.round((Date.parse(card.dueAt) - Date.now()) / 86_400_000));
+  return {
+    status: "filed",
+    cardId: card.id,
+    created,
+    firstReviewInDays: created ? days : null,
+    dueAt: card.dueAt,
+    targets: card.targets,
+    ...(firstRating !== proposed ? { gradeCapped: "The breakthrough was assisted, so the first grade was capped at hard and the first review comes sooner." } : {}),
+    related,
+    note: created
+      ? `Filed. The first review is due in about ${days} day${days === 1 ? "" : "s"}. If you mention it, say so plainly — "I've filed the idea that cracked this for review in ${days} day${days === 1 ? "" : "s"}" — and do not restate the card.${related.length ? " Related cards on the same pattern are listed: if this insight contradicts or deepens one of them, say how in a sentence." : ""}`
+      : "Refined the card this challenge already had. Its review schedule is unchanged.",
+  };
 }
 
 /** The attempt the learner has open right now, for a call that named none. */
@@ -547,7 +672,7 @@ function solveHead(files: Array<{ path: string; text: string }>): { path: string
 }
 
 function sectionList(value: unknown): ReplaySection[] {
-  const allowed: ReplaySection[] = ["log", "cases", "runs", "timings"];
+  const allowed: ReplaySection[] = ["log", "cases", "runs", "code", "timings", "turning-points"];
   if (!Array.isArray(value)) return DEFAULT_SECTIONS;
   const chosen = value.filter((entry): entry is ReplaySection => allowed.includes(entry as ReplaySection));
   return chosen.length ? chosen : DEFAULT_SECTIONS;

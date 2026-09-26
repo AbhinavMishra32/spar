@@ -82,4 +82,9 @@ describe("the blocks that were already there", () => {
     const source = ["```bash", "cat x | grep y", "--- | ---", "```"].join("\n");
     expect(first(source, "code")?.body).toBe("cat x | grep y\n--- | ---");
   });
+
+  it("reads an image on its own line, remote https only", () => {
+    expect(parse("![tree](https://assets.leetcode.com/t.jpg)")).toEqual([{ kind: "image", alt: "tree", src: "https://assets.leetcode.com/t.jpg" }]);
+    expect(parse("![x](file:///etc/passwd)")[0]?.kind).toBe("paragraph");
+  });
 });

@@ -392,6 +392,13 @@ export function groupParts(parts: RunPart[]): GroupedPart[] {
        Keep that status during the wait, then let the call itself take its place.
        This also lets the thinking immediately before it bind to the actual call. */
     if (part.kind === "status" && (isToolPreparationStatus(part.body, parts[index + 1]) || isDraftPreparation(part.body, parts[index + 1]))) continue;
+    /* "Preparing <tool>" only says what the wait is for, and only while it is
+       the wait. Parallel calls, or thinking between the announcement and the
+       call, leave it somewhere other than directly above its row — and there it
+       stayed, a grey dot line naming a tool in snake case between the steps it
+       was supposed to have been replaced by. Anything after it means the wait
+       is over. */
+    if (part.kind === "status" && isPreparation(part.body) && index < parts.length - 1) continue;
     // A published challenge is the outcome of the turn rather than another step
     // toward it, and leaving it among the retrieval rows is what made it vanish.
     if (part.kind === "tool" && isChallengePublished(part)) grouped.push({ kind: "challenge", id: `challenge-${part.id}`, part });
@@ -449,6 +456,10 @@ function isToolPreparationStatus(body: string, next: RunPart | undefined): boole
     && (next.tool === "create_question" || next.tool === "replace_current_question");
 }
 
+function isPreparation(body: string): boolean {
+  return /^Preparing [a-z0-9 ]+$/.test(body) || body === "Preparing the next action";
+}
+
 function isDraftPreparation(body: string, next: RunPart | undefined): boolean {
   return next?.kind === "draft" && body.startsWith("Drafting challenge input");
 }
@@ -462,6 +473,7 @@ function isProtocolNoise(body: string): boolean {
 }
 
 const TOOL_VERBS: Record<string, string> = {
+  load_skill: "Used a skill",
   search_learner_model: "Searched the learner model",
   search_attempt_history: "Searched attempt history",
   read_ability: "Read ability document",
@@ -481,6 +493,7 @@ const TOOL_VERBS: Record<string, string> = {
   replay_attempt: "Read your solve",
   evaluate_attempt: "Evaluated your attempt",
   propose_ability_update: "Updated ability document",
+  record_insight: "Filed what made it click",
   commit_session_decision: "Committed next action",
   open_visualizer: "Opened the visualiser",
   visualize_run: "Traced the code",
@@ -513,10 +526,12 @@ export function toolVerb(tool: string, running: boolean, rejected = false): stri
     .replace(/^Inspected/, "Inspecting")
     .replace(/^Evaluated/, "Evaluating")
     .replace(/^Updated/, "Updating")
-    .replace(/^Committed/, "Committing");
+    .replace(/^Committed/, "Committing")
+    .replace(/^Filed/, "Filing");
 }
 
 const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
+  load_skill: ["Loading a skill", "Used a skill"],
   search_learner_model: ["Search learning history", "Searched learning history"],
   search_attempt_history: ["Review past attempts", "Reviewed past attempts"],
   search_challenge_history: ["Review challenge history", "Reviewed challenge history"],
@@ -532,6 +547,7 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   set_session_objective: ["Update session objective", "Updated session objective"],
   set_training_target: ["Update training target", "Updated training target"],
   propose_ability_update: ["Prepare ability update", "Prepared ability update"],
+  record_insight: ["Filing what made it click for review", "Filed what made it click for review"],
   upsert_ability: ["Update ability", "Updated ability"],
   commit_session_decision: ["Choose next step", "Chose next step"],
   create_question: ["Build challenge", "Built challenge"],

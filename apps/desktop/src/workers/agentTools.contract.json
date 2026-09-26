@@ -341,7 +341,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here."
+          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one and each boundary. Every known-incorrect implementation must pass all of them, so the case that exposes the plausible wrong idea belongs in hiddenTests, not here. No generated sweep here."
         },
         "hiddenTests": {
           "type": "object",
@@ -358,7 +358,8 @@
               "type": "string"
             }
           },
-          "minItems": 1
+          "minItems": 1,
+          "description": "Plausible wrong implementations at the reference's own path. Each must be genuinely wrong: it returns a different answer from the reference on at least one input the statement allows, which a hidden case contains, and it passes every visible case. A change that cannot alter any allowed answer is not a misconception, for example a shrinking `while` turned into `if` in a sliding window over non-negative values. The host executes each one beside the reference and replaces one that never disagrees."
         },
         "runCommand": {
           "type": "string",
@@ -370,14 +371,16 @@
           "items": {
             "type": "string"
           },
-          "maxItems": 3
+          "maxItems": 3,
+          "default": []
         },
         "expectedFailureSignatures": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "minItems": 1
+          "default": [],
+          "description": "Observable ways the known-incorrect implementations fail."
         },
         "solutionRequirements": {
           "type": "array",
@@ -446,10 +449,33 @@
         "visibleTests",
         "hiddenTests",
         "knownIncorrectFiles",
-        "runCommand",
-        "accidentalDifficulty",
-        "expectedFailureSignatures",
         "why",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "load_skill": {
+    "description": "Load one of the skills listed under SKILLS in your instructions: returns that skill's full instructions. Load a skill before doing the work it describes, the first time in a turn you need it — its instructions are not in your context until you do. Loading the same skill twice in one turn returns the same text.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 48,
+          "description": "The skill's name exactly as listed under SKILLS."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "name",
         "actionTitle"
       ],
       "additionalProperties": false,
@@ -718,12 +744,22 @@
               "log",
               "cases",
               "runs",
-              "timings"
+              "code",
+              "timings",
+              "turning-points"
             ]
           },
           "minItems": 1,
-          "maxItems": 4,
-          "description": "log: every event, in order, with its payload and per-case lines. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases and runs."
+          "maxItems": 6,
+          "description": "log: every event, in order, with its payload and per-case lines, including what the learner asked the agent and what it replied while the attempt was open. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. code: the diff of what the learner changed before each run, against the code the previous run executed, beside that run's newly passing and failing cases — read this before asking what change made something pass, because it usually already says. turning-points: the runs where the score moved most — the breakthrough that first passed everything after failing, and large jumps — each with the diff just before it and anything asked or said in between, which is the evidence for what made it click and whether the idea was theirs. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases, runs, code and turning-points."
+        },
+        "segments": {
+          "type": "string",
+          "enum": [
+            "latest",
+            "all"
+          ],
+          "description": "`latest` (the default) reads from the most recent reset or reopen onward. `all` includes the segments before it — for a learner who reset and started over, the approach they abandoned is often the contrast that explains the one that worked."
         },
         "eventTypes": {
           "type": "array",
@@ -1116,6 +1152,186 @@
       "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
+  "record_insight": {
+    "description": "File the core idea that solved this challenge as an insight card for spaced review. Write it from the replay — especially read_attempt's turning-points — not from the problem statement: what made it click for THIS learner, the cue they should have spotted, the invariant that makes it correct, and the mistakes they actually made on the way. Spar schedules the card with FSRS and later writes fresh review prompts from it (a new problem needing the same idea, a what-if, their own earlier bug to spot), so every field must be about the transferable pattern, never about this problem's specific inputs or code. Call it once per solved challenge; a challenge solved again refines its existing card.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The solved attempt. Omit for the one this turn is about."
+        },
+        "title": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 90,
+          "description": "The pattern as a short handle the learner can recognise later, in plain words: \"Shrink the window only when the invariant breaks\", not \"Sliding window\" and not the problem's title."
+        },
+        "trigger": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 400,
+          "description": "What in a problem statement should make someone reach for this: the shape of the input, the question asked, the constraint. Written so it would still apply to a problem with a different story."
+        },
+        "insight": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 700,
+          "description": "The key realisation itself, in two to four sentences, as the learner would need to say it to themselves. Why it works, not just what to do."
+        },
+        "invariant": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 300,
+          "description": "The condition the solution maintains, when there is one — the loop invariant, the recurrence, what the data structure guarantees."
+        },
+        "click": {
+          "type": "object",
+          "properties": {
+            "summary": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 500,
+              "description": "What changed between stuck and solved, from the turning points: the realisation behind the change, in their terms. If they passed first try, say what they recognised immediately."
+            },
+            "runOrdinal": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "The run the breakthrough landed on, as read_attempt numbers them."
+            },
+            "diff": {
+              "type": "string",
+              "maxLength": 1600,
+              "description": "The few changed lines that carried it, quoted from the turning-point diff. Omit when the change was a rewrite."
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "additionalProperties": false
+        },
+        "independence": {
+          "type": "string",
+          "enum": [
+            "independent",
+            "assisted",
+            "unknown"
+          ],
+          "description": "Whether the breakthrough was theirs. `assisted` when the log shows the agent explaining the idea, or a lesson on it, shortly before the change that made it pass."
+        },
+        "pitfalls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "mistake": {
+                "type": "string",
+                "minLength": 4,
+                "maxLength": 240
+              },
+              "fix": {
+                "type": "string",
+                "minLength": 4,
+                "maxLength": 240
+              }
+            },
+            "required": [
+              "mistake",
+              "fix"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 4,
+          "description": "Mistakes the replay shows they actually made, each with the correction, phrased so they generalise. Empty when there were none; never invent them."
+        },
+        "rubric": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 200
+          },
+          "minItems": 2,
+          "maxItems": 5,
+          "description": "What a correct recall of this idea must contain, point by point. The grader checks review answers against exactly this list, so each point must be checkable from a free-text answer."
+        },
+        "transfer": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 240
+          },
+          "minItems": 1,
+          "maxItems": 4,
+          "description": "Variations where the same idea applies or must bend: changed constraints, a different story with the same structure, the case where it breaks. Seeds for future review prompts."
+        },
+        "concepts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 60
+          },
+          "maxItems": 4,
+          "description": "Concept slugs the idea belongs to, the pattern itself first. Omit to use the challenge's own tags. Cards sharing the first concept share review credit."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "problem",
+              "pattern",
+              "concept",
+              "turning-point",
+              "pitfall"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 5,
+          "description": "What later reviews should make them recall — each review rehearses one: `problem` — this exact challenge again, worth it for a classic they will meet in interviews; `pattern` — spotting and applying the technique in a new story; `concept` — the invariant or property that makes it correct; `turning-point` — the realisation that got them unstuck, the default when there was a real struggle; `pitfall` — the mistake they kept making, when it cost them several runs. Pick the ones this solve earned, usually two or three. If the learner said what they want to remember, follow that. The learner can change these on the card. Omit to use turning-point and pattern."
+        },
+        "remember": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 600,
+          "description": "What the learner said they want to remember from this problem, when you asked them — their words, lightly cleaned up, not your summary. Reviews aim at it, so the card's insight, click and targets must be about what they pointed at. Required for a new card when they have chosen to decide what their reviews ask about; omit otherwise."
+        },
+        "firstGrade": {
+          "type": "string",
+          "enum": [
+            "again",
+            "hard",
+            "good",
+            "easy"
+          ],
+          "description": "How well the idea is held right now, as a first spaced-review grade, judged from the whole solve: `again` — solved only after being walked to it; `hard` — got there with real struggle, help, or several wrong turns; `good` — worked it out themselves with ordinary friction; `easy` — clean and fast from the first draft. This decides when the first review comes due (roughly 1, 1, 2 and 8 days)."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "title",
+        "trigger",
+        "insight",
+        "click",
+        "independence",
+        "pitfalls",
+        "rubric",
+        "transfer",
+        "firstGrade",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
   "replace_current_question": {
     "description": "Review fit and compile a validated replacement for the active challenge while preserving its attempt and replacement lineage. Supply a corrected trainingTarget when the existing one no longer describes this task.",
     "inputSchema": {
@@ -1236,7 +1452,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one, each boundary, and the one that separates the right idea from the plausible wrong one. No generated sweep here."
+          "description": "The contract the learner reads. At least four cases, each named and written by hand: the ordinary one and each boundary. Every known-incorrect implementation must pass all of them, so the case that exposes the plausible wrong idea belongs in hiddenTests, not here. No generated sweep here."
         },
         "hiddenTests": {
           "type": "object",
@@ -1253,7 +1469,8 @@
               "type": "string"
             }
           },
-          "minItems": 1
+          "minItems": 1,
+          "description": "Plausible wrong implementations at the reference's own path. Each must be genuinely wrong: it returns a different answer from the reference on at least one input the statement allows, which a hidden case contains, and it passes every visible case. A change that cannot alter any allowed answer is not a misconception, for example a shrinking `while` turned into `if` in a sliding window over non-negative values. The host executes each one beside the reference and replaces one that never disagrees."
         },
         "runCommand": {
           "type": "string",
@@ -1265,14 +1482,16 @@
           "items": {
             "type": "string"
           },
-          "maxItems": 3
+          "maxItems": 3,
+          "default": []
         },
         "expectedFailureSignatures": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "minItems": 1
+          "default": [],
+          "description": "Observable ways the known-incorrect implementations fail."
         },
         "solutionRequirements": {
           "type": "array",
@@ -1346,9 +1565,6 @@
         "visibleTests",
         "hiddenTests",
         "knownIncorrectFiles",
-        "runCommand",
-        "accidentalDifficulty",
-        "expectedFailureSignatures",
         "why",
         "reason",
         "actionTitle"
@@ -1566,66 +1782,78 @@
   "search_practice_problems": {
     "description": "Search every available problem provider for real problems. Results carry `source`; keep it paired with `slug` when reading or assigning a candidate. Prefer a fitting real problem over writing one because it carries a real judge, calibrated difficulty, and—when that provider is connected—the learner's own history. Search by Spar concept slug (translated separately to each provider's tags) and narrow by difficulty. `todo` is useful when you want something new.",
     "inputSchema": {
-      "$schema": "http://json-schema.org/draft-07/schema#",
-      "additionalProperties": false,
+      "type": "object",
       "properties": {
-        "actionTitle": {
-          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
-          "maxLength": 70,
-          "minLength": 3,
-          "type": "string"
-        },
         "concepts": {
-          "description": "Spar concept slugs, e.g. [\"window-invariant-restoration\"]. Translated to the source's own tags, walking up to the area when the sub-concept has no tag of its own.",
+          "type": "array",
           "items": {
-            "maxLength": 60,
+            "type": "string",
             "minLength": 2,
-            "type": "string"
+            "maxLength": 60
           },
           "maxItems": 5,
-          "type": "array"
+          "description": "Spar concept slugs, e.g. [\"window-invariant-restoration\"]. Translated to the source's own tags, walking up to the area when the sub-concept has no tag of its own."
+        },
+        "query": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Free text, for when the concept vocabulary does not reach what you mean."
         },
         "difficulty": {
+          "type": "string",
           "enum": [
             "easy",
             "medium",
             "hard"
-          ],
-          "type": "string"
+          ]
         },
-        "limit": {
-          "default": 8,
-          "maximum": 25,
-          "minimum": 1,
-          "type": "integer"
-        },
-        "offset": {
-          "default": 0,
-          "maximum": 2000,
+        "minRating": {
+          "type": "integer",
           "minimum": 0,
-          "type": "integer"
+          "maximum": 4000,
+          "description": "Lowest problem rating to return, on the Codeforces scale — use learnerStanding.setProblemsRated.minRating. Codeforces filters on each problem's own rating; LeetCode is narrowed to the difficulty bands whose price falls inside the window (easy 1200, medium 1600, hard 2100)."
         },
-        "query": {
-          "description": "Free text, for when the concept vocabulary does not reach what you mean.",
-          "maxLength": 200,
-          "type": "string"
+        "maxRating": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4000,
+          "description": "Highest problem rating to return — use learnerStanding.setProblemsRated.maxRating."
         },
         "status": {
-          "default": "todo",
-          "description": "`todo` for something they have not tried, `attempted` to return to something they left unfinished, `solved` to look at how they did it before.",
+          "type": "string",
           "enum": [
             "any",
             "todo",
             "attempted",
             "solved"
           ],
-          "type": "string"
+          "default": "todo",
+          "description": "`todo` for something they have not tried, `attempted` to return to something they left unfinished, `solved` to look at how they did it before."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 25,
+          "default": 8
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2000,
+          "default": 0
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
         }
       },
       "required": [
         "actionTitle"
       ],
-      "type": "object"
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
   "set_session_objective": {

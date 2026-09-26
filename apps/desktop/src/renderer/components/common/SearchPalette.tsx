@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { Eye, History, LayoutGrid, Library, Map, Plus, Search, Settings, Target, Waypoints } from "lucide-react";
+import { Clock, Eye, History, LayoutGrid, Library, Map, Plus, Search, Settings, Target, Waypoints } from "lucide-react";
 import type { ChallengeHistorySummary, ConceptSummary, SessionSummary } from "@spar/domain";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { LANGUAGE_LABEL } from "@/components/common/LanguageGlyph";
@@ -179,6 +179,7 @@ const PLACE_ICON: Record<PalettePlace["page"], React.ComponentType<{ className?:
   tracks: Target,
   track: Target,
   history: History,
+  review: Clock,
   problems: Library,
   visualizer: Eye,
   sessions: LayoutGrid,

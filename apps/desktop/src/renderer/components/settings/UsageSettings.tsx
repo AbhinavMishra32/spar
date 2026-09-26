@@ -57,7 +57,7 @@ export function UsageSettings({ api, providers }: { api: SparApi | undefined; pr
         {report ? (
           <Masthead onRange={setRange} range={range} report={report} />
         ) : (
-          <Panel className="flex items-center gap-2.5 px-5 py-6">
+          <Panel className="-mx-3.5 flex items-center gap-2.5 px-3.5 py-6">
             <SparDots className="text-muted-foreground" pattern="pulse" size={16} />
             <span className="text-ui text-muted-foreground">{api ? "Adding up runs…" : "Usage is recorded in the desktop app."}</span>
           </Panel>
@@ -66,7 +66,7 @@ export function UsageSettings({ api, providers }: { api: SparApi | undefined; pr
 
       {subscriptions.length > 0 && (
         <SettingsSection title="Plan limits">
-          <Panel className="divide-y-[length:var(--hairline)] divide-[var(--border-surface-strong)]">
+          <Panel className="-mx-3.5 divide-y-[length:var(--hairline)] divide-[var(--border-surface-strong)]">
             {subscriptions.map((provider) => <LimitRow api={api} key={provider.id} provider={provider} />)}
           </Panel>
         </SettingsSection>
@@ -159,8 +159,8 @@ function Masthead({ onRange, range, report }: { onRange(range: Range): void; ran
   ];
 
   return (
-    <Panel className="overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-5 pt-3">
+    <Panel className="-mx-3.5 overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-3.5 pt-3">
         <p className="min-w-0 truncate text-ui text-muted-foreground">
           {RANGE_LABEL[range]}
           {subscriptionOnly && (
@@ -172,14 +172,14 @@ function Masthead({ onRange, range, report }: { onRange(range: Range): void; ran
 
       {/* Four figures at reading size, not one at display size: spend is one fact
           about a range of work among several, not the thing this page is for. */}
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 px-5 pt-2.5 pb-3 @md:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 px-3.5 pt-2.5 pb-3 @md:grid-cols-4">
         <Stat label="Spend" value={money(totals.costUsd)} />
         <Stat label="Tokens" value={tokens(sumTokens(totals))} />
         <Stat label="From cache" value={`${cacheRate(totals)}%`} />
         <Stat label="Turns" value={totals.runs.toLocaleString()} />
       </dl>
 
-      <div className="px-5 pb-3.5">
+      <div className="px-3.5 pb-3.5">
         <SpendCurve className="h-12" series={series} />
         <span className="mt-1 flex items-baseline justify-between gap-3 text-ui-sm text-muted-foreground">
           <span className="truncate">{busiest ? `Most on ${dayLabel(busiest.day)} · ${money(busiest.costUsd)}` : "Nothing spent yet"}</span>
@@ -189,7 +189,7 @@ function Masthead({ onRange, range, report }: { onRange(range: Range): void; ran
 
       {/* What the tokens were, as one measured bar: the share the cache saved is
           the part of this worth seeing, and it is only visible against the rest. */}
-      <div className="border-t-[length:var(--hairline)] border-[var(--border-surface-strong)] px-5 pt-3 pb-3.5">
+      <div className="border-t-[length:var(--hairline)] border-[var(--border-surface-strong)] px-3.5 pt-3 pb-3.5">
         <Bands bands={bands} height="0.375rem" />
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5">
           {bands.filter((band) => band.value > 0).map((band) => (
@@ -280,7 +280,7 @@ function LimitRow({ api, provider }: { api: SparApi | undefined; provider: Provi
   const fiveHour = usage?.windows.find((entry) => entry.kind === "five-hour") ?? null;
   const weekly = usage?.windows.find((entry) => entry.kind === "weekly") ?? null;
   return (
-    <div className="flex items-center gap-4 px-5 py-3">
+    <div className="flex items-center gap-4 px-3.5 py-3">
       <span className="flex w-32 shrink-0 items-center gap-2">
         <ProviderGlyph className="size-4 shrink-0" provider={provider.id} />
         <span className="truncate text-content font-medium tracking-[-0.01em]">{provider.name}</span>

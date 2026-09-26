@@ -47,7 +47,7 @@ type DialogOverlayProps = DialogOverlayPrimitiveProps;
 function DialogOverlay({ className, ...props }: DialogOverlayProps) {
   return (
     <DialogOverlayPrimitive
-      className={cn('fixed inset-0 z-50 bg-black/50', className)}
+      className={cn('fixed inset-0 z-50 bg-[var(--modal-scrim)]', className)}
       {...props}
     />
   );

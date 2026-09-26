@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ChallengeCodePreview, ChallengeDetail, Language, SessionDetail, SessionSummary, Track } from "@spar/domain";
+import type { ChallengeCodePreview, ChallengeDetail, Language, ProblemSource, SessionDetail, SessionSummary, Track } from "@spar/domain";
 import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
@@ -22,6 +22,7 @@ import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
 import { SettingsPage } from "./components/pages/SettingsPage";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
+import type { ReviewStart } from "./components/review/ReviewSession";
 import { ConceptSheet } from "./components/concepts/ConceptSheet";
 import { LessonReader } from "./components/agent/LessonReader";
 import { MarkdownLinkProvider } from "./components/agent/MarkdownLinks";
@@ -65,6 +66,13 @@ export function App() {
      reached by following a reference to one rather than by opening the
      challenge itself. */
   const [challengeSubmission, setChallengeSubmission] = useState<string | null>(null);
+  /* A challenge opened to be solved again as a spaced review, rather than
+     practised. Held beside the challenge id so an ordinary open clears it. */
+  const [reviewTarget, setReviewTarget] = useState<{ challengeId: string; cardId: string; promptId?: string | undefined; rest: string[] } | null>(null);
+  /* A review asked for from elsewhere — the notification, the palette, a
+     challenge's panel. History starts it: the due queue, or one card. */
+  const [reviewStart, setReviewStart] = useState<ReviewStart | null>(null);
+  const openReviewsRef = useRef<(() => void) | null>(null);
   const [opening, setOpening] = useState(false);
   /* Every agent turn in flight, by the session it belongs to — not just the one
      the workspace is showing. A turn is started from a session and then survives
@@ -282,11 +290,11 @@ export function App() {
   /* Starting a session is reachable before the shell exists: the last step of
      onboarding opens the sparring session the learner picked, so this has to be
      declared above the early returns rather than beside the other page actions. */
-  const start = useCallback(async (goal: string, trackId?: string) => {
+  const start = useCallback(async (goal: string, trackId?: string, problemSources?: ProblemSource[]) => {
     if (!api) return;
     setError(null);
     try {
-      const result = await api.createSession({ goal, trackId });
+      const result = await api.createSession({ goal, trackId, ...(problemSources ? { problemSources } : {}) });
       await refresh();
       await openSession(result.sessionId);
     } catch (cause) {
@@ -476,6 +484,12 @@ export function App() {
     return api.onSyncState((syncState) => setData((current) => (current ? { ...current, syncState } : current)));
   }, []);
 
+  /* A review notification was clicked. */
+  useEffect(() => {
+    if (!api || typeof api.onReviewsOpen !== "function") return;
+    return api.onReviewsOpen(() => openReviewsRef.current?.());
+  }, []);
+
   /* Re-read whenever the number of challenges changes, which is the one event
      that can add an excerpt this map has not got. */
   const challengeCount = data?.challenges.length ?? 0;
@@ -559,7 +573,10 @@ export function App() {
   /* A page is a place. Recorded here rather than at each call site so a page
      reached from the sidebar and the same page reached from the palette are one
      entry with one meaning. */
-  const navigate = (next: Page) => {
+  const navigate = (requested: Page) => {
+    /* Review lives on History now; going "to Review" means starting one there. */
+    const next = requested === "review" ? "history" : requested;
+    if (requested === "review") setReviewStart({ cardId: null });
     show(next);
     /* The pages that are a place only together with an id record themselves,
        from the call that knows the id. */
@@ -567,6 +584,8 @@ export function App() {
       setHistory((current) => visit(current, { page: next }));
     }
   };
+  openReviewsRef.current = () => navigate("review");
+  const setReviewOverview = (reviews: BootstrapData["reviews"]) => setData((current) => (current ? { ...current, reviews } : current));
 
   /* What `registerShelfRoute` actually calls, kept current on every render. Goes
      to the page and asks it for the saved filter, because "saved" is a filter on
@@ -735,6 +754,7 @@ export function App() {
     setChallengeSeed(null);
     setChallengeId(id);
     setChallengeSubmission(submissionId ?? null);
+    setReviewTarget(null);
     show("challenge");
     setHistory((current) => visit(current, { page: "challenge", challengeId: id, ...(submissionId ? { submissionId } : {}) }));
     if (api) void api.readChallenge(id).then((next) => {
@@ -787,6 +807,7 @@ export function App() {
     rename: (session, title) => void mutateSession((sdk) => sdk.renameSession({ sessionId: session.id, title })),
     setPinned: (session, pinned) => void mutateSession((sdk) => sdk.setSessionPinned({ sessionId: session.id, value: pinned })),
     setArchived: (session, archived) => void mutateSession((sdk) => sdk.setSessionArchived({ sessionId: session.id, value: archived })),
+    setProblemSources: (session, sources) => void mutateSession((sdk) => sdk.setSessionProblemSources({ sessionId: session.id, sources })),
     setFinished: (session, finished) => void mutateSession(async (sdk) => {
       await sdk.setSessionStatus({ sessionId: session.id, status: finished ? "completed" : "paused" });
       // The open session's own view is drawn from the detail, not the summary.
@@ -872,7 +893,7 @@ export function App() {
     } finally { setOpening(false); }
   };
 
-  const createTrack = async (input: { goal: string; title?: string; language?: Language }) => {
+  const createTrack = async (input: { goal: string; title?: string; language?: Language; problemSources?: ProblemSource[] }) => {
     if (!api) return;
     setOpening(true); setError(null);
     try {
@@ -954,6 +975,7 @@ export function App() {
               nav={nav}
               onPage={navigate}
               page={page}
+              reviewsDue={data.reviews?.dueCount ?? 0}
               runs={runs}
               sessionActions={sessionActions}
               /* Every Track's sessions, not just the open one's: the sidebar groups
@@ -1033,7 +1055,7 @@ export function App() {
 
             {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
             {page === "tracks" && <TracksPage onDelete={deleteTrack} busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
-            {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal) => start(goal,data.activeTrack!.id)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
+            {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal, sources) => start(goal,data.activeTrack!.id,sources)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
             {page === "problems" && (
               <ProblemsPage
                 abilities={data.abilities}
@@ -1073,13 +1095,22 @@ export function App() {
                 onPractise={practise}
               />
             )}
-            {(page === "history" || page === "challenges") && (
+            {(page === "history" || page === "challenges" || page === "review") && (
               <ChallengesPage
                 api={api}
                 challenges={data.challenges}
                 concepts={data.concepts}
                 onOpen={(challenge) => openChallenge(challenge.id)}
                 onOpenConcept={setConcept}
+                onError={setError}
+                onResolve={(challengeId, review, rest) => {
+                  openChallenge(challengeId);
+                  setReviewTarget({ challengeId, ...review, rest });
+                }}
+                onReviewsChanged={setReviewOverview}
+                onStartHandled={() => setReviewStart(null)}
+                reviews={data.reviews}
+                startReview={reviewStart}
               />
             )}
             {page === "settings" && (
@@ -1187,6 +1218,19 @@ export function App() {
                       onError={setError}
                       onExpandSidebar={expandSidebar}
                       onOpenSession={(sessionId) => void openSession(sessionId).catch((cause) => setError(message(cause)))}
+                      onReviewFiled={(overview) => setReviewOverview(overview)}
+                      onReviewEnd={(options) => {
+                        /* Back to the queue where it was left: the rest of it
+                           after a re-solve, or this card's flashcard first when
+                           the learner chose not to solve it after all. */
+                        const ended = reviewTarget;
+                        setReviewTarget(null);
+                        navigate("history");
+                        if (!ended) return;
+                        if (options?.flashcard) setReviewStart({ cardId: null, cardIds: [ended.cardId, ...ended.rest], flashcardFirst: true });
+                        else if (ended.rest.length) setReviewStart({ cardId: null, cardIds: ended.rest });
+                      }}
+                      review={reviewTarget?.challengeId === challengeId ? reviewTarget : null}
                       seed={challengeSeed}
                       trail={trailFor(data.challenges.find((challenge) => challenge.id === challengeId)?.sessionId)}
                     />

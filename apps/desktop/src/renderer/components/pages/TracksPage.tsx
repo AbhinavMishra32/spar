@@ -1,18 +1,19 @@
 import { useState } from "react";
 import { ArrowRight, CircleDot, Plus, Radar, ShieldCheck, Trash2 } from "lucide-react";
-import { LANGUAGES, type Language, type Track } from "@spar/domain";
+import { DEFAULT_PROBLEM_SOURCES, LANGUAGES, type Language, type ProblemSource, type Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
+import { LANGUAGE_LABEL, LanguageGlyph } from "../common/LanguageGlyph";
+import { ProblemSourcesMenu } from "../common/ProblemSources";
 
 export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
   data: BootstrapData;
   busy: boolean;
-  onCreate(input: { goal: string; title?: string; language?: Language }): Promise<void>;
+  onCreate(input: { goal: string; title?: string; language?: Language; problemSources?: ProblemSource[] }): Promise<void>;
   onOpen(track: Track): Promise<void>;
   onDelete(track: Track): Promise<boolean>;
 }) {
@@ -24,11 +25,14 @@ export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
      "port my Python service to Go" both contain the word Python and want
      different answers. Null means the Track follows the profile default. */
   const [language, setLanguage] = useState<Language | null>(data.profile?.language ?? null);
+  /* For the Track's first session, the same choice the Track page offers for
+     every session after it. */
+  const [sources, setSources] = useState<ProblemSource[]>(DEFAULT_PROBLEM_SOURCES);
 
   const create = async () => {
     if (goal.trim().length < 3) return;
-    await onCreate({ goal: goal.trim(), ...(title.trim() ? { title: title.trim() } : {}), ...(language ? { language } : {}) });
-    setGoal(""); setTitle(""); setOpen(false);
+    await onCreate({ goal: goal.trim(), ...(title.trim() ? { title: title.trim() } : {}), ...(language ? { language } : {}), problemSources: sources });
+    setGoal(""); setTitle(""); setSources(DEFAULT_PROBLEM_SOURCES); setOpen(false);
   };
 
   return <div className="app-scroll h-full overflow-y-auto">
@@ -37,36 +41,40 @@ export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
         <div><h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Tracks</h1><p className="mt-1 max-w-[38rem] text-content text-muted-foreground">Separate workspaces for distinct goals. Each keeps its own sessions, learner model, memory, and training direction.</p></div>
         <Dialog onOpenChange={setOpen} open={open}>
           <DialogTrigger asChild><Button disabled={busy}><Plus data-icon="inline-start" />New Track</Button></DialogTrigger>
-          <DialogContent>
-            <DialogHeader><DialogTitle>Create a Track</DialogTitle><DialogDescription>Describe what you want to become better at. Spar will choose an initial direction, not a fixed syllabus.</DialogDescription></DialogHeader>
+          <DialogContent className="sm:max-w-[30rem]">
+            <DialogHeader><DialogTitle>Create a Track</DialogTitle><DialogDescription>Describe what you want to get better at. Spar chooses an initial direction, not a fixed syllabus.</DialogDescription></DialogHeader>
             <div className="flex flex-col gap-3">
-              <Input onChange={(event) => setTitle(event.target.value)} placeholder="Track name (optional)" value={title} />
-              <Textarea autoFocus className="min-h-28" onChange={(event) => setGoal(event.target.value)} placeholder="I want to become extremely strong at TypeScript and understand the language deeply…" value={goal} />
-              <div>
-                <p className="text-ui-sm font-medium">Language</p>
-                <p className="mt-0.5 text-ui-sm text-muted-foreground">Every challenge in this Track is written in it.</p>
-                <div aria-label="Language for this Track" className="mt-2 grid w-[13.5rem] grid-cols-5 gap-1" role="radiogroup">
-                  {LANGUAGES.map((option) => (
-                    <button
-                      aria-checked={language === option}
-                      aria-label={LANGUAGE_LABEL[option]}
-                      className={cn(
-                        "grid size-10 place-items-center rounded-[var(--radius-lg)] outline-none transition-[background-color,box-shadow,transform] duration-150 hover:bg-accent/55 focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-[0.96]",
-                        language === option ? "bg-accent shadow-[inset_0_0_0_1px_var(--border-strong),var(--app-shadow-card)]" : "",
-                      )}
-                      key={option}
-                      onClick={() => setLanguage(option)}
-                      role="radio"
-                      title={LANGUAGE_LABEL[option]}
-                      type="button"
-                    >
-                      <SelectableLanguageGlyph className="size-[1.3rem]" language={option} selected={language === option} />
-                    </button>
-                  ))}
-                </div>
+              <Textarea autoFocus className="min-h-28 resize-none" onChange={(event) => setGoal(event.target.value)} placeholder="I want to become extremely strong at TypeScript and understand the language deeply…" value={goal} />
+              <div className="divide-y divide-border rounded-xl border border-border">
+                <Row label="Name">
+                  <input className="h-7 w-44 bg-transparent pr-1.5 text-right text-ui outline-none placeholder:text-muted-foreground/70" onChange={(event) => setTitle(event.target.value)} placeholder="From the goal" value={title} />
+                </Row>
+                <Row label="Language">
+                  <Select onValueChange={(next) => setLanguage(next as Language)} value={language ?? ""}>
+                    <SelectTrigger aria-label="Language for this Track" className="h-7 border-transparent bg-transparent pr-1.5 text-ui shadow-none hover:bg-accent dark:bg-transparent" size="sm">
+                      <SelectValue placeholder="Choose" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {LANGUAGES.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          <span className="inline-flex items-center gap-2">
+                            <LanguageGlyph className="size-3.5" language={option} />
+                            {LANGUAGE_LABEL[option]}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Row>
+                <Row label="Challenges from">
+                  <ProblemSourcesMenu onChange={setSources} value={sources} />
+                </Row>
               </div>
             </div>
-            <DialogFooter><Button disabled={busy || goal.trim().length < 3} onClick={() => void create()}>Create Track</Button></DialogFooter>
+            <DialogFooter>
+              <Button onClick={() => setOpen(false)} variant="secondary">Cancel</Button>
+              <Button disabled={busy || goal.trim().length < 3} onClick={() => void create()}>Create Track<ArrowRight data-icon="inline-end" /></Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       </header>
@@ -115,4 +123,14 @@ function TrackRow({ data, track, onOpen, onDelete, busy }: { data: BootstrapData
       </div>
     </div>
   </article>;
+}
+
+/** One setting in the create dialog: its name on the left, its control on the right. */
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-h-11 items-center justify-between gap-4 py-1.5 pl-3 pr-2">
+      <span className="text-ui text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
 }

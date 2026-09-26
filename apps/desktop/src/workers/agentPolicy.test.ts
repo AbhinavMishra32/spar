@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedTools, completionInstruction, nextToolStage, phaseExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
+import { allowedTools, completionInstruction, nextToolStage, owedChallenge, phaseExecutionKey, VISUALIZER_GATE, VISUALIZER_SKILL_TOOLS, type AgentTurnKind } from "./agentPolicy.js";
 
 const kinds: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message"];
 const result = (status: string) => [{ result: { status } }];
@@ -114,5 +114,52 @@ describe("generalist agent tool policy", () => {
     const playable = new Map<string, unknown[]>([["replace_current_question", result("playable")]]);
     expect(completionInstruction("learner-message", playable)).toContain("why this problem and why now");
     expect(completionInstruction("learner-message", new Map())).not.toContain("why this problem and why now");
+  });
+
+  it("keeps an attempt-complete turn open until a next challenge is published", () => {
+    const rejected = new Map<string, unknown[]>([["create_question", [{ result: { status: "invalid", report: { checks: [{ name: "reference solution", passed: false, detail: "expected: 2 | actual: 3" }] } } }]]]);
+    const owed = owedChallenge("attempt-complete", rejected, false, "(1) reference solution: expected: 2 | actual: 3");
+    expect(owed).toContain("expected: 2 | actual: 3");
+    expect(owed).toContain("owes the learner their next challenge");
+    /* An answered question is a result inside this same turn, not an ending. */
+    expect(owedChallenge("attempt-complete", new Map([["ask_user_question", [{ result: { status: "answered", answer: "x" } }]]]), false)).not.toBe("");
+    expect(owedChallenge("attempt-complete", new Map([["ask_user_question", [{ result: { status: "cancelled" } }]]]), false)).toBe("");
+    expect(owedChallenge("attempt-complete", new Map([["review_solution", [{ result: { review: "rework" } }]]]), false)).toBe("");
+    expect(owedChallenge("attempt-complete", new Map([["create_question", result("playable")]]), false)).toBe("");
+    expect(owedChallenge("attempt-complete", new Map([["create_fallback_question", result("playable")]]), false)).toBe("");
+  });
+
+  it("owes a retry only on other turns that already tried to author", () => {
+    expect(owedChallenge("learner-message", new Map(), false)).toBe("");
+    expect(owedChallenge("session-start", new Map([["create_question", result("invalid")]]), false)).toContain("Call the authoring tool again");
+    expect(owedChallenge("session-start", new Map([["create_question", result("invalid")]]), false, "(1) session lifecycle: already active")).toBe("");
+  });
+
+  it("closes authoring once the host fallback publishes and names it as a standard exercise", () => {
+    const outcomes = new Map<string, unknown[]>([["create_question", result("invalid")], ["create_fallback_question", result("playable")]]);
+    expect(nextToolStage("attempt-complete", outcomes, 3).activeTools).not.toContain("create_question");
+    expect(completionInstruction("attempt-complete", outcomes)).toContain("standard local tracing exercise");
+  });
+});
+
+describe("sessions that take provider problems only", () => {
+  it("never offers the authoring tools", () => {
+    for (const kind of kinds) {
+      for (const active of [false, true]) {
+        const tools = allowedTools(kind, active, false, true, false);
+        expect(tools.has("create_question")).toBe(false);
+        expect(tools.has("replace_current_question")).toBe(false);
+        expect(tools.has("assign_practice_problem")).toBe(true);
+      }
+    }
+  });
+
+  it("owes a provider problem after an attempt, quoting the last refusal", () => {
+    const outcomes = new Map<string, unknown[]>([["assign_practice_problem", [{ result: { status: "invalid", report: { checks: [{ passed: false, detail: "subscription-only" }] } } }]]]);
+    const owed = owedChallenge("attempt-complete", outcomes, false, "", false);
+    expect(owed).toContain("assign_practice_problem");
+    expect(owed).toContain("subscription-only");
+    expect(owed).not.toContain("create_question");
+    expect(owedChallenge("learner-message", new Map(), false, "", false)).toBe("");
   });
 });

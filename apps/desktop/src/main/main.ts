@@ -1,3 +1,4 @@
+import { SkillService } from "./skills.js";
 import { app, BrowserWindow, nativeTheme } from "electron";
 import path from "node:path";
 import { mkdir } from "node:fs/promises";
@@ -24,6 +25,7 @@ import { WorkspaceService } from "./workspaces.js";
 import { themePreferenceSchema } from "../shared/api.js";
 import { AgentQuestions } from "./agentQuestions.js";
 import { AgentTelemetry } from "./agentTelemetry.js";
+import { ReviewReminders } from "./reviewReminders.js";
 
 let mainWindow: BrowserWindow | null = null;
 let store: LocalStore;
@@ -60,10 +62,20 @@ else {
        right for a page the learner is driving. The toolbox is what holds a run
        still between tool calls so a turn can ask several questions about it. */
     const visualizerTools = new VisualizerToolbox(visualizer, store, workspaces);
+    /* Instructions the agent loads on demand. Built-in skills ship beside the
+       app like the runtime icons; the learner's own live with their data. */
+    const skills = new SkillService(
+      app.isPackaged ? path.join(process.resourcesPath, "skills") : path.join(app.getAppPath(), "build", "skills"),
+      path.join(root, "skills"),
+      store,
+    );
+    /* Keeps the Dock badge on the number of spaced reviews due, and announces new
+       ones while the app is in the background. */
+    const reminders = new ReviewReminders(store, () => mainWindow);
     const agentQuestions = new AgentQuestions(store, (sessionId) => {
       mainWindow?.webContents.send("agent:event", { runId: "", sessionId, type: "question-pending" });
     });
-    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); telemetry.record(runId,value); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, (name, input, context) => executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice, visualizerTools, agentQuestions, context.progress));
+    const agent = new UtilityClient("agent", (event) => { const value = event.event as Record<string, unknown>; if (value?.type === "provider-usage") { providers.recordCodexRateLimits(value.headers as Record<string, string>); return; } const runId = String(event.requestId); telemetry.record(runId,value); recordAgentActivity(runId, value); mainWindow?.webContents.send("agent:event", { runId, sessionId: agentRunSessions.get(runId), ...value }); }, async (name, input, context) => { const output = await executeTrainingTool(name, input, context.sessionId, store, workspaces, runner, web, practice, visualizerTools, agentQuestions, context.progress, skills); if (name === "record_insight") reminders.refresh(false); return output; });
     const sync=new CloudSyncService(store,auth,origin,(state)=>mainWindow?.webContents.send("sync:state",state));sync.start();
     /* Writes the checkpoints that make a session resumable on another machine.
        Nothing wrote them before, so `checkpoints` was empty on every install and
@@ -80,6 +92,7 @@ else {
     let shutdown: Promise<void> | null = null;
     const prepareToExit = () => shutdown ??= (async () => {
       practice.stop();
+      reminders.stop();
       await checkpoints.flushAll();
       checkpoints.stop();
       sync.stop();
@@ -99,10 +112,10 @@ else {
     const signedIn = Boolean(await auth.account());
     const needsRestore = signedIn && !store.getProfile();
     const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : "app" as const;
-    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentQuestions, agentRunSessions, telemetry, appVersion:app.getVersion(), sync, checkpoints, restore, web, visualizer, window: () => mainWindow });
+    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentQuestions, agentRunSessions, telemetry, appVersion:app.getVersion(), sync, checkpoints, restore, web, visualizer, skills, window: () => mainWindow, onReviewsChanged: () => reminders.refresh(false) });
     updates = new UpdateService(store, () => mainWindow, prepareToExit);
     updates.installIpc();
-    installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); updates.start();
+    installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); updates.start(); reminders.start();
     /* Started after the window exists, so its progress has somewhere to be
        reported. The renderer holds the restoring screen until this settles. */
     if (needsRestore) void restore.run().then((state) => { if (state !== "failed") fitWindowTo(mainWindow, store.getProfile() ? "app" : "onboarding"); });

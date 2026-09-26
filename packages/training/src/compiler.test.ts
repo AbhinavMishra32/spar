@@ -170,3 +170,39 @@ it("accepts an authored challenge whose hidden suite actually sweeps",async()=>{
   expect(report.caseCounts).toEqual({ visible: 5, hidden: 30 });
   expect(report.valid).toBe(true);
 });
+
+it("says an uncaught misconception is a coverage fault, not a harness-format fault", async () => {
+  // Every run passes: the known-incorrect implementation is never distinguished.
+  const { report } = await compileQuestion(design, async () => ({ exitCode: 0, stdout: "ok - preserves queued work\nok - second case\n", stderr: "", durationMs: 1 }), "host");
+  const caught = report.checks.find((check) => check.name === "known incorrect 1 fails hidden");
+  const verdicts = report.checks.find((check) => check.name === "known incorrect 1 failure case results");
+  expect(caught?.passed).toBe(false);
+  expect(caught?.detail).toContain("No hidden input reaches its mistake");
+  expect(caught?.detail).toContain("all 2 hidden case verdicts were ok");
+  expect(verdicts?.passed).toBe(false);
+  expect(verdicts?.detail).toContain("not a harness-format fault");
+  expect(verdicts?.detail).not.toContain("failed but emitted no failing case verdict");
+});
+
+it("repairs the mechanical faults that used to cost a whole model round", async () => {
+  const seen: string[][] = [];
+  const { design: compiled, report } = await compileQuestion({
+    ...design,
+    language: "python",
+    starterFiles: { "src/solution.py": "pass" },
+    referenceFiles: { "src/solution.py": "def solve(x): return x" },
+    // Misnamed tests, a null left over from patch syntax, and no signatures, difficulty or command.
+    visibleTests: { "tests/visible.test.py": "print('ok - visible')", "tests/stale_test.py": null },
+    hiddenTests: { "tests/hidden.py": "print('ok - hidden')", "tests/helpers.py": "VALUE = 1" },
+    knownIncorrectFiles: [{ "src/solution.py": "def solve(x): return None" }],
+    runCommand: undefined,
+    accidentalDifficulty: undefined,
+    expectedFailureSignatures: undefined,
+  }, async (files) => { seen.push(Object.keys(files)); return { exitCode: 0, stdout: "ok - case\n", stderr: "", durationMs: 1 }; });
+  expect(Object.keys(compiled.visibleTests)).toEqual(["tests/visible_test.py"]);
+  // A helper the tests import keeps its name; only names that say "test" move.
+  expect(Object.keys(compiled.hiddenTests).sort()).toEqual(["tests/helpers.py", "tests/hidden_test.py"]);
+  expect(report.checks.find((check) => check.name === "tests use the runner's naming")?.passed).toBe(false);
+  expect(compiled.expectedFailureSignatures).toEqual([]);
+  expect(seen.length).toBe(0);
+});

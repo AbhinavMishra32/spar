@@ -13,7 +13,7 @@ export function resolveLanguageStages(root:string,language:Language,command:"tes
   if(language==="javascript")return{stages:[{bin:process.execPath,args:command==="test"?[...TEST_FLAGS,...tests("**/*.test.js")]:[existsSync(path.join(root,"index.js"))?"index.js":"src/index.js"]}]};
   if(language==="typescript"){const tsxCli=createRequire(import.meta.url).resolve("tsx/cli");return{stages:[{bin:process.execPath,args:[tsxCli,...(command==="test"?[...TEST_FLAGS,...tests("**/*.test.ts")]:[existsSync(path.join(root,"index.ts"))?"index.ts":"src/index.ts"])]}]};}
   const standalone=(pattern:string,bin:string):StageResolution=>{const files=tests(pattern);return files.length?{stages:files.map(file=>({bin,args:[file]}))}:{error:`No ${language} test sources found.\n`};};
-  if(language==="python")return standalone("**/{test_*.py,*_test.py}","python3");
+  if(language==="python")return standalone("**/{test_*.py,*_test.py}",pythonBin());
   if(language==="ruby")return standalone("**/{*_test.rb,*.test.rb}","ruby");
   /* -v/--nocapture are part of Spar's case protocol, not developer noise: both
      runners otherwise swallow stdout from passing cases, which makes a correct
@@ -26,3 +26,10 @@ export function resolveLanguageStages(root:string,language:Language,command:"tes
   if(language==="c"){const files=tests("**/*.{c,h}");const testFiles=files.filter(file=>/\.test\.c$/.test(file));const sources=files.filter(file=>file.endsWith(".c")&&!/\.test\.c$/.test(file));if(!testFiles.length)return{error:"No C test sources found. Use *.test.c files.\n"};return{stages:testFiles.flatMap((file,index)=>{const binary=path.join(output,`c-test-${index}`);rmSync(binary,{force:true});return[{bin:"clang",args:["-std=c17","-O2","-Wall","-Wextra","-pedantic","-Isrc","-Iinclude","-o",binary,file,...sources]},{bin:binary,args:[]}];})};}
   const plan=planCppBuild({files:tests("**/*.{cpp,cc,cxx,h,hpp,hh,hxx}"),outputDir:output,command});if("error"in plan)return plan;for(const binary of plan.binaries)rmSync(binary,{force:true});return{stages:plan.stages};
 }
+
+/* The runner's PATH puts /usr/bin first, and on macOS that is Python 3.9 —
+   old enough to crash on `TreeNode | None`, which LeetCode's own Python accepts
+   and learners write. A Homebrew install is newer whenever it exists, so it is
+   preferred explicitly rather than by reordering PATH for every language. */
+const PYTHON_CANDIDATES=["/opt/homebrew/bin/python3","/usr/local/bin/python3"];
+function pythonBin():string{return PYTHON_CANDIDATES.find(candidate=>existsSync(candidate))??"python3";}

@@ -1,6 +1,6 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, ArrowRight, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Loader2, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, Target, Trash2, Waypoints } from "lucide-react";
-import type { ChallengeHistorySummary, Language, SessionSummary, Track } from "@spar/domain";
+import { Archive, ArchiveRestore, ArrowRight, BrainCircuit, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Loader2, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, SlidersHorizontal, Target, Trash2, Waypoints } from "lucide-react";
+import type { ChallengeHistorySummary, Language, ProblemSource, SessionSummary, Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { formatDuration, initials, relativeTime } from "@/lib/format";
@@ -15,6 +15,7 @@ import { Meter } from "@/components/ui/meter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NavButtons } from "./NavButtons";
 import { SparWordmark } from "../common/SparWordmark";
+import { SessionSourcesDialog } from "../common/ProblemSources";
 import { LanguageGlyph } from "../common/LanguageGlyph";
 import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { SidebarGlyph } from "./NavIcons";
@@ -23,7 +24,7 @@ import type { AgentRun } from "../agent/agentRun";
 /* "challenge" is one challenge opened from History or Problems. Like
    "workspace" it draws its own toolbar and is not a destination in the nav; the
    parent destination is kept by App so Back returns to the surface it came from. */
-export type Page = "home" | "baseline" | "tracks" | "track" | "history" | "problems" | "visualizer" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
+export type Page = "home" | "baseline" | "tracks" | "track" | "history" | "review" | "problems" | "visualizer" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
 
 /** What the sidebar can do to a session. Every one of these is a write the main
  *  process owns, so the row reports intent and never edits its own copy. */
@@ -31,6 +32,7 @@ export type SessionActions = {
   rename(session: SessionSummary, title: string): void;
   setPinned(session: SessionSummary, pinned: boolean): void;
   setArchived(session: SessionSummary, archived: boolean): void;
+  setProblemSources(session: SessionSummary, sources: ProblemSource[]): void;
   setFinished(session: SessionSummary, finished: boolean): void;
   remove(session: SessionSummary): void;
 };
@@ -45,12 +47,15 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
      stands were two destinations that each needed the other to make sense — see
      `HomePage`. */
   { id: "home", label: "Home", icon: Waypoints },
+  /* Second, because it is the other half of the daily loop: what is due to come
+     back comes before picking something new. Spaced review lives here too — a
+     solved challenge and what it taught are one record, not two pages. */
+  { id: "history", label: "History", icon: History },
   { id: "problems", label: "Problems", icon: Library },
   /* Below Problems, which is the order of the work: you pick something to solve,
      then you go and look at how it runs. Putting it under the surface it is
      opened from also keeps it out of the first rows, where the daily loop lives. */
   { id: "visualizer", label: "Visualize", icon: Eye },
-  { id: "history", label: "History", icon: History },
 ];
 
 /* 30px tall on a 13px label, cornered at --radius-lg, inset 8px from the sidebar's
@@ -142,6 +147,7 @@ export function Sidebar({
   syncState,
   sessionActions,
   onPage,
+  reviewsDue = 0,
   onOpenSession,
   onOpenTrack,
   onNewTrack,
@@ -171,6 +177,8 @@ export function Sidebar({
   syncState: BootstrapData["syncState"];
   sessionActions: SessionActions;
   onPage(page: Page): void;
+  /** Spaced reviews due now, for the count on the History row. */
+  reviewsDue?: number;
   onOpenSession(session: SessionSummary): void;
   onOpenTrack(track: Track): void;
   onNewTrack(): void;
@@ -181,6 +189,7 @@ export function Sidebar({
 }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<SessionSummary | null>(null);
+  const [pendingSources, setPendingSources] = useState<SessionSummary | null>(null);
   const [pendingTrackDelete, setPendingTrackDelete] = useState<Track | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   /* Which Tracks the learner has opened in the list. Only their explicit choices live here;
@@ -240,6 +249,7 @@ export function Sidebar({
       onRenameEnd={() => setRenaming(null)}
       onRenameStart={() => setRenaming(session.id)}
       onRequestDelete={() => setPendingDelete(session)}
+      onRequestSources={() => setPendingSources(session)}
       renaming={renaming === session.id}
       working={runs[session.id]?.status === "streaming"}
       session={session}
@@ -319,6 +329,11 @@ export function Sidebar({
           >
             <Icon className={cn(ROW_ICON, ROW_ICON_TONE)} />
             <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+            {id === "history" && reviewsDue > 0 && (
+              <span className="min-w-[1.125rem] rounded-full bg-[var(--warning)]/18 px-1.5 text-center text-ui-sm font-medium tabular-nums text-[var(--warning)]">
+                {reviewsDue > 99 ? "99+" : reviewsDue}
+              </span>
+            )}
           </button>
         ))}
       </nav>
@@ -443,6 +458,15 @@ export function Sidebar({
           setPendingDelete(null);
         }}
         session={pendingDelete}
+      />
+
+      <SessionSourcesDialog
+        onCancel={() => setPendingSources(null)}
+        onSave={(session, sources) => {
+          sessionActions.setProblemSources(session, sources);
+          setPendingSources(null);
+        }}
+        session={pendingSources}
       />
     </aside>
   );
@@ -696,6 +720,7 @@ function SessionRow({
   onRenameStart,
   onRenameEnd,
   onRequestDelete,
+  onRequestSources,
 }: {
   session: SessionSummary;
   /** What the session is written in. Absent only before its first challenge
@@ -711,6 +736,7 @@ function SessionRow({
   onRenameStart(): void;
   onRenameEnd(): void;
   onRequestDelete(): void;
+  onRequestSources(): void;
 }) {
   const [open, setOpen] = useState(false);
   const [peeking, setPeeking] = useState(false);
@@ -734,6 +760,7 @@ function SessionRow({
     ...(canFinish
       ? [{ key: "f", label: finished ? "Mark as in progress" : "Mark as finished", icon: finished ? RotateCcw : CircleCheck, run: () => actions.setFinished(session, !finished) }]
       : []),
+    { key: "s", label: "Problem sources…", icon: SlidersHorizontal, run: onRequestSources },
     { key: "a", label: archived ? "Restore" : "Archive", icon: archived ? ArchiveRestore : Archive, run: () => actions.setArchived(session, !archived) },
     { key: "d", label: "Delete…", icon: Trash2, run: onRequestDelete, destructive: true },
   ];

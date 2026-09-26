@@ -21,6 +21,22 @@ describe("normalizeLeetCodeVerdict — a scratch run", () => {
     expect(verdict.runtime).toBe("52 ms");
   });
 
+  it("counts the cases the judge ran, not LeetCode's padded answer arrays", () => {
+    const verdict = normalizeLeetCodeVerdict({
+      status_code: 10,
+      status_msg: "Accepted",
+      compare_result: "11",
+      code_answer: ["[2,1,3]", "[]", ""],
+      expected_code_answer: ["[2,1,3]", "[]", ""],
+      last_testcase: "[4,2,7,1,3]\n2\n[4,2,7,1,3]\n5",
+      total_correct: 2,
+      total_testcases: 2,
+    }, { ...context, submitted: false });
+    expect(verdict.caseAnswers).toHaveLength(2);
+    expect(verdict.caseAnswers.every((entry) => entry.passed)).toBe(true);
+    expect(verdict.caseAnswers[1]?.input).toBe("[4,2,7,1,3]\n5");
+  });
+
   it("fails a run that finished but got a case wrong", () => {
     // Status 10 on a run means "the program did not crash", not "correct". A
     // client that reads it as a pass tells the learner they solved something

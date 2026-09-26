@@ -6,7 +6,7 @@ import { FileSearch } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
+import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSkill, IconSparkle, IconTerminal } from "./threadIcons";
 import { baresDetail, ToolDetail } from "./ToolDetail";
 import { toolSubject } from "./toolSubject";
 import { latestHeading, thoughts } from "./thoughts";
@@ -21,7 +21,7 @@ import { readPublishedChallenge } from "./publishedChallenge";
 import { useRevealOnExpand } from "./useRevealOnExpand";
 import { diffTotals, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
 import { solveStats, spentOn, type SolveStats } from "./solveStats";
-import { Clock, DraftTree, Reveal, StageTree, draftFromCall } from "./StageTree";
+import { Clock, DraftTree, InsightTree, QuestionTitle, Reveal, StageTree, draftFromCall, type QuestionMark } from "./StageTree";
 import type { ChallengeDraft } from "../../../shared/api";
 import type { ChallengeStop, ChallengeTrail } from "../workspace/ChallengeStepper";
 
@@ -104,6 +104,7 @@ function orbFor(tool: string): OrbState {
   const name = tool.replace(/-/g, "_");
   /* Out to the internet: the wires, not the globe. */
   if (name.startsWith("web_") || name.startsWith("fetch_") || name.startsWith("sync_")) return "connecting";
+  if (name === "load_skill") return "searching";
   if (name.startsWith("search_") || name.startsWith("read_") || name.startsWith("inspect_") || name.startsWith("list_") || name.startsWith("grep") || name === "replay_attempt") return "searching";
   if (name.startsWith("write_") || name.startsWith("edit_") || name.startsWith("apply_") || name.startsWith("create_file")) return "shaping";
   if (name === "create_question" || name === "replace_current_question" || name.startsWith("plan_") || name.startsWith("path")) return "weaving";
@@ -132,13 +133,15 @@ const MARK = "size-4";
 
 function ToolIcon({ part }: { part: ToolPart }) {
   if (part.phase === "running") return <ThinkingOrb aria-label="Working" size={20} state={orbFor(part.tool)} style={{ width: 15, height: 15 }} />;
-  if (part.phase === "error") return <IconAlert className={cn(MARK, "text-[var(--warning)]")} />;
+  if (part.phase === "error") return <IconAlert className={cn(MARK, "text-[var(--miss)]")} />;
   /* Anything that reached the practice source is marked with the source's own logo.
      A magnifying glass over "Searching LeetCode for a problem" says the agent
      searched something; the mark says what. */
   if (isSourceTool(part.tool)) return <SourceGlyph className="size-4" source={sourceFor(part)} />;
 
   switch (part.tool) {
+    case "load_skill":
+      return <IconSkill className={MARK} />;
     /* Going out to the web gets its own mark. Every other row in the transcript
        is the agent reading the learner's own project, and a globe is the
        one-glance difference between "it read your files" and "it read the internet". */
@@ -220,6 +223,9 @@ function ToolIcon({ part }: { part: ToolPart }) {
       return <IconChip className={MARK} />;
     case "commit_session_decision":
       return <IconLightning className={MARK} />;
+    /* The one call that files something for the learner to keep. */
+    case "record_insight":
+      return <IconSparkle className={MARK} />;
     default:
       break;
   }
@@ -238,7 +244,7 @@ function StatusPill({ part }: { part: ToolPart }) {
   const [text, tone] = part.phase === "running"
     ? ["Running", "text-muted-foreground"]
     : rejected
-      ? ["Rejected", "text-[var(--warning)]"]
+      ? ["Rejected", "text-[var(--miss)]"]
       : part.phase === "error"
         ? ["Failed", "text-destructive"]
         : ["Success", "text-[var(--success)]"];
@@ -378,15 +384,59 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
      detail that used to overwrite itself beside the title would only repeat the
      newest of them. */
   const staged = part.stages.length > 0;
+  /* A filed insight card hangs off the row the way a build's stages do: it is
+     a thing the call made, not a payload to open. */
+  const insight = part.tool === "record_insight" && part.phase === "done" && hasCall;
+  const treed = staged || insight;
   const design = useMemo(() => (staged ? draftFromCall(part.input, part.files) : null), [staged, part.input, part.files]);
   /* A staged call's row folds its stages, not a panel of JSON: the tree is the
      account of what the call did, and its arguments and result are already
      drawn in it — the design as files, the result as the checks. */
-  const panel = hasPayload && !staged;
-  const [treeOpen, setTreeOpen] = useState(true);
+  /* A skill row names the skill and stops there: the instructions are the
+     agent's reading, and Settings is where a learner goes to read them. A load
+     that failed still opens, so the reason it failed can be read. */
+  const quiet = part.tool === "load_skill" && part.phase !== "error";
+  const panel = hasPayload && !treed && !quiet;
+  const [treeChoice, setTreeChoice] = useState<boolean | null>(null);
+  /* A build that made a question says so on its own row. "Publishing the
+     TypeScript root exercise" is the agent's caption for a step; the question
+     it produced — language, number, title, how hard — is the thing the learner
+     is about to open, and it should not only exist in the card further down. */
+  const question = useMemo<QuestionMark | null>(() => {
+    if (part.phase !== "done" || (part.tool !== "create_question" && part.tool !== "replace_current_question")) return null;
+    const challenge = readPublishedChallenge(part);
+    const outcome = part.stages.find((stage) => stage.kind === "outcome");
+    if (!challenge.questionId && outcome?.state !== "done") return null;
+    return {
+      title: challenge.title,
+      ordinal: challenge.ordinal,
+      language: challenge.language,
+      detail: (challenge.difficulty ? DIFFICULTY_WORD[challenge.difficulty] : "") ?? "",
+    };
+  }, [part]);
+  /* Open while it runs, and open when it did not publish — that is the build
+     you came to read. One that published folds itself a moment after it lands,
+     long enough to see "Published" arrive, and its question rises into this
+     row. A turn read back from history is already folded. */
+  const [landed, setLanded] = useState(() => question !== null);
+  useEffect(() => {
+    if (!question || landed) return;
+    const timer = window.setTimeout(() => setLanded(true), 1_100);
+    return () => window.clearTimeout(timer);
+  }, [question, landed]);
+  const treeOpen = treeChoice ?? !(question && landed);
+  const setTreeOpen = (next: (value: boolean) => boolean) => setTreeChoice(next(treeOpen));
 
   const label = (
     <>
+      {question ? (
+        /* Once it published, the row is the question: what was made, not the
+           agent's caption for the step that made it. */
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0">{part.tool === "replace_current_question" ? "Replaced with" : "Created"}</span>
+          <QuestionTitle question={question} />
+        </span>
+      ) : (
       <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
         <ToolTitle part={part} />
         {/* What the call is doing or came back with, beside what it was for.
@@ -397,18 +447,19 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
 
             Dimmer than the title and after it, because the title is the question
             and this is the answer to that one question, not a headline. */}
-        {!staged && part.phase !== "error" && detail.trim() && (
+        {!treed && !question && part.phase !== "error" && detail.trim() && (
           <span className="ml-1.5 text-[var(--transcript-step-mark)]">{oneLine(detail)}</span>
         )}
         {took(part) && <span className="ml-1.5 tabular-nums text-[var(--transcript-step-mark)]">{took(part)}</span>}
       </span>
+      )}
       {staged && running && <Clock since={part.startedAt} />}
       <DiffStat added={totals.added} removed={totals.removed} />
       {/* Only when it did not simply work. A row of green "Success" badges down a
           transcript is noise; the one that says Error is the one worth seeing. */}
       {part.phase === "error" && <StatusPill part={part} />}
       {panel && <Caret open={open} />}
-      {staged && <Caret open={treeOpen} />}
+      {treed && <Caret open={treeOpen} />}
     </>
   );
 
@@ -429,7 +480,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           asymmetry read as the rows being attached to the wrong paragraph. An
           open row keeps it: there the padding is what the thread's line runs
           through to reach the panel. */}
-      <motion.div {...arrival} {...(handoff ? { initial: false } : {})} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", continues && !open && "-mb-0.5", open && "pb-0.5")} ref={block}>
+      <motion.div {...arrival} {...(handoff ? { initial: false } : {})} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", continues && !open && "pb-1", open && "pb-0.5")} ref={block}>
         <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
           {/* One element, not three. The line starts below this row's mark and
               runs to the foot of its block — which grows when the panel opens,
@@ -468,13 +519,13 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
                 initial={reduced ? false : { opacity: 0, scale: 0.6 }}
                 key={running ? "running" : part.phase}
                 transition={reduced ? { duration: 0 } : { type: "spring", visualDuration: 0.3, bounce: 0.3 }}
-              ><ToolIcon part={part} /></motion.span>
+              >{question?.language ? <LanguageGlyph className="size-4" language={question.language} /> : <ToolIcon part={part} />}</motion.span>
             </AnimatePresence>
           </motion.span>
         </div>
 
         <div className="min-w-0 flex-1">
-          {staged ? (
+          {treed ? (
             <button className={cn(LABEL_ROW, TRIGGER)} onClick={() => setTreeOpen((value) => !value)} type="button">{label}</button>
           ) : panel ? (
             <CollapsibleTrigger className={cn(LABEL_ROW, TRIGGER)}>{label}</CollapsibleTrigger>
@@ -484,7 +535,8 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
                line. */
             <div className={cn(LABEL_ROW, "text-[var(--transcript-step)] transition-colors hover:text-[var(--transcript-step-strong)]")}>{label}</div>
           )}
-          {staged && <Reveal show={treeOpen}><StageTree draft={design} language={design?.language} stages={part.stages} /></Reveal>}
+          {insight && <Reveal show={treeOpen}><InsightTree input={part.input} output={part.output} /></Reveal>}
+          {staged && <Reveal show={treeOpen}><StageTree draft={design} language={design?.language} question={question} stages={part.stages} /></Reveal>}
           {/* One rounded box, not two. The surface lives on the element that
               clips, because that element is also the one animating the height —
               and a bordered panel nested inside a clip of exactly its own radius
@@ -496,7 +548,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
                pinned payload type size — just the question and the answer in
                the column the rest of the turn is written in. The thinking above
                it keeps its own surface, because that half is still machinery. */
-            <CollapsibleContent className={cn("mt-1.5", bare ? "px-0.5" : BLOCK_SURFACE)} expandDuration={0.42}>
+            <CollapsibleContent className={bare ? "px-0.5" : BLOCK_SURFACE} expandDuration={0.42} gap={6}>
               {bare ? (
                 <>
                   {reasons.length > 0 && (
@@ -564,7 +616,7 @@ function GutterRow({ mark, continues, children, markKey }: { mark: React.ReactNo
   const arrival = useThreadArrival();
   const reduced = useReducedMotion();
   return (
-    <motion.div {...arrival} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", continues && "-mb-0.5")}>
+    <motion.div {...arrival} className={cn("relative -ml-1 flex min-w-0 items-start gap-1.5", continues && "pb-1")}>
       <div className="relative flex min-h-6 w-6 shrink-0 items-start justify-center self-stretch">
         {continues && <span aria-hidden className={RAIL} />}
         <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}>
@@ -593,7 +645,7 @@ export function StatusRow({ body, continues = false }: { body: string; continues
   const [head, ...rest] = body.split(/:\s(.*)/s);
   const reason = rest.join("").trim();
   return (
-    <GutterRow continues={continues} mark={rejected ? <IconAlert className={cn(MARK, "text-[var(--warning)]")} /> : <IconDot />} markKey={rejected ? "alert" : "dot"}>
+    <GutterRow continues={continues} mark={rejected ? <IconAlert className={cn(MARK, "text-[var(--miss)]")} /> : <IconDot />} markKey={rejected ? "alert" : "dot"}>
       <button className={cn(LABEL_ROW, TRIGGER, "w-full")} onClick={() => reason && setOpen((value) => !value)} type="button">
         <span className="min-w-0 truncate">
           {head}
@@ -744,9 +796,9 @@ function orbForThought(id: string): OrbState {
   return THOUGHT_ORBS[Math.abs(hash) % THOUGHT_ORBS.length] ?? "solving";
 }
 
-/** The compact linked rows overlap by 2px. Each 16px icon sits inside a 24px
- *  mark; the connector leaves the same 1px clearance below this icon and above
- *  the next, while retaining a short visible segment at the tighter spacing. */
+/** Linked rows carry 4px of padding under their 24px mark, so every step of a
+ *  run — call, status or lesson — sits on the same 28px rhythm. The connector
+ *  starts 1px under this icon and runs through that padding toward the next. */
 const RAIL = "bg-[var(--transcript-rail)] absolute top-[21px] -bottom-px left-1/2 w-[0.5px] -translate-x-1/2";
 /** The last step of a run draws no line — there is nothing under it to reach.
  *  Except when its own panel is open, where the line is what ties the panel to

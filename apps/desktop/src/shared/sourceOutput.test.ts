@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { PracticeVerdict } from "@spar/practice";
 import type { SourceRunReport } from "./api.js";
 import { sourceRunOutput, sourceSubmissionOutput } from "./sourceOutput.js";
-import { parseTestOutput } from "./testReport.js";
+import { parseTestOutput, stoppedAtFailure } from "./testReport.js";
 
 /**
  * Every one of these asserts the same thing from a different angle: what the run
@@ -55,12 +55,13 @@ describe("a run judged at the source", () => {
     const report = parseTestOutput(output);
 
     expect(report.parsed).toBe(true);
-    expect(report.cases[0]?.status).toBe("failed");
-    expect(report.cases[0]?.name).toContain("[3,3], 6");
-    expect(report.cases[0]?.failure).toMatchObject({ expected: "[0,1]", actual: "[]" });
-    // Counted from the judge's totals, never from the one row it named.
-    expect(report.passed).toBe(9);
-    expect(report.failed).toBe(203);
+    // The nine it passed, then the one it stopped on, out of a suite of 212.
+    expect(report.cases).toHaveLength(10);
+    expect(report.cases[9]?.status).toBe("failed");
+    expect(report.cases[9]?.name).toContain("[3,3], 6");
+    expect(report.cases[9]?.failure).toMatchObject({ input: "[3,3], 6", expected: "[0,1]", actual: "[]" });
+    expect([report.passed, report.failed, report.suiteSize]).toEqual([9, 1, 212]);
+    expect(stoppedAtFailure(output)).toBe(true);
   });
 
   it("keeps a multi-line value inside its own case", () => {
@@ -125,10 +126,31 @@ describe("a submission judged at the source", () => {
     const report = parseTestOutput(output);
 
     expect(report.parsed).toBe(true);
-    expect(report.cases[0]?.failure).toMatchObject({ expected: "[0,1]", actual: "[1,0]" });
-    /* 9 of 212, not 9 of the one row on screen — the panel counts from these and
-       "9/1 passed" is not a thing that can be true. */
-    expect([report.passed, report.failed]).toEqual([9, 203]);
+    expect(report.cases[9]?.failure).toMatchObject({ expected: "[0,1]", actual: "[1,0]" });
+    /* The whole suite's shape: nine passed, one failed, the rest unreached. */
+    expect([report.passed, report.failed, report.suiteSize]).toEqual([9, 1, 212]);
+    expect(stoppedAtFailure(output)).toBe(true);
+  });
+
+  it("names a runtime error and keeps its traceback whole", () => {
+    const output = sourceSubmissionOutput({
+      ...VERDICT,
+      status: "Runtime Error",
+      statusCode: 15,
+      passedCases: 0,
+      totalCases: 36,
+      runtimeError: "NameError: name 'searchBST' is not defined\n    return searchBST(root.left)\nLine 16 in searchBST (Solution.py)",
+      failedCase: { input: "[4,2,7,1,3]\n2", expected: "[2,1,3]", actual: "", stdout: "" },
+    }, "LeetCode");
+    const report = parseTestOutput(output);
+
+    expect(report.status).toBe("Runtime Error");
+    expect(report.suiteSize).toBe(36);
+    expect(report.cases).toHaveLength(1);
+    // No blank Output for a case that produced none.
+    expect(report.cases[0]?.failure?.actual).toBeUndefined();
+    expect(report.cases[0]?.failure?.stderr).toContain("Line 16 in searchBST");
+    expect(report.cases[0]?.failure?.stderr?.split("\n")).toHaveLength(3);
   });
 
   it("draws an acceptance as a passing case rather than as prose", () => {
@@ -144,7 +166,9 @@ describe("a submission judged at the source", () => {
     const report = parseTestOutput(output);
 
     expect(report.parsed).toBe(true);
-    expect(report.cases[0]?.status).toBe("passed");
+    // One dot per hidden case, not one standing in for all of them.
+    expect(report.cases).toHaveLength(212);
+    expect(report.cases.every((item) => item.status === "passed")).toBe(true);
     expect(report.failed).toBe(0);
     expect(output).toContain("beats 91.2%");
   });

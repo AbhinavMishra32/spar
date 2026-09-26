@@ -13,6 +13,14 @@ import "./theme.css";
 const now = new Date().toISOString();
 const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
+/* Solved challenges, so Home's shelf has stones on it. */
+const TOPICS = ["trees", "graphs", "strings", "arrays", "dynamic-programming", "hashing"];
+const DIFFS = ["foundation", "developing", "proficient", "advanced", "developing", "foundation", "proficient"] as const;
+const stones: any[] = Array.from({ length: 11 }, (_, index) => ({
+  id: `stone-${index}`, ordinal: index + 1, title: `Challenge ${index + 1}`, difficulty: DIFFS[index % DIFFS.length],
+  lastOutcome: "passed", updatedAt: ago(index * 30), concepts: [{ slug: TOPICS[index % TOPICS.length], parentSlug: null, title: TOPICS[index % TOPICS.length] }],
+}));
+
 const ability = (over: Partial<any>): any => ({
   abilityId: "a1", title: "Two-pointer invariants", proficiency: 0.7, confidence: 0.6,
   evidenceCount: 4, lastEvidenceAt: ago(20), trainingStatus: "monitoring", trend: "stable",
@@ -111,6 +119,7 @@ const data: BootstrapData = {
     mode: { kind: "recommended" }, createdAt: now,
   } as any,
   progress, trackProgress: {}, baseline: { status: "complete", confidence: 0.6, directEvidenceCount: 4, importedEvidenceCount: 0, completedAt: ago(300), sessionId: null },
+  reviews: { totalCards: 0, dueCount: 0, dueTodayCount: 0, retention: null, nextDueAt: null, upcoming: [], reviewedToday: 0, streakDays: 0, byQuestion: {} },
   trainingMode: { kind: "recommended" }, theme: "dark", syncState: "synced", restore: "done", serverConfigured: true,
 };
 
@@ -175,7 +184,7 @@ function Harness() {
           <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setDark((value) => !value)} type="button">{dark ? "Light" : "Dark"}</button>
         </div>
         <div className="min-h-0 flex-1 bg-background">
-          {page === "home" && <HomePage abilities={abilityLedger} ability={ability} api={api} busy={false} challenges={[]} concepts={[]} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onNavigate={() => {}} onOpen={() => {}} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} />}
+          {page === "home" && <HomePage abilities={abilityLedger} ability={ability} api={api} busy={false} challenges={stones} concepts={[]} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onNavigate={() => {}} onOpen={() => {}} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} />}
           {page === "map" && <div className="mx-auto w-full max-w-[72rem] px-8 pt-6"><ConceptMap abilities={abilityLedger} concepts={conceptFixtures} onOpenAbility={setAbility} onOpenConcept={() => {}} progress={progress} query="" /></div>}
           {page === "settings" && <SettingsPage account={data.account!} api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
         </div>

@@ -15,6 +15,7 @@ import { Snippet } from "./Snippet";
 import { readAttempt } from "./attemptReport";
 import { AttemptReadView } from "./AttemptRead";
 import { questionExchange } from "./questionExchange";
+import { clock } from "../../../shared/attemptReplay";
 
 /**
  * What a tool call actually did, drawn rather than dumped.
@@ -143,6 +144,13 @@ export function ToolDetail({
       const attempt = record(result);
       if (!Array.isArray(attempt.events) && !Array.isArray(attempt.files)) break;
       return <Attempt result={attempt} />;
+    }
+    /* The idea the agent took from a solve, filed for spaced review. Drawn as
+       the card itself: the learner should see exactly what will come back, and
+       when. */
+    case "record_insight": {
+      if (!args || !text(args.insight)) break;
+      return <InsightFiled args={args} result={record(result)} />;
     }
     case "flow-memory-fetch":
       return <Memory reads={result} />;
@@ -728,6 +736,76 @@ function ReadStep({ result }: { result: Record<string, unknown> }) {
  * show — twelve `file_changed` records are a paragraph of identical objects and
  * a single glance at a column of stamps.
  */
+function InsightFiled({ args, result }: { args: Record<string, unknown>; result: Record<string, unknown> }) {
+  const click = record(args.click);
+  const pitfalls = Array.isArray(args.pitfalls) ? (args.pitfalls as unknown[]).map(record).filter((row) => text(row.mistake)) : [];
+  const transfer = Array.isArray(args.transfer) ? (args.transfer as unknown[]).map(text).filter(Boolean) : [];
+  const filed = text(result.status) === "filed";
+  const days = typeof result.firstReviewInDays === "number" ? result.firstReviewInDays : null;
+  const dueAt = text(result.dueAt);
+  const when = days !== null
+    ? `First review in ${days} day${days === 1 ? "" : "s"}`
+    : filed
+      ? "Card refined, schedule unchanged"
+      : "Not filed";
+  const field = (label: string, body: string, strong = false) => body ? (
+    <div>
+      <Eyebrow>{label}</Eyebrow>
+      <p className={cn("px-2.5 leading-[1.6]", strong ? "font-medium text-foreground" : "text-foreground/85")}><Inline text={body} /></p>
+    </div>
+  ) : null;
+  return (
+    <div className="min-w-0 pb-2.5">
+      <div className="flex items-center gap-2 px-2.5 pt-2.5 pb-0.5">
+        <span className="min-w-0 flex-1 truncate font-medium text-foreground">{text(args.title)}</span>
+        <span
+          className={cn("shrink-0 rounded-md px-1.5 py-0.5 font-medium", filed ? "bg-[var(--success)]/12 text-[var(--success)]" : "bg-destructive/12 text-destructive")}
+          title={dueAt ? new Date(dueAt).toLocaleString() : undefined}
+        >
+          {when}
+        </span>
+      </div>
+      {!filed && text(result.note) && <Note>{text(result.note)}</Note>}
+      {field("When you see", text(args.trigger))}
+      {field("The idea", text(args.insight), true)}
+      {field("Why it holds", text(args.invariant))}
+      {text(click.summary) && (
+        <div>
+          <Eyebrow>What made it click{text(args.independence) === "assisted" ? " · with help" : text(args.independence) === "independent" ? " · on your own" : ""}</Eyebrow>
+          <p className="px-2.5 leading-[1.6] text-foreground/85"><Inline text={text(click.summary)} /></p>
+          {text(click.diff) && (
+            <pre className="mx-2.5 mt-1.5 max-h-40 overflow-auto rounded-md bg-[var(--color-background-editor)] px-2.5 py-1.5 font-mono text-[11px] leading-[1.55]">
+              {text(click.diff).split("\n").map((line, index) => (
+                <span key={index} className={cn("block", line.startsWith("+") && "text-[var(--success)]", line.startsWith("-") && "text-destructive")}>{line || " "}</span>
+              ))}
+            </pre>
+          )}
+        </div>
+      )}
+      {pitfalls.length > 0 && (
+        <div>
+          <Eyebrow>Where you slipped</Eyebrow>
+          <ul className="space-y-1 px-2.5">
+            {pitfalls.map((pitfall, index) => (
+              <li key={index} className="leading-[1.55]">
+                <span className="text-foreground/85">{text(pitfall.mistake)}</span>
+                <span className="text-muted-foreground"> — {text(pitfall.fix)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {transfer.length > 0 && (
+        <div>
+          <Eyebrow>Also works for</Eyebrow>
+          <p className="px-2.5 text-foreground/80">{transfer.join(" · ")}</p>
+        </div>
+      )}
+      {text(result.gradeCapped) && <Note>{text(result.gradeCapped)}</Note>}
+    </div>
+  );
+}
+
 function Attempt({ result }: { result: Record<string, unknown> }) {
   const files = Array.isArray(result.files) ? (result.files as Array<Record<string, unknown>>) : [];
   const events = Array.isArray(result.events) ? (result.events as Array<Record<string, unknown>>) : [];
@@ -837,15 +915,10 @@ function momentDetail(kind: string, payload: Record<string, unknown>): string {
   return text(payload.path);
 }
 
-/** How far into the attempt something happened. */
-function offset(at: string, since: number): string {
+/** When something happened, on the learner's own clock: "6:20pm". */
+function offset(at: string, _since: number): string {
   const when = Date.parse(at);
-  if (!Number.isFinite(when) || !Number.isFinite(since)) return "";
-  const seconds = Math.max(0, Math.round((when - since) / 1_000));
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 10) return `${minutes}m${seconds % 60}s`;
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60}m`;
+  return Number.isFinite(when) ? clock(when) : "";
 }
 
 function Memory({ reads }: { reads: unknown }) {

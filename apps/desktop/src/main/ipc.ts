@@ -1,10 +1,12 @@
-import { BrowserWindow, ipcMain, nativeTheme, shell } from "electron";
+import { BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
 import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceSlugInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
+import { reviewAnswerInput, reviewCommitInput, reviewResolveInput, reviewSettingsInput, reviewStartInput, reviewSuspendInput, reviewTargetsInput, type ReviewSettings } from "../shared/api.js";
+import { REVIEW_TARGET_MODE_KEY, ReviewService, reviewTargetMode } from "./reviewSession.js";
+import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionSourcesInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceLanguageInput, sourceSlugInput, skillDraftInput, skillEnabledInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -31,8 +33,9 @@ import { forgetAgentActivity, takeAgentActivity } from "./agentActivity.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 import type { AgentQuestions } from "./agentQuestions.js";
 import type { AgentTelemetry } from "./agentTelemetry.js";
+import type { SkillService } from "./skills.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentQuestions: AgentQuestions; agentRunSessions: Map<string, string>; telemetry:AgentTelemetry; appVersion:string; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; window: () => BrowserWindow | null }) {
+export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentQuestions: AgentQuestions; agentRunSessions: Map<string, string>; telemetry:AgentTelemetry; appVersion:string; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; skills: SkillService; window: () => BrowserWindow | null; onReviewsChanged?: () => void }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
@@ -62,14 +65,14 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      them a second later. */
   ipcMain.handle(ipc.bootstrap, async () => {
     deps.store.decayAbilities();
-    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
+    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), reviews: deps.store.reviews.overview(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
   });
   ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
      turn that can never run is a dead entry in the sidebar that the learner has
      to clean up to make the error go away. */
-  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); if(!await deps.providers.available())throw new Error(NO_PROVIDER); const created=deps.store.createSession(input.goal,input.trackId);const trackId=deps.store.trackIdForSession(created.sessionId);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,trackId);await startAgentTurn(created.sessionId,`Start a new adaptive session inside this Track workspace for the learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
-  ipcMain.handle(ipc.tracksCreate, async (_event,value)=>{const input=createTrackInput.parse(value);if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createTrack(input.goal,input.title,input.language??null);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,created.track.id);await startAgentTurn(created.sessionId,`Establish the initial direction for this Track workspace: ${input.goal}. Its learner model and memory belong to this Track. Do not write a permanent syllabus; choose the next training intent and one well-matched challenge.`,"learner",coldStart?"cold-start":"session-start");return created;});
+  ipcMain.handle(ipc.sessionsCreate, async (_event, value) => { const input = createSessionInput.parse(value); if(!await deps.providers.available())throw new Error(NO_PROVIDER); const created=deps.store.createSession(input.goal,input.trackId,input.problemSources);const trackId=deps.store.trackIdForSession(created.sessionId);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,trackId);await startAgentTurn(created.sessionId,`Start a new adaptive session inside this Track workspace for the learner goal: ${input.goal}`,"learner",coldStart?"cold-start":"session-start");return created; });
+  ipcMain.handle(ipc.tracksCreate, async (_event,value)=>{const input=createTrackInput.parse(value);if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createTrack(input.goal,input.title,input.language??null,input.problemSources);const coldStart=!deps.store.hasRelevantLearnerEvidence(input.goal,created.track.id);await startAgentTurn(created.sessionId,`Establish the initial direction for this Track workspace: ${input.goal}. Its learner model and memory belong to this Track. Do not write a permanent syllabus; choose the next training intent and one well-matched challenge.`,"learner",coldStart?"cold-start":"session-start");return created;});
   ipcMain.handle(ipc.tracksActive,(_event,value)=>deps.store.setActiveTrack(zUuid(value)));
   ipcMain.handle(ipc.trainingMode,(_event,value)=>deps.store.setTrainingMode(trainingModeSchema.parse(value)));
   ipcMain.handle(ipc.baselineState,(_event,value)=>deps.store.setBaseline(baselineStateSchema.partial().parse(value) as Partial<BaselineState>));
@@ -114,7 +117,32 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return ensureLiveWorkspace(id, detail);
   });
   ipcMain.handle(ipc.workspaceStateSave, (_event, value) => { const { sessionId, ...state } = workspaceStateInput.parse(value); deps.checkpoints.remember(sessionId, state); });
-  ipcMain.handle(ipc.attemptAppend, (_event, value) => deps.store.appendNextEvent(attemptAppendInput.parse(value)));
+  /* A test command is where the code a run executed gets snapshotted: the window
+     saves and then records the command, so the files on disk at this moment are
+     exactly what the runner is about to see. Without it the agent could see that
+     three cases started passing and not one character of what made them pass. */
+  ipcMain.handle(ipc.attemptAppend, async (_event, value) => {
+    const input = attemptAppendInput.parse(value);
+    if (input.type !== "command_executed" || input.payload.command !== "test") return deps.store.appendNextEvent(input);
+    const code = await runSnapshot(input.attemptId).catch(() => null);
+    return deps.store.appendNextEvent(code ? { ...input, payload: { ...input.payload, code } } : input);
+  });
+  const runSnapshot = async (attemptId: string): Promise<{ files: Record<string, string>; truncated: boolean } | null> => {
+    const bundle = deps.store.submissionBundle(attemptId);
+    if (!bundle) return null;
+    const touched = deps.store.readAttempt(attemptId).flatMap((event) => event.type === "file_changed" && typeof event.payload.path === "string" ? [event.payload.path] : []);
+    const paths = [...new Set([solutionPath(bundle.design), ...touched])];
+    const files: Record<string, string> = {};
+    let truncated = false;
+    for (const path of paths) {
+      const text = await deps.workspaces.read(bundle.session_id, path).catch(() => null);
+      if (text === null) continue;
+      const snapshot = snapshotCode(path, text);
+      files[path] = snapshot.text;
+      truncated ||= snapshot.truncated;
+    }
+    return Object.keys(files).length ? { files, truncated } : null;
+  };
   ipcMain.handle(ipc.workspaceRead, async (_event, value) => {
     const input = workspacePathInput.parse(value);
     try { return await deps.workspaces.read(input.sessionId, input.path); }
@@ -141,6 +169,17 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     void request.promise.catch((error) => deps.window()?.webContents.send("runner:event", { id: request.id, stream: "stderr", data: String(error) }));
     return { id: request.id };
   });
+  /* What was said while an attempt was open goes into the attempt itself, beside
+     the runs. Without it a replay could show a fix landing two minutes after the
+     learner asked a question and not know the question existed, so every insight
+     read out of a solve looked like the learner's own. The agent decides what the
+     exchange means; this only puts it on the same timeline as the code. */
+  const noteConversation=(sessionId:string,from:"learner"|"agent",body:string)=>{
+    const question=deps.store.readSession(sessionId)?.question;
+    if(!question||question.attemptCompletedAt||!question.attemptId)return;
+    const text=body.length>CONVERSATION_NOTE_LIMIT?`${body.slice(0,CONVERSATION_NOTE_LIMIT)}…`:body;
+    try{deps.store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:from==="learner"?"learner_remark":"agent_message",occurredAt:new Date().toISOString(),payload:{kind:from==="learner"?"asked-agent":"reply",body:text},source:from,schemaVersion:1});}catch{/* the attempt closed under us; nothing to annotate */}
+  };
   const startAgentTurn=async(sessionId:string,message:string,role:"learner"|"system"="learner",turnKind:AgentTurnKind="learner-message",visibleMessage=message)=>{
     const activeRunId=activeAgentRuns.get(sessionId);if(activeRunId)return{runId:activeRunId};
     const starting=startingAgentRuns.get(sessionId);if(starting)return starting;
@@ -171,10 +210,17 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
          source while the app is open, and a session that expired mid-turn must
          stop offering tools that can only answer "not connected". */
       const practiceInventory=await deps.practice.inventory().catch(()=>[]);
-      const connectedSources=practiceInventory.filter((entry)=>entry.state==="connected");
-      const practiceConnected=connectedSources.length>0;
+      /* Only the providers this session allows. A session the learner narrowed
+         to a provider gets its tools even while it is not signed in: search and
+         reading are public, and a problem mounted without an account is graded
+         locally against its published examples — which every tool reply says. */
+      const problemSources=session.summary.problemSources;
+      const narrowed=problemSources.length<3;
+      const enabledSources=practiceInventory.filter((entry)=>problemSources.includes(entry.source));
+      const connectedSources=enabledSources.filter((entry)=>entry.state==="connected");
+      const practiceConnected=connectedSources.length>0||(narrowed&&enabledSources.length>0);
       const practiceSummary=practiceConnected?{
-        providers:connectedSources.map((entry)=>({source:entry.source,name:entry.name,region:entry.region,judgesSubmissions:entry.judgesSubmissions})),
+        providers:(narrowed?enabledSources:connectedSources).map((entry)=>({source:entry.source,name:entry.name,region:entry.region,connected:entry.state==="connected",judgesSubmissions:entry.judgesSubmissions})),
         /* What has already been set from the source, so the agent can see it has
            asked for this problem before without spending a tool call to find out. */
         alreadyAssigned:deps.store.assignedPracticeProblems(12,session.summary.trackId),
@@ -184,7 +230,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       /* Assembled by `agentTurnPayload`, which is also what the eval calls, so
          the prompt the product sends and the prompt a measurement is taken
          against cannot be two different prompts. */
-      const payload=agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id});
+      const payload=agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,skills:deps.skills.catalog()});
       /* A run is claimed by its session for as long as it is in flight, in two
          places: `activeAgentRuns` guards against a second turn, and
          `agentRunSessions` is what lets the main process stamp a session id onto
@@ -210,8 +256,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
            turn answers with a challenge rather than a sentence, and it used to
            leave the transcript with no trace that it ran at all. */
         if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity,Date.now()-startedAt);
+        if(turnKind==="learner-message"&&value.text?.trim())noteConversation(sessionId,"agent",value.text.trim());
         deps.telemetry.finish(request.id,value);
-        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);deps.telemetry.finish(request.id,{},error);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,resumeSince:new Date(startedAt).toISOString()}),provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);beginTelemetry(retry.id,index+1);return attempt(retry,index+1);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
+        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);deps.telemetry.finish(request.id,{},error);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,resumeSince:new Date(startedAt).toISOString(),skills:deps.skills.catalog()}),provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);beginTelemetry(retry.id,index+1);return attempt(retry,index+1);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);
@@ -245,6 +292,41 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
 
   /* Reads over the learner's own recorded history, so neither starts a turn and
      neither costs a provider call. */
+  /* ---- Spaced review -------------------------------------------------------
+     Reads are free. Starting and answering spend one model call each; filing
+     spends none, and is the only thing that moves a schedule. */
+  const reviews = new ReviewService({
+    store: deps.store,
+    agent: deps.agent,
+    providers: async () => {
+      const account = await deps.auth.account();
+      if (!account) throw new Error("Sign in before starting a review");
+      return deps.providers.resolve(account.id, await deps.auth.accessToken());
+    },
+  });
+  ipcMain.handle(ipc.reviewQueue, () => ({ due: deps.store.reviews.due(), cards: deps.store.reviews.list(), overview: deps.store.reviews.overview() }));
+  ipcMain.handle(ipc.reviewCard, (_event, value) => deps.store.reviews.detail(zUuid(value)));
+  ipcMain.handle(ipc.reviewForChallenge, (_event, value) => { const card = deps.store.reviews.cardForQuestion(zUuid(value)); return card ? deps.store.reviews.detail(card.id) : null; });
+  ipcMain.handle(ipc.reviewStart, (_event, value) => { const input = reviewStartInput.parse(value); return reviews.start(input.cardId, input.fresh === true, input.target); });
+  ipcMain.handle(ipc.reviewCue, (_event, value) => reviews.cue(zUuid(value)));
+  ipcMain.handle(ipc.reviewReveal, (_event, value) => reviews.reveal(zUuid(value)));
+  ipcMain.handle(ipc.reviewAbandon, (_event, value) => { reviews.abandon(zUuid(value)); });
+  ipcMain.handle(ipc.reviewAnswer, (_event, value) => { const input = reviewAnswerInput.parse(value); return reviews.answer(input.promptId, input.answer); });
+  ipcMain.handle(ipc.reviewCommit, (_event, value) => { const input = reviewCommitInput.parse(value); const filed = reviews.commit(input.promptId, input.rating); deps.onReviewsChanged?.(); return filed; });
+  ipcMain.handle(ipc.reviewResolve, (_event, value) => { const filed = reviews.resolve(reviewResolveInput.parse(value)); deps.onReviewsChanged?.(); return filed; });
+  ipcMain.handle(ipc.reviewSuspend, (_event, value) => { const input = reviewSuspendInput.parse(value); deps.store.reviews.setSuspended(input.cardId, input.suspended); deps.onReviewsChanged?.(); });
+  ipcMain.handle(ipc.reviewTargets, (_event, value) => { const input = reviewTargetsInput.parse(value); deps.store.reviews.setTargets(input.cardId, input.targets); deps.onReviewsChanged?.(); const card = deps.store.reviews.card(input.cardId); if (!card) throw new Error("That review card no longer exists."); return card; });
+  const reviewSettings = (): ReviewSettings => ({ desiredRetention: Number(deps.store.getSetting<number>("review-desired-retention", 0.9)) || 0.9, reminders: deps.store.getSetting<boolean>("review-reminders-enabled", true), targets: reviewTargetMode(deps.store) });
+  ipcMain.handle(ipc.reviewSettings, () => reviewSettings());
+  ipcMain.handle(ipc.reviewSettingsSave, (_event, value) => {
+    const input = reviewSettingsInput.parse(value);
+    if (input.desiredRetention !== undefined) deps.store.setSetting("review-desired-retention", input.desiredRetention);
+    if (input.reminders !== undefined) deps.store.setSetting("review-reminders-enabled", input.reminders);
+    if (input.targets !== undefined) deps.store.setSetting(REVIEW_TARGET_MODE_KEY, input.targets);
+    deps.onReviewsChanged?.();
+    return reviewSettings();
+  });
+
   ipcMain.handle(ipc.conceptRead, (_event, value) => { if (typeof value !== "string" || !value.trim()) throw new Error("A concept is required"); return deps.store.conceptDetail(value); });
   ipcMain.handle(ipc.abilityRead, (_event, value) => deps.store.readAbilityDetail(zUuid(value)));
 
@@ -284,6 +366,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sessionsRename, (_event, value) => { const input = sessionRenameInput.parse(value); return deps.store.renameSession(input.sessionId, input.title); });
   ipcMain.handle(ipc.sessionsPin, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionPinned(input.sessionId, input.value); });
   ipcMain.handle(ipc.sessionsArchive, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionArchived(input.sessionId, input.value); });
+  ipcMain.handle(ipc.sessionsSources, (_event, value) => { const input = sessionSourcesInput.parse(value); return deps.store.setSessionProblemSources(input.sessionId, input.sources); });
   /* Calling a session finished is the learner's judgement, but only while nothing
      is live: a session with a challenge open on screen is described by that
      challenge, and a status behind it would contradict what they are looking at. */
@@ -441,6 +524,24 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return { total: found.total, failed: found.failed, problems: found.problems.map((problem) => ({ source: problem.source, sourceName: problem.source === "leetcode" ? "LeetCode" : "Codeforces", slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, sourceRating: problem.sourceRating ?? null, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
   });
   ipcMain.handle(ipc.sourceProblem, async (_event, value) => { const input = sourceSlugInput.parse(value); return (await deps.practice.problem(input.source, input.slug)).problem; });
+  ipcMain.handle(ipc.sourceLanguages, async (_event, value) => { const input = sourceSlugInput.parse(value); return [...new Set((await deps.practice.problem(input.source, input.slug)).problem.languages.map((entry) => entry.language))]; });
+  ipcMain.handle(ipc.skillsList, () => deps.skills.list());
+  ipcMain.handle(ipc.skillsRead, (_event, value) => deps.skills.read(z.string().parse(value)));
+  ipcMain.handle(ipc.skillsSave, (_event, value) => deps.skills.save(skillDraftInput.parse(value)));
+  ipcMain.handle(ipc.skillsRemove, (_event, value) => { deps.skills.remove(z.string().parse(value)); });
+  ipcMain.handle(ipc.skillsEnabled, (_event, value) => { const input = skillEnabledInput.parse(value); deps.skills.setEnabled(input.name, input.enabled); });
+  ipcMain.handle(ipc.skillsImport, async () => {
+    const window = deps.window();
+    const options = { title: "Import skill folder", buttonLabel: "Import", properties: ["openDirectory" as const] };
+    const picked = window ? await dialog.showOpenDialog(window, options) : await dialog.showOpenDialog(options);
+    return picked.canceled || !picked.filePaths[0] ? null : deps.skills.importFolder(picked.filePaths[0]);
+  });
+  ipcMain.handle(ipc.skillsCustomize, (_event, value) => deps.skills.customize(z.string().parse(value)));
+  ipcMain.handle(ipc.skillsReveal, async (_event, value) => {
+    const skill = typeof value === "string" ? deps.skills.read(value) : null;
+    if (skill) shell.showItemInFolder(skill.path);
+    else await shell.openPath(deps.skills.userFolder);
+  });
 
   /* ---- Code visualiser ---------------------------------------------------
      Two handlers that start a process and one that reads a problem. The
@@ -544,6 +645,39 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     return openChosenProblem(deps, { source: input.source, slug: input.slug, language: input.language });
   });
   /**
+   * The open sourced problem, in another language.
+   *
+   * The source publishes a starter per language, so this is the same mount the
+   * problem was opened with, asked for a different one. It goes through the
+   * replace path rather than editing the question in place: the language is part
+   * of the challenge's design, the cloud copy is synced from question creation,
+   * and the replaced attempt keeps the code written so far in its events.
+   */
+  ipcMain.handle(ipc.sourceLanguage, async (_event, value) => {
+    const input = sourceLanguageInput.parse(value);
+    const question = deps.store.readSession(input.sessionId)?.question;
+    if (!question?.source || question.attemptId !== input.attemptId) throw new Error("That challenge is no longer open.");
+    if (question.attemptCompletedAt) throw new Error("This attempt is already graded, so its language is settled.");
+    if (question.language === input.language) return;
+    const source = question.source;
+    const mounted = await deps.practice.mount({ source: source.source, slug: source.slug, language: input.language });
+    if (mounted.design.language !== input.language) throw new Error(`${source.source === "leetcode" ? "LeetCode" : "Codeforces"} publishes no starter in that language for this problem.`);
+    /* The mount crossed the network; the learner may have submitted meanwhile. */
+    const still = deps.store.readSession(input.sessionId)?.question;
+    if (still?.attemptId !== input.attemptId || still.attemptCompletedAt) throw new Error("The challenge changed while the new starter was loading, so nothing was switched.");
+    await deps.workspaces.replaceAll(input.sessionId, mounted.files);
+    const report = { valid: true, sourced: true, checks: [{ name: "practice source", passed: true, detail: mounted.source.judge }] };
+    deps.store.replaceQuestion(
+      input.sessionId,
+      mounted.design,
+      report,
+      `The learner switched the language from ${question.language} to ${input.language}.`,
+      question.concepts.map((concept) => ({ slug: concept.slug, title: concept.title, kind: concept.kind, parentSlug: concept.parentSlug, role: concept.role })),
+      mounted.source,
+      question.introductionReason,
+    );
+  });
+  /**
    * Running the open challenge at its source, without submitting it.
    *
    * Recorded as a test run, because it is one: the source ran the learner's code
@@ -568,7 +702,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const verdict = await deps.practice.run({ source, code, language: bundle.language, testcases });
     deps.store.appendNextEvent({
       id: randomUUID(), attemptId: input.attemptId, type: "test_run", occurredAt: new Date().toISOString(),
-      payload: { scope: "source-run", judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed", status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases },
+      payload: { scope: "source-run", code: snapshotCode(solutionPath(bundle.design), code), judge: source.source, exitCode: verdict.outcome === "passed" ? 0 : 1, passed: verdict.outcome === "passed", status: verdict.status, passedCases: verdict.passedCases, totalCases: verdict.totalCases },
       source: "runner", schemaVersion: 1,
     });
     return sourceRunReport(verdict, source.source === "leetcode" ? "LeetCode" : "Codeforces");
@@ -665,6 +799,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        transcript entry is a thing the agent has, and writing one for a turn that
        ended mid-keystroke would leave the learner reading a message nothing will
        ever answer. That race falls through to starting a turn instead. */
+    noteConversation(sessionId, "learner", said);
     const deliver = async (body: string, turnKind: AgentTurnKind, visible = body) => {
       const target = activeAgentRuns.get(sessionId);
       if (target) {
@@ -734,8 +869,12 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       return;
     }
     const source=input.source;
+    /* The learner chose to say what their reviews ask about. The question goes
+       through the same ask_user_question as any other, and record_insight is
+       refused without their answer, so the choice holds even if this is missed. */
+    const askToRemember=reviewTargetMode(deps.store)==="ask"?" (the learner decides what their reviews ask about: before record_insight, ask them with ask_user_question what they want to remember from this problem — one question, multiple answers allowed, custom answers on, and options named from this solve: the step that cracked it, the general pattern, the problem itself. Then read the attempt for what they pointed at, write the card about that, set targets from their answer and pass their words as remember)":"";
     const verdict=source?`${source.source==="leetcode"?"LeetCode":"Codeforces"} accepted the submission against every hidden case it has`:`every visible and hidden test passes${requirementsNote(bundle.design)}`;
-    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId} — ${verdict}.${complexityNote} Replay attempt ${attemptId} first and read how they got here, including their complexity claim and its quick review. Update the relevant ability document, commit exactly one next pedagogical action, and either ask about a specific moment the replay could not explain or aim the next target and validated question. The new target and question must explicitly respond to this attempt without overreacting to it.${source?" Prefer another real problem when one fits the target.":""}`,"system","attempt-complete");
+    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId} — ${verdict}.${complexityNote} Replay attempt ${attemptId} first and read how they got here, including their complexity claim and its quick review — the turning points show which change made it pass and what was said just before it. Update the relevant ability document, file what cracked it with record_insight so Spar can bring the idea back for spaced review,${askToRemember} commit exactly one next pedagogical action, and either ask about a specific moment the replay could not explain or aim the next target and validated question. The new target and question must explicitly respond to this attempt without overreacting to it.${source?" Prefer another real problem when one fits the target.":""}`,"system","attempt-complete");
   };
   const submitToSource = async (input: { sessionId: string; attemptId: string; bundle: NonNullable<ReturnType<LocalStore["submissionBundle"]>>; source: NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"] }) => {
     const { sessionId, attemptId, bundle } = input;
@@ -985,6 +1124,9 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   });
 }
 const SUGGESTION_COUNT = 3;
+/** How much of one message is copied into the attempt log. Enough to say what
+ *  was asked or explained; the whole exchange stays in the transcript. */
+const CONVERSATION_NOTE_LIMIT = 1_500;
 /** One sentence for every refusal to run a turn, so the renderer can recognise
  *  it and the learner reads the same instruction wherever they hit it. */
 const NO_PROVIDER = "Connect a model provider in Settings before starting Spar";
@@ -1072,7 +1214,8 @@ function sourceRunReport(verdict: PracticeVerdict, sourceName: string): SourceRu
     runtime: verdict.runtime,
     memory: verdict.memory,
     failedCase: verdict.failedCase,
-    cases: verdict.caseAnswers.map((entry) => ({ input: entry.input, expected: entry.expected, actual: entry.actual, passed: entry.passed })),
+    error: verdict.runtimeError || verdict.compileError,
+    cases: verdict.caseAnswers.map((entry, index) => ({ input: entry.input, expected: entry.expected, actual: entry.actual, passed: entry.passed, ...(verdict.stdout[index] ? { stdout: verdict.stdout[index] } : {}) })),
     url: verdict.submissionUrl,
     message: verdict.outcome === "errored"
       ? `${sourceName} could not run that (${verdict.status}). Nothing was recorded.`

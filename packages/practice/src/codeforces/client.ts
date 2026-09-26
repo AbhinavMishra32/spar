@@ -59,6 +59,10 @@ export class CodeforcesClient {
       if (query && !`${slug} ${problem.name ?? ""} ${tags.join(" ")}`.toLowerCase().includes(query)) return [];
       if (requested.length && !requested.every((tag) => tags.includes(tag))) return [];
       if (input.difficulty && codeforcesDifficulty(problem.rating) !== input.difficulty) return [];
+      /* An unrated problem has no price to compare, so a window excludes it. */
+      if ((input.minRating !== undefined || input.maxRating !== undefined) && !problem.rating) return [];
+      if (input.minRating !== undefined && problem.rating! < input.minRating) return [];
+      if (input.maxRating !== undefined && problem.rating! > input.maxRating) return [];
       if (input.status !== "any" && status !== input.status) return [];
       const summary = normalizeCodeforcesSummary(problem, set.stats.get(slug), status);
       return summary ? [summary] : [];

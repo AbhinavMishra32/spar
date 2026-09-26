@@ -83,10 +83,12 @@ export function pageChrome(page: ShellPage, data: BootstrapData, abilityId: stri
        of it came out passed. */
     case "history":
     case "challenges":
+    case "review":
       return {
         facts: [
           { value: count(data.challenges.length, "challenge") },
           ...(data.challenges.length > 0 ? [{ value: `${solved.length}`, label: "solved", tone: "good" as const }] : []),
+          ...(data.reviews?.dueCount ? [{ value: `${data.reviews.dueCount}`, label: "to review" }] : []),
         ],
       };
 

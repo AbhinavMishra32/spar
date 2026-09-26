@@ -288,7 +288,7 @@ describe("source reads", () => {
     try {
       const sessionId = targetedSession(store);
       const result = await executeTrainingTool("search_practice_problems", { concepts: ["hash-maps"] }, sessionId, store, workspaces, {} as UtilityClient, undefined, service);
-      expect(service.callTool).toHaveBeenCalledWith("search_practice_problems", { concepts: ["hash-maps"] });
+      expect(service.callTool).toHaveBeenCalledWith("search_practice_problems", { concepts: ["hash-maps"] }, ["leetcode", "codeforces"]);
       expect(result).toMatchObject({ tool: "search_practice_problems" });
     } finally { store.close(); }
   });

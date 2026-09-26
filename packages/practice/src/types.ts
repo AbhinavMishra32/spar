@@ -184,6 +184,10 @@ export const practiceSearchInputSchema = z.object({
   /** Narrow to what the learner has or has not done. Only honoured while the
    *  source knows who is asking. */
   status: z.enum(["any", "todo", "attempted", "solved"]).default("any"),
+  /** A window on the source's own numeric rating. Only a source that publishes
+   *  one can honour it; the others are narrowed by band by the caller. */
+  minRating: z.number().int().min(0).max(4000).optional(),
+  maxRating: z.number().int().min(0).max(4000).optional(),
   limit: z.number().int().min(1).max(50).default(10),
   offset: z.number().int().min(0).max(5_000).default(0),
 });

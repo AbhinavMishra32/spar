@@ -41,7 +41,11 @@ describe("transcript rows", () => {
     expect(groupParts([preparing, tool("ask_user_question")]).map((row) => row.kind)).toEqual(["tool-row"]);
     const draft: RunPart = { kind: "status", id: "draft", body: "Drafting challenge input · 1,024 characters received" };
     expect(groupParts([draft, tool("create_question")]).map((row) => row.kind)).toEqual(["challenge"]);
-    expect(groupParts([preparing, tool("read_ability")]).map((row) => row.kind)).toEqual(["status", "tool-row"]);
+    /* A preparation line left behind by parallel calls is stale once anything
+       follows it, whether or not the next row is the call it named. */
+    expect(groupParts([preparing, tool("read_ability")]).map((row) => row.kind)).toEqual(["tool-row"]);
+    const retry: RunPart = { kind: "status", id: "retry", body: "Tool call rejected: bad input" };
+    expect(groupParts([retry, tool("read_ability")]).map((row) => row.kind)).toEqual(["status", "tool-row"]);
   });
 
   it("updates one live challenge draft and shows why a rejected draft is retried", () => {

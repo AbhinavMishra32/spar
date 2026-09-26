@@ -19,7 +19,9 @@ export type OverlaySide = "top" | "right" | "bottom" | "left";
  * waiting on.
  *
  * A modal is the other kind: no trigger to grow out of, it covers what you were
- * reading, and it is worth a beat. That one keeps the blur-and-settle.
+ * reading, and it is worth a beat — a fade and a short settle. No blur: an
+ * animated `filter` repaints the whole sheet every frame, and on a large window
+ * that is the difference between landing and stuttering in.
  */
 
 /** CSS `ease`, verbatim — the curve their menus actually run on. */
@@ -45,11 +47,6 @@ const EASE_IN = [0.4, 0, 1, 1] as const;
 const OPEN_FADE: Transition = { duration: 0.16, ease: EASE_OUT };
 const CLOSE_MOVE: Transition = { duration: 0.16, ease: [0.32, 0, 0.67, 0] };
 const CLOSE_FADE: Transition = { duration: 0.12, ease: EASE_IN };
-const CLOSE_BLUR: Transition = { duration: 0.14, ease: EASE_IN };
-
-/** How far out of focus a modal starts, and how far it dissolves on the way out. */
-const BLUR_IN = 14;
-const BLUR_OUT = 12;
 
 /** Reduced motion keeps the fade and drops everything that moves — including the
  *  blur, which is motion by another name for anyone who asked not to have any. */
@@ -108,20 +105,18 @@ export function modalContentVariants(reduced = false): Variants {
   if (reduced) return stillVariants();
 
   return {
-    hidden: { opacity: 0, filter: `blur(${BLUR_IN}px)`, scale: 0.94, y: 10 },
+    hidden: { opacity: 0, scale: 0.97, y: 6 },
     visible: {
       opacity: 1,
-      filter: "blur(0px)",
       scale: 1,
       y: 0,
-      transition: { default: MODAL_SPRING, opacity: OPEN_FADE, filter: { duration: 0.32, ease: EASE_OUT } },
+      transition: { default: MODAL_SPRING, opacity: OPEN_FADE },
     },
     exit: {
       opacity: 0,
-      filter: `blur(${BLUR_OUT}px)`,
-      scale: 0.975,
-      y: 4,
-      transition: { default: CLOSE_MOVE, opacity: CLOSE_FADE, filter: CLOSE_BLUR },
+      scale: 0.98,
+      y: 2,
+      transition: { default: CLOSE_MOVE, opacity: CLOSE_FADE },
     },
   };
 }

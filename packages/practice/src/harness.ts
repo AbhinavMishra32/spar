@@ -316,8 +316,14 @@ function scriptTest(language: Language, signature: PracticeSignature, cases: Pra
  * a `NameError`, which is the least informative way a correct solution can lose.
  * It sits outside the markers so the submitted region stays byte-for-byte the
  * learner's own code.
+ *
+ * The `__future__` import keeps annotations unevaluated. LeetCode runs a modern
+ * Python, so learners write `TreeNode | None`; the desktop app often resolves
+ * the system `python3` (3.9 on macOS), where evaluating that union at class
+ * definition time raises before a single case runs.
  */
 const PYTHON_PREAMBLE = [
+  "from __future__ import annotations",
   "from typing import *",
   "from collections import Counter, OrderedDict, defaultdict, deque",
   "import bisect",

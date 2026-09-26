@@ -28,4 +28,10 @@ describe("presentSourcedStatement", () => {
   it("uses newly structured hints without modifying clean provider prose", () => {
     expect(presentSourcedStatement("Clean statement.", source({ hints: ["First hint"] }))).toEqual({ statement: "Clean statement.", hints: ["First hint"] });
   });
+
+  it("tags LeetCode's worked examples so they draw as quoted examples, not code", () => {
+    const { statement } = presentSourcedStatement("Find it.\n\n```\nInput: root = [0]\nOutput: false\n```\n\n```\nint x = 1;\n```", source());
+    expect(statement).toBe("Find it.\n\n```example\nInput: root = [0]\nOutput: false\n```\n\n```\nint x = 1;\n```");
+  });
 });
+
