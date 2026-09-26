@@ -43,6 +43,12 @@ describe("legacy silent assertion results", () => {
   it("does not invent which case failed from a suite-level non-zero exit", () => {
     expect(reportForRun("assertion failed\ncode:1", false, { kind: "failed", summary: "" }, declared).parsed).toBe(false);
   });
+
+  it("does not call a run solved when every printed case passed but the process failed", () => {
+    const output = "TAP version 13\nok 1 - empty\nok 2 - single node\n1..2\nTraceback (most recent call last):\nImportError: cannot import name 'count_nodes'\ncode:1";
+    expect(reportForRun(output, false, { kind: "failed", summary: "" }, declared)).toMatchObject({ parsed: true, passed: 2, failed: 0, exitedWithError: true, status: "Runtime Error" });
+    expect(reportForRun(output.replace("code:1", "code:0"), false, { kind: "passed", summary: "" }, declared).exitedWithError).toBeUndefined();
+  });
 });
 
 describe("which case opens under the grid", () => {

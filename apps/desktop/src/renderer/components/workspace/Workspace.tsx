@@ -247,6 +247,7 @@ export function Workspace({
       if (event.stream === "exit") {
         setRunning(false);
         visibleRunId.current=null;
+        setOutcome({kind:event.exitCode===0?"passed":"failed",summary:""});
         void api.appendAttemptEvent({id:crypto.randomUUID(),attemptId:question.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",exitCode:event.exitCode??-1,passed:event.exitCode===0,...runEvidence(terminalRef.current)},source:"runner",schemaVersion:1}).then(()=>onRefresh()).catch((error)=>onError(message(error)));
       }
     });

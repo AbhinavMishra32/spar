@@ -59,6 +59,10 @@ export type TestReport = {
   /** The judge's own word for a failure — "Runtime Error", "Time Limit Exceeded" —
    *  when it said something more specific than a wrong answer. */
   status?: string;
+  /** Every case it printed passed, but the process still exited non-zero:
+   *  something outside those cases failed — a crash after the last one, or a
+   *  second test file. It is not a pass, whatever the cases say. */
+  exitedWithError?: boolean;
 };
 
 /**

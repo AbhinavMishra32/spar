@@ -78,15 +78,16 @@ function VerdictRail({
   suiteSize: number;
 }) {
   const total = report.passed + report.failed + report.skipped || report.cases.length;
+  const failing = report.failed > 0 || report.exitedWithError;
   return (
     <div className="mt-2.5">
       <p
         className={cn(
           "text-content font-semibold leading-[1.15] tracking-tight",
-          report.failed ? "text-destructive" : "text-[var(--success)]",
+          failing ? "text-destructive" : "text-[var(--success)]",
         )}
       >
-        {report.failed ? report.status || "Wrong Answer" : "Accepted"}
+        {failing ? report.status || "Wrong Answer" : "Accepted"}
       </p>
       {failedAt ? (
         /* A stopped run has no pass rate to report — "2/3 passed" out of a suite
@@ -136,6 +137,22 @@ function Cleared({ report, submitted }: { report: TestReport; submitted: boolean
         {submitted
           ? `Every one of the ${total} hidden cases passed${report.durationMs !== undefined ? ` in ${report.durationMs.toFixed(0)} ms` : ""}.`
           : `${total === 1 ? "The one visible case" : `All ${total} visible cases`} passed. Submit when you are ready.`}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Every printed case passed and the run still failed. The cases cannot say why,
+ * so this says that plainly and points at the one place that can: the raw
+ * output, opened below.
+ */
+function ExitedWithError() {
+  return (
+    <div>
+      <p className="text-content font-semibold leading-[1.15] tracking-tight">Not solved.</p>
+      <p className="mt-1.5 text-ui-sm leading-[1.55] text-muted-foreground">
+        Every case that reported passed, but the program exited with an error, so this run does not count. The output below shows what failed.
       </p>
     </div>
   );
@@ -342,7 +359,7 @@ export function ResultPanel({
       ?? declared.cases.find((item) => item.name === activeResult.name)
     : undefined;
 
-  const rawShown = rawOpen ?? !report.parsed;
+  const rawShown = rawOpen ?? (!report.parsed || Boolean(report.exitedWithError));
   /* A run that came back with per-case verdicts — the only shape the panel can
      draw a grid for, and so the only one that gets the rail layout. */
   const graded = report.parsed && report.cases.length > 0;
@@ -410,7 +427,7 @@ export function ResultPanel({
      column's cue to say so. Not merely "no failures": a fail-fast run that
      stopped has no failures among the cases that ran either, and it has not been
      solved. */
-  const cleared = graded && report.failed === 0 && report.passed > 0 && !stopped;
+  const cleared = graded && report.failed === 0 && report.passed > 0 && !stopped && !report.exitedWithError;
 
   useEffect(() => {
     setSelectedResult("");
@@ -463,10 +480,12 @@ export function ResultPanel({
               <span
                 className={cn(
                   "rounded-full px-1.5 text-ui-sm tabular-nums",
-                  report.failed ? "bg-destructive/15 text-destructive" : "bg-[var(--success)]/15 text-[var(--success)]",
+                  report.failed || report.exitedWithError ? "bg-destructive/15 text-destructive" : "bg-[var(--success)]/15 text-[var(--success)]",
                 )}
               >
-                {report.passed}/{suiteSize || report.cases.length}
+                {/* Never fewer than the cases on screen: a remembered suite size
+                    can be older than this run, and "41/36" is not a count. */}
+                {report.passed}/{Math.max(suiteSize, report.cases.length)}
               </span>
             ) : undefined
           }
@@ -628,6 +647,7 @@ export function ResultPanel({
                            dots have completed their animation. */
                         <div className="animate-in fade-in-0 slide-in-from-bottom-1 fill-mode-both duration-700 ease-out motion-reduce:animate-none">
                           {cleared && !activeResult && <Cleared report={report} submitted={hiddenRun} />}
+                          {report.exitedWithError && !activeResult && <ExitedWithError />}
                           {shownResult && <CaseDetail declared={declaredForResult} result={shownResult} status={report.status} />}
                           <OtherFailures activeId={activeResult?.id} cases={report.cases} declared={declared.cases} onSelect={setSelectedResult} />
                         </div>
@@ -709,6 +729,7 @@ export function reportForRun(
 ): TestReport {
   if (running) return EMPTY_REPORT;
   const parsed = parseTestOutput(output);
+  if (parsed.parsed && outcome?.kind === "failed" && parsed.failed === 0) return { ...parsed, exitedWithError: true, status: parsed.status ?? "Runtime Error" };
   if (parsed.parsed || outcome?.kind !== "passed" || !declared.parsed) return parsed;
   const cases: TestCaseResult[] = declared.cases.map((item) => ({
     id: `declared-${item.id}`,
