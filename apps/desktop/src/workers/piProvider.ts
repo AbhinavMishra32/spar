@@ -24,6 +24,12 @@ export type PiProviderInput = {
   reasoningEffort?: ReasoningEffort;
   fastMode?: boolean;
   modelInfo?: Model<Api>;
+  /** A stable key for provider-side prompt caching, one per kind of call (the
+   *  coach in one session, the builder, a review). Sent as pi's `sessionId`,
+   *  which OpenAI-family routes pass on as `prompt_cache_key`: without it their
+   *  cache is best-effort routing luck, and most requests reprocess the whole
+   *  prompt. Anthropic caches by breakpoint regardless. */
+  cacheKey?: string;
 };
 
 /** What the phase controller can ask for. Kept in the AI SDK's spelling because

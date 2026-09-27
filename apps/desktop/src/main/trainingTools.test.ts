@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { LocalStore } from "./store.js";
-import { executeTrainingTool } from "./trainingTools.js";
+import { applyNotebookEdits, executeTrainingTool } from "./trainingTools.js";
 import { REVIEW_TARGET_MODE_KEY, reviewTargetMode } from "./reviewSession.js";
 import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
@@ -574,5 +574,56 @@ describe("filing an insight when the learner decides what to remember", () => {
     } finally {
       store.close();
     }
+  });
+});
+
+describe("notebook edits", () => {
+  const notebook = "# Notes\n- Ability: developing.\n- Plan: depth next.\n";
+
+  it("applies exact replacements in order and leaves the rest alone", () => {
+    expect(applyNotebookEdits(notebook, { edits: [{ find: "developing", replace: "independent" }, { find: "depth next", replace: "balance next" }] }))
+      .toEqual({ markdown: "# Notes\n- Ability: independent.\n- Plan: balance next.\n" });
+  });
+
+  it("refuses text that is missing or matches more than once, rather than guessing", () => {
+    expect(applyNotebookEdits(notebook, { edits: [{ find: "nowhere", replace: "x" }] })).toMatchObject({ error: expect.stringContaining("not in the notebook") });
+    expect(applyNotebookEdits(notebook, { edits: [{ find: "- ", replace: "* " }] })).toMatchObject({ error: expect.stringContaining("more than once") });
+  });
+
+  it("takes a whole document to start or reorganise, and needs one to start", () => {
+    expect(applyNotebookEdits(null, { markdown: "# New" })).toEqual({ markdown: "# New" });
+    expect(applyNotebookEdits(null, { edits: [{ find: "a", replace: "b" }] })).toMatchObject({ error: expect.stringContaining("no notebook yet") });
+    expect(applyNotebookEdits(notebook, { markdown: "# New", edits: [{ find: "a", replace: "b" }] })).toMatchObject({ error: expect.stringContaining("not both") });
+  });
+});
+
+describe("an accepted review of a run that failed only on its exit code", () => {
+  const setup = (store: LocalStore, run: Record<string, unknown>) => {
+    const { sessionId } = store.createSession("Practise trees");
+    store.setTrainingTarget(sessionId, { ability: "Trees", specificGap: "Depth", desiredEvidence: "Returns the depth", avoidTesting: [] });
+    const question = store.createQuestion(sessionId, design("Maximum depth"), { valid: true });
+    store.appendNextEvent({ id: randomUUID(), attemptId: question.attemptId, type: "test_run", occurredAt: new Date().toISOString(), payload: { scope: "visible-and-hidden", ...run }, source: "runner", schemaVersion: 1 });
+    store.appendNextEvent({ id: randomUUID(), attemptId: question.attemptId, type: "submission_evaluated", occurredAt: new Date().toISOString(), payload: { outcome: "failed", exitCode: 1 }, source: "system", schemaVersion: 1 });
+    return { sessionId, attemptId: question.attemptId };
+  };
+  const review = (store: LocalStore, sessionId: string, attemptId: string) =>
+    executeTrainingTool("review_solution", { attemptId, verdict: "accepted", observedComplexity: "O(n)", approach: "Recursive depth of both children.", reasons: ["Correct recursion."] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<{ completed?: boolean }>;
+
+  it("completes the attempt when every case passed", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId, attemptId } = setup(store, { exitCode: 1, passed: false, passedCases: 41, failedCases: 0 });
+      expect((await review(store, sessionId, attemptId)).completed).toBe(true);
+      expect(store.readAttempt(attemptId).some((event) => event.type === "attempt_completed" && event.payload.outcome === "passed")).toBe(true);
+    } finally { store.close(); }
+  });
+
+  it("leaves it open when a case failed", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId, attemptId } = setup(store, { exitCode: 1, passed: false, passedCases: 40, failedCases: 1 });
+      expect((await review(store, sessionId, attemptId)).completed).toBeUndefined();
+      expect(store.readAttempt(attemptId).some((event) => event.type === "attempt_completed")).toBe(false);
+    } finally { store.close(); }
   });
 });

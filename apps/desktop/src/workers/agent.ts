@@ -215,7 +215,7 @@ Reply with one JSON object and nothing else, with exactly these keys: "time" and
   const timer = setTimeout(() => abort.abort(new Error("Spar's complexity check took too long.")), SUGGEST_TIMEOUT_MS);
   try {
     const { provider: _provider, ...context } = request.payload;
-    const raw = (await piCompleteText({ ...request.payload.provider, reasoningEffort: "low" }, instructions, stableJson(context), abort.signal, "Spar's complexity check took too long.")).trim();
+    const raw = (await piCompleteText({ ...request.payload.provider, reasoningEffort: "low", cacheKey: "spar-complexity-review" }, instructions, stableJson(context), abort.signal, "Spar's complexity check took too long.")).trim();
     const verdict = parseVerdict(raw);
     /* No verdict means the model answered in prose instead of JSON. Its sentences
        are still worth showing — they are the review — but nothing may claim to
@@ -241,7 +241,7 @@ async function writeReviewPrompt(request: ReviewPromptMessage) {
   const timer = setTimeout(() => abort.abort(new Error("Spar took too long to write this review.")), SUGGEST_TIMEOUT_MS);
   try {
     const { provider, ...context } = request.payload;
-    const raw = await piCompleteText({ ...provider, reasoningEffort: "low" }, reviewPromptInstructions(context.formats, context.learner.language, context.target), stableJson(context), abort.signal, "Spar took too long to write this review.");
+    const raw = await piCompleteText({ ...provider, reasoningEffort: "low", cacheKey: "spar-review-prompt" }, reviewPromptInstructions(context.formats, context.learner.language, context.target), stableJson(context), abort.signal, "Spar took too long to write this review.");
     const prompt = parseReviewPrompt(raw, context.formats);
     if (!prompt) throw new Error("Spar could not write a usable review question. Try again.");
     parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { prompt } });
@@ -258,7 +258,7 @@ async function gradeReviewAnswer(request: ReviewGradeMessage) {
   const timer = setTimeout(() => abort.abort(new Error("Spar took too long to grade this answer.")), SUGGEST_TIMEOUT_MS);
   try {
     const { provider, ...context } = request.payload;
-    const raw = await piCompleteText({ ...provider, reasoningEffort: "low" }, reviewGradeInstructions(), stableJson(context), abort.signal, "Spar took too long to grade this answer.");
+    const raw = await piCompleteText({ ...provider, reasoningEffort: "low", cacheKey: "spar-review-grade" }, reviewGradeInstructions(), stableJson(context), abort.signal, "Spar took too long to grade this answer.");
     const grade = parseReviewGrade(raw);
     if (!grade) throw new Error("Spar could not grade that answer. Try again.");
     parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { grade } });
@@ -279,7 +279,7 @@ async function suggest(request: SuggestRequest) {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(new Error("Spar's provider took too long to draft sessions.")), SUGGEST_TIMEOUT_MS);
   try {
-    const text = await piCompleteText(request.payload.provider, suggestionInstructions(request.payload.count), stableJson(request.payload.profile), abort.signal, "Spar's provider took too long to draft sessions.");
+    const text = await piCompleteText({ ...request.payload.provider, cacheKey: "spar-suggest" }, suggestionInstructions(request.payload.count), stableJson(request.payload.profile), abort.signal, "Spar's provider took too long to draft sessions.");
     parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text } });
   } catch (error) {
     parentPort.postMessage({ kind: "result", id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) });
@@ -611,7 +611,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
     } finally { pausedWatch?.resume(); }
   };
 
-  const agent = createTrainingAgent(payload.provider, COACH_PROMPT.text, new WorkerTelemetryContext(request.id));
+  const agent = createTrainingAgent({ ...payload.provider, cacheKey: `spar-coach:${payload.sessionId}` }, COACH_PROMPT.text, new WorkerTelemetryContext(request.id));
   agent.state.tools = piAgentTools((name) => allowed.has(name), invoke);
   parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "event", name: "prompts", callId: randomUUID(), attributes: { ...promptRefs(), tools: [...allowed].sort() } } });
 
@@ -832,7 +832,9 @@ async function completePrivateChallenge(
      producing anything is abandoned. `signal` is the learner's Stop. */
   const watchdog = idleWatchdog(PROVIDER_IDLE_TIMEOUT_MS, timedOut);
   try {
-    const answer = await piCompleteText(provider, system, message, AbortSignal.any([signal, watchdog.signal]), timedOut, (value) => { usage = value; recordUsage(value); }, onText, watchdog.touch);
+    /* Keyed by what the generation is, so every build shares the builder's
+       cached prefix and every repair the repair's. */
+    const answer = await piCompleteText({ ...provider, cacheKey: `spar-${name}` }, system, message, AbortSignal.any([signal, watchdog.signal]), timedOut, (value) => { usage = value; recordUsage(value); }, onText, watchdog.touch);
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "end", model: provider.model, provider: provider.provider, latencyMs: Date.now() - started, usage, output: telemetryValue({ text: answer }) } });
     return answer;
   } catch (error) {

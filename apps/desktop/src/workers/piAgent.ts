@@ -66,6 +66,7 @@ export function createTrainingAgent(input: PiProviderInput, systemPrompt: string
       ...(input.headers ? { headers: input.headers } : {}),
       ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
       ...(reasoningSummary ? { reasoningSummary } : {}),
+      ...(input.cacheKey ? { sessionId: input.cacheKey } : {}),
       ...piFastModeOptions(input),
     } as SimpleStreamOptions),
     /* One call at a time: a challenge build and a notebook write racing each
@@ -186,6 +187,7 @@ export async function piCompleteText(input: PiProviderInput, systemPrompt: strin
     ...(transport ? { transport } : {}),
     ...(input.headers ? { headers: input.headers } : {}),
     ...(input.reasoningEffort && input.reasoningEffort !== "off" ? { reasoning: input.reasoningEffort } : {}),
+    ...(input.cacheKey ? { sessionId: input.cacheKey } : {}),
     ...piFastModeOptions(input),
   } as SimpleStreamOptions;
   /* Streamed when someone is watching the answer arrive — the private challenge

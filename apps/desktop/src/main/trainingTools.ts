@@ -156,8 +156,9 @@ export async function executeTrainingTool(
      with the result so the thread can draw what changed; the worker drops it
      from what the model reads. */
   if (name === "update_notebook") {
-    const markdown = typeof value.markdown === "string" ? value.markdown : "";
-    if (!markdown.trim()) return { status: "invalid", note: "The notebook cannot be empty. Send the whole document." };
+    const edited = applyNotebookEdits(local.readNotebook(trackId)?.markdown ?? null, value);
+    if ("error" in edited) return { status: "invalid", note: edited.error };
+    const markdown = edited.markdown;
     const { saved, previous } = local.writeNotebook(trackId, { markdown, note: String(value.note ?? ""), author: "coach", sessionId });
     const unchanged = previous !== null && previous.version === saved.version;
     return { status: unchanged ? "unchanged" : "saved", version: saved.version, note: saved.note, markdown: saved.markdown, previous: unchanged ? null : previous?.markdown ?? null, previousAuthor: previous?.author ?? null };
@@ -288,9 +289,14 @@ export async function executeTrainingTool(
   if (name === "review_solution") {
     const attemptId = String(value.attemptId);
     const verdict = value.verdict === "rework" ? "rework" : "accepted";
-    const reasons = Array.isArray(value.reasons) ? value.reasons.map((entry) => String(entry)).slice(0, 4) : [];
+    const reasons = Array.isArray(value.reasons) ? value.reasons.map((entry) => String(entry)).slice(0, 6) : [];
     local.appendNextEvent({ id: randomUUID(), attemptId, type: "submission_evaluated", occurredAt: new Date().toISOString(), payload: { review: verdict, reasons, approach: String(value.approach ?? ""), observedComplexity: String(value.observedComplexity ?? "") }, source: "system", schemaVersion: 1 });
-    if (verdict === "accepted") return { review: "accepted", note: "Recorded. The attempt stays complete." };
+    if (verdict === "accepted") {
+      const settled = settleBlockedAttempt(local, attemptId);
+      return settled
+        ? { review: "accepted", completed: true, note: "Every case of the last submission passed and only the process exit failed, so the host has completed the attempt as solved. It is rated, and record_insight now works for it." }
+        : { review: "accepted", note: "Recorded." };
+    }
     /* Reopening is the point of the tool, so it is the host that does it — an
        agent that says "that does not meet the requirement" and leaves the
        challenge closed has only complained. */
@@ -752,6 +758,48 @@ function conceptTags(value: unknown): ConceptTagInput[] {
       ...(typeof record.role === "string" ? { role: record.role } : {}),
     }];
   });
+}
+
+/**
+ * An open attempt the runner failed on its exit code alone, completed on the
+ * coach's acceptance. The evidence decides, not the coach: only when the last
+ * submission passed every case it ran, and failed none. It happened when a
+ * stale test file from an earlier challenge crashed every run; any other
+ * failure after the cases would be the same shape and the same injustice.
+ */
+function settleBlockedAttempt(local: LocalStore, attemptId: string): boolean {
+  const bundle = local.submissionBundle(attemptId);
+  if (!bundle) return false;
+  const events = local.readAttempt(attemptId);
+  if (events.some((event) => event.type === "attempt_completed")) return false;
+  const lastRun = [...events].reverse().find((event) => event.type === "test_run" && event.payload.scope === "visible-and-hidden");
+  const payload = (lastRun?.payload ?? {}) as { exitCode?: unknown; passedCases?: unknown; failedCases?: unknown };
+  const passed = typeof payload.passedCases === "number" ? payload.passedCases : 0;
+  if (!lastRun || payload.exitCode === 0 || passed === 0 || payload.failedCases !== 0) return false;
+  local.appendNextEvent({ id: randomUUID(), attemptId, type: "attempt_completed", occurredAt: new Date().toISOString(), payload: { outcome: "passed", settledBy: "review", note: `All ${passed} cases passed; the run failed only on its exit code.` }, source: "system", schemaVersion: 1 });
+  local.completeAttempt(attemptId, "passed");
+  return true;
+}
+
+/** The notebook an update_notebook call asks for: the whole document it sent, or
+ *  the current one with its edits applied. An edit whose text is missing or
+ *  ambiguous is refused with the reason, never guessed at. */
+export function applyNotebookEdits(current: string | null, value: Record<string, unknown>): { markdown: string } | { error: string } {
+  const edits = Array.isArray(value.edits) ? value.edits as Array<{ find?: unknown; replace?: unknown }> : [];
+  if (typeof value.markdown === "string" && edits.length) return { error: "Send edits or markdown, not both." };
+  if (typeof value.markdown === "string") return value.markdown.trim() ? { markdown: value.markdown } : { error: "The notebook cannot be empty." };
+  if (!edits.length) return { error: "Send edits, or the whole markdown." };
+  if (current === null) return { error: "There is no notebook yet. Start it with the whole markdown." };
+  let text = current;
+  for (const [index, edit] of edits.entries()) {
+    const find = typeof edit.find === "string" ? edit.find : "";
+    const replace = typeof edit.replace === "string" ? edit.replace : "";
+    const at = find ? text.indexOf(find) : -1;
+    if (at < 0) return { error: `Edit ${index + 1}: its find text is not in the notebook${index ? " (after the edits before it)" : ""}. Copy it exactly from the notebook in your context.` };
+    if (text.indexOf(find, at + 1) >= 0) return { error: `Edit ${index + 1}: its find text occurs more than once. Include more of the surrounding text so it matches one place.` };
+    text = text.slice(0, at) + replace + text.slice(at + find.length);
+  }
+  return text.trim() ? { markdown: text } : { error: "Those edits would leave the notebook empty." };
 }
 
 /** The optional parts of an ability write, shared by both branches of

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffCounts, lineDiff } from "./lineDiff";
+import { diffCounts, lineDiff, wordDiff } from "./lineDiff";
 
 describe("lineDiff", () => {
   it("marks every line added when there was nothing before", () => {
@@ -27,5 +27,25 @@ describe("lineDiff", () => {
 
   it("treats identical texts as unchanged", () => {
     expect(diffCounts(lineDiff("a\r\nb", "a\nb"))).toEqual({ added: 0, removed: 0 });
+  });
+});
+
+describe("wordDiff", () => {
+  it("marks only the words that changed on an edited line", () => {
+    const diff = wordDiff(lineDiff("- Current ability: recursion is developing.", "- Current ability: recursion is independent for count and depth."));
+    const removed = diff.find((line) => line.kind === "removed")!;
+    const added = diff.find((line) => line.kind === "added")!;
+    expect(removed.spans?.filter((span) => span.changed).map((span) => span.text)).toEqual(["developing"]);
+    expect(added.spans?.filter((span) => span.changed).map((span) => span.text).join("")).toBe("independent for count and depth");
+    expect(added.spans?.map((span) => span.text).join("")).toBe(added.text);
+  });
+
+  it("leaves a rewritten line as a whole-line change", () => {
+    const diff = wordDiff(lineDiff("likes hints early", "the plan is to revisit balance next"));
+    expect(diff.every((line) => line.spans === undefined)).toBe(true);
+  });
+
+  it("does not mark an added line with nothing removed opposite it", () => {
+    expect(wordDiff(lineDiff("a", "a\nb"))[1]).toEqual({ kind: "added", text: "b" });
   });
 });

@@ -19,14 +19,12 @@ function useGem(question: EmblemQuestion): Gem {
 }
 
 /**
- * A challenge's gem: its own stone, generated from the challenge rather than
- * fetched, with its number on a tag under it.
+ * A challenge's stone, generated from the challenge rather than fetched, with
+ * its number on a tag under it.
  *
- * What the stone says — kind from difficulty, cut from topic, everything else
- * from the id — is decided in `lib/gem.ts`. This only draws it, flat: the body,
- * blurred flashes of colour clipped to the outline, a dome shade, one highlight
- * and a hairline rim. No photographic texture, so it sits in Spar's chrome the
- * way an icon does rather than like a pasted-in render.
+ * What the stone looks like — pattern, colour family, cut — is decided in
+ * `lib/gem.ts`. This only draws it: the outline, the pattern's layers clipped
+ * to it, a dome shade, one highlight, glints, and a hairline rim. Flat fills, so it sits in Spar's chrome the way an icon does.
  *
  * The number is HTML, not SVG text. It has to be readable at 40px beside a
  * title, and SVG text scales with the stone — at that size it came out five
@@ -76,14 +74,13 @@ export function ChallengeEmblem({
 
 /**
  * The stone, up close: what it is called and what made it look the way it
- * does. Every trait is a fact about the challenge, so the card is also the
- * legend for every stone in the app — read one and the rest are legible.
+ * does, so the card is also the legend for every stone in the app.
  */
 function GemCard({ gem, open, onOpenChange, question }: { gem: Gem; open: boolean; onOpenChange(open: boolean): void; question: EmblemQuestion }) {
   const primary = question.concepts?.[0];
   const topic = primary ? primary.parentTitle ?? primary.title ?? null : null;
   const solved = question.lastOutcome === "passed";
-  const tint = gem.flashes[0]?.color ?? gem.body;
+  const tint = gem.glow;
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="overflow-hidden p-0 sm:max-w-[23rem]">
@@ -101,9 +98,9 @@ function GemCard({ gem, open, onOpenChange, question }: { gem: Gem; open: boolea
           </span>
         </div>
         <dl className="border-t border-border text-ui">
-          <Trait label="Kind" value={gem.kind} why={`${DIFFICULTY_LABEL[question.difficulty]} challenge`} />
+          <Trait label="Pattern" value={gem.patternName} why={gem.pattern === "sparks" || gem.pattern === "halo" ? "More common on hard ones" : "Common"} />
+          <Trait label="Colour" value={gem.family} why={`${DIFFICULTY_LABEL[question.difficulty]} challenge`} />
           <Trait label="Cut" value={capitalize(gem.cut)} why={topic ?? "No topic"} />
-          <Trait label="Pattern" value="Its own" why="No other challenge has it" />
         </dl>
       </DialogContent>
     </Dialog>
@@ -127,6 +124,9 @@ function GemArt({ gem, size, numbered, animated, ordinal }: { gem: Gem; size: nu
   /* The glow is for the large stone alone — on a 40px row it is a smudge. */
   const glow = size >= 96;
   const tag = Math.max(10, Math.round(size * 0.13));
+  const blurs = [...new Set(gem.layers.flatMap((layer) => (layer.blur ? [layer.blur] : [])))];
+  const blurId = (amount: number) => `gem-blur-${uid}-${String(amount).replace(".", "_")}`;
+  const spin = animated ? { transformOrigin: "50px 50px", animation: "emblem-spin 48s linear infinite" } : undefined;
 
   return (
     <span className="relative block" style={{ width: size, height: size }}>
@@ -135,22 +135,26 @@ function GemArt({ gem, size, numbered, animated, ordinal }: { gem: Gem; size: nu
           <clipPath id={`gem-clip-${uid}`}>
             <path d={gem.path} />
           </clipPath>
-          <filter height="200%" id={`gem-blur-${uid}`} width="200%" x="-50%" y="-50%">
-            <feGaussianBlur stdDeviation={gem.blur} />
-          </filter>
-          {/* Shade toward the rim, lit from the top-left: the one cue that makes
-              a flat outline read as a dome. */}
-          <radialGradient cx="42%" cy="36%" id={`gem-dome-${uid}`} r="70%">
-            <stop offset="45%" stopColor={gem.rim} stopOpacity="0" />
-            <stop offset="100%" stopColor={gem.rim} stopOpacity={gem.tone === "dark" ? 0.85 : 0.6} />
-          </radialGradient>
+          {blurs.map((amount) => (
+            <filter height="300%" id={blurId(amount)} key={amount} width="300%" x="-100%" y="-100%">
+              <feGaussianBlur stdDeviation={amount} />
+            </filter>
+          ))}
           <filter height="300%" id={`gem-soft-${uid}`} width="300%" x="-100%" y="-100%">
             <feGaussianBlur stdDeviation="1.6" />
           </filter>
+          {/* Shade toward the rim, lit from the top-left: the one cue that makes
+              a flat outline read as a dome. */}
+          {gem.dome && (
+            <radialGradient cx="42%" cy="36%" id={`gem-dome-${uid}`} r="70%">
+              <stop offset="45%" stopColor={gem.dome.color} stopOpacity="0" />
+              <stop offset="100%" stopColor={gem.dome.color} stopOpacity={gem.dome.opacity} />
+            </radialGradient>
+          )}
           {glow && (
             <radialGradient id={`gem-glow-${uid}`}>
-              <stop offset="0%" stopColor={gem.flashes[0]?.color ?? gem.body} stopOpacity="0.35" />
-              <stop offset="100%" stopColor={gem.flashes[0]?.color ?? gem.body} stopOpacity="0" />
+              <stop offset="0%" stopColor={gem.glow} stopOpacity="0.35" />
+              <stop offset="100%" stopColor={gem.glow} stopOpacity="0" />
             </radialGradient>
           )}
         </defs>
@@ -159,34 +163,35 @@ function GemArt({ gem, size, numbered, animated, ordinal }: { gem: Gem; size: nu
             rather than its middle. */}
         <g transform={numbered ? "translate(0 -4)" : undefined}>
           {glow && <circle cx="50" cy="50" fill={`url(#gem-glow-${uid})`} r="58" />}
-          <path d={gem.path} fill={gem.body} />
           <g clipPath={`url(#gem-clip-${uid})`}>
-            <g
-              filter={`url(#gem-blur-${uid})`}
-              style={animated ? { transformOrigin: "50px 50px", animation: "emblem-spin 48s linear infinite" } : undefined}
-            >
-              {gem.flashes.map((flash, index) => (
-                <circle cx={flash.cx} cy={flash.cy} fill={flash.color} fillOpacity={flash.opacity} key={index} r={flash.r} />
-              ))}
-            </g>
-            {gem.flecks.length > 0 && (
-              <g filter={`url(#gem-soft-${uid})`}>
-                {gem.flecks.map((fleck, index) => (
-                  <circle cx={fleck.cx} cy={fleck.cy} fill={fleck.color} fillOpacity="0.9" key={index} r={fleck.r} />
-                ))}
-              </g>
+            {gem.layers.map((layer, index) => (
+              <path
+                d={layer.d}
+                fill={layer.fill}
+                fillOpacity={layer.opacity}
+                filter={layer.blur ? `url(#${blurId(layer.blur)})` : undefined}
+                key={index}
+                stroke={layer.line?.color}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeOpacity={layer.line?.opacity}
+                strokeWidth={layer.line ? Math.max(layer.line.width, layer.fill === "none" ? 0 : 70 / size) : undefined}
+                style={layer.spin ? spin : undefined}
+              />
+            ))}
+            {gem.dome && <path d={gem.path} fill={`url(#gem-dome-${uid})`} />}
+            {gem.highlight && (
+              <ellipse
+                cx={gem.highlight.cx}
+                cy={gem.highlight.cy}
+                fill="#fff"
+                fillOpacity={gem.highlight.opacity}
+                filter={`url(#gem-soft-${uid})`}
+                rx={gem.highlight.rx}
+                ry={gem.highlight.ry}
+                transform={`rotate(${gem.highlight.rotate} ${gem.highlight.cx} ${gem.highlight.cy})`}
+              />
             )}
-            <path d={gem.path} fill={`url(#gem-dome-${uid})`} />
-            <ellipse
-              cx={gem.highlight.cx}
-              cy={gem.highlight.cy}
-              fill="#fff"
-              fillOpacity={gem.highlight.opacity}
-              filter={`url(#gem-soft-${uid})`}
-              rx={gem.highlight.rx}
-              ry={gem.highlight.ry}
-              transform={`rotate(${gem.highlight.rotate} ${gem.highlight.cx} ${gem.highlight.cy})`}
-            />
           </g>
           {gem.glints.map((glint, index) => (
             <path
@@ -202,6 +207,7 @@ function GemArt({ gem, size, numbered, animated, ordinal }: { gem: Gem; size: nu
             d={gem.path}
             fill="none"
             stroke={gem.tone === "dark" ? "#fff" : "var(--foreground)"}
+            strokeLinejoin="round"
             strokeOpacity={gem.tone === "dark" ? 0.22 : 0.14}
             strokeWidth={Math.max(1, 100 / size)}
           />

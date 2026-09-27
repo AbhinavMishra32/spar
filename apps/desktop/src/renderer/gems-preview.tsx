@@ -4,10 +4,17 @@ import "./theme.css";
 
 /* Throwaway: every stone kind across a few topics, at the sizes the app uses. */
 const DIFFICULTIES = ["foundation", "developing", "proficient", "advanced"] as const;
-const TOPICS = ["trees", "graphs", "strings", "arrays", "dynamic-programming", "hashing"];
+const TOPICS = ["trees", "graphs", "strings", "arrays", "dynamic-programming", "hashing", "heaps", "sorting", "stacks", "tries"];
 
 function Wall() {
-  if (location.hash === "#dark") document.documentElement.classList.add("dark");
+  if (location.hash.includes("dark")) document.documentElement.classList.add("dark");
+  if (location.hash.includes("big")) return (
+    <div className="grid min-h-screen grid-cols-6 gap-4 bg-background p-6">
+      {DIFFICULTIES.flatMap((difficulty) => TOPICS.slice(0, 6).map((topic, index) => (
+        <ChallengeEmblem animated={false} key={difficulty + topic} question={{ id: `q-${difficulty}-${topic}`, difficulty, ordinal: index * 3 + 2, concepts: [{ slug: topic, parentSlug: null }] }} numbered={false} size={110} />
+      )))}
+    </div>
+  );
   return (
     <div className="min-h-screen bg-background p-8 text-foreground">
       {DIFFICULTIES.map((difficulty) => (

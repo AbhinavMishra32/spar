@@ -143,7 +143,7 @@
         "why": {
           "type": "string",
           "minLength": 20,
-          "maxLength": 400,
+          "maxLength": 1500,
           "description": "One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns."
         },
         "language": {
@@ -165,7 +165,7 @@
         "replaceReason": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 500,
+          "maxLength": 1500,
           "description": "Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."
         },
         "actionTitle": {
@@ -605,25 +605,25 @@
         "title": {
           "type": "string",
           "minLength": 4,
-          "maxLength": 90,
+          "maxLength": 160,
           "description": "The pattern as a short handle the learner can recognise later, in plain words: \"Shrink the window only when the invariant breaks\", not \"Sliding window\" and not the problem's title."
         },
         "trigger": {
           "type": "string",
           "minLength": 10,
-          "maxLength": 400,
+          "maxLength": 1200,
           "description": "What in a problem statement should make someone reach for this: the shape of the input, the question asked, the constraint. Written so it would still apply to a problem with a different story."
         },
         "insight": {
           "type": "string",
           "minLength": 20,
-          "maxLength": 700,
+          "maxLength": 2000,
           "description": "The key realisation itself, in two to four sentences, as the learner would need to say it to themselves. Why it works, not just what to do."
         },
         "invariant": {
           "type": "string",
           "minLength": 8,
-          "maxLength": 300,
+          "maxLength": 800,
           "description": "The condition the solution maintains, when there is one — the loop invariant, the recurrence, what the data structure guarantees."
         },
         "click": {
@@ -632,7 +632,7 @@
             "summary": {
               "type": "string",
               "minLength": 8,
-              "maxLength": 500,
+              "maxLength": 1500,
               "description": "What changed between stuck and solved, from the turning points: the realisation behind the change, in their terms. If they passed first try, say what they recognised immediately."
             },
             "runOrdinal": {
@@ -642,7 +642,7 @@
             },
             "diff": {
               "type": "string",
-              "maxLength": 1600,
+              "maxLength": 4000,
               "description": "The few changed lines that carried it, quoted from the turning-point diff. Omit when the change was a rewrite."
             }
           },
@@ -668,12 +668,12 @@
               "mistake": {
                 "type": "string",
                 "minLength": 4,
-                "maxLength": 240
+                "maxLength": 600
               },
               "fix": {
                 "type": "string",
                 "minLength": 4,
-                "maxLength": 240
+                "maxLength": 600
               }
             },
             "required": [
@@ -690,7 +690,7 @@
           "items": {
             "type": "string",
             "minLength": 4,
-            "maxLength": 200
+            "maxLength": 500
           },
           "minItems": 2,
           "maxItems": 5,
@@ -701,7 +701,7 @@
           "items": {
             "type": "string",
             "minLength": 8,
-            "maxLength": 240
+            "maxLength": 600
           },
           "minItems": 1,
           "maxItems": 4,
@@ -736,7 +736,7 @@
         "remember": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 600,
+          "maxLength": 1500,
           "description": "What the learner said they want to remember from this problem, when you asked them — their words, lightly cleaned up, not your summary. Reviews aim at it, so the card's insight, click and targets must be about what they pointed at. Required for a new card when they have chosen to decide what their reviews ask about; omit otherwise."
         },
         "firstGrade": {
@@ -792,13 +792,13 @@
         "observedComplexity": {
           "type": "string",
           "minLength": 2,
-          "maxLength": 80,
+          "maxLength": 500,
           "description": "The time complexity of what they actually wrote, e.g. \"O(n)\" or \"O(n log n) from the sort\"."
         },
         "approach": {
           "type": "string",
           "minLength": 10,
-          "maxLength": 300,
+          "maxLength": 1500,
           "description": "What they actually did, in one sentence, in their own terms."
         },
         "reasons": {
@@ -806,9 +806,9 @@
           "items": {
             "type": "string",
             "minLength": 8,
-            "maxLength": 220
+            "maxLength": 1000
           },
-          "maxItems": 4,
+          "maxItems": 6,
           "description": "For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner."
         },
         "actionTitle": {
@@ -975,19 +975,19 @@
             "ability": {
               "type": "string",
               "minLength": 2,
-              "maxLength": 120,
+              "maxLength": 200,
               "description": "The ability this trains, in a few words, stable across challenges that train it."
             },
             "gap": {
               "type": "string",
               "minLength": 8,
-              "maxLength": 400,
+              "maxLength": 1500,
               "description": "The specific thing still uncertain about this learner that this challenge probes."
             },
             "evidence": {
               "type": "string",
               "minLength": 8,
-              "maxLength": 400,
+              "maxLength": 1500,
               "description": "What a pass or a fail will tell you."
             }
           },
@@ -1002,7 +1002,7 @@
         "stretch": {
           "type": "string",
           "minLength": 10,
-          "maxLength": 400,
+          "maxLength": 1500,
           "description": "What is new relative to the learner's last challenge — the one step up. For revise, say what changes."
         },
         "brief": {
@@ -1104,7 +1104,7 @@
           "items": {
             "type": "string",
             "minLength": 4,
-            "maxLength": 160
+            "maxLength": 400
           },
           "maxItems": 4,
           "description": "How the solution must be written when a different approach would defeat the exercise (\"recursive\", \"one pass\"). Shown to the learner and checked by review_solution. Omit when there is nothing to insist on."
@@ -1122,13 +1122,13 @@
         "why": {
           "type": "string",
           "minLength": 10,
-          "maxLength": 500,
+          "maxLength": 1500,
           "description": "Why this challenge for this learner now. Stored with the challenge for later turns."
         },
         "reason": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 500,
+          "maxLength": 1500,
           "description": "For revise or replace: what the learner asked for, or why the open challenge has to change."
         },
         "actionTitle": {
@@ -1367,7 +1367,7 @@
         "title": {
           "type": "string",
           "minLength": 2,
-          "maxLength": 120,
+          "maxLength": 200,
           "description": "Required when introducing an ability."
         },
         "markdown": {
@@ -1386,7 +1386,7 @@
         "summary": {
           "type": "string",
           "minLength": 10,
-          "maxLength": 220,
+          "maxLength": 800,
           "description": "One sentence in plain words: what the learner can now do. Written to them, not about them."
         },
         "concepts": {
@@ -1442,7 +1442,7 @@
           "items": {
             "type": "string",
             "minLength": 10,
-            "maxLength": 180
+            "maxLength": 600
           },
           "maxItems": 4,
           "description": "Drills for going further on this exact ability, each phrased as the learner's own goal because each one starts a session. Vary the transfer context, not just the difficulty."
@@ -1511,7 +1511,7 @@
             "title": {
               "type": "string",
               "minLength": 3,
-              "maxLength": 100
+              "maxLength": 200
             },
             "description": {
               "type": "string",
@@ -1562,20 +1562,47 @@
     }
   },
   "update_notebook": {
-    "description": "Replace your notebook for this Track with a new version. The notebook is in your context every turn and the learner can read and edit it; keep it under about 600 words, rewrite rather than append, and delete what is no longer true. Use it when something durable changes: their goal, how they like to be taught, what clicked, what keeps tripping them, their code-shape conventions, the plan for the next few steps.",
+    "description": "Change your notebook for this Track, your primary memory of this learner. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit it; keep it under about 1,200 words and delete what is no longer true.",
     "inputSchema": {
       "type": "object",
       "properties": {
+        "edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "find": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000,
+                "description": "Text copied exactly from the current notebook, long enough to occur only once."
+              },
+              "replace": {
+                "type": "string",
+                "maxLength": 6000,
+                "description": "What it becomes. Empty to delete it."
+              }
+            },
+            "required": [
+              "find",
+              "replace"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 20,
+          "description": "Replacements applied in order to the current notebook."
+        },
         "markdown": {
           "type": "string",
           "minLength": 1,
           "maxLength": 12000,
-          "description": "The whole notebook, as markdown."
+          "description": "The whole notebook, replacing the current one. Only to start it or reorganise it; otherwise use edits."
         },
         "note": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 160,
+          "maxLength": 300,
           "description": "One line saying what changed, shown to the learner."
         },
         "actionTitle": {
@@ -1586,7 +1613,6 @@
         }
       },
       "required": [
-        "markdown",
         "note",
         "actionTitle"
       ],
@@ -1606,7 +1632,7 @@
         "title": {
           "type": "string",
           "minLength": 3,
-          "maxLength": 90,
+          "maxLength": 160,
           "description": "What this shows, in the learner's language. Not the tool's name for it."
         },
         "steps": {
@@ -1621,7 +1647,7 @@
               "caption": {
                 "type": "string",
                 "minLength": 3,
-                "maxLength": 200,
+                "maxLength": 400,
                 "description": "What to notice in this step, addressed to the learner. One sentence, no preamble."
               },
               "focus": {
@@ -1654,7 +1680,7 @@
         },
         "takeaway": {
           "type": "string",
-          "maxLength": 400,
+          "maxLength": 1000,
           "description": "Optional: the one sentence the whole sequence adds up to, shown under it."
         },
         "actionTitle": {

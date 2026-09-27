@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
-import { diffCounts, lineDiff, type DiffLine } from "./lineDiff";
+import { diffCounts, lineDiff, wordDiff, type DiffLine } from "./lineDiff";
 
 /**
  * The coach's notebook: the page of markdown it keeps about the learner, per
@@ -33,7 +33,8 @@ export function readNotebookCall(input: string, output: string): NotebookCall {
   const back = record(output);
   const status = back.status === "saved" || back.status === "unchanged" ? back.status : null;
   return {
-    markdown: typeof sent.markdown === "string" ? sent.markdown : "",
+    /* The host's copy first: a call made of edits sends only fragments. */
+    markdown: typeof back.markdown === "string" ? back.markdown : typeof sent.markdown === "string" ? sent.markdown : "",
     note: typeof back.note === "string" && back.note.trim() ? back.note.trim() : typeof sent.note === "string" ? sent.note.trim() : "",
     version: typeof back.version === "number" ? back.version : null,
     previous: typeof back.previous === "string" ? back.previous : null,
@@ -77,7 +78,23 @@ function DiffRow({ line }: { line: DiffLine }) {
     >
       <span aria-hidden className="w-2.5 shrink-0 select-none opacity-70">{line.kind === "added" ? "+" : line.kind === "removed" ? "−" : " "}</span>
       <span className="sr-only">{line.kind === "added" ? "Added: " : line.kind === "removed" ? "Removed: " : ""}</span>
-      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">{line.text || " "}</span>
+      <span className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+        {line.spans
+          ? line.spans.map((span, index) => span.changed
+            ? (
+              <mark
+                className={cn(
+                  "rounded-[3px] text-inherit",
+                  line.kind === "added" ? "bg-[color-mix(in_srgb,var(--success)_32%,transparent)]" : "bg-destructive/30",
+                )}
+                key={index}
+              >
+                {span.text}
+              </mark>
+            )
+            : <span key={index}>{span.text}</span>)
+          : line.text || " "}
+      </span>
     </div>
   );
 }
@@ -99,7 +116,7 @@ function Fold({ lines }: { lines: DiffLine[] }) {
 /** A line diff between two versions of a page: added green, removed red,
  *  unchanged dimmed, and long unchanged stretches folded. */
 export function LineDiffView({ before, after, className }: { before: string | null; after: string; className?: string }) {
-  const diff = useMemo(() => lineDiff(before, after), [before, after]);
+  const diff = useMemo(() => wordDiff(lineDiff(before, after)), [before, after]);
   const parts = useMemo(() => segments(diff), [diff]);
   if (!diff.some((line) => line.kind !== "same")) {
     return <p className={cn("px-3 py-2 text-thread-tool text-muted-foreground", className)}>No changes from the previous version.</p>;
