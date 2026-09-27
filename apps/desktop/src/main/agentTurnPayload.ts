@@ -154,8 +154,8 @@ export function journeyDocument(input: TurnPayloadInput): string {
   const reviews = reviewLines(store);
   if (reviews) sections.push(reviews);
 
-  const intake = store.answeredIntake(sessionId);
-  if (intake) sections.push(`## The learner's answer to your earlier question\n${intake}`);
+  const intake = store.freshIntakeAnswer(sessionId);
+  if (intake) sections.push(`## The learner's answer to your question\nYou asked: ${intake.question}\nThey answered: ${intake.answer}`);
 
   const conversation = session.messages.slice(-12).filter((message) => message.body.trim());
   if (conversation.length) {

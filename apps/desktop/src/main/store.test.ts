@@ -922,7 +922,9 @@ it("rehydrates a failed provider's lesson and keeps unfinished planning in the j
     // Planning is not replayed as fake tool results any more; it is in the document.
     const first=agentTurnPayload({...input,turnKind:"cold-start"});
     expect(first.resumeState).toEqual({});
-    expect(first.context).toContain("## The learner's answer to your earlier question\nNew to trees");
+    expect(first.context).toContain("## The learner's answer to your question\nYou asked: Have you built a tree?\nThey answered: New to trees");
+    store.addMessage(sessionId,"agent","Let's start with nodes.");
+    expect(agentTurnPayload({...input,turnKind:"cold-start"}).context).not.toContain("## The learner's answer to your question");
     expect(first.context).toContain("## Current training target\n- Ability: Tree nodes");
     expect(first.context).toContain("- Gap: Links");
     expect(first.context).toContain("- Evidence sought: Build a tree");
