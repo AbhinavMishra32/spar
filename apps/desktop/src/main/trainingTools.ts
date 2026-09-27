@@ -1,5 +1,5 @@
 import { normalizeStatementText } from "../shared/statementText.js";
-import { checkFigure } from "../shared/figure.js";
+import { figureProblems } from "../shared/figure.js";
 import type { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { compileQuestion, type DesignOrigin } from "@spar/training";
@@ -68,16 +68,7 @@ function followsLesson(local: LocalStore, concepts: ConceptTagInput[], trackId: 
 
 /** Each ```figure fence in a statement that does not check, as one sentence. */
 export function statementFigureProblems(statement: string): string[] {
-  const problems: string[] = [];
-  const fence = /^```figure\s*\n([\s\S]*?)^```\s*$/gm;
-  let match: RegExpExecArray | null;
-  let count = 0;
-  while ((match = fence.exec(statement))) {
-    count += 1;
-    const result = checkFigure(match[1]!.trim());
-    if (!result.ok) problems.push(`Figure ${count}: ${result.error}`);
-  }
-  return problems;
+  return figureProblems(statement);
 }
 
 export async function executeTrainingTool(
@@ -195,6 +186,10 @@ export async function executeTrainingTool(
     if (!parsed.success) {
       return { status: "invalid", report: { valid: false, checks: parsed.error.issues.slice(0, 6).map((issue) => ({ name: issue.path.join(".") || "lesson", passed: false, detail: issue.message })) } };
     }
+    /* A page's figure is checked like a statement's: one that does not draw
+       is refused with the field at fault, rather than shown as an error box. */
+    const brokenFigures = parsed.data.pages.flatMap((page, k) => figureProblems(page.body).map((problem) => `Page ${k + 1}, ${problem}`));
+    if (brokenFigures.length) return { status: "invalid", report: { valid: false, checks: [{ name: "figures", passed: false, detail: `${brokenFigures.join(" ")} Fix the figure spec and send the lesson again; load the challenge-figures skill if you have not.` }] } };
     /* A lesson that cites another must cite one that exists. A dangling id is a
        chip the learner clicks and nothing happens, which is worse than the plain
        sentence it replaced — so the reference is dropped and the agent is told. */

@@ -16,6 +16,7 @@ import { internalToolDefinitions, setChallengeInputSchema, type SetChallengeInpu
 import { telemetryValue } from "./telemetryPayload.js";
 import { parseReviewGrade, parseReviewPrompt, reviewGradeInstructions, reviewPromptInstructions, type ReviewGradeRequest, type ReviewPromptRequest } from "./reviewAgent.js";
 import { WorkerTelemetryContext } from "./piTelemetry.js";
+import { figureProblems } from "../shared/figure.js";
 import { BUILDER_PROMPT, COACH_PROMPT, REDRAFT_PROMPT, REPAIR_PROMPT, promptRefs } from "./prompts.js";
 
 /**
@@ -624,6 +625,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
   const contextWindow = piModelFor(payload.provider).contextWindow;
   let nudged = false;
   let spillRetried = false;
+  let figureRetried = false;
   let overflowRetries = 0;
   const finish = (text: string, reason: string, steps: number) => parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text, usage: sumUsage(usage), finishReason: reason, phaseSteps: steps, prompts: promptRefs() } });
   const dropLastReply = () => { if (agent.state.messages.at(-1)?.role === "assistant") agent.state.messages.pop(); };
@@ -724,6 +726,17 @@ async function runTurn(request: Request, stopped: AbortSignal) {
           continue;
         }
         text = text.slice(0, text.indexOf("to=functions.")).trim();
+      }
+      /* A figure in the reply that would not draw: the learner would see an
+         error box where the picture should be, and the coach cannot see it,
+         so the reply goes back once with the reason. */
+      const brokenFigures = figureProblems(text);
+      if (brokenFigures.length && !figureRetried) {
+        figureRetried = true;
+        dropLastReply();
+        pending = `Your reply was not shown: its figures would not draw. ${brokenFigures.join(" ")} Send the reply again with the figure fixed (load the challenge-figures skill if you have not), or without it.`;
+        parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: "figure-refused" } });
+        continue;
       }
       /* The one reminder. A finished attempt left with nothing next is the case
          the learner notices; past one nudge the coach's judgement stands. */

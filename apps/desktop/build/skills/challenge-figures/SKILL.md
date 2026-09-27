@@ -1,90 +1,170 @@
 ---
 name: challenge-figures
-description: Draw diagrams in challenge statements — binary trees, linked lists, graphs, grids and arrays — the way LeetCode shows a picture beside its examples. Use when writing a challenge whose input is a structure a learner understands faster by seeing it.
+description: Draw figures — trees, linked lists, graphs (any arity, state machines, recursion trees, tries), grids and DP tables, arrays and bars, stacks, intervals and tables — with highlights, notes, routes, arrows and before/after steps, in a reply, a lesson page or a challenge statement. Load it whenever a picture would make a structure, a state or a step of an algorithm faster to understand than words.
 ---
 
-# Challenge figures
+# Figures
 
-A statement can carry pictures. You do not draw them: you write a fenced block with the language `figure` whose body is one JSON spec, and Spar lays it out and draws it in the app's style, in light and dark. You cannot see the result, so the spec is built so that a figure that validates looks right. A figure that does not validate is refused when you publish, with the field at fault named — fix that field and publish again.
+You can draw. Write a fenced block with the language `figure` whose body is one JSON spec, and Spar lays it out and draws it in the app's style, in light and dark. You never see the result, so the spec is built so that a figure that validates looks right: layout, spacing and colour are Spar's job, and yours is to say what is in the picture and what matters in it.
 
-## When to use one
+Every figure is checked before anyone sees it. In a statement or a lesson a broken figure is refused with the field at fault; in a reply, the reply comes back to you with the reason. Fix that field and send again.
 
-- The input is a tree, list, graph, grid or array whose shape is the problem: lone children, a cycle, a route, walls, a window.
-- One figure per example that needs it, placed directly above that example's `Input:` line. Usually only Example 1 needs one.
-- Not for plain numbers or strings, and not for anything the example line already makes obvious.
-- Only in challenge statements. Do not put figures in chat replies or hints unless the learner asks to see a structure drawn.
+## When to draw
+
+Draw whenever the learner would otherwise have to build the picture in their head. That is often, in this work:
+
+- the input is a structure whose shape is the point — a tree with a lone child, a list with a cycle, a graph, a grid with walls;
+- you are explaining a state — where two pointers sit, what is on the stack, which window is live, which DP cells a cell is built from;
+- something changes — before and after a rotation, the steps of a merge, a list mid-reversal;
+- they are confused about what their code does to a structure: draw what it actually does next to what they expected;
+- a challenge statement's example is a tree, list, graph, grid or anything with a shape.
+
+Leave it out when the words already carry it: a plain number or string, a one-line fact, a picture that would only repeat the sentence beside it, or the same structure you drew two messages ago with nothing new marked. One good figure beats three. Each figure should make one point, and its highlights should be the point.
+
+In a reply, put the figure where it answers the question and say in a sentence what to look at. In a lesson, a figure per state change is often the lesson. In a statement, see the placement section below.
 
 ## The rule that matters most
 
-Use the same values as the example line. An example written `root = [3,9,20,null,null,15,7]` gets `"values": [3,9,20,null,null,15,7]` — the exact LeetCode serialisation, nulls included. Never draw a different instance from the one the example states.
+Draw the real instance. A figure for `root = [3,9,20,null,null,15,7]` uses `"values": [3,9,20,null,null,15,7]` — the exact serialisation, nulls included. Never draw a different instance from the one the text states, and when you trace an algorithm, trace it on the values you are talking about.
+
+## One vocabulary for every figure
+
+Every spec is one JSON object with a `type`. Keep it on one line. Unknown keys are refused. Every key a field names is checked against the structure, so a highlight can never silently miss.
+
+- **Tones**: `mark` (look here), `good` (the answer, the route, what is done), `bad` (wrong, removed, the violation), `info` (a region, a frontier, a pointer's reach). Each is an array of element keys. An element takes one tone.
+- **Keys**: indexes for trees (level-order position, counting nulls), lists, arrays, stacks and intervals; node ids for graphs; `[row, col]` for grid cells; `[row, col]` or a row number for tables.
+- **labels**: a few words beside one element (up to 28 characters) — a running sum, a distance, `lo`, `LCA`, `memo hit`. Keyed by the element's key as a string: `{"3": "sum 20"}`, or `{"2,1": "3+3"}` for a grid.
+- **removed**: elements drawn faded and dashed — deleted, pruned, popped, skipped.
+- **edgeTones**: for trees and graphs, the same four tones on edges, each a list of `[a, b]` pairs of node keys.
+- **caption**: one or two sentences under the figure saying what it shows.
+
+A `path` (trees, graphs, grids) tones its nodes and edges `good` for you; an explicit tone on a node on the path wins, so you can `mark` where the route ends.
 
 ## Specs
-
-Every spec is one JSON object with a `type`. Unknown keys are rejected. Keep the JSON on one line.
-
-Highlighting uses four tones, each an array of node keys: `mark` (look here), `good` (the answer or the route), `bad` (removed or wrong), `info` (a region). Keys are indexes for trees, lists and arrays, and node labels for graphs. Use them sparingly — one idea per figure.
 
 ### tree — a binary tree
 
 ```figure
-{"type":"tree","values":[3,9,20,null,null,15,7]}
+{"type":"tree","values":[5,4,8,11,null,13,4,7,2],"path":[0,1,3,8],"mark":[8],"labels":{"8":"sum 22"}}
 ```
 
-- `values`: the level-order array with `null` for missing children, at most 63 entries.
-- `removed`: indexes drawn faded and dashed, for pruned or deleted nodes.
-- `path`: indexes of a root-to-node route; the edges between them are drawn as the route.
-- Every index is a position in `values`, counting the nulls.
+- `values`: level-order with `null` for a missing child, up to 127 entries. As in LeetCode, a null has no children listed after it.
+- `path`: indexes in walking order, each the parent or child of the one before — root-to-leaf, or up through a common ancestor and down again.
+- `removed`, `labels`, `edgeTones` (pairs of parent and child indexes), tones, `caption`.
+- Heaps, BSTs, segment trees and tries-as-binary are all trees: put ranges or bounds in `labels`.
 
 ### list — a linked list
 
 ```figure
-{"type":"list","values":[3,2,0,-4],"cycle":1,"labels":{"0":"head"}}
+{"type":"list","values":[1,2,3,4,5],"reversed":[0,1],"cut":[2],"pointers":{"prev":2,"cur":3}}
 ```
 
-- `cycle`: the index the tail points back to, LeetCode's `pos`. Leave it out when there is no cycle.
-- `labels`: short names above nodes, keyed by index as a string.
+- `cycle`: the index the tail points back to (LeetCode's `pos`).
+- `pointers`: name → index, drawn as arrows down onto a node: `slow`, `fast`, `prev`, `cur`, `dummy`.
+- `labels`: short names above nodes, like `head`.
+- `reversed`: indexes whose next link points backward, for a list mid-reversal. `cut`: indexes whose next link is severed.
+- `links`: extra arrows under the list, `[from, to]` or `[from, to, tone]` — random pointers, a splice, where a node will be re-linked.
+- `removed`, tones, `caption`. Up to 16 nodes.
 
-### graph — nodes and edges
+### graph — nodes and edges, any shape
 
 ```figure
-{"type":"graph","edges":[["A","B",4],["A","C",2],["C","B",1]],"path":["A","C","B"],"good":["A","B"]}
+{"type":"graph","edges":[["A","B",4],["A","C",2],["C","B",1],["B","D",5]],"path":["A","C","B","D"],"labels":{"A":"0","C":"2","B":"3","D":"8"}}
 ```
 
-- `edges`: `[from, to]` or `[from, to, weight]`. Labels are numbers or short strings.
-- `directed`: `true` draws arrows. Undirected by default.
-- `nodes`: only needed for nodes with no edges.
-- `path`: a walk through the graph; every consecutive pair must be an edge.
-- Laid out left to right automatically. Keep it to about 12 nodes.
+- `edges`: `[from, to]` or `[from, to, label]`; the label is a weight, a character, a condition. Self-loops (`["q","q","a"]`) and edges both ways are drawn properly.
+- `directed`: `true` draws arrows. `nodes`: isolated nodes, or to fix declaration order.
+- `layout`: `"LR"` (default) or `"TB"` — top to bottom for anything tree-like with more than two children: n-ary trees, recursion trees, tries, union-find forests, DAG levels.
+- `names`: text drawn inside a node instead of its id, so ids stay unique while nodes read the same — `{"n4":"fib(2)","n7":"fib(2)"}`.
+- `shape`: `"box"` for states or longer names; nodes whose text does not fit a circle become boxes on their own.
+- `path`, `labels` (above the node, or beside it in `TB`), `removed` (fades the node and its edges), `edgeTones`, tones, `caption`. Up to 40 nodes and 80 edges; keep it to what the point needs.
 
-### grid — a matrix, board or maze
+### grid — a matrix, board, maze or DP table
 
 ```figure
-{"type":"grid","cells":[[0,0,1],[1,0,1],[1,0,0]],"wall":1,"showValues":false,"path":[[0,0],[0,1],[1,1],[2,1],[2,2]]}
+{"type":"grid","rows":["","a","b","c"],"cols":["","a","c","e"],"cells":[[0,0,0,0],[0,1,1,1],[0,1,1,1],[0,1,2,2]],"mark":[[2,1]],"good":[[3,2]],"arrows":[[[2,1],[3,2],"good"]]}
 ```
 
-- `cells`: rows of equal length, at most 12 by 12.
-- `wall`: the cell value drawn as a solid wall.
-- `fill`: cell value to tone, for example `{"1":"info"}` to shade land in an islands problem.
-- `path`: `[row, col]` cells, each a neighbour of the one before. With `showValues` false the ends are marked S and E.
+- `cells`: rows of equal length, up to 20 × 20.
+- `rows`, `cols`: headers down the left and along the top (blank allowed) — the two strings of an LCS table, the capacities of a knapsack.
+- `arrows`: cell → cell, `[[r,c],[r,c]]` or with a tone — what a DP cell is built from, a move, a jump.
+- `wall`: the value drawn as a solid wall. `fill`: value → tone, like `{"1":"info"}` for land.
+- `path`: `[row, col]` cells, each a neighbour of the one before. With `"showValues": false` its ends read S and E.
+- `labels` (`"row,col"` → words in the cell's corner, or its middle when values are hidden), tones on `[row, col]`, `caption`.
 
-### array — values with indexes, a window and pointers
+### array — values, windows, pointers, spans, arcs, bars
 
 ```figure
-{"type":"array","values":[4,6,5,5,7,8],"window":[1,4],"pointers":{"left":1,"right":4}}
+{"type":"array","values":[4,6,5,5,7,8],"window":[1,4],"pointers":{"left":1,"right":4},"bad":[5],"labels":{"5":"too big"}}
 ```
 
-- `window`: an inclusive `[from, to]` range, shaded.
-- `pointers`: a name for each index, drawn as arrows under the cells.
+- `values`: up to 32; strings work for characters.
+- `window`: an inclusive `[from, to]`, shaded. `pointers`: name → index, arrows under the cells.
+- `ranges`: brackets under the cells, `{"from":1,"to":3,"label":"sum 7","tone":"good"}` — subarrays, partitions, prefix spans.
+- `arrows`: arcs over the cells, `[from, to]` or with a tone — next-greater links, jumps, swaps.
+- `bars`: `true` draws numbers as bars, for heights, histograms and rain water.
+- `indexes`: `false` hides the index row. `removed` strikes a cell. `labels`, tones, `caption`.
 
-### row — before and after
+### stack — values bottom to top
 
 ```figure
-{"type":"row","captions":["root","after pruning"],"items":[{"type":"tree","values":[8,3,10,1,6],"removed":[3]},{"type":"tree","values":[8,3,10,null,6]}]}
+{"type":"stack","values":[1,3,5,6],"mark":[3],"labels":{"3":"pushed"}}
 ```
 
-- Two or three of the specs above side by side, with arrows between them. Set `"arrows": false` to leave the arrows out.
+- The last value is the top; it is pointed at. Empty is allowed. `removed` for a pop, `labels` beside entries, tones, `caption`.
+- A queue or deque is an `array` with `front` and `back` pointers.
 
-## Placing a figure in a statement
+### intervals — spans on a number line
+
+```figure
+{"type":"intervals","items":[[1,3],[2,6],[8,10],[15,18]],"good":[0,1],"markers":{"t=5":5}}
+```
+
+- `items`: `[start, end]` pairs, one lane each; `packed: true` shares lanes between intervals that do not overlap (meeting rooms).
+- `markers`: name → position, a dashed line across every lane — a sweep line, a query point.
+- `labels` replace the `[start,end]` text. `removed`, tones, `caption`.
+
+### table — rows of text
+
+```figure
+{"type":"table","columns":["i","x","cur","best"],"rows":[[0,-2,-2,-2],[1,1,1,1],[2,-3,-2,1],[3,4,4,4]],"mark":[[3,3]]}
+```
+
+- A step-by-step trace, a hash map's contents, a comparison. `columns` is the header; cells hold up to 40 characters.
+- Tones take `[row, col]` for a cell or a row number for the whole row (counting from 0, header not counted).
+
+### row and column — several figures in order
+
+```figure
+{"type":"row","captions":["delete 3","after"],"items":[{"type":"tree","values":[5,3,6,2,4,null,7],"bad":[1]},{"type":"tree","values":[5,4,6,2,null,null,7],"good":[1]}]}
+```
+
+- `items`: two to four of the specs above, side by side (`row`) or stacked (`column`), with arrows between. `"arrows": false` leaves them out.
+- `captions`: a short title over each item; each item can also carry its own `caption`.
+- Use it for before → after, and for the steps of an algorithm when each step changes the picture.
+
+## Choosing a figure
+
+| To show | Draw |
+| --- | --- |
+| a tree's shape, a root-to-leaf route, where recursion is | `tree` with `path`, `labels` for returned values |
+| an n-ary tree, a trie, a recursion tree, memo hits | `graph` with `"layout":"TB"`, `names`, `removed` for pruned calls |
+| BFS layers, Dijkstra distances, a topological order | `graph` with `labels` per node, `info` for the frontier |
+| a cycle, a bad edge, a cut | `edgeTones` with `bad` |
+| a state machine or automaton | `graph`, `directed`, `"shape":"box"`, edge labels, self-loops |
+| union-find parents | `graph`, `directed`, `"layout":"TB"`, roots in `good` |
+| two pointers, a sliding window, binary search `lo`/`mid`/`hi` | `array` with `pointers` and `window` |
+| prefix sums, partitions, a subarray's sum | `array` with `ranges` |
+| monotonic stack links, jumps | `array` with `arrows`, or `stack` |
+| heights, histograms, trapped water | `array` with `bars` |
+| a DP table and where a cell comes from | `grid` with `rows`/`cols`, `arrows`, the answer cell `good` |
+| islands, flood fill, maze routes | `grid` with `fill`, `wall`, `path`, `"showValues": false` |
+| list reversal, fast/slow pointers, splicing | `list` with `reversed`, `pointers`, `links` |
+| merging or scheduling intervals | `intervals`, `packed`, `markers` |
+| a variable trace over iterations, a hash map | `table` |
+| what changed | `row` of the before and after |
+
+## Placing a figure in a challenge statement
 
 Put the fence on its own lines inside the Examples section, directly above the example it illustrates:
 
@@ -92,4 +172,4 @@ Put the fence on its own lines inside the Examples section, directly above the e
 - the ```figure fence with the spec
 - the `Input:` line, then `Output:` and `Explanation:` as usual
 
-The figure is drawn inside that example's card, above its input.
+The figure is drawn inside that example's card, above its input. Usually Example 1 is the one that needs it; add one to another example only when its shape is different in a way that matters. Mark the answer in a statement figure when the example's output is a route, a node or a region, the way LeetCode highlights it.

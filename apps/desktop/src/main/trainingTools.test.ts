@@ -627,3 +627,21 @@ describe("an accepted review of a run that failed only on its exit code", () => 
     } finally { store.close(); }
   });
 });
+
+describe("teach_lesson figures", () => {
+  it("refuses a lesson whose figure would not draw, naming the page and the field", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Practise trees");
+      const page = (body: string) => ({ title: "Where the route goes", body });
+      const lesson = (body: string) => ({ title: "Root-to-leaf sums", summary: "You will see which nodes a root-to-leaf sum passes through.", concepts: ["tree-path-sum"], pages: [page("A route from the root, drawn below.\n\n```figure\n" + body + "\n```\n")] });
+      const refused = await executeTrainingTool("teach_lesson", lesson('{"type":"tree","values":[1,null,2],"good":[1]}'), sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; report: { checks: Array<{ name: string; detail: string }> } };
+      expect(refused.status).toBe("invalid");
+      expect(refused.report.checks[0]?.detail).toMatch(/^Page 1, Figure 1: tree.good: index 1 is null/);
+      const taught = await executeTrainingTool("teach_lesson", lesson('{"type":"tree","values":[1,null,2],"path":[0,2]}'), sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string };
+      expect(taught.status).not.toBe("invalid");
+    } finally {
+      store.close();
+    }
+  });
+});
