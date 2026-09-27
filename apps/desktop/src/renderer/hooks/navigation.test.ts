@@ -99,12 +99,6 @@ describe("forget", () => {
     expect(after.entries.some((view) => view.page === "workspace" && view.sessionId === "a")).toBe(false);
   });
 
-  it("drops the baseline surface of the same session too", () => {
-    const history = visit(start, { page: "baseline", sessionId: "a" });
-    const after = forget(history, "a");
-    expect(after.entries).toEqual([{ page: "home" }]);
-  });
-
   it("keeps the cursor on the view it was on", () => {
     const history = visit(visit(visit(start, workspace("a")), { page: "settings" }), { page: "sessions" });
     const after = forget(step(history, -1)!.history, "a");

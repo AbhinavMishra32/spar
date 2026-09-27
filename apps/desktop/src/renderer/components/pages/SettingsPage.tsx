@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sparkle, Sun, Trash2, UserRound } from "lucide-react";
-import { LANGUAGES as SUPPORTED_LANGUAGES, type BaselineState, type Language } from "@spar/domain";
+import { LANGUAGES as SUPPORTED_LANGUAGES, type Language } from "@spar/domain";
 import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ReviewTargetMode, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -37,7 +37,7 @@ import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
-type SettingsSection = "account" | "agent" | "usage" | "connections" | "learning" | "privacy" | "appearance" | "advanced";
+type SettingsSection = "account" | "agent" | "usage" | "connections" | "learning" | "privacy" | "appearance";
 type NavItem = SidebarGroup<SettingsSection>["items"][number];
 
 /**
@@ -65,7 +65,7 @@ const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
     items: [
       { id: "agent", label: "Agent", icon: SparkleFilled, sections: ["Model", "Providers", "Tools", "Skills"] },
       { id: "usage", label: "Usage", icon: ChartColumn, sections: ["Overview", "Plan limits", "Models", "Sessions"] },
-      { id: "learning", label: "Learning", icon: Settings2, sections: ["Baseline", "Training preferences"] },
+      { id: "learning", label: "Learning", icon: Settings2, sections: ["Training preferences"] },
       { id: "connections", label: "Connections", icon: Link2, sections: ["Practice sources"] },
     ],
   },
@@ -73,7 +73,6 @@ const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
     label: "Your record",
     items: [
       { id: "privacy", label: "Data & Privacy", icon: Eye, sections: ["Data & Privacy"] },
-      { id: "advanced", label: "Learning Engine", icon: Globe, sections: ["Learning Engine", "Raw snapshot"] },
     ],
   },
 ];
@@ -560,19 +559,6 @@ function ConnectRow({ available, onPick }: { available: Provider[]; onPick(provi
   );
 }
 
-function LearningEngineInspector({ api }: { api: SparApi | undefined }) {
-  const [snapshot,setSnapshot]=useState<Record<string,unknown>|null>(null);
-  const [failure,setFailure]=useState("");
-  const read=useCallback(()=>{if(!api)return;setFailure("");void api.learningEngine().then(setSnapshot).catch((cause)=>setFailure(message(cause)));},[api]);
-  useEffect(read,[read]);
-  const model=snapshot?.model as Record<string,unknown>|undefined;
-  return <><Group label="Learning Engine">
-    <Row><div className="min-w-0 flex-1"><p className="text-content font-medium">Internal learner system</p><p className="mt-0.5 text-ui text-muted-foreground">Structured state, evidence, patterns, training decisions, rating history, and model metadata. This is inspectability—not a normal training surface.</p></div><Button onClick={read} size="sm" variant="outline"><RotateCw data-icon="inline-start" />Refresh</Button></Row>
-    <Row><div className="grid w-full grid-cols-3 gap-4 text-ui"><div><p className="text-muted-foreground">Schema</p><p className="mt-0.5 font-mono">v{String(model?.schemaVersion??"…")}</p></div><div><p className="text-muted-foreground">Policy</p><p className="mt-0.5 truncate font-mono">{String(model?.policyVersion??"…")}</p></div><div><p className="text-muted-foreground">Registry</p><p className="mt-0.5 truncate font-mono">{String(model?.abilityRegistry??"…")}</p></div></div></Row>
-  </Group>
-  <Group label="Raw snapshot"><div className="max-h-[30rem] overflow-auto p-3.5">{failure?<p className="text-ui text-destructive">{failure}</p>:snapshot?<pre className="whitespace-pre-wrap break-words font-mono text-[0.68rem] leading-5 text-muted-foreground">{JSON.stringify(snapshot,null,2)}</pre>:<p className="flex items-center gap-2 text-ui text-muted-foreground"><SparDots pattern="pulse" size={16} />Reading learner state…</p>}</div></Group></>;
-}
-
 export function SettingsPage({
   account,
   api,
@@ -580,8 +566,6 @@ export function SettingsPage({
   onLanguageChange,
   onSignedOut,
   onThemeChange,
-  baseline,
-  onBaseline,
   theme,
 }: {
   account: { displayName: string; email: string };
@@ -590,8 +574,6 @@ export function SettingsPage({
   onLanguageChange(language: Language): void;
   onSignedOut(): Promise<void>;
   onThemeChange(theme: ThemePreference): Promise<void>;
-  baseline: BaselineState;
-  onBaseline(): void;
   theme: ThemePreference;
 }) {
   const [inventory, setInventory] = useState<ProviderInventory | null>(null);
@@ -777,9 +759,7 @@ export function SettingsPage({
           <EditorSettings />
         </Group>}
 
-        {section === "learning" && <><Group label="Baseline">
-          <Row><div className="min-w-0 flex-1"><p className="text-content font-medium">Build your baseline</p><p className="mt-0.5 text-ui text-muted-foreground">{baseline.status === "complete" ? `Complete · ${Math.round(baseline.confidence*100)}% confidence from ${baseline.directEvidenceCount} direct calibration attempts.` : "Direct adaptive calibration is required before personalization can fully begin."}</p></div><Button onClick={onBaseline} size="sm" variant="outline">{baseline.status === "not-started" || baseline.status === "skipped" ? "Begin" : baseline.status === "complete" ? "Recalibrate" : "Continue"}</Button></Row>
-        </Group><Group label="Training preferences">
+        {section === "learning" && <><Group label="Training preferences">
           <ComplexityCheckRow api={api}/>
           <Row className="items-center gap-6 py-3">
             <div className="min-w-0 flex-1">
@@ -913,7 +893,6 @@ export function SettingsPage({
           </Row>
         </Group>}
 
-        {section === "advanced" && <LearningEngineInspector api={api} />}
             </div>
             </main>
           </div>

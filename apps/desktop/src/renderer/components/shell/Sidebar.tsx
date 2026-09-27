@@ -24,7 +24,7 @@ import type { AgentRun } from "../agent/agentRun";
 /* "challenge" is one challenge opened from History or Problems. Like
    "workspace" it draws its own toolbar and is not a destination in the nav; the
    parent destination is kept by App so Back returns to the surface it came from. */
-export type Page = "home" | "baseline" | "tracks" | "track" | "history" | "review" | "problems" | "visualizer" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
+export type Page = "home" | "tracks" | "track" | "history" | "review" | "problems" | "visualizer" | "sessions" | "ability" | "challenges" | "challenge" | "settings" | "workspace";
 
 /** What the sidebar can do to a session. Every one of these is a write the main
  *  process owns, so the row reports intent and never edits its own copy. */
@@ -320,7 +320,7 @@ export function Sidebar({
                  keeps the label constant and moves the highlight. */
               // A single challenge is a page under Challenges, so the section
               // stays lit rather than the nav going blank while it is open.
-              page === id || (id === "home" && (page === "baseline" || page === "ability")) || (id === "history" && page === "challenge")
+              page === id || (id === "home" && page === "ability") || (id === "history" && page === "challenge")
                 ? "bg-[var(--sidebar-accent-active)]"
                 : "hover:bg-[var(--sidebar-accent)]",
             )}

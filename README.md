@@ -149,12 +149,14 @@ Choose a language you can read and edit comfortably. You can change direction
 later; the point of the first session is to create evidence, not to lock your
 identity forever.
 
-### 3. Take the baseline seriously, but do not try to perform
+### 3. Let the first challenges show how you work, but do not try to perform
 
-The baseline is calibration. Spar is trying to see how you reason, not whether
-you can guess the expected answer quickly. Read the prompt aloud to yourself,
-write down the invariant or state you think matters, run a small case, and ask
-for help when you would ask a human coach.
+There is no separate placement test. The coach starts from what you told it,
+sets a first challenge, and learns from how you solve it: it reads your runs and
+edits, not just the final score, and writes what it sees in its notebook for the
+Track. Read the prompt aloud to yourself, write down the invariant or state you
+think matters, run a small case, and ask for help when you would ask a human
+coach.
 
 A wrong first attempt is useful. An unexplained perfect-looking solution is
 less informative than a short trajectory that shows where your reasoning became
@@ -206,12 +208,12 @@ perfectly staged completion.
 </p>
 
 <p align="center">
-  <sub>The agent reads the attempt as calibration evidence, answers a direct
-  question about ability, and explains why the next probe is different.</sub>
+  <sub>The agent reads the attempt as evidence, answers a direct question about
+  ability, and explains why the next challenge is different.</sub>
 </p>
 
 <p align="center">
-  <img src="docs/assets/screenshots/live-home-luna.png" alt="Maya Chen's Spar Home: a provisional rating, one solved challenge, one open session, and a baseline card." width="900">
+  <img src="docs/assets/screenshots/live-home-luna.png" alt="Maya Chen's Spar Home: a provisional rating, one solved challenge, and one open session." width="900">
 </p>
 
 <p align="center">

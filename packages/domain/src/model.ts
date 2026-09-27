@@ -507,25 +507,6 @@ export const learnerPatternSchema = z.object({
 });
 export type LearnerPattern = z.infer<typeof learnerPatternSchema>;
 
-export const trainingModeSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("recommended") }),
-  z.object({ kind: z.literal("focus"), focus: z.string().min(1).max(80) }),
-  z.object({ kind: z.literal("explore") }),
-  z.object({ kind: z.literal("source"), source: z.enum(["leetcode", "codeforces", "spar"]) }),
-  z.object({ kind: z.literal("quick") }),
-]);
-export type TrainingMode = z.infer<typeof trainingModeSchema>;
-
-export const baselineStateSchema = z.object({
-  status: z.enum(["not-started", "in-progress", "complete", "skipped"]),
-  confidence: z.number().min(0).max(1),
-  directEvidenceCount: z.number().int().nonnegative(),
-  importedEvidenceCount: z.number().int().nonnegative(),
-  completedAt: isoDate.nullable(),
-  sessionId: id.nullable().default(null),
-});
-export type BaselineState = z.infer<typeof baselineStateSchema>;
-
 export const sparNoticeSchema = z.object({ id, title: z.string(), body: z.string(), createdAt: isoDate });
 export type SparNotice = z.infer<typeof sparNoticeSchema>;
 
@@ -556,6 +537,8 @@ export const ratingPointSchema = z.object({
 });
 export type RatingPoint = z.infer<typeof ratingPointSchema>;
 
+/** What Home points at: the challenge the coach last set on the active Track,
+ *  and the ability it is aimed at. It is read from the coach's own records. */
 export const todayRecommendationSchema = z.object({
   id,
   trackId: id,
@@ -565,12 +548,6 @@ export const todayRecommendationSchema = z.object({
   challengeTitle: z.string(),
   abilityId: id.nullable(),
   abilityTitle: z.string(),
-  intent: pedagogicalActionSchema,
-  source: z.enum(["leetcode", "codeforces", "spar"]),
-  reason: z.string(),
-  reasoning: z.array(z.string()),
-  mode: trainingModeSchema,
-  createdAt: isoDate,
 });
 export type TodayRecommendation = z.infer<typeof todayRecommendationSchema>;
 

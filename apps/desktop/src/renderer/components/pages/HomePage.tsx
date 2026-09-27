@@ -1,14 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, CornerDownLeft, Sparkles } from "lucide-react";
-import type { AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary, SessionSummary, TrainingMode } from "@spar/domain";
+import { useEffect, useMemo } from "react";
+import { CornerDownLeft, Sparkles } from "lucide-react";
+import type { AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary, SessionSummary } from "@spar/domain";
 import type { BootstrapData, SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Page } from "../common/Page";
-import { SourceGlyph } from "../common/SourceGlyph";
 import { ChallengeEmblem } from "../workspace/ChallengeEmblem";
 import { AbilityDetail } from "./AbilityPage";
 
@@ -42,9 +38,7 @@ export function HomePage({
   challenges,
   concepts,
   data,
-  onBaseline,
   onCreateTrack,
-  onMode,
   onNavigate,
   onOpen,
   onOpenAbility,
@@ -61,9 +55,7 @@ export function HomePage({
   challenges: ChallengeHistorySummary[];
   concepts: ConceptSummary[];
   data: BootstrapData;
-  onBaseline(): void;
   onCreateTrack(): void;
-  onMode(mode: TrainingMode): Promise<void>;
   onNavigate(page: HomeDestination): void;
   onOpen(session: SessionSummary): void;
   onOpenAbility(abilityId: string | null): void;
@@ -78,11 +70,9 @@ export function HomePage({
   const continuing = Boolean(session?.activeQuestion);
   /* The one thing the page asks you to do, whichever it is today. */
   const primary: { label: string; run(): void; disabled: boolean } =
-    data.baseline.status !== "complete"
-      ? { label: data.baseline.status === "in-progress" ? "Continue baseline" : "Begin baseline", run: onBaseline, disabled: busy }
-      : !recommendation
-        ? { label: "Create a track", run: onCreateTrack, disabled: busy }
-        : { label: continuing ? "Continue" : "Start", run: () => session && onOpen(session), disabled: busy || !session };
+    !recommendation
+      ? { label: "Create a track", run: onCreateTrack, disabled: busy }
+      : { label: continuing ? "Continue" : "Start", run: () => session && onOpen(session), disabled: busy || !session };
 
   /* Enter starts it, from anywhere on the page that is not a control. */
   useEffect(() => {
@@ -115,14 +105,14 @@ export function HomePage({
   }
 
   const name = data.profile?.name?.split(/\s+/)[0] ?? data.account?.displayName?.split(/\s+/)[0] ?? "";
-  const checking = data.baseline.status === "complete" ? recommendation?.abilityTitle ?? "" : "";
+  const checking = recommendation?.abilityTitle ?? "";
 
   return (
     <Page className="pt-6" width="wide">
       <div className="flex min-h-[calc(100vh-10rem)] flex-col justify-center pb-10">
         <p className="text-ui text-muted-foreground">{today()}</p>
 
-        <Note data={data} name={name} onBaseline={onBaseline} onCreateTrack={onCreateTrack} onNavigate={onNavigate} onOpenAbility={onOpenAbility} onStart={primary.run} />
+        <Note data={data} name={name} onCreateTrack={onCreateTrack} onNavigate={onNavigate} onOpenAbility={onOpenAbility} onStart={primary.run} />
 
         {/* What the next challenge is checking, in one line. The agent's full
             reasoning is written for Spar, in the third person, and reads that
@@ -144,7 +134,6 @@ export function HomePage({
             {primary.label}
             <kbd className="ml-1 inline-flex items-center rounded border border-current/25 px-1 py-px opacity-70"><CornerDownLeft className="size-2.5" /></kbd>
           </Button>
-          {recommendation && data.baseline.status === "complete" && <ModeMenu mode={data.trainingMode} onMode={onMode} />}
         </div>
 
         {/* At the foot of the first screen: the note is what you read, the days
@@ -163,10 +152,9 @@ export function HomePage({
  * Spar's note, composed from the data and nothing else. Each sentence is there
  * only when it has something true to say, and each figure in it is a door.
  */
-function Note({ data, name, onBaseline, onCreateTrack, onNavigate, onOpenAbility, onStart }: {
+function Note({ data, name, onCreateTrack, onNavigate, onOpenAbility, onStart }: {
   data: BootstrapData;
   name: string;
-  onBaseline(): void;
   onCreateTrack(): void;
   onNavigate(page: HomeDestination): void;
   onOpenAbility(abilityId: string | null): void;
@@ -182,9 +170,7 @@ function Note({ data, name, onBaseline, onCreateTrack, onNavigate, onOpenAbility
   const delta = before && before.id !== rating.id ? rating.rating - before.rating : 0;
 
   const next: React.ReactNode =
-    data.baseline.status !== "complete" ? (
-      <>Spar hasn&apos;t watched you work yet — <Ref onClick={onBaseline}>set your baseline</Ref> and it will start writing for you.</>
-    ) : !recommendation ? (
+    !recommendation ? (
       <>Tell Spar what you&apos;re training for — <Ref onClick={onCreateTrack}>create a track</Ref> and it will start writing for you.</>
     ) : (
       <>
@@ -327,58 +313,8 @@ function Days({ challenges, data, onNavigate }: { challenges: ChallengeHistorySu
   );
 }
 
-/* ——— The mode ————————————————————————————————————————————————————— */
-
-/** "Not this one": what decides the next challenge, as a quiet menu beside the
- *  button it overrules. */
-function ModeMenu({ mode, onMode }: { mode: TrainingMode; onMode(mode: TrainingMode): Promise<void> }) {
-  const [focusOpen, setFocusOpen] = useState(false);
-  const [focus, setFocus] = useState(mode.kind === "focus" ? mode.focus : "");
-  const label = mode.kind === "recommended" ? "Recommended"
-    : mode.kind === "focus" ? `Focus: ${mode.focus}`
-    : mode.kind === "explore" ? "Exploring"
-    : mode.kind === "quick" ? "Quick practice"
-    : `${SOURCE_LABEL[mode.source]} only`;
-  const pick = (next: TrainingMode) => void onMode(next);
-  return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button className="max-w-56 text-muted-foreground" size="lg" variant="ghost">
-            <span className="truncate">{label}</span>
-            <ChevronDown data-icon="inline-end" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56">
-          <DropdownMenuItem onSelect={() => pick({ kind: "recommended" })}>Recommended</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setFocusOpen(true)}>Focus on…</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => pick({ kind: "explore" })}>Explore something new</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => pick({ kind: "quick" })}>Quick practice</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => pick({ kind: "source", source: "leetcode" })}><SourceGlyph className="size-3.5" source="leetcode" />LeetCode only</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => pick({ kind: "source", source: "codeforces" })}><SourceGlyph className="size-3.5" source="codeforces" />Codeforces only</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => pick({ kind: "source", source: "spar" })}><Sparkles className="size-3.5" />Spar challenges only</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <Dialog onOpenChange={setFocusOpen} open={focusOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Focus training</DialogTitle>
-            <DialogDescription>Spar still picks within this area.</DialogDescription>
-          </DialogHeader>
-          <Input autoFocus onChange={(event) => setFocus(event.target.value)} placeholder="Graphs, TypeScript types, dynamic programming…" value={focus} />
-          <DialogFooter>
-            <Button disabled={!focus.trim()} onClick={() => { pick({ kind: "focus", focus: focus.trim() }); setFocusOpen(false); }}>Apply focus</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
 /* ——— words ———————————————————————————————————————————————————————— */
 
-const SOURCE_LABEL: Record<"leetcode" | "codeforces" | "spar", string> = { leetcode: "LeetCode", codeforces: "Codeforces", spar: "Spar" };
 
 function today() { return new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" }); }
 

@@ -458,21 +458,6 @@ describe("adaptive product state",()=>{
     expect(store.listTracks().find((track)=>track.id===unset.track.id)?.language).toBe("python");
   }finally{store.close();}});
 
-  it("keeps baseline calibration out of Tracks and ordinary session navigation",()=>{const store=new LocalStore(":memory:");try{
-    const training=store.createTrack("Become reliable at backend problem solving","Backend Problem Solving");
-    const baseline=store.createBaselineSession();
-    expect(store.listTracks()).toEqual([expect.objectContaining({id:training.track.id})]);
-    expect(store.activeTrack()?.id).toBe(training.track.id);
-    expect(store.readSession(baseline.sessionId)?.summary).toMatchObject({context:"baseline",trackId:null,title:"Baseline"});
-    expect(store.getBaseline()).toMatchObject({status:"in-progress",sessionId:baseline.sessionId});
-    expect(store.createBaselineSession()).toEqual(baseline);
-  }finally{store.close();}});
-
-  it("keeps baseline evidence outside every Track learner model across restarts",()=>{const directory=mkdtempSync(path.join(tmpdir(),"spar-baseline-model-"));const database=path.join(directory,"state.sqlite3");try{
-    const first=new LocalStore(database);const track=first.createTrack("Prepare for algorithmic interviews");const baseline=first.createBaselineSession();const target=first.setTrainingTarget(baseline.sessionId,{ability:"Problem decomposition",specificGap:"Split an unfamiliar task into testable steps",desiredEvidence:"Defines the state before coding",avoidTesting:[]});first.ensureAbility(target.abilityId,target.abilityTitle,null);expect(first.listAbilities(track.track.id)).toEqual([]);first.close();
-    const reopened=new LocalStore(database);try{expect(reopened.activeTrack()?.id).toBe(track.track.id);expect(reopened.listAbilities(track.track.id)).toEqual([]);expect(reopened.readAbility(target.abilityId)).toMatchObject({id:target.abilityId,title:"Problem decomposition"});}finally{reopened.close();}
-  }finally{rmSync(directory,{recursive:true,force:true});}});
-
   it("keeps sessions and learner models isolated by Track workspace",()=>{const store=new LocalStore(":memory:");try{
     const typescript=store.createTrack("Become extremely strong at TypeScript and understand the language deeply");
     const interviews=store.createTrack("Prepare seriously for algorithmic interviews");
@@ -566,17 +551,12 @@ describe("adaptive product state",()=>{
     }finally{store.close();}});
   });
 
-  it("persists baseline, training mode and an inspectable Today decision",()=>{const store=new LocalStore(":memory:");try{
+  it("points Home at the challenge the coach last set",()=>{const store=new LocalStore(":memory:");try{
     const created=store.createTrack("Climb Codeforces while keeping practice targeted","Codeforces Climb");
     const target=store.setTrainingTarget(created.sessionId,{ability:"Graph recognition",specificGap:"Recognize implicit graph structure",desiredEvidence:"Models states and transitions independently",avoidTesting:["advanced syntax"],action:"diagnose"});
     store.ensureAbility(target.abilityId,target.abilityTitle);
     store.createQuestion(created.sessionId,design("Hidden transit map"),{valid:true});
-    store.setBaseline({status:"in-progress",confidence:0.3,directEvidenceCount:1});
-    store.setTrainingMode({kind:"focus",focus:"Graphs"});
-    const today=store.todayRecommendation();
-    expect(today).toMatchObject({trackTitle:"Codeforces Climb",challengeTitle:"Hidden transit map",abilityTitle:"Graph recognition",intent:"diagnose",mode:{kind:"focus",focus:"Graphs"}});
-    expect(store.getBaseline()).toMatchObject({status:"in-progress",directEvidenceCount:1});
-    expect(store.learningEngineSnapshot()).toMatchObject({model:{schemaVersion:4},activeTrack:{id:created.track.id}});
+    expect(store.todayRecommendation()).toEqual({id:expect.any(String),trackId:created.track.id,trackTitle:"Codeforces Climb",sessionId:created.sessionId,questionId:expect.any(String),challengeTitle:"Hidden transit map",abilityId:target.abilityId,abilityTitle:"Graph recognition"});
   }finally{store.close();}});
 
   it("requires independent attempts before promoting an observation to a pattern",()=>{const store=new LocalStore(":memory:");try{
@@ -679,8 +659,6 @@ describe("adaptive product state",()=>{
     const created=source.createTrack("Become deeply fluent in the TypeScript type system","TypeScript Depth");
     const target=source.setTrainingTarget(created.sessionId,{ability:"Generic constraint design",specificGap:"Constrain inference without widening",desiredEvidence:"Preserves the caller's narrow type",avoidTesting:[]});
     source.ensureAbility(target.abilityId,target.abilityTitle);
-    source.setBaseline({status:"in-progress",confidence:0.4,directEvidenceCount:1});
-    source.setTrainingMode({kind:"focus",focus:"TypeScript"});
     // Several adaptive writes still produce one latest projection. Attempt
     // events remain separate rows and are deliberately not compacted this way.
     expect(source.pendingSync().filter((item)=>item.kind==="learning-state")).toHaveLength(1);
@@ -690,8 +668,6 @@ describe("adaptive product state",()=>{
     restored.restoreLearningState(source.cloudLearningState());
     expect(restored.listTracks()).toEqual([expect.objectContaining({title:"TypeScript Depth"})]);
     expect(restored.activeTrack()?.id).toBe(created.track.id);
-    expect(restored.getBaseline()).toMatchObject({status:"in-progress",directEvidenceCount:1});
-    expect(restored.getTrainingMode()).toEqual({kind:"focus",focus:"TypeScript"});
     expect(restored.abilityStates()).toEqual([expect.objectContaining({abilityId:target.abilityId,trainingStatus:"unknown"})]);
     expect(restored.pendingSync()).toEqual([]);
   }finally{source.close();restored.close();}});
@@ -794,11 +770,10 @@ describe("the shelf",()=>{
   });
 });
 
-it("deletes a Track and its owned history while preserving other Tracks and baseline", () => {
+it("deletes a Track and its owned history while preserving other Tracks", () => {
   const store = new LocalStore(":memory:");
   try {
     const keep = store.createTrack("Practise graph algorithms");
-    const baseline = store.createBaselineSession();
     const removed = store.createTrack("Practise recursive algorithms");
     const extra = store.createSession("More recursion practice", removed.track.id);
     const target = store.setTrainingTarget(removed.sessionId, { ability: "Recursion", specificGap: "Base cases", desiredEvidence: "States the base case", avoidTesting: [] });
@@ -812,14 +787,12 @@ it("deletes a Track and its owned history while preserving other Tracks and base
     expect(store.readAttempt(question.attemptId)).toEqual([]);
     expect(store.listAbilities(removed.track.id)).toEqual([]);
     expect(store.readSession(keep.sessionId)).not.toBeNull();
-    expect(store.readSession(baseline.sessionId)).not.toBeNull();
     expect(store.cloudLearningState().tracks.map((track) => track.id)).toEqual([keep.track.id]);
     expect(store.pendingSync().filter((item) => item.kind === "session-delete")).toHaveLength(2);
     expect(store.deleteTrack(removed.track.id)).toBe(false);
     expect(store.deleteTrack(keep.track.id)).toBe(true);
     expect(store.activeTrack()).toBeNull();
     expect(store.listTracks()).toEqual([]);
-    expect(store.readSession(baseline.sessionId)).not.toBeNull();
   } finally { store.close(); }
 });
 

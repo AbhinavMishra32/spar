@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { BaselineState, Language } from "@spar/domain";
+import type { Language } from "@spar/domain";
 import type { SkillSummary, SparApi, ThemePreference } from "../shared/api";
 import figuresSkill from "../../build/skills/challenge-figures/SKILL.md?raw";
 import { SettingsPage } from "./components/pages/SettingsPage";
@@ -12,15 +12,6 @@ import "./theme.css";
    see the shell, the sidebar, the cards and the section rail — which is the
    part of this page that is worth looking at rather than clicking. Not shipped;
    it is here for the same reason harness.html is. */
-
-const baseline: BaselineState = {
-  status: "complete",
-  sessionId: null,
-  completedAt: null,
-  confidence: 0.82,
-  directEvidenceCount: 14,
-  importedEvidenceCount: 0,
-};
 
 /* Skills against an in-memory store, seeded from the real built-in file, so the
    Skills page can be clicked through. Every other method never settles, which
@@ -57,9 +48,7 @@ function Preview() {
         <SettingsPage
           account={{ displayName: "Ada Lovelace", email: "ada@example.com" }}
           api={api}
-          baseline={baseline}
           language={language}
-          onBaseline={() => {}}
           onLanguageChange={setLanguage}
           onSignedOut={async () => {}}
           onThemeChange={async (next) => {

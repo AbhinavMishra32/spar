@@ -57,7 +57,6 @@ export function Workspace({
   onOpenSettings,
   onAbandon,
   trail,
-  context = "training",
 }: {
   detail: SessionDetail;
   /** What the problem's concept chips need to preview and open. */
@@ -78,7 +77,6 @@ export function Workspace({
   /** The session's own challenges, for stepping back into the ones already
    *  solved. Absent for a session with only one. */
   trail?: ChallengeTrail | undefined;
-  context?: "training" | "baseline";
 }) {
   // Editable files are what the learner switches between; read-only test files
   // belong in the Testcase panel rather than competing for editor tabs.
@@ -553,9 +551,7 @@ export function Workspace({
           <DialogHeader>
             <DialogTitle>Give up on this challenge?</DialogTitle>
             <DialogDescription>
-              {context === "baseline"
-                ? "This probe ends here. What you tried remains calibration evidence so Spar can choose a cleaner diagnostic next."
-                : "It ends here and the session returns to chat. What you tried is kept as evidence, so the agent can pick something better next."}
+              It ends here and the session returns to chat. What you tried is kept as evidence, so the agent can pick something better next.
             </DialogDescription>
           </DialogHeader>
           <Textarea
@@ -644,23 +640,18 @@ export function Workspace({
         }
         nav={nav}
         onExpandSidebar={onExpandSidebar}
-        /* Baseline keeps a subtitle because "Adaptive calibration" is the only
-           thing on that toolbar saying what the run is for. A challenge does not:
-           the session's own name went here, and a session is named by the sentence
+        /* No subtitle: the session's own name went here, and a session is named by the sentence
            you typed to start it — "Wanna get better in sliding window python for
            interview. start from basics an…" — which is a paragraph wearing a
            label's clothes. It truncated to nothing useful, and everything it was
            standing in for is already on screen: the stepper says which challenge,
            the panel header says which problem. */
-        {...(context === "baseline" ? { subtitle: `Adaptive calibration · ${question.abilityTitle}` } : {})}
         /* The stepper stands in for the title once there is more than one
            challenge to step through: it says the same thing — which challenge of
            how many — and is the way back to the rest of them. */
-        title={context === "baseline"
-          ? `Baseline probe ${question.ordinal}`
-          : trail && trail.stops.length > 1
-            ? <ChallengeStepper currentId={question.id} trail={trail} />
-            : `Challenge ${question.ordinal}`}
+        title={trail && trail.stops.length > 1
+          ? <ChallengeStepper currentId={question.id} trail={trail} />
+          : `Challenge ${question.ordinal}`}
       />
 
       {/* The conversation is the surface; the working panes are sheets inset into

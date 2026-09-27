@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { AgentUsageRow, CoachNotebookVersion, UsageReport, UsageTotals } from "../shared/api.js";
+import type { ActivityReport, AgentUsageRow, CoachNotebookVersion, UsageReport, UsageTotals } from "../shared/api.js";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { challengeFileEntries, codePreview } from "./challengeFiles.js";
 import { foldSubmissions, submissionSummary, type SubmissionContext, type SubmissionRecord, type SubmissionRow } from "../shared/submissions.js";
@@ -8,7 +8,7 @@ import { challengeItemRating, decay as decayRating, updateRating, ESTABLISHED_DE
 import { challengeResult, elapsedDays } from "./rating.js";
 import { ReviewLedger } from "./reviews.js";
 import { DEFAULT_FSRS, DEFAULT_PROBLEM_SOURCES, problemSourcesSchema, type ProblemSource } from "@spar/domain";
-import { askUserQuestionRequestSchema, baselineStateSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, savedProblemSchema, sessionCheckpointSchema, trainingModeSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type BaselineState, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SavedProblem, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingMode, type TrainingTarget } from "@spar/domain";
+import { askUserQuestionRequestSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, savedProblemSchema, sessionCheckpointSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SavedProblem, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingTarget } from "@spar/domain";
 
 type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null; problem_sources:string|null };
 const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at,problem_sources";
@@ -170,7 +170,6 @@ export class LocalStore {
       CREATE TABLE IF NOT EXISTS pattern_evidence (pattern_id TEXT NOT NULL REFERENCES learner_patterns(id) ON DELETE CASCADE, evidence_id TEXT NOT NULL REFERENCES learner_evidence(id) ON DELETE CASCADE, PRIMARY KEY(pattern_id,evidence_id));
       CREATE TABLE IF NOT EXISTS learner_notices (id TEXT PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, created_at TEXT NOT NULL, dismissed_at TEXT);
       CREATE TABLE IF NOT EXISTS rating_points (id TEXT PRIMARY KEY, rating INTEGER NOT NULL, provisional INTEGER NOT NULL, reason TEXT NOT NULL, occurred_at TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS training_decisions (id TEXT PRIMARY KEY, track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE, session_id TEXT, ability_id TEXT, intent TEXT NOT NULL, reason TEXT NOT NULL, mode TEXT NOT NULL, candidate_snapshot TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL);
       /* A picture the agent built into an explanation, kept because the
          explanation outlives the turn. The transcript stores only this row's id,
          so a message from three weeks ago still draws its own diagram instead of
@@ -274,6 +273,8 @@ export class LocalStore {
     const updateIntake=this.db.prepare("UPDATE session_intake SET question=? WHERE session_id=?");
     this.db.transaction(()=>{for(const row of legacyIntakes){try{askUserQuestionRequestSchema.parse(JSON.parse(row.question));}catch{updateIntake.run(JSON.stringify(legacyQuestionRequest(row.question)),row.session_id);}}})();
     this.normalizeLegacyBaseline();
+    /* The rule-based engine's decisions, training mode and baseline calibration are gone: the coach decides. */
+    this.db.exec("DROP TABLE IF EXISTS training_decisions; DELETE FROM settings WHERE key IN ('baseline-state','training-mode');");
     this.backfillTracks();
     this.migrateLegacyTrackWorkspaces();
     this.backfillLearningTracks();
@@ -287,7 +288,6 @@ export class LocalStore {
   listSessions(): SessionSummary[] { return (this.db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY (pinned_at IS NULL), updated_at DESC`).all() as SessionRow[]).map(row => this.toSession(row)); }
   createSession(goal: string, trackId?: string, problemSources?: ProblemSource[]): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;const resolvedTrack=trackId??this.activeTrack()?.id??this.createTrackRecord(goal,title).id;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,problem_sources) VALUES (?,?,?,?,?,'[]','[]',0,?,?,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now,resolvedTrack,storedProblemSources(problemSources));this.setActiveTrack(resolvedTrack);this.enqueue("session-create",{sessionId,goal,title,trackId:resolvedTrack,createdAt:now});this.queueLearningState();return{sessionId}; }
 
-  createBaselineSession(){const baseline=this.getBaseline();if(baseline.sessionId&&this.readSession(baseline.sessionId))return{sessionId:baseline.sessionId};const sessionId=randomUUID();const now=new Date().toISOString();const goal="Establish a direct adaptive programming baseline.";this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,context) VALUES (?,?,?,?,?,'[]','[]',0,?,?,NULL,'baseline')").run(sessionId,"Baseline",goal,"Calibrate current problem-solving ability with the smallest useful sequence of direct coding probes.","planning",now,now);this.enqueue("session-create",{sessionId,goal,title:"Baseline",context:"baseline",createdAt:now});const importedEvidenceCount=Math.max(baseline.importedEvidenceCount,this.abilityStates().reduce((sum,item)=>sum+item.evidenceCount,0));this.setBaseline({status:"in-progress",sessionId,importedEvidenceCount});return{sessionId};}
 
   createTrack(goal:string,title?:string,language?:Language|null,problemSources?:ProblemSource[]){const track=this.createTrackRecord(goal,title,language);const session=this.createSession(goal,track.id,problemSources);return{track,sessionId:session.sessionId};}
   deleteTrack(trackId: string): boolean {
@@ -927,30 +927,14 @@ export class LocalStore {
   learnerProgress(trackId?:string|null):LearnerProgress{const scope=this.learningTrackId(trackId);const history=this.ratingHistory();const rating=history.at(-1)??this.ensureRating();return{rating,ratingHistory:history.length?history:[rating],abilities:this.abilityStates(scope),patterns:this.listPatterns(scope),notices:this.listNotices(6,scope)};}
   progressByTrack(){return Object.fromEntries(this.listTracks().map((track)=>[track.id,this.learnerProgress(track.id)]));}
 
-  getBaseline():BaselineState{return baselineStateSchema.catch({status:"not-started",confidence:0,directEvidenceCount:0,importedEvidenceCount:0,completedAt:null,sessionId:null}).parse(this.getSetting("baseline-state",{status:"not-started",confidence:0,directEvidenceCount:0,importedEvidenceCount:0,completedAt:null,sessionId:null}));}
-  setBaseline(input:Partial<BaselineState>){const previous=this.getBaseline();const next=baselineStateSchema.parse({...previous,...input});this.setSetting("baseline-state",next);this.queueLearningState();return next;}
-  getTrainingMode():TrainingMode{return trainingModeSchema.catch({kind:"recommended"}).parse(this.getSetting("training-mode",{kind:"recommended"}));}
-  setTrainingMode(mode:TrainingMode){const parsed=trainingModeSchema.parse(mode);this.setSetting("training-mode",parsed);this.queueLearningState();return parsed;}
 
   todayRecommendation():TodayRecommendation|null{
     const track=this.activeTrack();if(!track)return null;
-    const mode=this.getTrainingMode();
     const session=this.db.prepare("SELECT id FROM sessions WHERE track_id=? AND archived_at IS NULL ORDER BY updated_at DESC LIMIT 1").get(track.id) as {id:string}|undefined;
-    const detail=session?this.readSession(session.id):null;
-    const question=detail?.question;
+    const question=session?this.readSession(session.id)?.question:null;
     const rawTarget=session?this.latestTarget(session.id):null;
     const target=rawTarget?normalizeTarget(rawTarget):null;
-    const source=question?.source?.source??"spar";
-    const ability=target?this.abilityStates().find((item)=>item.abilityId===target.abilityId):undefined;
-    const intent=target?.action??((ability?.confidence??0)<0.45?"diagnose":"practise");
-    const challengeTitle=question?.title??`Continue ${track.title}`;
-    const reason=question
-      ? `${intentCopy(intent)} ${target?.specificGap??question.specificGap}`
-      : "Spar is reviewing this Track's evidence before it chooses a narrowly matched challenge.";
-    const recommendation={id:question?.id??track.id,trackId:track.id,trackTitle:track.title,sessionId:session?.id??null,questionId:question?.id??null,challengeTitle,abilityId:target?.abilityId??null,abilityTitle:target?.abilityTitle??track.priorities[0]??"Initial direction",intent,source,reason,reasoning:[`Training intent: ${intentCopy(intent)}`,ability?`Confidence is ${Math.round(ability.confidence*100)}% from ${ability.evidenceCount} linked evidence item${ability.evidenceCount===1?"":"s"}.`:"This ability is still unknown, so Spar is seeking clean diagnostic evidence.",question?.source?`${question.source.source==="leetcode"?"LeetCode":"Codeforces"} provides the best current fit and its own judge.`:"A Spar challenge keeps unrelated difficulty from obscuring the target."],mode,createdAt:new Date().toISOString()} satisfies TodayRecommendation;
-    const existing=this.db.prepare("SELECT id FROM training_decisions WHERE id=?").get(recommendation.id);
-    if(!existing){this.db.prepare("INSERT INTO training_decisions (id,track_id,session_id,ability_id,intent,reason,mode,candidate_snapshot,created_at) VALUES (?,?,?,?,?,?,?,?,?)").run(recommendation.id,track.id,session?.id??null,target?.abilityId??null,intent,reason,JSON.stringify(mode),JSON.stringify([{title:challengeTitle,source,selected:true}]),recommendation.createdAt);this.queueLearningState();}
-    return recommendation;
+    return{id:question?.id??track.id,trackId:track.id,trackTitle:track.title,sessionId:session?.id??null,questionId:question?.id??null,challengeTitle:question?.title??`Continue ${track.title}`,abilityId:target?.abilityId??null,abilityTitle:target?.abilityTitle??""};
   }
   /** The ability's own page: the document, and the challenges that are the reason
    *  it exists. Evidence is the challenges created against this ability's targets
@@ -1447,6 +1431,16 @@ export class LocalStore {
       .map(({modelList,...row})=>({...row,models:modelList?modelList.split(","):[]}));
     return{since,totals,daily,models,sessions};
   }
+  /** The practice calendar: every pass, and every day the learner worked, split
+   *  by where the challenge came from. Only the learner's own actions count as
+   *  work — a challenge the agent set and nobody opened is not a day practised.
+   *  Days are local, as in `usageReport`. */
+  activityReport():ActivityReport{
+    const source="COALESCE(json_extract(q.source_ref,'$.source'),'spar')";
+    const solves=this.db.prepare(`SELECT date(e.occurred_at,'localtime') AS day,MIN(e.occurred_at) AS at,q.id AS questionId,q.title AS title,${source} AS source,COALESCE(json_extract(q.source_ref,'$.difficulty'),q.difficulty) AS difficulty,json_extract(q.source_ref,'$.displayId') AS displayId FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id WHERE e.type='attempt_completed' AND json_extract(e.payload,'$.outcome')='passed' GROUP BY q.id,1 ORDER BY at`).all() as ActivityReport["solves"];
+    const days=this.db.prepare(`SELECT date(e.occurred_at,'localtime') AS day,${source} AS source,COUNT(DISTINCT q.id) AS worked,SUM(e.type IN ('test_run','submission_created')) AS runs FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id JOIN questions q ON q.id=a.question_id WHERE e.type IN ('file_changed','test_run','submission_created','hint_requested','learner_remark') GROUP BY 1,2 ORDER BY day`).all() as ActivityReport["days"];
+    return{solves:solves.map((row)=>({...row,displayId:row.displayId===null?null:String(row.displayId)})),days};
+  }
   /* ---- Restore ------------------------------------------------------------
      The pull half of sync. Everything here writes rows the cloud already has, so
      it differs from every other insert path in this class in two ways that
@@ -1536,15 +1530,14 @@ export class LocalStore {
   /** Account-scoped learner state must not survive a permanent account deletion. Preferences stay device-scoped. */
   /* The cached problems go too. Their statements are public, but the copy Spar
      holds records whether *this* learner has solved each one, which is theirs. */
-  learningEngineSnapshot(){const trackId=this.activeTrack()?.id??null;return{baseline:this.getBaseline(),trainingMode:this.getTrainingMode(),activeTrack:this.activeTrack(),abilityState:this.abilityStates(trackId),evidence:this.db.prepare("SELECT e.* FROM learner_evidence e JOIN ability_documents a ON a.id=e.ability_id WHERE a.track_id IS ? ORDER BY e.occurred_at DESC LIMIT 100").all(trackId),patterns:this.listPatterns(trackId),decisions:this.db.prepare("SELECT * FROM training_decisions WHERE track_id IS ? ORDER BY created_at DESC LIMIT 50").all(trackId),notices:this.listNotices(20,trackId),rating:this.ratingHistory(),model:{schemaVersion:4,policyVersion:"adaptive-policy-v1",abilityRegistry:"concept-taxonomy-v1"}};}
-  cloudLearningState(){const tracks=this.listTracks();return{version:2,updatedAt:new Date().toISOString(),tracks,activeTrackId:this.activeTrack()?.id??null,sessionTracks:this.db.prepare("SELECT id sessionId,track_id trackId FROM sessions WHERE track_id IS NOT NULL").all(),abilityTracks:this.db.prepare("SELECT id abilityId,track_id trackId FROM ability_documents WHERE track_id IS NOT NULL").all(),baseline:this.getBaseline(),trainingMode:this.getTrainingMode(),abilityState:tracks.flatMap((track)=>this.abilityStates(track.id)),evidence:this.db.prepare("SELECT * FROM learner_evidence").all(),patterns:this.db.prepare("SELECT * FROM learner_patterns").all(),patternEvidence:this.db.prepare("SELECT * FROM pattern_evidence").all(),notices:this.db.prepare("SELECT * FROM learner_notices").all(),rating:this.db.prepare("SELECT * FROM rating_points").all(),decisions:this.db.prepare("SELECT * FROM training_decisions").all()};}
+  cloudLearningState(){const tracks=this.listTracks();return{version:2,updatedAt:new Date().toISOString(),tracks,activeTrackId:this.activeTrack()?.id??null,sessionTracks:this.db.prepare("SELECT id sessionId,track_id trackId FROM sessions WHERE track_id IS NOT NULL").all(),abilityTracks:this.db.prepare("SELECT id abilityId,track_id trackId FROM ability_documents WHERE track_id IS NOT NULL").all(),abilityState:tracks.flatMap((track)=>this.abilityStates(track.id)),evidence:this.db.prepare("SELECT * FROM learner_evidence").all(),patterns:this.db.prepare("SELECT * FROM learner_patterns").all(),patternEvidence:this.db.prepare("SELECT * FROM pattern_evidence").all(),notices:this.db.prepare("SELECT * FROM learner_notices").all(),rating:this.db.prepare("SELECT * FROM rating_points").all()};}
   queueLearningState(){if(this.restoring)return;this.db.prepare("DELETE FROM sync_outbox WHERE kind='learning-state'").run();this.enqueue("learning-state",this.cloudLearningState());}
   restoreLearningState(value:unknown){if(!value||typeof value!=="object")return;const state=value as Record<string,unknown>;const tracks=Array.isArray(state.tracks)?state.tracks:[];
     /* A restore runs before the outbox flush. If this device has a pending
        snapshot, it is the only copy that can contain its offline work; replacing
        it with the cloud document would silently move the learner model backward. */
     if(this.db.prepare("SELECT 1 FROM sync_outbox WHERE kind='learning-state' LIMIT 1").get())return;
-    this.inRestore(()=>{this.db.prepare("UPDATE sessions SET track_id=NULL").run();for(const table of ["pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","learner_ability_state","tracks"])this.db.prepare(`DELETE FROM ${table}`).run();/* Columns named rather than positional: this insert silently became wrong the
+    this.inRestore(()=>{this.db.prepare("UPDATE sessions SET track_id=NULL").run();for(const table of ["pattern_evidence","learner_patterns","learner_evidence","learner_notices","rating_points","learner_ability_state","tracks"])this.db.prepare(`DELETE FROM ${table}`).run();/* Columns named rather than positional: this insert silently became wrong the
          moment the table grew a language, and a restore that writes a Track's goal
          into its status column is not a failure anyone would diagnose from here. */
       const insertTrack=this.db.prepare("INSERT INTO tracks (id,title,goal,status,language,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)");for(const item of tracks){const row=item as Track;try{insertTrack.run(row.id,row.title,row.goal,row.status,row.language??null,JSON.stringify(row.emphasis??[]),JSON.stringify(row.priorities??[]),JSON.stringify(row.investigating??[]),JSON.stringify(row.monitoring??[]),row.createdAt,row.updatedAt);}catch{/* Ignore a future track shape. */}}
@@ -1562,8 +1555,7 @@ export class LocalStore {
          the number like a beginner's. Older snapshots have neither field, and
          those genuinely were never measured, so the defaults are right for them. */
       const rating=this.db.prepare("INSERT OR IGNORE INTO rating_points (id,rating,deviation,volatility,provisional,reason,occurred_at,track_id,question_id) VALUES (?,?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.rating)?state.rating:[]){const row=item as Record<string,unknown>;rating.run(row.id,row.rating,row.deviation??INITIAL_DEVIATION,row.volatility??INITIAL_VOLATILITY,row.provisional,row.reason,row.occurred_at,row.track_id??null,row.question_id??null);}
-      const decision=this.db.prepare("INSERT OR IGNORE INTO training_decisions VALUES (?,?,?,?,?,?,?,?,?)");for(const item of Array.isArray(state.decisions)?state.decisions:[]){const row=item as Record<string,unknown>;try{decision.run(row.id,row.track_id,row.session_id,row.ability_id,row.intent,row.reason,row.mode,row.candidate_snapshot,row.created_at);}catch{/* Defensive restore. */}}
-      if(state.baseline){const baseline=baselineStateSchema.safeParse(state.baseline);if(baseline.success){this.setSetting("baseline-state",baseline.data);if(baseline.data.sessionId)this.db.prepare("UPDATE sessions SET context='baseline',track_id=NULL WHERE id=?").run(baseline.data.sessionId);}}if(state.trainingMode)this.setSetting("training-mode",state.trainingMode);if(typeof state.activeTrackId==="string")this.setSetting("active-track-id",state.activeTrackId);
+      if(typeof state.activeTrackId==="string")this.setSetting("active-track-id",state.activeTrackId);
     /* The restored ability states were computed on the device that sent them,
        from evidence this device has now imported and can read for itself. Doing
        so is not a courtesy: a snapshot written before proficiency followed the
@@ -1571,7 +1563,7 @@ export class LocalStore {
        reintroduce them one machine at a time. */
     });this.backfillTracks();this.backfillLearningTracks();this.reconcileEveryAbility();this.ensureRating();}
 
-  clearAccountData(){this.db.transaction(()=>{this.reviews.clear();for(const table of ["sync_outbox","pattern_evidence","learner_patterns","learner_evidence","learner_notices","training_decisions","rating_points","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","learner_ability_state","tracks","ability_documents","learner_profile","practice_problems","practice_problem_links"])this.db.prepare(`DELETE FROM ${table}`).run();
+  clearAccountData(){this.db.transaction(()=>{this.reviews.clear();for(const table of ["sync_outbox","pattern_evidence","learner_patterns","learner_evidence","learner_notices","rating_points","question_concepts","ability_concepts","attempt_events","checkpoints","agent_messages","session_decisions","session_intake","attempts","questions","training_targets","sessions","learner_ability_state","tracks","ability_documents","learner_profile","practice_problems","practice_problem_links"])this.db.prepare(`DELETE FROM ${table}`).run();
     /* Seeded concepts are shipped vocabulary and stay. A concept the agent
        invented is not: it names something this learner was working on, and
        serving it to whoever signs in next would leak that. */
@@ -1592,7 +1584,7 @@ export class LocalStore {
    * Track. That is a renamed history list, not a workspace. Collapse that exact
    * migration shape once; deliberate Tracks have independently-created Track
    * timestamps and are left alone. */
-  private migrateLegacyTrackWorkspaces(){if(this.getSetting<boolean>("track-workspace-migration-v2",false))return;const rows=this.db.prepare(`SELECT t.id,s.id session_id,s.created_at,s.updated_at FROM tracks t JOIN sessions s ON s.track_id=t.id WHERE t.goal=s.original_goal AND t.title=substr(s.title,1,80) AND t.created_at=s.created_at AND t.updated_at=s.updated_at AND (SELECT COUNT(*) FROM sessions owned WHERE owned.track_id=t.id)=1`).all() as Array<{id:string;session_id:string;created_at:string;updated_at:string}>;if(rows.length>1){const trackId=randomUUID();const oldest=rows.map((row)=>row.created_at).sort()[0]!;const newest=rows.map((row)=>row.updated_at).sort().at(-1)!;this.db.transaction(()=>{this.db.prepare("INSERT INTO tracks (id,title,goal,status,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,? ,?,'active','[]','[]','[]','[]',?,?)").run(trackId,"General practice","Continue adaptive practice across my existing Spar history.",oldest,newest);const attach=this.db.prepare("UPDATE sessions SET track_id=? WHERE id=?");const moveAbilities=this.db.prepare("UPDATE ability_documents SET track_id=? WHERE track_id=?");const moveNotices=this.db.prepare("UPDATE learner_notices SET track_id=? WHERE track_id=?");const moveRatings=this.db.prepare("UPDATE rating_points SET track_id=? WHERE track_id=?");const moveDecisions=this.db.prepare("UPDATE training_decisions SET track_id=? WHERE track_id=?");for(const row of rows){attach.run(trackId,row.session_id);moveAbilities.run(trackId,row.id);moveNotices.run(trackId,row.id);moveRatings.run(trackId,row.id);moveDecisions.run(trackId,row.id);}const remove=this.db.prepare("DELETE FROM tracks WHERE id=?");for(const row of rows)remove.run(row.id);this.setSetting("active-track-id",trackId);})();}this.setSetting("track-workspace-migration-v2",true);}
+  private migrateLegacyTrackWorkspaces(){if(this.getSetting<boolean>("track-workspace-migration-v2",false))return;const rows=this.db.prepare(`SELECT t.id,s.id session_id,s.created_at,s.updated_at FROM tracks t JOIN sessions s ON s.track_id=t.id WHERE t.goal=s.original_goal AND t.title=substr(s.title,1,80) AND t.created_at=s.created_at AND t.updated_at=s.updated_at AND (SELECT COUNT(*) FROM sessions owned WHERE owned.track_id=t.id)=1`).all() as Array<{id:string;session_id:string;created_at:string;updated_at:string}>;if(rows.length>1){const trackId=randomUUID();const oldest=rows.map((row)=>row.created_at).sort()[0]!;const newest=rows.map((row)=>row.updated_at).sort().at(-1)!;this.db.transaction(()=>{this.db.prepare("INSERT INTO tracks (id,title,goal,status,emphasis,priorities,investigating,monitoring,created_at,updated_at) VALUES (?,? ,?,'active','[]','[]','[]','[]',?,?)").run(trackId,"General practice","Continue adaptive practice across my existing Spar history.",oldest,newest);const attach=this.db.prepare("UPDATE sessions SET track_id=? WHERE id=?");const moveAbilities=this.db.prepare("UPDATE ability_documents SET track_id=? WHERE track_id=?");const moveNotices=this.db.prepare("UPDATE learner_notices SET track_id=? WHERE track_id=?");const moveRatings=this.db.prepare("UPDATE rating_points SET track_id=? WHERE track_id=?");for(const row of rows){attach.run(trackId,row.session_id);moveAbilities.run(trackId,row.id);moveNotices.run(trackId,row.id);moveRatings.run(trackId,row.id);}const remove=this.db.prepare("DELETE FROM tracks WHERE id=?");for(const row of rows)remove.run(row.id);this.setSetting("active-track-id",trackId);})();}this.setSetting("track-workspace-migration-v2",true);}
   private backfillLearningTracks(){const fallback=this.activeTrack()?.id??null;if(!fallback)return;this.db.prepare(`UPDATE ability_documents SET track_id=COALESCE((SELECT s.track_id FROM training_targets t JOIN sessions s ON s.id=t.session_id WHERE t.ability_id=ability_documents.id AND s.track_id IS NOT NULL ORDER BY t.created_at DESC LIMIT 1),?) WHERE track_id IS NULL AND NOT EXISTS (SELECT 1 FROM training_targets t JOIN sessions s ON s.id=t.session_id WHERE t.ability_id=ability_documents.id AND s.context='baseline')`).run(fallback);this.db.prepare("UPDATE learner_notices SET track_id=? WHERE track_id IS NULL").run(fallback);
     /* Ratings are deliberately not backfilled onto a Track. The column only
        records which line of practice produced a point, and the account's opening
@@ -1794,7 +1786,6 @@ function conceptKind(value:unknown):ConceptKind{return value==="dsa"||value==="c
 function conceptStandingOf(summary:ConceptSummary){return CONCEPT_STANDING_LABEL[conceptStanding(conceptStrength(summary))].toLowerCase();}
 function trackTitle(goal:string){const clean=goal.replace(/^(i want to|i'd like to|help me)\s+/i,"").trim();return clean.length>52?`${clean.slice(0,49).trimEnd()}…`:clean.replace(/^./,(letter)=>letter.toUpperCase());}
 function firstNarrativeLine(markdown:string){return markdown.split("\n").map((line)=>line.replace(/^#+\s*/,"").trim()).find((line)=>line.length>8)??"Spar is still forming a reliable belief.";}
-function intentCopy(intent:TrainingTarget["action"]){return({diagnose:"Spar needs cleaner evidence before treating this as a weakness.",teach:"A prerequisite needs a short, explicit intervention.",practise:"Repeated evidence makes deliberate practice worthwhile.",transfer:"Direct execution looks reliable; the next question tests transfer.",advance:"The current level is supported strongly enough to raise the constraint.",retain:"This was previously reliable but has not been observed recently."} as const)[intent];}
 type NotebookRow={track_key:string;version:number;markdown:string;note:string;author:string;session_id:string|null;created_at:string};
 function toNotebook(row:NotebookRow):CoachNotebookVersion{return{trackId:row.track_key||null,version:row.version,markdown:row.markdown,note:row.note,author:row.author==="learner"?"learner":"coach",sessionId:row.session_id,createdAt:row.created_at};}
 export type JourneyChallenge={id:string;title:string;sessionId:string;createdAt:string;source:"spar"|"leetcode"|"codeforces";difficulty:string;itemRating:number;language:string;outcome:string|null;assistance:string;elapsedMs:number|null;testRuns:number;passedCases:number|null;totalCases:number|null;replacesTitle:string|null;replacedByTitle:string|null;concepts:string[];why:string;task:string;requirements:string[];statement:string;starter:{path:string;text:string}|null};

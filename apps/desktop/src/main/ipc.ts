@@ -4,7 +4,7 @@ import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { ESTABLISHED_DEVIATION, baselineStateSchema, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, trainingModeSchema, type AgentActivityStep, type BaselineState, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
+import { ESTABLISHED_DEVIATION, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { reviewAnswerInput, reviewCommitInput, reviewResolveInput, reviewSettingsInput, reviewStartInput, reviewSuspendInput, reviewTargetsInput, type ReviewSettings } from "../shared/api.js";
 import { REVIEW_TARGET_MODE_KEY, ReviewService, reviewTargetMode } from "./reviewSession.js";
 import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionSourcesInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceLanguageInput, sourceSlugInput, skillDraftInput, skillEnabledInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
@@ -66,7 +66,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      them a second later. */
   ipcMain.handle(ipc.bootstrap, async () => {
     deps.store.decayAbilities();
-    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), baseline: deps.store.getBaseline(), trainingMode: deps.store.getTrainingMode(), reviews: deps.store.reviews.overview(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
+    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), reviews: deps.store.reviews.overview(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
   });
   ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
@@ -82,10 +82,6 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.notebookRead,(_event,value)=>deps.store.readNotebook(notebookTrack(value)));
   ipcMain.handle(ipc.notebookHistory,(_event,value)=>deps.store.notebookHistory(notebookTrack(value)));
   ipcMain.handle(ipc.notebookWrite,(_event,value)=>{const input=value as {trackId?:unknown;markdown?:unknown;note?:unknown};if(typeof input.markdown!=="string")throw new Error("Notebook text is required");if(input.markdown.length>40_000)throw new Error("The notebook is too long");return deps.store.writeNotebook(notebookTrack(input.trackId),{markdown:input.markdown,note:typeof input.note==="string"?input.note:"Edited by you",author:"learner"}).saved;});
-  ipcMain.handle(ipc.trainingMode,(_event,value)=>deps.store.setTrainingMode(trainingModeSchema.parse(value)));
-  ipcMain.handle(ipc.baselineState,(_event,value)=>deps.store.setBaseline(baselineStateSchema.partial().parse(value) as Partial<BaselineState>));
-  ipcMain.handle(ipc.baselineStart,async()=>{if(!await deps.providers.available())throw new Error(NO_PROVIDER);const created=deps.store.createBaselineSession();const detail=deps.store.readSession(created.sessionId);if(detail&&!detail.question&&!detail.pendingLearnerQuestion&&!detail.messages.length)await startAgentTurn(created.sessionId,"The learner started their baseline: short diagnostic probes, one at a time, to calibrate their level. Set the first probe.","system","cold-start");return created;});
-  ipcMain.handle(ipc.learningEngine,()=>deps.store.learningEngineSnapshot());
   /**
    * SQLite is the durable owner of an active challenge. A workspace can be
    * absent after an interrupted restore or an older checkpoint that carried no
@@ -294,8 +290,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const sessionId = zUuid((value as { sessionId?: unknown }).sessionId);
     deps.store.setSessionStatus(sessionId, "planning");
     clearAutoResume(sessionId);
-    const baseline=deps.store.readSession(sessionId)?.summary.context==="baseline";
-    return startAgentTurn(sessionId, baseline?"The learner ended that baseline probe without solving it. Its attempt is partial calibration evidence. Set the next probe.":"The learner asked for their next challenge.", "learner", "session-start");
+    return startAgentTurn(sessionId, "The learner asked for their next challenge.", "learner", "session-start");
   });
 
   /* Reads over the learner's own recorded history, so neither starts a turn and
@@ -835,7 +830,6 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       if(answered&&openQuestion(answered)){
         return deliver(`The learner answered your question: ${said}\nTheir challenge is still open.`,"learner-message",said);
       }
-      if(answered?.summary.context==="baseline")return deliverIntake(`The learner answered your baseline question: ${said}`);
       return deliverIntake(`The learner answered your opening question: ${said}`);
     }
     return deliver(contextual,"learner-message",said);
@@ -853,7 +847,6 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
    * submission — it is LeetCode being down or rate-limiting — and writing it into
    * the attempt would put an outage into the learner's evidence.
    */
-  const noteBaselineEvidence=(sessionId:string)=>{const baseline=deps.store.getBaseline();if(baseline.status!=="in-progress"||baseline.sessionId!==sessionId)return{baseline:false,complete:false};const directEvidenceCount=baseline.directEvidenceCount+1;const required=baseline.importedEvidenceCount>=4?2:3;const complete=directEvidenceCount>=required;const importedContribution=Math.min(0.15,baseline.importedEvidenceCount*0.03);deps.store.setBaseline({directEvidenceCount,confidence:Math.min(0.85,directEvidenceCount/required*0.7+importedContribution),...(complete?{status:"complete" as const,completedAt:new Date().toISOString()}:{})});return{baseline:true,complete};};
   const complexityCheckEnabled=()=>deps.store.getSetting<boolean>("complexity-check-enabled",true);
   /* Two gates, with separate owners: the authoring agent decides whether Big-O
      is useful evidence for this particular challenge, while the learner's
@@ -870,11 +863,6 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const complexityNote=complexity?` They claimed time ${String(complexity.payload.timeComplexity??"")} and space ${String(complexity.payload.spaceComplexity??"")}; the quick review of that claim is in the attempt.`:"";
     deps.store.appendNextEvent({id:randomUUID(),attemptId,type:"attempt_completed",occurredAt:new Date().toISOString(),payload:{outcome:"passed",...(input.source?{judge:input.source.source}:{})},source:"system",schemaVersion:1});
     deps.store.completeAttempt(attemptId,"passed");
-    const calibration=noteBaselineEvidence(sessionId);
-    if(calibration.baseline){
-      if(!calibration.complete)void startAgentTurn(sessionId,`Baseline probe attempt ${attemptId} passed every visible and hidden test.${complexityNote} It is calibration evidence, not proof of mastery.`,"system","attempt-complete");
-      return;
-    }
     const source=input.source;
     /* The learner chose to say what their reviews ask about. The question goes
        through the same ask_user_question as any other, and record_insight is
@@ -1092,6 +1080,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   });
   ipcMain.handle(ipc.settingsProviderUsage, (_event, value) => deps.providers.subscriptionUsage(providerId(value)));
   ipcMain.handle(ipc.settingsUsageReport, (_event, value) => deps.store.usageReport(typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.min(value, 3650) : null));
+  ipcMain.handle(ipc.settingsActivityReport, () => deps.store.activityReport());
   ipcMain.handle(ipc.settingsProviderAccount, (_event, value) => deps.providers.subscriptionAccount(providerId(value)));
   ipcMain.handle(ipc.settingsReasoningEffort, (_event, value) => deps.providers.setReasoningEffort(reasoningEffortSchema.parse(value)));
   ipcMain.handle(ipc.settingsFastMode, (_event, value) => deps.providers.setFastMode(z.boolean().parse(value)));

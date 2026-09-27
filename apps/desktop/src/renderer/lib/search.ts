@@ -28,7 +28,7 @@ export type PaletteAction = { id: "new-session"; label: string; keywords: string
 
 /** A destination in the nav. The pages that draw their own toolbar are not here:
  *  a workspace and a single challenge are things you open, not places you go. */
-export type PalettePlace = { page: Exclude<Page, "workspace" | "challenge" | "baseline">; label: string; keywords: string };
+export type PalettePlace = { page: Exclude<Page, "workspace" | "challenge">; label: string; keywords: string };
 
 export const PALETTE_ACTIONS: PaletteAction[] = [
   { id: "new-session", label: "Start a session", keywords: "new create begin spar practice goal" },

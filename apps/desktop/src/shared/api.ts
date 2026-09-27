@@ -4,11 +4,11 @@ import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spa
 import type { AgentActivityStep } from "@spar/domain";
 export type { VisualizerSpec, VisualizerTrace };
 import type { SubmissionRecord, SubmissionRow } from "./submissions.js";
-import { attemptEventSchema, baselineStateSchema, problemSourcesSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, trainingModeSchema, type AbilityDetail, type AbilityHistorySummary, type BaselineState, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type TrainingMode, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal } from "@spar/domain";
+import { attemptEventSchema, problemSourcesSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
-  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", notebookRead: "notebook:read", notebookHistory: "notebook:history", notebookWrite: "notebook:write", trainingMode: "training:mode", baselineState: "baseline:state", baselineStart: "baseline:start", learningEngine: "learning:engine",
+  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", notebookRead: "notebook:read", notebookHistory: "notebook:history", notebookWrite: "notebook:write",
   /* The window reports its own state; the main process decides when that becomes
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
@@ -16,7 +16,7 @@ export const ipc = {
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentAnswer: "agent:answer", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
   authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
-  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsUsageReport: "settings:usage-report", settingsProviderAccount: "settings:provider-account", settingsProviderOauthStart: "settings:provider-oauth-start",
+  settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsUsageReport: "settings:usage-report", settingsActivityReport: "settings:activity-report", settingsProviderAccount: "settings:provider-account", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
   settingsOpenExternal: "settings:open-external", settingsTheme: "settings:theme", settingsReasoningEffort: "settings:reasoning-effort", settingsFastMode: "settings:fast-mode",
   settingsWebSearch: "settings:web-search", settingsWebSearchSave: "settings:web-search-save", settingsWebSearchClear: "settings:web-search-clear",
@@ -249,6 +249,15 @@ export type UsageReport = {
   models: Array<UsageTotals & { provider: string; model: string }>;
   sessions: Array<UsageTotals & { sessionId: string; title: string | null; lastRunAt: string; models: string[] }>;
 };
+/** One challenge passed, on the local day it was passed. `source` is "spar" for a
+ *  challenge Spar wrote and the provider's id otherwise, left as a plain string so
+ *  a provider added later shows up without a change here. Each challenge counts
+ *  once per day however many times it was passed that day. */
+export type ActivitySolve = { day: string; at: string; questionId: string; title: string; source: string; difficulty: string; displayId: string | null };
+/** Learner work per local day and source: how many challenges were touched, and
+ *  how many times the code was run or submitted. Solves are in `solves`. */
+export type ActivityDay = { day: string; source: string; worked: number; runs: number };
+export type ActivityReport = { solves: ActivitySolve[]; days: ActivityDay[] };
 export type ProviderOAuthEvent = {
   flowId: string;
   provider: ProviderId;
@@ -451,7 +460,7 @@ export type VisualizerProblem = {
   paidOnly: boolean;
 };
 
-export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; saved: SavedProblem[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; baseline: BaselineState; trainingMode: TrainingMode; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
+export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; saved: SavedProblem[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** The spaced-review queue and each challenge's place in it. */
   reviews: ReviewOverview;
   /** How far the pull half of sync has got. The shell gates on this before it
@@ -613,10 +622,6 @@ export interface SparApi {
   readNotebook(trackId: string | null): Promise<CoachNotebookVersion | null>;
   notebookHistory(trackId: string | null): Promise<CoachNotebookVersion[]>;
   writeNotebook(input: { trackId: string | null; markdown: string; note?: string }): Promise<CoachNotebookVersion>;
-  setTrainingMode(mode: z.infer<typeof trainingModeSchema>): Promise<TrainingMode>;
-  setBaseline(input: Partial<z.infer<typeof baselineStateSchema>>): Promise<BaselineState>;
-  startBaseline(): Promise<{ sessionId: string }>;
-  learningEngine(): Promise<Record<string, unknown>>;
   openSession(sessionId: string): Promise<SessionDetail | null>;
   /** Tell the main process how this session's window is arranged. It folds this
    *  into the checkpoint it writes on its own schedule, along with the workspace
@@ -802,6 +807,8 @@ export interface SparApi {
   providerAccount(provider: ProviderId): Promise<ProviderAccount | null>;
   /** Local agent spend over the last `days` days, or all of it for null. */
   usageReport(days: number | null): Promise<UsageReport>;
+  /** Every solve and every day of practice on this device, for the activity calendar. */
+  activityReport(): Promise<ActivityReport>;
   setReasoningEffort(effort: ReasoningEffort): Promise<void>;
   /** OpenAI's priority service tier, which is what ChatGPT calls fast mode. Set
    *  for every model; only the Responses providers can act on it. */

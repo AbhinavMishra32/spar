@@ -16,14 +16,14 @@
 import type { Page } from "../components/shell/Sidebar";
 
 /** The pages that are one place each — no id distinguishes two visits. */
-export type PlainPage = Exclude<Page, "workspace" | "baseline" | "challenge" | "ability" | "track">;
+export type PlainPage = Exclude<Page, "workspace" | "challenge" | "ability" | "track">;
 
 export type View =
   | { page: PlainPage }
   /* A session is opened into one of two surfaces: the workspace, and the
      baseline interview, which is the same session machinery in a different
      frame. Both are the session, so both carry its id. */
-  | { page: "workspace" | "baseline"; sessionId: string }
+  | { page: "workspace"; sessionId: string }
   /* `submissionId` is where on the page, not which page: a submission reference
      in the transcript opens the challenge it belongs to with that submission
      already unfolded. Two entries for the same challenge and different
@@ -40,7 +40,7 @@ export const HISTORY_LIMIT = 50;
 
 export const sameView = (a: View | undefined, b: View): boolean => {
   if (!a || a.page !== b.page) return false;
-  if (a.page === "workspace" || a.page === "baseline") return "sessionId" in b && a.sessionId === b.sessionId;
+  if (a.page === "workspace") return "sessionId" in b && a.sessionId === b.sessionId;
   if (a.page === "challenge") return "challengeId" in b && a.challengeId === b.challengeId;
   if (a.page === "ability") return "abilityId" in b && a.abilityId === b.abilityId;
   if (a.page === "track") return "trackId" in b && a.trackId === b.trackId;
@@ -85,7 +85,7 @@ export function step(history: History, direction: -1 | 1): { history: History; v
  * repaired here rather than left for the caller to notice.
  */
 export function forget(history: History, sessionId: string): History {
-  const gone = (view: View) => (view.page === "workspace" || view.page === "baseline") && view.sessionId === sessionId;
+  const gone = (view: View) => view.page === "workspace" && view.sessionId === sessionId;
   const current = history.entries[history.index];
   const kept: View[] = [];
   for (const view of history.entries) {

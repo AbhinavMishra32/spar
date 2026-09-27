@@ -12,7 +12,6 @@ import { pageChrome, type ShellPage } from "./components/shell/pageChrome";
 import { SearchPalette } from "./components/common/SearchPalette";
 import { HomePage } from "./components/pages/HomePage";
 import type { ChallengeTrail } from "./components/workspace/ChallengeStepper";
-import { BaselinePage } from "./components/pages/BaselinePage";
 import { SIDEBAR_SLIDE, SIDEBAR_SLIDE_CSS } from "./components/shell/sidebarMotion";
 import { TracksPage } from "./components/pages/TracksPage";
 import { TrackPage } from "./components/pages/TrackPage";
@@ -249,11 +248,11 @@ export function App() {
     });
   }, []);
 
-  const openSession = useCallback(async (id: string, destination: "workspace" | "baseline" = "workspace", record = true) => {
+  const openSession = useCallback(async (id: string, record = true) => {
     if (!api) return;
-    setPage(destination);
+    setPage("workspace");
     setAbility(null);
-    if (record) setHistory((current) => visit(current, { page: destination, sessionId: id }));
+    if (record) setHistory((current) => visit(current, { page: "workspace", sessionId: id }));
     setOpening(true);
     try {
       const next = await api.openSession(id);
@@ -274,18 +273,6 @@ export function App() {
       setOpening(false);
     }
   }, []);
-
-  const beginBaseline = useCallback(async () => {
-    if (!api) return;
-    setOpening(true);
-    setError(null);
-    try {
-      const created = await api.startBaseline();
-      await refresh();
-      await openSession(created.sessionId, "baseline");
-    } catch (cause) { setError(message(cause)); }
-    finally { setOpening(false); }
-  }, [openSession, refresh]);
 
   /* Starting a session is reachable before the shell exists: the last step of
      onboarding opens the sparring session the learner picked, so this has to be
@@ -400,7 +387,7 @@ export function App() {
         // The summaries every card is drawn from are re-read whichever session
         // finished; only the open one needs its detail re-opened.
         if (detailRef.current?.summary.id === sessionId) {
-          void openSession(sessionId, detailRef.current.summary.context === "baseline" ? "baseline" : "workspace").catch((cause) => setError(message(cause))).finally(() => clearRun(sessionId, event.runId));
+          void openSession(sessionId).catch((cause) => setError(message(cause))).finally(() => clearRun(sessionId, event.runId));
         } else clearRun(sessionId, event.runId);
         void refresh().catch(() => undefined);
         return;
@@ -421,7 +408,7 @@ export function App() {
   // A planning session has no challenge to show yet, so poll until one exists.
   useEffect(() => {
     if (!detail || detail.question || detail.pendingLearnerQuestion || detail.summary.status !== "planning") return;
-    const timer = setInterval(() => void openSession(detail.summary.id, detail.summary.context === "baseline" ? "baseline" : "workspace").catch(() => undefined), 1_800);
+    const timer = setInterval(() => void openSession(detail.summary.id).catch(() => undefined), 1_800);
     return () => clearInterval(timer);
   }, [detail, openSession]);
 
@@ -543,7 +530,6 @@ export function App() {
       <OnboardingPage
         api={api}
         displayName={data.account.displayName}
-        onBaseline={beginBaseline}
         onDone={async (profile) => { setData((current) => (current ? { ...current, profile } : current)); await refresh(); }}
         onStartSession={start}
       />
@@ -580,7 +566,7 @@ export function App() {
     show(next);
     /* The pages that are a place only together with an id record themselves,
        from the call that knows the id. */
-    if (next !== "workspace" && next !== "baseline" && next !== "challenge" && next !== "ability" && next !== "track") {
+    if (next !== "workspace" && next !== "challenge" && next !== "ability" && next !== "track") {
       setHistory((current) => visit(current, { page: next }));
     }
   };
@@ -607,9 +593,9 @@ export function App() {
    * main process owns. Anything deleted since is skipped rather than reopened.
    */
   const applyView = (view: View) => {
-    if (view.page === "workspace" || view.page === "baseline") {
+    if (view.page === "workspace") {
       if (!data.sessions.some((session) => session.id === view.sessionId)) return;
-      void openSession(view.sessionId, view.page, false).catch((cause) => setError(message(cause)));
+      void openSession(view.sessionId, false).catch((cause) => setError(message(cause)));
       return;
     }
     if (view.page === "challenge") {
@@ -836,9 +822,8 @@ export function App() {
       attemptId: detail.question.attemptId,
       reason,
     });
-    if(detail.summary.context==="baseline")await api.requestNextChallenge({sessionId:detail.summary.id});
     clearRun(detail.summary.id);
-    await openSession(detail.summary.id,detail.summary.context==="baseline"?"baseline":"workspace");
+    await openSession(detail.summary.id);
     await refresh();
   };
 
@@ -854,7 +839,7 @@ export function App() {
      each render rather than memoised because the hooks above it are behind the
      boot guards, and the work is two filters over lists the pages below filter
      again anyway. */
-  const chrome = page === "workspace" || page === "challenge" || page === "baseline"
+  const chrome = page === "workspace" || page === "challenge"
     ? null
     : pageChrome(page as ShellPage, data, ability);
   const changeTheme = async (theme: ThemePreference) => {
@@ -902,12 +887,6 @@ export function App() {
       await openSession(created.sessionId);
     } catch (cause) { setError(message(cause)); }
     finally { setOpening(false); }
-  };
-
-  const setTrainingMode = async (mode: BootstrapData["trainingMode"]) => {
-    if (!api) return;
-    await api.setTrainingMode(mode);
-    await refresh();
   };
 
   return (
@@ -1025,7 +1004,7 @@ export function App() {
             "transition-[border-radius,box-shadow]",
             SIDEBAR_SLIDE_CSS,
             sidebar && "app-content-pane",
-            (page === "workspace" || page === "challenge" || page === "baseline") && "app-pane-glass",
+            (page === "workspace" || page === "challenge") && "app-pane-glass",
           )}
         >
           {/* The row is drawn for every shell page, including the ones with
@@ -1033,7 +1012,7 @@ export function App() {
               collapsed sidebar it is the only place the traffic lights and the
               back control can go. What varies is whether it carries anything —
               see `pageChrome`. */}
-          {page !== "workspace" && page !== "challenge" && page !== "baseline" && (
+          {page !== "workspace" && page !== "challenge" && (
             <Toolbar
               nav={nav}
               onExpandSidebar={expandSidebar}
@@ -1053,7 +1032,6 @@ export function App() {
 
           <div className="min-h-0 flex-1">
 
-            {page === "baseline" && <BaselinePage api={api} busy={opening} concepts={conceptContext} dark={dark} data={data} detail={detail} onAbandon={abandon} nav={nav} onError={setError} onExpandSidebar={expandSidebar} onOpenSettings={() => navigate("settings")} onProgress={() => navigate("home")} onRefresh={async () => { await refresh(); if (detail) await openSession(detail.summary.id,"baseline"); }} onStart={beginBaseline} run={detail ? runs[detail.summary.id]??null : null} />}
             {page === "tracks" && <TracksPage onDelete={deleteTrack} busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
             {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal, sources) => start(goal,data.activeTrack!.id,sources)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
             {page === "problems" && (
@@ -1084,9 +1062,7 @@ export function App() {
                 challenges={data.challenges}
                 concepts={data.concepts}
                 data={data}
-                onBaseline={beginBaseline}
                 onCreateTrack={() => navigate("tracks")}
-                onMode={setTrainingMode}
                 onNavigate={navigate}
                 onOpen={open}
                 onOpenAbility={(next) => (next ? openAbility(next) : navigate("home"))}
@@ -1118,9 +1094,7 @@ export function App() {
                 // Same identity the sidebar row shows: the onboarding name, not the one derived from their email.
                 account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
                 api={api}
-                baseline={data.baseline}
                 language={data.profile.language}
-                onBaseline={beginBaseline}
                 onLanguageChange={(next) => setData((current) => (current?.profile ? { ...current, profile: { ...current.profile, language: next } } : current))}
                 onSignedOut={signedOut}
                 onThemeChange={changeTheme}

@@ -109,18 +109,10 @@ const data: BootstrapData = {
   recommendation: {
     id: "rec1", trackId: "t1", trackTitle: "Graph fundamentals", sessionId: "s1", questionId: null,
     challengeTitle: "Number of Islands", abilityId: "a3", abilityTitle: "Graph traversal with visited sets",
-    intent: "diagnose", source: "leetcode",
-    reason: "You have passed two grid problems by scanning, and failed the one that needed a visited set. This is the smallest problem that cannot be solved the first way.",
-    reasoning: [
-      "The last two failures were both on revisiting a cell you had already cleared.",
-      "Your hash-map counting is strong enough that the bookkeeping will not be what trips you up.",
-      "A diagnose problem now is cheaper than another week of DP work built on a shaky traversal.",
-    ],
-    mode: { kind: "recommended" }, createdAt: now,
-  } as any,
-  progress, trackProgress: {}, baseline: { status: "complete", confidence: 0.6, directEvidenceCount: 4, importedEvidenceCount: 0, completedAt: ago(300), sessionId: null },
+  },
+  progress, trackProgress: {},
   reviews: { totalCards: 0, dueCount: 0, dueTodayCount: 0, retention: null, nextDueAt: null, upcoming: [], reviewedToday: 0, streakDays: 0, byQuestion: {} },
-  trainingMode: { kind: "recommended" }, theme: "dark", syncState: "synced", restore: "done", serverConfigured: true,
+  theme: "dark", syncState: "synced", restore: "done", serverConfigured: true,
 };
 
 (window as any).spar = {
@@ -184,9 +176,9 @@ function Harness() {
           <button className="rounded-md border border-border px-2 py-1 text-ui" onClick={() => setDark((value) => !value)} type="button">{dark ? "Light" : "Dark"}</button>
         </div>
         <div className="min-h-0 flex-1 bg-background">
-          {page === "home" && <HomePage abilities={abilityLedger} ability={ability} api={api} busy={false} challenges={stones} concepts={[]} data={data} onBaseline={() => {}} onCreateTrack={() => {}} onMode={async () => {}} onNavigate={() => {}} onOpen={() => {}} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} />}
+          {page === "home" && <HomePage abilities={abilityLedger} ability={ability} api={api} busy={false} challenges={stones} concepts={[]} data={data} onCreateTrack={() => {}} onNavigate={() => {}} onOpen={() => {}} onOpenAbility={setAbility} onOpenConcept={() => {}} onOpenSession={() => {}} onPractise={() => {}} />}
           {page === "map" && <div className="mx-auto w-full max-w-[72rem] px-8 pt-6"><ConceptMap abilities={abilityLedger} concepts={conceptFixtures} onOpenAbility={setAbility} onOpenConcept={() => {}} progress={progress} query="" /></div>}
-          {page === "settings" && <SettingsPage account={data.account!} api={api} baseline={data.baseline} language="python" onBaseline={async () => {}} onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
+          {page === "settings" && <SettingsPage account={data.account!} api={api} language="python" onLanguageChange={() => {}} onSignedOut={async () => {}} onThemeChange={async () => {}} theme="dark" />}
         </div>
       </div>
     </div>

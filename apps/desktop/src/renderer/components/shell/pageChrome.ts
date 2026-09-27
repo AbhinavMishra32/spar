@@ -27,7 +27,7 @@ export type PageChrome = { title?: string; facts: ToolbarFact[] };
 /** Pages the shell puts its own toolbar over. The three that draw their own —
  *  a session, a past challenge, and the baseline run — carry a back control and
  *  their own actions, so they build the row themselves. */
-export type ShellPage = Exclude<Page, "workspace" | "challenge" | "baseline">;
+export type ShellPage = Exclude<Page, "workspace" | "challenge">;
 
 /** "1 session", "4 sessions". A count with no noun is a number nobody can read
  *  at this size, and a noun that does not agree with it reads as a bug. */
@@ -38,8 +38,8 @@ function count(value: number, noun: string, plural = `${noun}s`): string {
 const LANGUAGE: Record<string, string> = { python: "Python", typescript: "TypeScript", javascript: "JavaScript", java: "Java", cpp: "C++", go: "Go", rust: "Rust" };
 
 export function pageChrome(page: ShellPage, data: BootstrapData, abilityId: string | null): PageChrome | null {
-  /* Baseline sessions are the calibration run's own bookkeeping and are never
-     shown in any list, so they must not be counted in one either. */
+  /* Sessions from the retired baseline calibration are hidden from every list,
+     so they must not be counted in one either. */
   const sessions = data.sessions.filter((session) => session.context !== "baseline");
   const open = sessions.filter((session) => session.status !== "completed" && !session.archivedAt);
   const solved = data.challenges.filter((challenge) => challenge.lastOutcome === "passed");

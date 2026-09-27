@@ -106,7 +106,6 @@ export function journeyDocument(input: TurnPayloadInput): string {
   const sources = sessionSourcesSection(session.summary.problemSources, input.practiceSource);
   sections.push([
     track ? `## Track: ${track.title}\nGoal: ${track.goal}` : "## Track\nThis session is not inside a Track.",
-    session.summary.context === "baseline" ? "This session is the learner's baseline: short diagnostic probes to calibrate their level. Do not create a Track or open general chat; set one fair probe at a time." : "",
     `Session goal: ${session.summary.originalGoal}`,
     sources ? `Problem sources: ${sources}` : "",
     practiceLine(input.practiceSummary),
