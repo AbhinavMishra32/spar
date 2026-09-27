@@ -40,7 +40,7 @@ export const CORE_TOOLS = [
 export function coachTools(context: { webSearch?: boolean; practiceSource?: boolean; sparAuthoring?: boolean; skills?: boolean }): Set<string> {
   return new Set([
     ...CORE_TOOLS,
-    ...(context.sparAuthoring !== false ? ["set_challenge"] : []),
+    ...(context.sparAuthoring !== false ? ["set_challenge", "edit_challenge"] : []),
     ...(context.practiceSource ? SOURCE_TOOLS : []),
     ...(context.webSearch ? WEB_TOOLS : []),
     ...(context.skills ? [SKILL_TOOL] : []),

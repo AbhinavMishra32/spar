@@ -210,6 +210,17 @@ export function Workspace({
     // Reloading on a new question keeps the editor from showing the previous challenge.
   }, [question.attemptId]);
 
+  /* The coach edited this challenge in place. The statement follows on its own;
+     the file on screen is re-read unless it holds unsaved typing, which stays
+     theirs — the host never overwrites code they changed, and neither does this. */
+  const revision = question.revision ?? 0;
+  const seenRevision = useRef(revision);
+  useEffect(() => {
+    if (!api || revision === seenRevision.current) return;
+    seenRevision.current = revision;
+    if (activeFile && !dirty) void api.readWorkspaceFile({ sessionId: detail.summary.id, path: activeFile }).then(setContent).catch(() => undefined);
+  }, [revision]);
+
   useEffect(()=>{
     if(!api||question.attemptCompletedAt)return;
     let cancelled=false;
@@ -236,7 +247,7 @@ export function Workspace({
     return () => {
       cancelled = true;
     };
-  }, [api, detail.summary.id, question.attemptId]);
+  }, [api, detail.summary.id, question.attemptId, question.revision]);
 
   useEffect(() => {
     if (!api) return;

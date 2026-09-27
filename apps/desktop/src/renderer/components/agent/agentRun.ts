@@ -487,6 +487,7 @@ const TOOL_VERBS: Record<string, string> = {
   create_question: "Created challenge",
   replace_current_question: "Replaced challenge",
   set_challenge: "Built challenge",
+  edit_challenge: "Edited challenge",
   search_record: "Searched your record",
   read_record: "Read a record",
   update_ability: "Updated ability",
@@ -561,6 +562,7 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   /* v0.7's one challenge tool. It writes a new challenge, revises the open one
      or replaces it, and says which in its `mode` — see `safeToolLabel`. */
   set_challenge: ["Building challenge", "Built challenge"],
+  edit_challenge: ["Editing challenge", "Edited challenge"],
   search_record: ["Searching your record", "Searched your record"],
   read_record: ["Reading a record", "Read a record"],
   update_ability: ["Updating ability", "Updated ability"],

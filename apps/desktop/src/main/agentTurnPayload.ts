@@ -119,7 +119,8 @@ export function journeyDocument(input: TurnPayloadInput): string {
     const shown = journey.challenges;
     const earlier = journey.total - shown.length;
     const lines = [`## Challenges on this Track (${earlier > 0 ? `last ${shown.length} of ${journey.total}` : `${journey.total}`}, oldest first)`];
-    shown.forEach((challenge, index) => lines.push(challengeEntry(challenge, earlier + index + 1, index >= shown.length - 3)));
+    const openId = session.question && !session.question.attemptCompletedAt ? session.question.id : null;
+    shown.forEach((challenge, index) => lines.push(challengeEntry(challenge, earlier + index + 1, index >= shown.length - 3, challenge.id === openId)));
     sections.push(lines.join("\n\n"));
   }
 
@@ -168,7 +169,7 @@ export function journeyDocument(input: TurnPayloadInput): string {
   return sections.join("\n\n");
 }
 
-function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarter: boolean): string {
+function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarter: boolean, open = false): string {
   const outcome = challenge.replacedByTitle ? `replaced by "${challenge.replacedByTitle}"` : challenge.outcome ?? "not finished";
   const facts = [
     challenge.source === "spar" ? "Spar-written" : challenge.source === "leetcode" ? "LeetCode" : "Codeforces",
@@ -190,6 +191,9 @@ function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarte
     challenge.requirements.length ? `Requirements: ${challenge.requirements.join("; ")}` : "",
     `Id: ${challenge.id}`,
   ];
+  /* The open challenge exactly as the learner reads it, so a reply can quote it
+     and edit_challenge can name a passage without a read first. */
+  if (open && challenge.statement) lines.push(`Statement:\n<statement>\n${challenge.statement}\n</statement>`);
   if (withStarter && challenge.starter) lines.push(`Starter (${challenge.starter.path}):\n\`\`\`\n${challenge.starter.text}\n\`\`\``);
   return lines.filter(Boolean).join("\n");
 }

@@ -186,6 +186,77 @@
       "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
+  "edit_challenge": {
+    "description": "Change the open Spar-written challenge in place: reword a sentence that confused them, add or fix a figure, add an example, fix a typo, add a visible test case, adjust a type in the starter. Each edit replaces one exact passage — copied from the current text, occurring once — in one part of the challenge. Nothing is rebuilt and the learner keeps their place and their code: a statement or title edit is checked for its figures, and an edit to the starter, reference or tests reruns the full validation before it lands. The journey shows the open challenge's statement and starter; read_record the challenge for its reference and tests. Use set_challenge revise instead when the task, its contract or its code shape changes.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "part": {
+                "type": "string",
+                "enum": [
+                  "statement",
+                  "title",
+                  "starter",
+                  "reference",
+                  "visibleTests"
+                ],
+                "description": "Which part of the challenge the passage is in."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "The file, for starter, reference and test edits. May be omitted when that part has one file."
+              },
+              "find": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4000,
+                "description": "The exact text to replace, copied from the current version; it must occur exactly once. To add something, find the passage it goes next to and repeat that passage in replace with the addition."
+              },
+              "replace": {
+                "type": "string",
+                "maxLength": 8000,
+                "description": "What the passage becomes."
+              }
+            },
+            "required": [
+              "part",
+              "find",
+              "replace"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 20
+        },
+        "note": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 300,
+          "description": "What changed and why, in one sentence. Stored with the challenge."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "edits",
+        "note",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
   "load_skill": {
     "description": "Load one of the skills listed under Skills in the journey document: returns that skill's full instructions. Load a skill before doing the work it describes, the first time in a turn you need it — its instructions are not in your context until you do. Loading the same skill twice in one turn returns the same text.",
     "inputSchema": {
@@ -967,7 +1038,7 @@
             "revise",
             "replace"
           ],
-          "description": "new: no challenge is open. revise: change the open challenge while keeping its task and code shape (the learner asked for types, a clearer statement, another language, a fix). replace: swap the open challenge for a different problem, because the learner asked or it is clearly wrong for them."
+          "description": "new: no challenge is open. revise: rebuild the open challenge around the same task when its contract or code shape changes (typed starters, another language); for a few passages, edit_challenge is faster and keeps the learner's code. replace: swap the open challenge for a different problem, because the learner asked or it is clearly wrong for them."
         },
         "aim": {
           "type": "object",

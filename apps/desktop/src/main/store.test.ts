@@ -980,8 +980,11 @@ it("gives the agent enough recent challenge detail to compare two exercises",()=
     expect(secondEntry).toContain(`Id: ${current.id}`);
     // Recent challenges carry the starter they were handed out with.
     expect(secondEntry).toContain("Starter (src/index.js):\n```\nexport function solve(){ throw new Error(\"implement\") }\n```");
-    // Examples, reference solutions and hidden tests stay out.
-    expect(context).not.toContain("Input: [2, 1, 4]");
+    // The open challenge's statement is there as the learner reads it, so the
+    // coach can quote it and edit it; a past challenge's examples stay out, and
+    // so do reference solutions and hidden tests.
+    expect(context).toContain("<statement>\nFor each item, return the position of the first later greater value.\n\n**Examples**\nInput: [2, 1, 4]\n</statement>");
+    expect(context).not.toContain("Input: [2, 1, 3]");
     expect(context).not.toContain("return true }");
     expect(context).not.toContain("// hidden");
     expect(context).toContain(`## Open challenge: Next Greater Positions\nChallenge id ${current.id}, attempt id ${current.attemptId}.`);

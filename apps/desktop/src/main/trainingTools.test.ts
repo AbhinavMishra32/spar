@@ -645,3 +645,108 @@ describe("teach_lesson figures", () => {
     }
   });
 });
+
+describe("edit_challenge", () => {
+  type Edited = { status: string; revision?: number; validated?: string; learnerFiles?: Array<{ path: string; outcome: string }>; report?: { checks: Array<{ name: string; detail: string }> } };
+  const open = (store: LocalStore) => {
+    const { sessionId } = store.createSession("Practise arrays");
+    store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
+    const question = store.createQuestion(sessionId, { ...design("Count values"), language: "python", kind: "repair", starterFiles: { "solution.py": "export function count(values) {\n  return 0;\n}\n" }, referenceFiles: { "solution.py": "correct" }, knownIncorrectFiles: [{ "solution.py": "incorrect" }], visibleTests: { "test_visible.py": "visible" }, hiddenTests: { "test_hidden.py": "hidden" } }, { valid: true });
+    return { sessionId, question };
+  };
+  /** The runs a valid challenge produces, in the order the compiler asks for them. */
+  const validating = () => {
+    const visible = Array.from({ length: 4 }, (_, index) => `ok - visible ${index}`).join("\n");
+    const hidden = Array.from({ length: 4 }, (_, index) => `ok - hidden ${index}`).join("\n");
+    const outputs = [
+      { exitCode: 0, stdout: `${visible}\n${hidden}\n`, stderr: "", durationMs: 1 },
+      { exitCode: 0, stdout: `${visible}\n`, stderr: "", durationMs: 1 },
+      { exitCode: 1, stdout: "not ok - retained across chunks\n    input: two chunks\n    expected: retained\n    actual: lost\n", stderr: "", durationMs: 1 },
+      { exitCode: 0, stdout: `${visible}\n`, stderr: "", durationMs: 1 },
+    ];
+    let at = 0;
+    return { request: () => ({ id: "run", promise: Promise.resolve(outputs[at++ % outputs.length]!) }) } as unknown as UtilityClient;
+  };
+  /** A workspace that is a map, so what reached the learner's files can be read back. */
+  const workspace = (files: Record<string, string>) => ({
+    ...workspaceStub(),
+    read: async (_session: string, path: string) => files[path] ?? "",
+    write: async (_session: string, path: string, text: string) => { files[path] = text; },
+  }) as unknown as WorkspaceService;
+
+  it("rewords the statement in place, without compiling, and keeps the question and attempt", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId, question } = open(store);
+      const figure = "\n\n```figure\n{\"type\":\"array\",\"values\":[1,2,3],\"good\":[1]}\n```";
+      /* No runner: a statement edit must not compile. */
+      const result = await executeTrainingTool("edit_challenge", { edits: [{ part: "statement", find: "return the resulting total.", replace: `return how many there are.${figure}` }], note: "Clearer wording and a picture." }, sessionId, store, workspace({}), {} as UtilityClient) as Edited;
+      expect(result).toMatchObject({ status: "edited", revision: 1, validated: "figures" });
+      const after = store.readSession(sessionId)!.question!;
+      expect(after.id).toBe(question.id);
+      expect(after.attemptId).toBe(question.attemptId);
+      expect(after.revision).toBe(1);
+      expect(after.statement).toContain("return how many there are.");
+      expect(after.statement).toContain("```figure");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("refuses a passage that is missing or ambiguous, and a figure that would not draw, changing nothing", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = open(store);
+      const edit = (find: string, replace = "x") => executeTrainingTool("edit_challenge", { edits: [{ part: "statement", find, replace }], note: "Try an edit." }, sessionId, store, workspace({}), {} as UtilityClient) as Promise<Edited>;
+      expect((await edit("not in the statement")).report?.checks[0]?.detail).toMatch(/not there[\s\S]*Its current text:\nCount values/);
+      expect((await edit("a")).report?.checks[0]?.detail).toMatch(/occurs \d+ times/);
+      expect((await edit("total.", "total.\n\n```figure\n{\"type\":\"tree\",\"values\":[1,null,2],\"good\":[1]}\n```")).report?.checks[0]?.name).toBe("figures");
+      expect(store.readSession(sessionId)!.question!.revision).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("revalidates a starter edit and never overwrites code the learner changed", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = open(store);
+      const starterEdit = { part: "starter", find: "count(values)", replace: "count(values: number[])" };
+      /* Untouched: the file follows the challenge. */
+      const untouched: Record<string, string> = { "solution.py": "export function count(values) {\n  return 0;\n}\n" };
+      const first = await executeTrainingTool("edit_challenge", { edits: [starterEdit], note: "Typed the parameter." }, sessionId, store, workspace(untouched), validating()) as Edited;
+      expect(first).toMatchObject({ status: "edited", validated: "full", learnerFiles: [{ path: "solution.py", outcome: "updated" }] });
+      expect(untouched["solution.py"]).toContain("count(values: number[])");
+
+      /* Their own code with the passage still in it: the edit lands inside their code. */
+      const mine: Record<string, string> = { "solution.py": "export function count(values: number[]) {\n  return values.length; // mine\n}\n" };
+      const second = await executeTrainingTool("edit_challenge", { edits: [{ part: "starter", find: "count(values: number[])", replace: "count(values: readonly number[])" }], note: "Readonly input." }, sessionId, store, workspace(mine), validating()) as Edited;
+      expect(second.learnerFiles).toEqual([{ path: "solution.py", outcome: "merged" }]);
+      expect(mine["solution.py"]).toBe("export function count(values: readonly number[]) {\n  return values.length; // mine\n}\n");
+
+      /* Their code without the passage: left exactly as they wrote it. */
+      const rewritten: Record<string, string> = { "solution.py": "export const count = (xs) => xs.length;\n" };
+      const third = await executeTrainingTool("edit_challenge", { edits: [{ part: "starter", find: "readonly number[]", replace: "ReadonlyArray<number>" }], note: "Spelled the type out." }, sessionId, store, workspace(rewritten), validating()) as Edited;
+      expect(third.learnerFiles).toEqual([{ path: "solution.py", outcome: "kept" }]);
+      expect(rewritten["solution.py"]).toBe("export const count = (xs) => xs.length;\n");
+      expect(store.readSession(sessionId)!.question!.revision).toBe(3);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("changes nothing when the edited challenge fails validation", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = open(store);
+      const failing = { request: () => ({ id: "run", promise: Promise.resolve({ exitCode: 1, stdout: "", stderr: "boom", durationMs: 1 }) }) } as unknown as UtilityClient;
+      const files: Record<string, string> = { "solution.py": "export function count(values) {\n  return 0;\n}\n" };
+      const result = await executeTrainingTool("edit_challenge", { edits: [{ part: "starter", find: "return 0;", replace: "return;" }], note: "Break it." }, sessionId, store, workspace(files), failing) as Edited;
+      expect(result.status).toBe("invalid");
+      expect(files["solution.py"]).toContain("return 0;");
+      expect(store.readSession(sessionId)!.question!.revision).toBe(0);
+    } finally {
+      store.close();
+    }
+  });
+});

@@ -45,7 +45,10 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * ability writes became `update_ability`, `update_notebook` is new, and the
  * coach sets challenges with a brief to `set_challenge` while the builder's
  * `create_question` / `replace_current_question` became host-only. The whole
- * file was regenerated from agentToolSchemas() in that change.
+ * file was regenerated from agentToolSchemas() in that change. `edit_challenge`
+ * is new: exact-passage edits to the open challenge in place, so a figure or a
+ * clarified sentence no longer goes through the builder; `set_challenge`'s
+ * revise mode now points at it.
  */
 describe("the tool contract, against the pinned reference", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;

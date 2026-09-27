@@ -42,6 +42,7 @@ const VERBS: Record<string, [done: string, running: string]> = {
   search_record: ["Searched your record for", "Searching your record for"],
   update_ability: ["Updated ability:", "Updating ability:"],
   update_notebook: ["Updated notebook:", "Updating notebook:"],
+  edit_challenge: ["Edited challenge:", "Editing challenge:"],
 };
 
 /** A skill's name as a reader says it: `challenge-figures` → `Challenge Figures`. */
@@ -168,7 +169,8 @@ export function toolSubject(tool: string, input: string, running = false): ToolS
       const query = text(args.query);
       return query ? { verb, subject: oneLine(query, 48) } : null;
     }
-    case "update_notebook": {
+    case "update_notebook":
+    case "edit_challenge": {
       const note = text(args.note);
       return note ? { verb, subject: oneLine(note, 64) } : null;
     }

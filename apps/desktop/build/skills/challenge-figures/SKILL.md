@@ -172,4 +172,4 @@ Put the fence on its own lines inside the Examples section, directly above the e
 - the ```figure fence with the spec
 - the `Input:` line, then `Output:` and `Explanation:` as usual
 
-The figure is drawn inside that example's card, above its input. Usually Example 1 is the one that needs it; add one to another example only when its shape is different in a way that matters. Mark the answer in a statement figure when the example's output is a route, a node or a region, the way LeetCode highlights it.
+The figure is drawn inside that example's card, above its input. To add a figure to the challenge the learner already has open, use edit_challenge on the statement: find that example's `Input:` line and replace it with the fence followed by the same line. Nothing is rebuilt and the learner keeps their code. Usually Example 1 is the one that needs it; add one to another example only when its shape is different in a way that matters. Mark the answer in a statement figure when the example's output is a route, a node or a region, the way LeetCode highlights it.

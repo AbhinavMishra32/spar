@@ -71,7 +71,7 @@ const abilityClaimShape = {
  * remember them.
  */
 export const setChallengeInputSchema = z.object({
-  mode: z.enum(["new", "revise", "replace"]).describe("new: no challenge is open. revise: change the open challenge while keeping its task and code shape (the learner asked for types, a clearer statement, another language, a fix). replace: swap the open challenge for a different problem, because the learner asked or it is clearly wrong for them."),
+  mode: z.enum(["new", "revise", "replace"]).describe("new: no challenge is open. revise: rebuild the open challenge around the same task when its contract or code shape changes (typed starters, another language); for a few passages, edit_challenge is faster and keeps the learner's code. replace: swap the open challenge for a different problem, because the learner asked or it is clearly wrong for them."),
   aim: z.object({
     ability: z.string().min(2).max(200).describe("The ability this trains, in a few words, stable across challenges that train it."),
     gap: z.string().min(8).max(1_500).describe("The specific thing still uncertain about this learner that this challenge probes."),
@@ -164,6 +164,15 @@ export const toolDefinitions = {
     })).min(1).max(20).optional().describe("Replacements applied in order to the current notebook."),
     markdown: z.string().min(1).max(12_000).optional().describe("The whole notebook, replacing the current one. Only to start it or reorganise it; otherwise use edits."),
     note: z.string().min(3).max(300).describe("One line saying what changed, shown to the learner."),
+  })],
+  edit_challenge: ["Change the open Spar-written challenge in place: reword a sentence that confused them, add or fix a figure, add an example, fix a typo, add a visible test case, adjust a type in the starter. Each edit replaces one exact passage — copied from the current text, occurring once — in one part of the challenge. Nothing is rebuilt and the learner keeps their place and their code: a statement or title edit is checked for its figures, and an edit to the starter, reference or tests reruns the full validation before it lands. The journey shows the open challenge's statement and starter; read_record the challenge for its reference and tests. Use set_challenge revise instead when the task, its contract or its code shape changes.", z.object({
+    edits: z.array(z.object({
+      part: z.enum(["statement", "title", "starter", "reference", "visibleTests"]).describe("Which part of the challenge the passage is in."),
+      path: z.string().min(1).max(200).optional().describe("The file, for starter, reference and test edits. May be omitted when that part has one file."),
+      find: z.string().min(1).max(4_000).describe("The exact text to replace, copied from the current version; it must occur exactly once. To add something, find the passage it goes next to and repeat that passage in replace with the addition."),
+      replace: z.string().max(8_000).describe("What the passage becomes."),
+    })).min(1).max(20),
+    note: z.string().min(3).max(300).describe("What changed and why, in one sentence. Stored with the challenge."),
   })],
   set_challenge: ["Set the learner's next challenge from a brief. A builder writes the statement, starter, reference, tests and plausible wrong solutions; the host compiles and validates them and repairs recoverable failures before anything is published. Returns the published challenge, or the failed checks when it could not be validated — then adjust the brief (often simpler) and call again.", setChallengeInputSchema],
   record_insight: [

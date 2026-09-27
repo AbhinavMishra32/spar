@@ -18,6 +18,7 @@ import { BAND_WORD, ChallengeCardMeta, ChallengeCardMenu, ChallengeOutcomeTag, D
 import { ChallengePreview, hasChallengePreview, publishedPreviewData, stopPreviewData, useCursorPreview } from "./ChallengePreview";
 import { SaveProblem } from "../common/SaveProblem";
 import { readPublishedChallenge } from "./publishedChallenge";
+import { ChallengeEditCard } from "./ChallengeEditCard";
 import { useRevealOnExpand } from "./useRevealOnExpand";
 import { challengeMode, diffTotals, isChallengeAuthoringTool, isSourceTool, toolRowTitle, type ReasoningPart, type RunPart } from "./agentRun";
 import { AbilityCard, NotebookCard } from "./NotebookView";
@@ -201,6 +202,7 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "create_question":
     case "replace_current_question":
     case "set_challenge":
+    case "edit_challenge":
     case "create_fallback_question":
     case "assign_practice_problem":
       return <IconPuzzle className={MARK} />;
@@ -408,7 +410,9 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
   const notebook = part.tool === "update_notebook" && part.phase === "done" && hasCall;
   /* And an ability document, which is the same kind of page. */
   const ability = part.tool === "update_ability" && part.phase === "done" && hasCall;
-  const treed = staged || insight || notebook || ability;
+  /* And the passages an edit changed on the open challenge. */
+  const edited = part.tool === "edit_challenge" && part.phase === "done" && hasCall && /"status"\s*:\s*"edited"/.test(part.output);
+  const treed = staged || insight || notebook || ability || edited;
   const design = useMemo(() => (staged ? draftFromCall(part.input, part.files) : null), [staged, part.input, part.files]);
   /* A staged call's row folds its stages, not a panel of JSON: the tree is the
      account of what the call did, and its arguments and result are already
@@ -561,6 +565,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           {insight && <Reveal show={treeOpen}><InsightTree input={part.input} output={part.output} /></Reveal>}
           {notebook && <Reveal show={treeOpen}><NotebookCard input={part.input} output={part.output} /></Reveal>}
           {ability && <Reveal show={treeOpen}><AbilityCard input={part.input} output={part.output} /></Reveal>}
+          {edited && <Reveal show={treeOpen}><ChallengeEditCard input={part.input} output={part.output} /></Reveal>}
           {staged && <Reveal show={treeOpen}><StageTree draft={design} language={design?.language} question={question} stages={part.stages} /></Reveal>}
           {/* One rounded box, not two. The surface lives on the element that
               clips, because that element is also the one animating the height —

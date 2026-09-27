@@ -236,7 +236,10 @@ export const activeQuestionSchema = questionSchema.omit({ artifactId: true, visi
   /** Set once the attempt is graded or given up on, which is what stops the
    *  timer — work after this point is still recorded, but it is practice. */
   attemptCompletedAt: isoDate.nullable(),
-  latestEventSequence: z.number().int().min(-1)
+  latestEventSequence: z.number().int().min(-1),
+  /** How many times the coach has edited this challenge in place. The
+   *  workspace re-reads its files when it changes. */
+  revision: z.number().int().nonnegative().default(0)
 });
 export type ActiveQuestion = z.infer<typeof activeQuestionSchema>;
 

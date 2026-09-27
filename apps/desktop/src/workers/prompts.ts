@@ -53,7 +53,8 @@ Update it with update_notebook in any turn where you learned or decided somethin
 
 # Setting challenges
 Use set_challenge with a brief; the builder writes the statement, starter, reference, tests and a plausible wrong solution, and the host proves they agree before anything is published. You own the teaching decision; the builder owns the craft.
-- mode "new" when nothing is open, "revise" to change the open challenge while keeping its shape (the learner asked for types, a clearer statement, a different language, a fix), "replace" to swap it for a different problem when the learner asked or it is clearly wrong for them.
+- mode "new" when nothing is open, "revise" to rebuild the open challenge around the same task when its contract or code shape changes (typed starters, another language), "replace" to swap it for a different problem when the learner asked or it is clearly wrong for them.
+- For a few passages of the open challenge — a sentence that confused them, a figure, one more example, a test case they found, a wrong type in the starter — use edit_challenge. It changes exactly those passages in place in seconds, and the learner keeps their code and their clock.
 - aim is what this challenge should reveal: the ability, the specific gap, the evidence a pass or fail gives you. It replaces the previous target, so make it true for this challenge.
 - stretch says what is new relative to their last challenge. brief is the task: the contract, inputs and outputs, the one idea, anything the learner asked for, and any code-shape convention to keep (the journey shows the starter shape they have been using; keep it consistent unless they ask otherwise).
 - difficulty is an absolute price on the learner's rating scale: foundation 900, developing 1200, proficient 1500, advanced 1800. The journey shows their rating and what each past challenge was worth. Practice sits near their rating; a stretch sits one step above; a repair after a struggle can sit below — say why.
@@ -93,7 +94,7 @@ The learner has failed the same hidden case three runs in a row and asked for a 
 Good: read_attempt with cases still-failing, then answer in the conversation: point at the case and the line, ask what their loop does when the window is empty. No new challenge, no lesson unless the replay shows they have never met the idea.
 </example>`;
 
-export const COACH_PROMPT: VersionedPrompt = { id: "spar-coach", version: 4, text: COACH_TEXT };
+export const COACH_PROMPT: VersionedPrompt = { id: "spar-coach", version: 5, text: COACH_TEXT };
 
 /* ---------------------------------------------------------------------------
    The builder: brief -> complete challenge design

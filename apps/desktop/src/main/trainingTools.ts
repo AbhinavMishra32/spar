@@ -281,6 +281,7 @@ export async function executeTrainingTool(
     rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
   }
+  if (name === "edit_challenge") return editChallenge(local, sessionId, value, workspaces, runner, progress);
   if (name === "review_solution") {
     const attemptId = String(value.attemptId);
     const verdict = value.verdict === "rework" ? "rework" : "accepted";
@@ -843,6 +844,134 @@ async function compileCandidate(input:unknown,sessionId:string,workspaces:Worksp
     try{return await runner.request("run",{root,language:String(value.language),command:"test",timeoutMs:limits.timeoutMs}).promise as {exitCode:number;stdout:string;stderr:string;durationMs:number};}
     finally{await workspaces.removeValidation(sessionId,validationId);}
   },origin,progress);
+}
+
+type EditPart = "statement" | "title" | "starter" | "reference" | "visibleTests";
+type ChallengeEdit = { part: EditPart; path?: string; find: string; replace: string };
+const FILE_PARTS = { starter: "starterFiles", reference: "referenceFiles", visibleTests: "visibleTests" } as const;
+
+/** One exact passage replaced, or why not. The failure carries the current
+ *  text when it is short enough to be useful, so the next call can copy it. */
+function replaceOnce(text: string, find: string, replace: string, where: string): { text: string } | { error: string } {
+  const count = find ? text.split(find).length - 1 : 0;
+  if (count === 1) return { text: text.replace(find, () => replace) };
+  if (count > 1) return { error: `${where}: the text to find occurs ${count} times. Include more of the surrounding text so it names one place.` };
+  const shown = text.length <= 6_000 ? ` Its current text:\n${text}` : " Read the challenge with read_record for its current text.";
+  return { error: `${where}: the text to find is not there. Copy it exactly from the current version.${shown}` };
+}
+
+/**
+ * The open challenge, changed in place.
+ *
+ * Most changes to a challenge the learner is working are small: a sentence
+ * that confused them, a figure, one more example, a test case they found,
+ * a type in the starter. Sending those through the builder rewrote the whole
+ * challenge, re-validated it from nothing and replaced the learner's files. Here
+ * the coach names exact passages, the host applies them, and only what the
+ * change can break is checked: a statement edit has its figures checked, and any
+ * edit to code or tests reruns the full validation before anything lands. The
+ * question and attempt stay the same, and the learner's own code is never
+ * overwritten — a starter edit reaches their file only when the passage is
+ * still there to change.
+ */
+async function editChallenge(local: LocalStore, sessionId: string, value: Record<string, unknown>, workspaces: WorkspaceService, runner: UtilityClient, progress?: (value: unknown) => void) {
+  const refuse = (name: string, detail: string) => ({ status: "invalid", report: { valid: false, checks: [{ name, passed: false, detail }] } });
+  const active = openChallenge(local, sessionId);
+  if (!active) return refuse("session lifecycle", "No challenge is open to edit. Use set_challenge to set one.");
+  if (active.source) return refuse("source", "This is a provider's problem: its statement and judge are theirs, so it cannot be edited. Explain the point in the conversation, or replace it.");
+  const stored = local.questionDesign(active.id);
+  if (!stored) return refuse("session lifecycle", "The open challenge could not be read.");
+  const edits = (Array.isArray(value.edits) ? value.edits : []) as ChallengeEdit[];
+  const before = stored.design;
+  const design = structuredClone(before);
+  const touched = new Map<string, { part: EditPart; path?: string }>();
+  for (const [k, edit] of edits.entries()) {
+    const where = `edits.${k} (${edit.part}${edit.path ? ` ${edit.path}` : ""})`;
+    if (edit.part === "statement" || edit.part === "title") {
+      const next = replaceOnce(design[edit.part], edit.find, edit.replace, where);
+      if ("error" in next) return refuse("edit", next.error);
+      design[edit.part] = next.text;
+      touched.set(edit.part, { part: edit.part });
+      continue;
+    }
+    const files = design[FILE_PARTS[edit.part]];
+    const paths = Object.keys(files);
+    const path = edit.path ?? (paths.length === 1 ? paths[0] : undefined);
+    if (!path || !(path in files)) return refuse("edit", `${where}: name one of its files in path: ${paths.join(", ") || "(none)"}. Adding or removing files needs set_challenge.`);
+    const next = replaceOnce(files[path]!, edit.find, edit.replace, where);
+    if ("error" in next) return refuse("edit", next.error);
+    files[path] = next.text;
+    touched.set(`${edit.part}:${path}`, { part: edit.part, path });
+  }
+  design.statement = normalizeStatementText(design.statement);
+  if (design.title.trim().length < 3) return refuse("title", "The title would be empty.");
+  if (design.statement.trim().length < 30) return refuse("statement", "The statement would be too short to read as a challenge.");
+  const broken = figureProblems(design.statement);
+  if (broken.length) return refuse("figures", `${broken.join(" ")} Fix the figure spec and edit again; load the challenge-figures skill if you have not.`);
+
+  /* Words only: nothing the tests or reference depend on changed, so the
+     existing validation still stands. */
+  const codeChanged = [...touched.values()].some((entry) => entry.part !== "statement" && entry.part !== "title");
+  let saved = design;
+  let report = stored.report;
+  if (codeChanged) {
+    const compiled = await compileCandidate(design, sessionId, workspaces, runner, "authored", progress);
+    if (!compiled.report.valid) return { status: "invalid", report: compiled.report, note: "Nothing was changed: the edited challenge did not validate. Fix the edit, or use set_challenge if the change is bigger than a few passages." };
+    saved = compiled.design;
+    report = compiled.report;
+  }
+  const still = openChallenge(local, sessionId);
+  if (!still || still.id !== active.id) return refuse("session lifecycle", "The open challenge changed while this edit was checked. Nothing was changed.");
+
+  /* The learner's files. Visible tests are the challenge's own and follow it.
+     A starter file they have not touched follows too; one they have is edited
+     only where the same passage is still there, and otherwise left alone. */
+  const learnerFiles: Array<{ path: string; outcome: "updated" | "merged" | "kept" }> = [];
+  for (const { part, path } of touched.values()) {
+    if (!path || (part !== "starter" && part !== "visibleTests")) continue;
+    const next = saved[FILE_PARTS[part]][path] ?? design[FILE_PARTS[part]][path]!;
+    const old = before[FILE_PARTS[part]][path]!;
+    const current = await workspaces.read(sessionId, path).catch(() => null);
+    if (part === "visibleTests" || current === null || current === old) {
+      await workspaces.write(sessionId, path, next);
+      if (part === "starter") learnerFiles.push({ path, outcome: "updated" });
+      continue;
+    }
+    let merged: string | null = current;
+    for (const edit of edits) {
+      if (edit.part !== "starter" || (edit.path ?? path) !== path || merged === null) continue;
+      const applied = replaceOnce(merged, edit.find, edit.replace, path);
+      merged = "text" in applied ? applied.text : null;
+    }
+    if (merged !== null) await workspaces.write(sessionId, path, merged);
+    learnerFiles.push({ path, outcome: merged !== null ? "merged" : "kept" });
+  }
+  const note = String(value.note ?? "").trim();
+  const revision = local.editQuestion(active.id, saved, report);
+  const changed = [...touched.values()];
+  local.appendNextEvent({ id: randomUUID(), attemptId: active.attemptId, type: "agent_message", occurredAt: new Date().toISOString(), payload: { kind: "challenge_edited", note, changed, revision }, source: "agent", schemaVersion: 1 });
+  const kept = learnerFiles.filter((file) => file.outcome === "kept").map((file) => file.path);
+  return {
+    status: "edited",
+    questionId: active.id,
+    title: saved.title,
+    revision,
+    changed,
+    validated: codeChanged ? "full" : "figures",
+    learnerFiles,
+    /* For the thread to draw what changed; the worker keeps these out of the
+       coach's context. */
+    before: pick(before, changed),
+    after: pick(saved, changed),
+    note: kept.length
+      ? `Edited. The learner had already changed ${kept.join(", ")} where your edit falls, so their file was left as it is: tell them what changed if it affects their code.`
+      : "Edited in place. The learner sees the change now and keeps their code.",
+  };
+}
+
+/** The parts an edit touched, as text, for a before/after view. */
+function pick(design: import("@spar/domain").QuestionDesign, changed: Array<{ part: EditPart; path?: string }>) {
+  return changed.map(({ part, path }) => ({ part, ...(path ? { path } : {}), text: part === "statement" || part === "title" ? design[part] : design[FILE_PARTS[part]][path!] ?? "" }));
 }
 
 /** The opening of the learner's solve, as `read_attempt` carries it. A screen

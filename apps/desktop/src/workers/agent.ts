@@ -339,6 +339,10 @@ function forModel(name: string, value: unknown): unknown {
     const { markdown: _markdown, previous: _previous, previousAuthor, ...rest } = value as Record<string, unknown>;
     return { ...rest, ...(previousAuthor === "learner" ? { note: "Saved over a version the learner wrote. Keep what they said unless it is no longer true." } : {}) };
   }
+  if (name === "edit_challenge" && value && typeof value === "object") {
+    const { before: _before, after: _after, ...rest } = value as Record<string, unknown>;
+    return rest;
+  }
   if (name === "update_ability" && value && typeof value === "object") {
     const { previousMarkdown: _previous, ...rest } = value as Record<string, unknown>;
     return rest;
