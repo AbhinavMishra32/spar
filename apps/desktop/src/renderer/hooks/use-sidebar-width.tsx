@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const STORAGE_KEY = "spar.sidebarWidth";
 /* Matched to the ChatGPT desktop app, which clamps its sidebar to 240–520 and
@@ -7,9 +7,15 @@ const STORAGE_KEY = "spar.sidebarWidth";
    start: the sidebar should be readable before anyone drags it. */
 export const SIDEBAR_DEFAULT_WIDTH = 275;
 const MIN_WIDTH = 240;
-const MAX_WIDTH = 520;
+/* The widest a sidebar is still a list rather than a second page: long session
+   titles fit on one line well before this. */
+const MAX_WIDTH = 400;
+/* However wide it is allowed to be, it never takes more than this share of the
+   window, so a small window keeps its room for the workspace. */
+const MAX_SHARE = 0.3;
 
-const clamp = (value: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(value)));
+const maxWidth = () => Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(window.innerWidth * MAX_SHARE)));
+const clamp = (value: number) => Math.min(maxWidth(), Math.max(MIN_WIDTH, Math.round(value)));
 
 /**
  * Sidebar width, persisted across launches and draggable from the divider.
@@ -20,16 +26,26 @@ const clamp = (value: number) => Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.ro
  * while a drag is in flight or the edge lags behind the cursor.
  */
 export function useSidebarWidth() {
-  const [width, setWidth] = useState(() => {
+  /* What the learner chose, kept as chosen; the width shown is that choice
+     fitted to the window it is in now, so shrinking the window and growing it
+     again gives the same sidebar back. */
+  const [chosen, setChosen] = useState(() => {
     const stored = Number.parseInt(localStorage.getItem(STORAGE_KEY) ?? "", 10);
-    return Number.isFinite(stored) ? clamp(stored) : SIDEBAR_DEFAULT_WIDTH;
+    return Number.isFinite(stored) ? stored : SIDEBAR_DEFAULT_WIDTH;
   });
+  const [, setWindowWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setWindowWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  const width = clamp(chosen);
   const [dragging, setDragging] = useState(false);
   const origin = useRef({ x: 0, width: 0 });
 
   const commit = useCallback((next: number) => {
     const value = clamp(next);
-    setWidth(value);
+    setChosen(value);
     localStorage.setItem(STORAGE_KEY, String(value));
     return value;
   }, []);
