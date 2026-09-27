@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquare, SquareCode } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
+import { cn } from "@/lib/utils";
 import type { ActiveQuestion, RatingPoint, SessionDetail } from "@spar/domain";
 import { ViewSwitch } from "@/components/ui/view-switch";
 import { AgentThread, type OptimisticLearnerMessage } from "../agent/AgentThread";
@@ -19,6 +20,9 @@ import { ChallengeComposerContext } from "../agent/ChallengeCardMeta";
 
 type View = "problem" | "chat";
 const ORDER: View[] = ["problem", "chat"];
+/* Which tab each session was left on, so leaving for Home and coming back does
+   not drop the learner onto the statement when they were mid-conversation. */
+const lastView = new Map<string, View>();
 
 /**
  * The session surface. Reading the problem and talking to the agent are the two
@@ -76,7 +80,12 @@ export function AgentPanel({
   optimisticMessages: OptimisticLearnerMessage[];
   trail?: ChallengeTrail | undefined;
 }) {
-  const [view, setView] = useState<View>("problem");
+  const sessionId = detail.summary.id;
+  const [view, setViewState] = useState<View>(() => lastView.get(sessionId) ?? "problem");
+  const setView = useCallback((next: View) => {
+    lastView.set(sessionId, next);
+    setViewState(next);
+  }, [sessionId]);
   const [focusRequest, setFocusRequest] = useState(0);
   const [challengeContext, setChallengeContext] = useState<ChallengeTrail["stops"][number] | null>(null);
   const actionableTrail = useMemo(() => trail ? {
@@ -86,7 +95,7 @@ export function AgentPanel({
       setView("chat");
       setFocusRequest((value) => value + 1);
     },
-  } : undefined, [trail]);
+  } : undefined, [trail, setView]);
   /* Upgrade a draft produced by the first version of this action into the real
      attachment without discarding anything the learner typed after its prefix. */
   useEffect(() => {
@@ -161,38 +170,57 @@ export function AgentPanel({
           enough to say which way the switch went. Size and position ride a
           flat spring so they arrive without a bounce, while blur and opacity
           stay on tweens: the leaving view clears out early and fast so the two
-          never sit half-visible on top of each other. */}
+          never sit half-visible on top of each other.
+
+          Neither view unmounts when it leaves. Remounting the transcript threw
+          away where the learner had scrolled to and which folds they had open,
+          so coming back to Chat always landed at the bottom. The hidden view
+          keeps its layout under `visibility: hidden`, which is what keeps its
+          scroll offset. With only two views, the one arriving always left in
+          the opposite direction, so the pose it was left in is exactly the
+          pose it should arrive from. */}
       <div className="relative min-h-0 flex-1">
-        <AnimatePresence initial={false}>
-          <motion.div
-            key={view}
-            animate={{ opacity: 1, filter: "blur(0px)", scale: 1, x: 0 }}
-            className="absolute inset-0 flex flex-col will-change-[transform,filter,opacity]"
-            exit={{
-              opacity: 0,
-              filter: "blur(12px)",
-              scale: 1 - depth,
-              x: direction * -4,
-              transition: {
-                default: { duration: 0.28, ease: [0.32, 0, 0.67, 0] },
-                opacity: { duration: 0.16, ease: [0.4, 0, 1, 1] },
-                filter: { duration: 0.22, ease: [0.4, 0, 1, 1] },
-              },
-            }}
-            initial={{ opacity: 0, filter: "blur(12px)", scale: 1 + depth, x: direction * 4 }}
-            transition={{
-              default: { type: "spring", visualDuration: 0.38, bounce: 0 },
-              opacity: { duration: 0.24, ease: [0.22, 0.61, 0.36, 1] },
-              filter: { duration: 0.34, ease: [0.22, 0.61, 0.36, 1] },
-            }}
-          >
-            {view === "problem" ? (
-              <ProblemView concepts={concepts} learnerRating={learnerRating} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
-            ) : (
-              <AgentThread className="[--transcript-width:46rem]" currentQuestionId={question.id} messages={detail.messages} onEditMessage={onEditMessage} optimisticMessages={optimisticMessages} run={run} trail={actionableTrail} undoable={undoable} />
-            )}
-          </motion.div>
-        </AnimatePresence>
+        {ORDER.map((name) => {
+          const active = name === view;
+          return (
+            <motion.div
+              key={name}
+              animate={active ? {
+                opacity: 1,
+                filter: "blur(0px)",
+                scale: 1,
+                x: 0,
+                visibility: "visible",
+                transition: {
+                  default: { type: "spring", visualDuration: 0.38, bounce: 0 },
+                  opacity: { duration: 0.24, ease: [0.22, 0.61, 0.36, 1] },
+                  filter: { duration: 0.34, ease: [0.22, 0.61, 0.36, 1] },
+                },
+              } : {
+                opacity: 0,
+                filter: "blur(12px)",
+                scale: 1 - depth,
+                x: direction * -4,
+                transitionEnd: { visibility: "hidden" },
+                transition: {
+                  default: { duration: 0.28, ease: [0.32, 0, 0.67, 0] },
+                  opacity: { duration: 0.16, ease: [0.4, 0, 1, 1] },
+                  filter: { duration: 0.22, ease: [0.4, 0, 1, 1] },
+                },
+              }}
+              aria-hidden={!active}
+              className={cn("absolute inset-0 flex flex-col will-change-[transform,filter,opacity]", active ? "z-[1]" : "pointer-events-none")}
+              inert={!active}
+              initial={false}
+            >
+              {name === "problem" ? (
+                <ProblemView concepts={concepts} learnerRating={learnerRating} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
+              ) : (
+                <AgentThread className="[--transcript-width:46rem]" currentQuestionId={question.id} messages={detail.messages} onEditMessage={onEditMessage} optimisticMessages={optimisticMessages} run={run} scrollKey={`panel:${sessionId}`} trail={actionableTrail} undoable={undoable} />
+              )}
+            </motion.div>
+          );
+        })}
       </div>
 
       <div className="shrink-0 px-4 pb-3 pt-1">

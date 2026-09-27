@@ -757,6 +757,12 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
   );
 }
 
+/* Where each transcript was left, by `scrollKey`. Leaving the workspace for
+   Home unmounts the thread, and a fresh mount used to land wherever the first
+   layout happened to put it. Module scope rather than storage: it only has to
+   outlive the component, not the app. */
+const savedScroll = new Map<string, { top: number; pinned: boolean }>();
+
 export function AgentThread({
   messages,
   run,
@@ -770,6 +776,7 @@ export function AgentThread({
   className,
   currentQuestionId,
   trail,
+  scrollKey,
 }: {
   messages: Message[];
   run: AgentRun | null;
@@ -794,9 +801,22 @@ export function AgentThread({
    *  card stays inert; earlier cards reopen their read-only practice surface. */
   currentQuestionId?: string | undefined;
   trail?: ChallengeTrail | undefined;
+  /** Remembers the scroll position under this key across unmounts, so coming
+   *  back to a session returns to where the learner left it. */
+  scrollKey?: string | undefined;
 }) {
   const viewport = useRef<HTMLDivElement>(null);
-  const [pinned, setPinned] = useState(true);
+  const column = useRef<HTMLDivElement>(null);
+  const saved = scrollKey ? savedScroll.get(scrollKey) : undefined;
+  const [pinned, setPinned] = useState(saved?.pinned ?? true);
+  /* Until the learner scrolls, a restored offset is re-applied as the content
+     below the first layout finishes drawing (highlighting, maths, figures), so
+     the page the learner left is the one they come back to. */
+  const restoring = useRef(saved && !saved.pinned ? saved.top : null);
+  useLayoutEffect(() => {
+    const node = viewport.current;
+    if (node && restoring.current !== null) node.scrollTop = restoring.current;
+  }, []);
   /* Which ends of the transcript have content past them, and so are faded.
      Re-measured on resize as well as on scroll: whether a thread overflows
      changes when the pane changes and never because someone scrolled it. */
@@ -854,7 +874,11 @@ export function AgentThread({
     if (!node) return;
     const onScroll = () => {
       const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+      /* A restore in progress owns the position; measuring it now would record
+         the half-drawn layout's offset as where the learner is. */
+      if (restoring.current !== null) return;
       setPinned(distance < 48);
+      if (scrollKey) savedScroll.set(scrollKey, { top: node.scrollTop, pinned: distance < 48 });
       /* The fades, on only while there is something past that end — see
          `.transcript-fade`. Measured against the live edge rather than against
          `pinned`, which carries 48px of slack so that a stream does not stop
@@ -875,16 +899,31 @@ export function AgentThread({
        first, then measure, so following a stream survives a draft being typed
        underneath it and the fades answer to the height the scroller ended up
        with rather than the one it had. */
+    /* The content is observed as well as the scroller. Messages finish drawing
+       after the first layout — highlighted code, maths, figures — and that
+       growth is neither a scroll nor a resize of the scroller, so the thread
+       used to open short of the live edge and never catch up. */
     const observer = new ResizeObserver(() => {
-      if (pinnedRef.current) node.scrollTop = node.scrollHeight;
+      if (restoring.current !== null) node.scrollTop = restoring.current;
+      else if (pinnedRef.current) node.scrollTop = node.scrollHeight;
       onScroll();
     });
     observer.observe(node);
+    if (column.current) observer.observe(column.current);
+    /* Any deliberate move by the learner ends the restore. */
+    const release = () => {
+      if (restoring.current === null) return;
+      restoring.current = null;
+      onScroll();
+    };
+    const intents = ["wheel", "pointerdown", "keydown", "touchstart"] as const;
+    for (const name of intents) node.addEventListener(name, release, { passive: true });
     return () => {
       node.removeEventListener("scroll", onScroll);
+      for (const name of intents) node.removeEventListener(name, release);
       observer.disconnect();
     };
-  }, []);
+  }, [scrollKey]);
 
   /* A turn with nothing to show yet is not an empty thread. `PhaseWait` is what
      stands in its place, and showing the project's empty state over a running
@@ -918,6 +957,7 @@ export function AgentThread({
       <div ref={viewport} className="app-scroll transcript-fade transcript-scroller h-full overflow-y-auto overflow-x-hidden"
         style={transcriptFadeStyle(edges)}>
         <div
+          ref={column}
           className={cn(
             "transcript-column relative flex min-h-full min-w-0 flex-col gap-6",
             isEmpty ? "justify-center" : "justify-start",

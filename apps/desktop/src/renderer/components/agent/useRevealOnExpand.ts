@@ -43,12 +43,18 @@ const LIMIT = 1100;
 export function useRevealOnExpand<T extends HTMLElement>(open: boolean) {
   const ref = useRef<T>(null);
   /* A row that renders already-open — a re-mount, a transcript read back from
-     storage — was not expanded by anybody, and nothing should move. */
-  const mounted = useRef(false);
+     storage — was not expanded by anybody, and nothing should move. Compared
+     against the last state seen rather than guarded by a first-run flag: in
+     StrictMode the effect runs twice on mount, and the second run got past the
+     flag and read as every closed row having just been collapsed — each one
+     pulling the thread up to its heading, so a session opened at the top of
+     its transcript instead of the bottom. */
+  const previous = useRef(open);
 
   useEffect(() => {
     const node = ref.current;
-    if (!mounted.current) { mounted.current = true; return; }
+    if (previous.current === open) return;
+    previous.current = open;
     if (!node) return;
     const scroller = scrollParent(node);
     if (!scroller) return;

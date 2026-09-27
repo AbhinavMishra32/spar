@@ -143,6 +143,7 @@ export function ChatView({
         messages={detail.messages}
         optimisticMessages={optimisticMessages}
         run={run}
+        scrollKey={`chat:${detail.summary.id}`}
       />
 
       <div className="shrink-0 px-4 pb-4">
