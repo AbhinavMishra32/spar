@@ -1047,7 +1047,7 @@
               "type": "string",
               "minLength": 2,
               "maxLength": 200,
-              "description": "The ability this trains, in a few words, stable across challenges that train it."
+              "description": "The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."
             },
             "gap": {
               "type": "string",
@@ -1574,7 +1574,7 @@
             "additionalProperties": false
           },
           "maxItems": 8,
-          "description": "Nuanced interpretations of exact durable events. Describe the behavior observed, not a score."
+          "description": "Nuanced interpretations of exact durable events. Describe the behavior observed, not a score. Contradictory is as much evidence as supporting: a long struggle or an idea they had to be walked to counts against the ability, and a pass after heavy hints is assisted."
         },
         "pattern": {
           "type": "object",
@@ -1633,10 +1633,19 @@
     }
   },
   "update_notebook": {
-    "description": "Change your notebook for this Track, your primary memory of this learner. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit it; keep it under about 1,200 words and delete what is no longer true.",
+    "description": "Change one of your notebooks, your primary memory of this learner: the one for this Track, or the learner notebook every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both; keep each under about 1,200 words and delete what is no longer true.",
     "inputSchema": {
       "type": "object",
       "properties": {
+        "notebook": {
+          "type": "string",
+          "enum": [
+            "track",
+            "learner"
+          ],
+          "default": "track",
+          "description": "track: their progress on this Track. learner: the person across every Track — who they are, how they like to be taught, what helps them, habits seen wherever they work."
+        },
         "edits": {
           "type": "array",
           "items": {

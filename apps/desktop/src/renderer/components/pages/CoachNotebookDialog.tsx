@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { NotebookIcon } from "@phosphor-icons/react";
-import type { CoachNotebookVersion, SparApi } from "../../../shared/api";
+import { LEARNER_NOTEBOOK, type CoachNotebookVersion, type SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -12,19 +12,25 @@ import { Markdown } from "../agent/Markdown";
 import { DiffCounts, LineDiffView } from "../agent/NotebookView";
 
 type Tab = "view" | "edit" | "history";
+type Scope = "track" | "learner";
 
-const EMPTY = "Spar's coach keeps notes here about how you learn — what clicked, what to revisit, how you like to be taught. It reads them before every turn.";
+const EMPTY: Record<Scope, string> = {
+  track: "Spar's coach keeps notes here about your progress on this Track — what you can do, what to revisit, and the plan. It reads them before every turn.",
+  learner: "Spar's coach keeps notes here about you, whatever you are learning — how you like to be taught and what helps you. Every Track reads them.",
+};
 
 function author(version: CoachNotebookVersion): string {
   return version.author === "coach" ? "Coach" : "You";
 }
 
 /**
- * The coach's notebook for one Track: what it has written about the learner,
- * a way to correct it, and every version it has been through.
+ * The coach's notebooks as the learner sees them from a Track: the one for this
+ * Track and the one about the learner that every Track reads, each with a way to
+ * correct it and every version it has been through.
  */
 export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined; trackId: string | null }) {
   const [open, setOpen] = useState(false);
+  const [scope, setScope] = useState<Scope>("track");
   const [tab, setTab] = useState<Tab>("view");
   const [history, setHistory] = useState<CoachNotebookVersion[] | null>(null);
   const [error, setError] = useState("");
@@ -34,17 +40,18 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
   const [selected, setSelected] = useState<number | null>(null);
 
   const latest = history?.[0] ?? null;
+  const key = scope === "learner" ? LEARNER_NOTEBOOK : trackId;
 
   const load = useCallback(async () => {
     if (!api) return;
     setError("");
     try {
-      const versions = await api.notebookHistory(trackId);
+      const versions = await api.notebookHistory(key);
       const sorted = [...versions].sort((a, b) => b.version - a.version);
       /* History can be empty while a notebook still exists (an older store that
          kept only the latest), so the latest is read on its own as well. */
       if (sorted.length === 0) {
-        const current = await api.readNotebook(trackId);
+        const current = await api.readNotebook(key);
         if (current) sorted.push(current);
       }
       setHistory(sorted);
@@ -53,7 +60,7 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
       setError(message(cause));
       setHistory([]);
     }
-  }, [api, trackId]);
+  }, [api, key]);
 
   useEffect(() => {
     if (!open) return;
@@ -75,7 +82,7 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
     setError("");
     try {
       const trimmed = note.trim();
-      await api.writeNotebook({ trackId, markdown: draft, ...(trimmed ? { note: trimmed } : {}) });
+      await api.writeNotebook({ trackId: key, markdown: draft, ...(trimmed ? { note: trimmed } : {}) });
       setSelected(null);
       await load();
       setTab("view");
@@ -103,21 +110,33 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
         <DialogHeader>
           <DialogTitle>Coach's notebook</DialogTitle>
           <DialogDescription>
-            {latest ? `v${latest.version} · ${author(latest)} · ${relativeTime(latest.createdAt)}` : "What Spar's coach knows about how you learn in this Track."}
+            {latest ? `v${latest.version} · ${author(latest)} · ${relativeTime(latest.createdAt)}` : scope === "learner" ? "What Spar's coach knows about you, on every Track." : "What Spar's coach knows about your progress in this Track."}
           </DialogDescription>
         </DialogHeader>
 
-        <Segmented<Tab>
-          ariaLabel="Notebook view"
-          className="w-fit"
-          onChange={(value) => (value === "edit" ? startEditing() : setTab(value))}
-          options={[
-            { value: "view", label: "View" },
-            { value: "edit", label: "Edit" },
-            { value: "history", label: "History" },
-          ]}
-          value={tab}
-        />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Segmented<Scope>
+            ariaLabel="Which notebook"
+            className="w-fit"
+            onChange={setScope}
+            options={[
+              { value: "track", label: "This Track" },
+              { value: "learner", label: "About you" },
+            ]}
+            value={scope}
+          />
+          <Segmented<Tab>
+            ariaLabel="Notebook view"
+            className="w-fit"
+            onChange={(value) => (value === "edit" ? startEditing() : setTab(value))}
+            options={[
+              { value: "view", label: "View" },
+              { value: "edit", label: "Edit" },
+              { value: "history", label: "History" },
+            ]}
+            value={tab}
+          />
+        </div>
 
         {error && <p className="text-ui-sm text-destructive" role="alert">{error}</p>}
 
@@ -131,7 +150,7 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
           ) : (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center">
               <NotebookIcon className="size-6 text-muted-foreground" />
-              <p className="max-w-md text-ui leading-[1.55] text-muted-foreground">{EMPTY}</p>
+              <p className="max-w-md text-ui leading-[1.55] text-muted-foreground">{EMPTY[scope]}</p>
             </div>
           )
         )}
@@ -155,7 +174,7 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
           history === null ? (
             <p className="text-ui text-muted-foreground" role="status">Opening the history…</p>
           ) : history.length === 0 ? (
-            <p className="text-ui text-muted-foreground">No versions yet. {EMPTY}</p>
+            <p className="text-ui text-muted-foreground">No versions yet. {EMPTY[scope]}</p>
           ) : (
             <div className="grid min-h-0 grid-cols-[13rem_minmax(0,1fr)] gap-3">
               <ol className="app-scroll flex max-h-[55vh] flex-col gap-0.5 overflow-y-auto pr-1">

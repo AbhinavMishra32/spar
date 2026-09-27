@@ -1,3 +1,4 @@
+import { LEARNER_NOTEBOOK } from "../shared/api.js";
 import { normalizeStatementText } from "../shared/statementText.js";
 import { figureProblems } from "../shared/figure.js";
 import type { SkillService } from "./skills.js";
@@ -143,14 +144,15 @@ export async function executeTrainingTool(
      narrows with `kinds` when it knows what it is after. */
   if (name === "search_record") return searchRecord(local, value, trackId);
   if (name === "read_record") return readRecord(local, value, trackId);
-  /* The coach's own notebook for this Track. The previous version goes back
-     with the result so the thread can draw what changed; the worker drops it
-     from what the model reads. */
+  /* The coach's own notebooks: this Track's, or the learner notebook every
+     Track reads. The previous version goes back with the result so the thread
+     can draw what changed; the worker drops it from what the model reads. */
   if (name === "update_notebook") {
-    const edited = applyNotebookEdits(local.readNotebook(trackId)?.markdown ?? null, value);
+    const key = value.notebook === "learner" ? LEARNER_NOTEBOOK : trackId;
+    const edited = applyNotebookEdits(local.readNotebook(key)?.markdown ?? null, value);
     if ("error" in edited) return { status: "invalid", note: edited.error };
     const markdown = edited.markdown;
-    const { saved, previous } = local.writeNotebook(trackId, { markdown, note: String(value.note ?? ""), author: "coach", sessionId });
+    const { saved, previous } = local.writeNotebook(key, { markdown, note: String(value.note ?? ""), author: "coach", sessionId });
     const unchanged = previous !== null && previous.version === saved.version;
     return { status: unchanged ? "unchanged" : "saved", version: saved.version, note: saved.note, markdown: saved.markdown, previous: unchanged ? null : previous?.markdown ?? null, previousAuthor: previous?.author ?? null };
   }

@@ -1,6 +1,7 @@
 import { ESTABLISHED_DEVIATION } from "@spar/domain";
 import type { ProblemSource } from "@spar/domain";
 import type { LocalStore, JourneyChallenge } from "./store.js";
+import { LEARNER_NOTEBOOK, type CoachNotebookVersion } from "../shared/api.js";
 import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 import { sessionSourcesSection, skillsSection } from "../workers/sessionContext.js";
@@ -88,12 +89,19 @@ export function journeyDocument(input: TurnPayloadInput): string {
 
   sections.push(`# Journey\nNow: ${new Date().toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (the learner's local time).`);
 
-  /* First, because it is the coach's own running account of this learner:
-     everything below is the record, and this is what the record means. */
+  /* First, because they are the coach's own running account of this learner:
+     everything below is the record, and this is what the record means. The
+     learner notebook is about the person and every Track reads it; the Track
+     notebook is about their progress here. */
+  const written = (notebook: CoachNotebookVersion) => `v${notebook.version}, ${notebook.author === "learner" ? "last edited by the learner" : "last written by you"} ${ago(notebook.createdAt)}`;
+  const learnerNotebook = store.readNotebook(LEARNER_NOTEBOOK);
+  sections.push(learnerNotebook
+    ? `## Learner notebook — read this first (${written(learnerNotebook)})\n${learnerNotebook.markdown}`
+    : "## Learner notebook — read this first\n_Empty. Start it with update_notebook (notebook \"learner\") this turn: who they are, how they like to be taught, and anything you already know about them that is true beyond this Track._");
   const notebook = store.readNotebook(trackId);
   sections.push(notebook
-    ? `## Coach's notebook — read this first (v${notebook.version}, ${notebook.author === "learner" ? "last edited by the learner" : "last written by you"} ${ago(notebook.createdAt)})\n${notebook.markdown}`
-    : "## Coach's notebook — read this first\n_Empty. Start it with update_notebook this turn: who they are, what they are working towards, and what you have seen so far._");
+    ? `## Track notebook (${written(notebook)})\n${notebook.markdown}`
+    : "## Track notebook\n_Empty. Start it with update_notebook this turn: what they are working towards here and what you have seen so far._");
 
   sections.push([
     "## Learner",

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { agentTurnPayload } from "./agentTurnPayload.js";
+import { LEARNER_NOTEBOOK } from "../shared/api.js";
 import { ABILITY_STALE_AFTER_DAYS, LocalStore, validatedHiddenCaseCount } from "./store.js";
 import type { QuestionDesign } from "@spar/domain";
 
@@ -1000,19 +1001,37 @@ describe("coach's notebook",()=>{
     }finally{store.close();}
   });
 
-  it("puts the latest notebook in the journey document, and says when it is empty",()=>{
+  it("puts both notebooks at the top of the journey document, and says when each is empty",()=>{
     const store=new LocalStore(":memory:");
     try{
       const {sessionId}=store.createSession("Practise graphs");
       const input={store,sessionId,message:"hi",turnKind:"learner-message" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
-      expect(agentTurnPayload(input).context).toContain("## Coach's notebook — read this first\n_Empty.");
-      expect(agentTurnPayload(input).context.indexOf("## Coach's notebook")).toBeLessThan(agentTurnPayload(input).context.indexOf("## Learner"));
+      const empty=agentTurnPayload(input).context;
+      expect(empty).toContain("## Learner notebook — read this first\n_Empty.");
+      expect(empty).toContain("## Track notebook\n_Empty.");
+      expect(empty.indexOf("## Learner notebook")).toBeLessThan(empty.indexOf("## Track notebook"));
+      expect(empty.indexOf("## Track notebook")).toBeLessThan(empty.indexOf("## Learner\n"));
       const trackId=store.readSession(sessionId)!.summary.trackId??null;
       store.writeNotebook(trackId,{markdown:"Forgets visited sets.",author:"coach"});
       store.writeNotebook(trackId,{markdown:"Forgets visited sets on grids.",author:"learner"});
+      store.writeNotebook(LEARNER_NOTEBOOK,{markdown:"New programmer; wants diagrams.",author:"coach"});
       const context=agentTurnPayload(input).context;
-      expect(context).toMatch(/## Coach's notebook — read this first \(v2, last edited by the learner [^)]*\)\nForgets visited sets on grids\./);
+      expect(context).toMatch(/## Learner notebook — read this first \(v1, last written by you [^)]*\)\nNew programmer; wants diagrams\./);
+      expect(context).toMatch(/## Track notebook \(v2, last edited by the learner [^)]*\)\nForgets visited sets on grids\./);
       expect(context).not.toContain("_Empty.");
+    }finally{store.close();}
+  });
+
+  it("keeps the learner notebook apart from every Track's, so a new Track still reads it",()=>{
+    const store=new LocalStore(":memory:");
+    try{
+      const first=store.createSession("Practise graphs");
+      store.writeNotebook(LEARNER_NOTEBOOK,{markdown:"Likes one question at a time.",author:"coach"});
+      store.writeNotebook(store.readSession(first.sessionId)!.summary.trackId??null,{markdown:"Graphs notes",author:"coach"});
+      const second=store.createTrack("Learn heaps","Heaps",null,["spar"]);
+      const context=agentTurnPayload({store,sessionId:second.sessionId,message:"hi",turnKind:"learner-message",webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"}).context;
+      expect(context).toContain("Likes one question at a time.");
+      expect(context).not.toContain("Graphs notes");
     }finally{store.close();}
   });
 });

@@ -5,7 +5,7 @@ import { fitWindowTo } from "./window.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { ESTABLISHED_DEVIATION, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
-import { reviewAnswerInput, reviewCommitInput, reviewResolveInput, reviewSettingsInput, reviewStartInput, reviewSuspendInput, reviewTargetsInput, type ReviewSettings } from "../shared/api.js";
+import { LEARNER_NOTEBOOK, reviewAnswerInput, reviewCommitInput, reviewResolveInput, reviewSettingsInput, reviewStartInput, reviewSuspendInput, reviewTargetsInput, type ReviewSettings } from "../shared/api.js";
 import { REVIEW_TARGET_MODE_KEY, ReviewService, reviewTargetMode } from "./reviewSession.js";
 import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionSourcesInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceLanguageInput, sourceSlugInput, skillDraftInput, skillEnabledInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
@@ -78,7 +78,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   /* The coach's notebook, as the learner sees it from Track settings. A learner
      edit is a version like any other, attributed to them, and the coach reads
      it on its next turn. */
-  const notebookTrack=(value:unknown)=>value===null||value===undefined||value===""?null:zUuid(value);
+  const notebookTrack=(value:unknown)=>value===null||value===undefined||value===""?null:value===LEARNER_NOTEBOOK?LEARNER_NOTEBOOK:zUuid(value);
   ipcMain.handle(ipc.notebookRead,(_event,value)=>deps.store.readNotebook(notebookTrack(value)));
   ipcMain.handle(ipc.notebookHistory,(_event,value)=>deps.store.notebookHistory(notebookTrack(value)));
   ipcMain.handle(ipc.notebookWrite,(_event,value)=>{const input=value as {trackId?:unknown;markdown?:unknown;note?:unknown};if(typeof input.markdown!=="string")throw new Error("Notebook text is required");if(input.markdown.length>40_000)throw new Error("The notebook is too long");return deps.store.writeNotebook(notebookTrack(input.trackId),{markdown:input.markdown,note:typeof input.note==="string"?input.note:"Edited by you",author:"learner"}).saved;});

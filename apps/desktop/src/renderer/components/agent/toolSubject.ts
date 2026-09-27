@@ -169,7 +169,12 @@ export function toolSubject(tool: string, input: string, running = false): ToolS
       const query = text(args.query);
       return query ? { verb, subject: oneLine(query, 48) } : null;
     }
-    case "update_notebook":
+    case "update_notebook": {
+      const note = text(args.note);
+      /* The learner notebook is the one about them, not this Track's. */
+      const named = args.notebook === "learner" ? (running ? "Updating notes about you:" : "Updated notes about you:") : verb;
+      return note ? { verb: named, subject: oneLine(note, 64) } : null;
+    }
     case "edit_challenge": {
       const note = text(args.note);
       return note ? { verb, subject: oneLine(note, 64) } : null;

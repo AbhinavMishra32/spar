@@ -55,7 +55,7 @@ const abilityClaimShape = {
   concepts: z.array(conceptTagInputSchema).max(6).optional().describe("The concepts this ability covers, which is how the learner reaches the challenges behind it."),
   practice: z.array(z.string().min(10).max(600)).max(4).optional().describe("Drills for going further on this exact ability, each phrased as the learner's own goal because each one starts a session. Vary the transfer context, not just the difficulty."),
   status: z.enum(["uncertain","developing","independent","stale"]).optional().describe("Omit to let the evidence count decide. Set it only to say something the count cannot, such as marking a long-untouched ability stale."),
-  evidence: z.array(z.object({ eventId:z.string().uuid(),statement:z.string().min(8).max(300),polarity:z.enum(["supporting","contradictory","neutral"]),independence:z.enum(["independent","assisted","unknown"]),strength:z.number().min(0).max(1) })).max(8).optional().describe("Nuanced interpretations of exact durable events. Describe the behavior observed, not a score."),
+  evidence: z.array(z.object({ eventId:z.string().uuid(),statement:z.string().min(8).max(300),polarity:z.enum(["supporting","contradictory","neutral"]),independence:z.enum(["independent","assisted","unknown"]),strength:z.number().min(0).max(1) })).max(8).optional().describe("Nuanced interpretations of exact durable events. Describe the behavior observed, not a score. Contradictory is as much evidence as supporting: a long struggle or an idea they had to be walked to counts against the ability, and a pass after heavy hints is assisted."),
   pattern: z.object({title:z.string().min(3).max(200),description:z.string().min(10).max(400),status:z.enum(["observation","hypothesis","pattern","monitoring","resolved"]),evidenceEventIds:z.array(z.string().uuid()).max(12)}).optional().describe("A mistake lifecycle update. The host will refuse to promote a pattern unless evidence links span at least two attempts."),
 } as const;
 
@@ -73,7 +73,7 @@ const abilityClaimShape = {
 export const setChallengeInputSchema = z.object({
   mode: z.enum(["new", "revise", "replace"]).describe("new: no challenge is open. revise: rebuild the open challenge around the same task when its contract or code shape changes (typed starters, another language); for a few passages, edit_challenge is faster and keeps the learner's code. replace: swap the open challenge for a different problem, because the learner asked or it is clearly wrong for them."),
   aim: z.object({
-    ability: z.string().min(2).max(200).describe("The ability this trains, in a few words, stable across challenges that train it."),
+    ability: z.string().min(2).max(200).describe("The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."),
     gap: z.string().min(8).max(1_500).describe("The specific thing still uncertain about this learner that this challenge probes."),
     evidence: z.string().min(8).max(1_500).describe("What a pass or a fail will tell you."),
   }).describe("What this challenge should reveal. It becomes the session's training target, replacing the previous one."),
@@ -157,7 +157,8 @@ export const toolDefinitions = {
     evidenceEventIds: z.array(z.string().uuid()).default([]),
     ...abilityClaimShape,
   })],
-  update_notebook: ["Change your notebook for this Track, your primary memory of this learner. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit it; keep it under about 1,200 words and delete what is no longer true.", z.object({
+  update_notebook: ["Change one of your notebooks, your primary memory of this learner: the one for this Track, or the learner notebook every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both; keep each under about 1,200 words and delete what is no longer true.", z.object({
+    notebook: z.enum(["track", "learner"]).default("track").describe("track: their progress on this Track. learner: the person across every Track — who they are, how they like to be taught, what helps them, habits seen wherever they work."),
     edits: z.array(z.object({
       find: z.string().min(1).max(4_000).describe("Text copied exactly from the current notebook, long enough to occur only once."),
       replace: z.string().max(6_000).describe("What it becomes. Empty to delete it."),

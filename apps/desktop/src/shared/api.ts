@@ -240,6 +240,10 @@ export type AgentUsageRow = { runId: string; sessionId: string; provider: string
  *  is estimated from list prices, so on a subscription it is the API-equivalent. */
 /** One saved version of the coach's notebook. `author` says who wrote this
  *  version: the coach through update_notebook, or the learner from Track settings. */
+/** The notebook key for the learner notebook: the one about the person rather
+ *  than a Track, which every Track's turns read. Passed where a trackId goes. */
+export const LEARNER_NOTEBOOK = "learner";
+
 export type CoachNotebookVersion = { trackId: string | null; version: number; markdown: string; note: string; author: "coach" | "learner"; sessionId: string | null; createdAt: string };
 export type UsageTotals = { runs: number; inputTokens: number; outputTokens: number; cachedInputTokens: number; cacheWriteTokens: number; costUsd: number };
 export type UsageReport = {
@@ -617,7 +621,8 @@ export interface SparApi {
   deleteTrack(trackId: string): Promise<void>;
   createTrack(input: z.infer<typeof createTrackInput>): Promise<{ track: Track; sessionId: string }>;
   setActiveTrack(trackId: string): Promise<Track | null>;
-  /** The coach's notebook for a Track (null for sessions outside one): the
+  /** The coach's notebook for a Track (null for sessions outside one, or
+   *  LEARNER_NOTEBOOK for the one about the learner): the
    *  latest version, its history newest first, and a learner edit. */
   readNotebook(trackId: string | null): Promise<CoachNotebookVersion | null>;
   notebookHistory(trackId: string | null): Promise<CoachNotebookVersion[]>;
