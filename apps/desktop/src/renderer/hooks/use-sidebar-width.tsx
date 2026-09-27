@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const STORAGE_KEY = "spar.sidebarWidth";
-/* Matched to the ChatGPT desktop app, which clamps its sidebar to 240–520 and
-   opens at 275. Spar's rows carry session titles, which wrap and truncate worse
-   than a chat title does, so the narrow end of that range is the wrong place to
-   start: the sidebar should be readable before anyone drags it. */
-export const SIDEBAR_DEFAULT_WIDTH = 275;
+/* Wide enough that a Track's name and its challenge titles read on one line
+   before anyone drags it. */
+export const SIDEBAR_DEFAULT_WIDTH = 290;
 const MIN_WIDTH = 240;
 /* The widest a sidebar is still a list rather than a second page: long session
    titles fit on one line well before this. */
