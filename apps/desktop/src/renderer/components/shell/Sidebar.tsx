@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, ArrowRight, BrainCircuit, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Loader2, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, SlidersHorizontal, Target, Trash2, Waypoints } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, ArrowRight, BrainCircuit, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Loader2, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, SlidersHorizontal, Target, Trash2, Waypoints } from "lucide-react";
 import type { ChallengeHistorySummary, Language, ProblemSource, SessionSummary, Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -19,6 +19,7 @@ import { SessionSourcesDialog } from "../common/ProblemSources";
 import { LanguageGlyph } from "../common/LanguageGlyph";
 import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { SidebarGlyph } from "./NavIcons";
+import { setSettingsSlot } from "./settingsSlot";
 import type { AgentRun } from "../agent/agentRun";
 import { observeSize } from "../../lib/resizing";
 
@@ -93,7 +94,7 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
    that argument that was simply correct stays correct: the labels are solid
    foreground, never an alpha fraction, because this sidebar is glass and alpha text
    composites against the desktop twice and arrives grey however dark the token was. */
-const ROW =
+export const ROW =
   "flex h-[1.875rem] w-full items-center gap-2 rounded-lg px-2.5 text-source font-[450] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
 /** Nav and row glyphs. Set against the label rather than chosen for its own sake:
@@ -106,8 +107,8 @@ const ROW =
  *  moving these off 55%, and 70% was just a smaller dose of the same problem — a
  *  16px line drawing has less stroke to spare than a glyph does, so it lost more.
  *  Rank rows by fill and colour, never by thinning the ink. */
-const ROW_ICON = "size-4 shrink-0";
-const ROW_ICON_TONE = "text-foreground";
+export const ROW_ICON = "size-4 shrink-0";
+export const ROW_ICON_TONE = "text-foreground";
 
 const STATUS_COPY: Record<SessionSummary["status"], string> = {
   planning: "Planning",
@@ -127,7 +128,7 @@ const RECENT_LIMIT = 8;
 
 /** Indented to the row's text column, not to the row's box: the label heads a
  *  list of titles, so it is the titles it has to line up with. */
-function SectionLabel({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
+export function SectionLabel({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="flex h-7 items-center justify-between px-2.5 pt-1">
       <span className="text-source-sm text-muted-foreground">{children}</span>
@@ -284,6 +285,26 @@ export function Sidebar({
         </button>
       </div>
 
+      {page === "settings" ? (
+        /* Settings takes the sidebar over rather than opening a second one
+           beside it: one source list per window, on the same glass, with the
+           same rows. The way back is the first row, where a sheet of settings
+           in macOS keeps it. */
+        <div className="app-no-drag flex min-h-0 flex-1 flex-col">
+          <div className="px-2">
+            <button
+              className={cn(ROW, "hover:bg-[var(--sidebar-accent)]")}
+              onClick={() => (nav.canBack ? nav.onBack() : onPage("home"))}
+              type="button"
+            >
+              <ArrowLeft className={cn(ROW_ICON, ROW_ICON_TONE)} />
+              <span className="flex-1 text-left">Back to app</span>
+            </button>
+          </div>
+          <div className="mt-3 flex min-h-0 flex-1 flex-col" ref={setSettingsSlot} />
+        </div>
+      ) : (
+      <>
       <div className="app-no-drag space-y-0.5 px-2">
         <button
           className={cn(ROW, "hover:bg-[var(--sidebar-accent)]")}
@@ -441,6 +462,9 @@ export function Sidebar({
           <Settings className={cn(ROW_ICON, ROW_ICON_TONE)} />
         </button>
       </div>
+
+      </>
+      )}
 
       <DeleteTrackDialog
         onCancel={() => setPendingTrackDelete(null)}

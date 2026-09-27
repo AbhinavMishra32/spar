@@ -387,6 +387,10 @@
      glow rather than a second dot, and a token because it has to be paler in the
      dark theme than an opacity on the foreground would make it. */
   --rating-halo: oklch(14.5% 0 0 / 12%);
+  /* An empty day on the activity calendar: present enough to count, quiet
+     enough that a single solve is the first thing the eye lands on. */
+  --activity-empty: oklch(14.5% 0 0 / 6%);
+  --activity-heat: oklch(55% 0.19 255);
 
   /* Work, by kind.
      ----------------------------------------------------------------------
@@ -636,6 +640,8 @@
   --warning: oklch(82% 0.14 78);
   --miss: oklch(74% 0.16 48);
   --rating-halo: oklch(98.5% 0 0 / 14%);
+  --activity-empty: oklch(98.5% 0 0 / 7%);
+  --activity-heat: oklch(68% 0.17 255);
 
   /* The same six, lifted for a dark ground the way --success and --warning are:
      the hue is held and the lightness goes up, so a coloured word stays legible
@@ -2449,6 +2455,33 @@
 @media (prefers-reduced-motion: reduce) {
   .rating-curve-sweep,
   .rating-mark { animation-duration: 1ms; animation-delay: 0ms; }
+}
+
+/* The activity calendar. Every cell and bar enters on its own --wave delay, so
+   the plot fills as one diagonal sweep; transform and opacity only, which keeps
+   four hundred of them on the compositor. */
+@keyframes activity-cell-in {
+  from { opacity: 0; transform: scale(0.35); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes activity-bar-in {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+.activity-cell {
+  animation: activity-cell-in 420ms cubic-bezier(0.32, 0.72, 0, 1) var(--wave, 0ms) both;
+}
+.activity-bar {
+  transform-origin: 50% 100%;
+  animation: activity-bar-in 560ms cubic-bezier(0.32, 0.72, 0, 1) var(--wave, 0ms) both;
+}
+.activity-today {
+  outline: 1px solid color-mix(in oklab, var(--foreground) 45%, transparent);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-cell,
+  .activity-bar { animation-duration: 1ms; animation-delay: 0ms; }
 }
 
 /* The app icon's dot grid, animated — see components/common/SparDots.tsx. Each

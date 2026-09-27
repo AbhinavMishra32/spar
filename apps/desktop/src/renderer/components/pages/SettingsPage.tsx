@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sparkle, Sun, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sparkle, Sun, Trash2, UserRound } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type Language } from "@spar/domain";
 import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ReviewTargetMode, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,9 @@ import { credentialStore, deviceNoun } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsHeader, SettingsRow, SettingsSection } from "../settings/layout";
 import { SectionRail } from "../settings/SectionRail";
+import { createPortal } from "react-dom";
 import { SettingsSidebar, type SidebarGroup } from "../settings/SettingsSidebar";
+import { useSettingsSlot } from "../shell/settingsSlot";
 import { refreshProviders } from "../../hooks/use-providers";
 import { LanguageGlyph, LANGUAGE_LABEL, SelectableLanguageGlyph } from "../common/LanguageGlyph";
 import { ProviderGlyph } from "../common/ProviderGlyph";
@@ -32,22 +34,23 @@ import { PracticeSourceGroup } from "../settings/PracticeSource";
 import { UpdateSettings } from "../settings/UpdateSettings";
 import { EditorSettings } from "../settings/EditorSettings";
 import { UsageSettings } from "../settings/UsageSettings";
+import { ActivitySettings } from "../settings/ActivitySettings";
 import { SkillsSettings } from "../settings/SkillsSettings";
 import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
-type SettingsSection = "account" | "agent" | "usage" | "connections" | "learning" | "privacy" | "appearance";
+type SettingsSection = "account" | "activity" | "agent" | "usage" | "connections" | "learning" | "privacy" | "appearance";
 type NavItem = SidebarGroup<SettingsSection>["items"][number];
 
 /**
- * Eight destinations under three headings.
+ * Nine destinations under three headings.
  *
  * Eight unlabelled rows floating at the top of a tall empty column read as an
  * unfinished screen, and the fix is to say what the eight are rather than to
  * invent a ninth. The division is the honest one: two pages about this copy of
  * Spar and the person signed into it, four about the machinery that reads and
- * teaches and what it spends, two about what is kept.
+ * teaches and what it spends, three about what is kept and what it adds up to.
  */
 /* Lucide draws its sparkle as an outline; the Agent row wants it solid. */
 const SparkleFilled = ({ className }: { className?: string }) => <Sparkle className={className} fill="currentColor" />;
@@ -72,6 +75,7 @@ const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
   {
     label: "Your record",
     items: [
+      { id: "activity", label: "Activity", icon: CalendarDays, sections: ["Calendar", "Sources", "Rhythm", "Streak", "Solved"] },
       { id: "privacy", label: "Data & Privacy", icon: Eye, sections: ["Data & Privacy"] },
     ],
   },
@@ -584,6 +588,7 @@ export function SettingsPage({
   const [languageBusy, setLanguageBusy] = useState(false);
   const [accountAction, setAccountAction] = useState<"sign-out" | "delete" | null>(null);
   const [section, setSection] = useState<SettingsSection>("account");
+  const slot = useSettingsSlot();
   /* A skill's own page replaces the Agent page under it, title included. */
   const [skillOpen, setSkillOpen] = useState(false);
   /* Both the rail in the margin and the sidebar's search read the rendered
@@ -687,8 +692,12 @@ export function SettingsPage({
        settings screen drawn as one flat field reads as a web page that happened
        to open here rather than as a place in the app. */
     <div className="flex h-full min-h-0">
+      {/* In the app's own sidebar when there is one; beside the sheet otherwise. */}
+      {(() => {
+        const nav = (
       <SettingsSidebar
         active={section}
+        embedded={!!slot}
         footer={
           /* The bottom of the column, and the reason it no longer reads as
              empty: a list that ends in mid-air looks unfinished, one that ends
@@ -704,6 +713,9 @@ export function SettingsPage({
         groups={SETTINGS_NAV}
         onSelect={goto}
       />
+        );
+        return slot ? createPortal(nav, slot) : nav;
+      })()}
 
 
       {/* The sheet: the window's own paper, lifted off the chrome by a hairline
@@ -711,13 +723,13 @@ export function SettingsPage({
           on it as a bordered card, so the sheet itself has to stay quiet — a
           tinted page under tinted cards is two materials competing to be the
           background. */}
-      <div className="min-w-0 min-h-0 flex-1 p-1.5">
-        <div className="settings-sheet relative size-full @container">
+      <div className={cn("min-w-0 min-h-0 flex-1", !slot && "p-1.5")}>
+        <div className={cn("relative size-full @container", !slot && "settings-sheet")}>
           <div className="app-scroll size-full overflow-y-auto rounded-[inherit]" ref={viewport}>
             {/* Wide top padding rather than a title bar: the heading sits in air,
                 which is what makes it read as the page's name rather than as the
                 first row of the list under it. */}
-            <main className="mx-auto w-full max-w-2xl px-8 pt-16 pb-40 text-left" ref={content}>
+            <main className="mx-auto w-full max-w-3xl px-8 pt-16 pb-40 text-left" ref={content}>
         {!(section === "agent" && skillOpen) && <SettingsHeader>
           <h1>{SETTINGS_PAGES.find((item) => item.id === section)?.label ?? "Settings"}</h1>
         </SettingsHeader>}
@@ -850,6 +862,7 @@ export function SettingsPage({
 
         {section === "agent" && <SkillsSettings api={api} onDetail={setSkillOpen} />}
         {section === "usage" && <UsageSettings api={api} providers={inventory?.providers ?? []} />}
+        {section === "activity" && <ActivitySettings api={api} />}
 
         {section === "connections" && <Group label="Practice sources">
           <PracticeSourceGroup api={api} />

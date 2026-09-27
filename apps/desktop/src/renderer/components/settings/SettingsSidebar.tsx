@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ROW as SHELL_ROW, ROW_ICON, ROW_ICON_TONE, SectionLabel } from "../shell/Sidebar";
 
 /**
  * The Settings column, transcribed from construct rather than approximated.
@@ -30,15 +31,12 @@ export type SidebarItem<Id extends string> = {
 
 export type SidebarGroup<Id extends string> = { label: string; items: Array<SidebarItem<Id>> };
 
-/* Construct's `v`, resolved against its button recipe: the base shape, the ghost
-   variant, and `size="lg"` held down to `h-8`. Written out rather than composed,
-   so the one row in the app that has to match theirs exactly can be read in one
-   place. */
-const ROW =
-  "click-depth-slightly group/row flex h-8 w-full shrink-0 items-center justify-start gap-1.5 rounded-lg border border-transparent bg-clip-padding py-0 pr-2.5 pl-2 text-left text-sm font-medium whitespace-nowrap transition-all outline-none select-none";
-const ROW_IDLE =
-  "text-muted-foreground [&_svg]:text-muted-foreground hover:bg-muted hover:text-foreground dark:hover:bg-muted/50";
-const ROW_ACTIVE = "bg-muted! text-foreground [&_svg]:text-primary";
+/* The app sidebar's own row, fill for hover and a step more for selection, so
+   Settings reads as the same source list the rest of the window uses rather
+   than as a second one drawn in its own hand. */
+const ROW = SHELL_ROW;
+const ROW_IDLE = "hover:bg-[var(--sidebar-accent)]";
+const ROW_ACTIVE = "bg-[var(--sidebar-accent-active)]";
 
 /** A hit: the page it lives on, and the section inside it if the match was a
  *  section rather than the page's own name. */
@@ -67,11 +65,15 @@ function search<Id extends string>(groups: Array<SidebarGroup<Id>>, query: strin
 
 export function SettingsSidebar<Id extends string>({
   active,
+  embedded = false,
   footer,
   groups,
   onSelect,
 }: {
   active: Id;
+  /** Drawn inside the app sidebar rather than beside the sheet, which already
+   *  gives it its width and its gutters. */
+  embedded?: boolean;
   footer?: React.ReactNode;
   groups: Array<SidebarGroup<Id>>;
   /** `section` is the heading to land on once the page is up, if the hit was a
@@ -116,30 +118,30 @@ export function SettingsSidebar<Id extends string>({
   };
 
   return (
-    <aside className="relative flex h-full w-52 shrink-0 flex-col py-1 pr-0 pl-1.5">
+    <aside className={cn("relative flex h-full flex-col", embedded ? "min-h-0 flex-1 px-2" : "app-sidebar w-56 shrink-0 px-2 py-1")}>
       {/* Above the scroller, and above the results it opens: the popover hangs
           out of the column, so the field has to own a stacking context the list
           cannot paint over. */}
       <div className="relative z-50 shrink-0">
         <div
-          className="relative mb-3 flex h-8 w-full min-w-0 items-center rounded-lg border border-border bg-[var(--surface-primary)] shadow-xs transition-colors outline-none has-[input:focus-visible]:border-ring has-[input:focus-visible]:ring-3 has-[input:focus-visible]:ring-ring/50"
+          className="relative mb-2 flex h-[1.875rem] w-full min-w-0 items-center rounded-lg bg-[var(--sidebar-accent)] transition-colors outline-none has-[input:focus-visible]:ring-1 has-[input:focus-visible]:ring-ring"
           role="group"
         >
           <div
-            className="order-first flex h-auto cursor-text items-center justify-center gap-2 py-1.5 pl-2 text-sm font-medium text-muted-foreground select-none"
+            className="order-first flex h-auto cursor-text items-center justify-center pl-2.5 text-muted-foreground select-none"
             onPointerDown={() => field.current?.focus()}
           >
-            <Search className="size-4" />
+            <Search className={ROW_ICON} />
           </div>
           <input
             ref={field}
             aria-controls={searching ? "settings-search-results" : undefined}
             aria-expanded={searching}
             aria-label="Search settings"
-            className="min-w-0 flex-1 rounded-none border-0 bg-transparent pr-2 pl-1.5 text-sm shadow-none outline-none placeholder:text-muted-foreground"
+            className="min-w-0 flex-1 rounded-none border-0 bg-transparent pr-2 pl-2 text-source shadow-none outline-none placeholder:text-muted-foreground"
             onChange={(event) => { setQuery(event.currentTarget.value); setCursor(0); }}
             onKeyDown={keydown}
-            placeholder="Search.."
+            placeholder="Search settings"
             role="combobox"
             value={query}
           />
@@ -159,7 +161,7 @@ export function SettingsSidebar<Id extends string>({
                 {hits.map((hit, index) => (
                   <li aria-selected={index === cursor} key={hit.id} role="option">
                     <button
-                      className={cn(ROW, ROW_IDLE, "h-auto min-h-10 items-start gap-0 py-1.5", index === cursor && ROW_ACTIVE)}
+                      className={cn(ROW, "h-auto min-h-10 items-start gap-0 py-1.5", index === cursor ? ROW_ACTIVE : ROW_IDLE)}
                       onClick={() => go(hit)}
                       onMouseEnter={() => setCursor(index)}
                       type="button"
@@ -179,13 +181,13 @@ export function SettingsSidebar<Id extends string>({
         )}
       </div>
 
-      <nav aria-label="Settings pages" className="app-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pb-10">
+      <nav aria-label="Settings pages" className="app-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pb-2">
         {groups.map((group) => (
           <div key={group.label}>
             {/* Inset to the rows rather than spaced away from them: the heading
                 is a divider that happens to be readable, not a line of the list. */}
-            <h5 className="px-2.5 pb-1 text-xs font-medium text-muted-foreground select-none">{group.label}</h5>
-            <ul>
+            <SectionLabel>{group.label}</SectionLabel>
+            <ul className="space-y-0.5">
               {group.items.map(({ id, label, icon: Icon }) => (
                 <li key={id}>
                   <button
@@ -194,8 +196,8 @@ export function SettingsSidebar<Id extends string>({
                     onClick={() => onSelect(id)}
                     type="button"
                   >
-                    <Icon className="size-4 shrink-0" />
-                    <span className="grow truncate">{label}</span>
+                    <Icon className={cn(ROW_ICON, ROW_ICON_TONE)} />
+                    <span className="grow truncate text-left">{label}</span>
                   </button>
                 </li>
               ))}

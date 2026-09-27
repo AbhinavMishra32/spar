@@ -147,3 +147,24 @@ it("takes the cached problems on sign-out, because they record what this learner
     expect(store.practiceProblemLinks("leetcode", "global", "two-sum").incoming).toEqual([]);
   } finally { store.close(); }
 });
+
+it("splits the activity calendar by source and counts only the learner's own work", () => {
+  const store = new LocalStore(":memory:");
+  try {
+    const { question } = sourcedSession(store);
+    const at = new Date().toISOString();
+    const event = (type: "file_changed" | "test_run" | "attempt_completed", payload: Record<string, unknown>, attemptId = question.attemptId) =>
+      store.appendNextEvent({ id: crypto.randomUUID(), attemptId, type, occurredAt: at, payload, source: type === "file_changed" ? "learner" : "system", schemaVersion: 1 });
+    event("file_changed", { path: "src/solution.js" });
+    event("test_run", { passed: true });
+    event("attempt_completed", { outcome: "passed" });
+    // A Spar challenge the agent set and nobody touched is not a day practised.
+    const { sessionId } = store.createSession("Practise loops");
+    store.setTrainingTarget(sessionId, { ability: "Loop control", specificGap: "Count values", desiredEvidence: "One direct loop", avoidTesting: [] });
+    store.createQuestion(sessionId, sourcedDesign("Count the values"), { valid: true });
+
+    const report = store.activityReport();
+    expect(report.solves).toEqual([expect.objectContaining({ title: "Two Sum", source: "leetcode", difficulty: "easy", displayId: "1" })]);
+    expect(report.days).toEqual([expect.objectContaining({ source: "leetcode", worked: 1, runs: 1 })]);
+  } finally { store.close(); }
+});
