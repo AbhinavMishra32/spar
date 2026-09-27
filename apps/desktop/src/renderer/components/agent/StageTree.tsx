@@ -10,6 +10,7 @@ import { FadedScroll } from "./ToolPayload";
 import { LanguageGlyph } from "../common/LanguageGlyph";
 import type { Language } from "@spar/domain";
 import type { AgentActivityFile, ChallengeDraft, ToolStage, ToolStageRun } from "../../../shared/api";
+import { observeSize } from "../../lib/resizing";
 
 /**
  * A private process under one row, drawn the way a parent step draws the work
@@ -102,9 +103,7 @@ function FollowHeight({ children }: { children: ReactNode }) {
   useLayoutEffect(() => {
     const element = inner.current;
     if (!element || reduced) return;
-    const observer = new ResizeObserver(() => setHeight(element.offsetHeight));
-    observer.observe(element);
-    return () => observer.disconnect();
+    return observeSize([element], () => setHeight(element.offsetHeight));
   }, [reduced]);
   return (
     <motion.div animate={{ height }} initial={false} style={{ overflow: "clip", overflowClipMargin: 6 }} transition={{ type: "spring", visualDuration: 0.28, bounce: 0 }}>

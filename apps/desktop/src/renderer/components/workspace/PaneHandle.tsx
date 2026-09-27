@@ -1,5 +1,6 @@
 import { PanelResizeHandle } from "react-resizable-panels";
 import { cn } from "@/lib/utils";
+import { beginResize, endResize } from "../../lib/resizing";
 
 /**
  * Sits in the gutter between two blobs rather than drawn as a rule on their
@@ -13,6 +14,7 @@ export function PaneHandle({ direction = "horizontal" }: { direction?: "horizont
         "group/handle relative shrink-0",
         direction === "horizontal" ? "w-2 cursor-col-resize" : "h-2 cursor-row-resize",
       )}
+      onDragging={(dragging) => (dragging ? beginResize() : endResize())}
     >
       <span
         className={cn(

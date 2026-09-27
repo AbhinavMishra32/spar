@@ -13,6 +13,7 @@ import { BAND_WORD, ChallengeCardMeta, ChallengeOutcomeTag, DIFFICULTY_WORD } fr
 import type { Language } from "@spar/domain";
 import type { PublishedChallenge } from "./publishedChallenge";
 import type { ChallengeStop } from "../workspace/ChallengeStepper";
+import { observeSize } from "../../lib/resizing";
 
 /** Lines of starter the panel shows before it fades out. Enough for a signature,
  *  its doc line and the body it opens, which is the whole of what a reminder
@@ -284,9 +285,7 @@ export function useCursorPreview(panel: ReactNode, enabled: boolean) {
         : { width: rect.width, height: rect.height });
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(panelElement);
-    return () => observer.disconnect();
+    return observeSize([panelElement], measure);
   }, [panelElement]);
 
   useEffect(() => { if (!enabled) { cancel(); close(); } }, [enabled, cancel, close]);

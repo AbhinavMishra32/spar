@@ -20,6 +20,7 @@ import { LanguageGlyph } from "../common/LanguageGlyph";
 import { ProblemEmblem } from "../problems/ProblemEmblem";
 import { SidebarGlyph } from "./NavIcons";
 import type { AgentRun } from "../agent/agentRun";
+import { observeSize } from "../../lib/resizing";
 
 /* "challenge" is one challenge opened from History or Problems. Like
    "workspace" it draws its own toolbar and is not a destination in the nav; the
@@ -979,10 +980,7 @@ function RowTitle({ children }: { children: string }) {
       setOverflow(hidden > 1 ? hidden : 0);
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(box);
-    observer.observe(inner);
-    return () => observer.disconnect();
+    return observeSize([box, inner], measure);
   }, [children]);
 
   /* Travel is the hidden part plus the fade, so the last character ends up clear

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { beginResize, endResize } from "../lib/resizing";
 
 const STORAGE_KEY = "spar.sidebarWidth";
 /* Wide enough that a Track's name and its challenge titles read on one line
@@ -18,10 +20,14 @@ const clamp = (value: number) => Math.min(maxWidth(), Math.max(MIN_WIDTH, Math.r
 /**
  * Sidebar width, persisted across launches and draggable from the divider.
  *
- * The drag runs off pointer capture rather than window listeners so it survives
- * the pointer leaving the handle — and `dragging` is exposed because the width
- * is animated when the sidebar collapses, and that transition has to be off
- * while a drag is in flight or the edge lags behind the cursor.
+ * A drag never goes through React. Every frame of it would otherwise re-render
+ * the whole window — the sidebar, the workspace, the editor, the transcript —
+ * because the width lives at the top of the app. Instead the frame writes the
+ * width straight onto the elements that carry it (`bind` them with the refs),
+ * and the width is committed to state and storage once, on release.
+ *
+ * `dragging` is exposed because the width is animated when the sidebar
+ * collapses, and that transition has to be off while a drag is in flight.
  */
 export function useSidebarWidth() {
   /* What the learner chose, kept as chosen; the width shown is that choice
@@ -31,19 +37,33 @@ export function useSidebarWidth() {
     const stored = Number.parseInt(localStorage.getItem(STORAGE_KEY) ?? "", 10);
     return Number.isFinite(stored) ? stored : SIDEBAR_DEFAULT_WIDTH;
   });
-  const [, setWindowWidth] = useState(() => window.innerWidth);
+  /* Held as the fitted number rather than the window's width, so resizing the
+     window re-renders the app only on the frames where the sidebar actually
+     changes size — never while the window is wide enough for the choice. */
+  const [width, setWidth] = useState(() => clamp(chosen));
   useEffect(() => {
-    const onResize = () => setWindowWidth(window.innerWidth);
+    setWidth(clamp(chosen));
+    const onResize = () => setWidth(clamp(chosen));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, []);
-  const width = clamp(chosen);
+  }, [chosen]);
   const [dragging, setDragging] = useState(false);
-  const origin = useRef({ x: 0, width: 0 });
+
+  const column = useRef<HTMLDivElement | null>(null);
+  const sheet = useRef<HTMLDivElement | null>(null);
+  const handle = useRef<HTMLDivElement | null>(null);
+  const drag = useRef({ x: 0, from: 0, to: 0, frame: 0 });
+
+  const paint = useCallback((value: number) => {
+    if (column.current) column.current.style.width = `${value}px`;
+    if (sheet.current) sheet.current.style.width = `${value}px`;
+    if (handle.current) handle.current.style.left = `${value - 4}px`;
+  }, []);
 
   const commit = useCallback((next: number) => {
     const value = clamp(next);
     setChosen(value);
+    setWidth(value);
     localStorage.setItem(STORAGE_KEY, String(value));
     return value;
   }, []);
@@ -52,7 +72,8 @@ export function useSidebarWidth() {
     (event: React.PointerEvent<HTMLElement>) => {
       event.preventDefault();
       event.currentTarget.setPointerCapture(event.pointerId);
-      origin.current = { x: event.clientX, width };
+      drag.current = { x: event.clientX, from: width, to: width, frame: 0 };
+      beginResize();
       setDragging(true);
     },
     [width],
@@ -61,17 +82,26 @@ export function useSidebarWidth() {
   const onPointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-      commit(origin.current.width + (event.clientX - origin.current.x));
+      const state = drag.current;
+      state.to = clamp(state.from + (event.clientX - state.x));
+      if (!state.frame) state.frame = requestAnimationFrame(() => { state.frame = 0; paint(state.to); });
     },
-    [commit],
+    [paint],
   );
 
   const onPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
+    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    const state = drag.current;
+    if (state.frame) cancelAnimationFrame(state.frame);
+    state.frame = 0;
+    paint(state.to);
+    /* Committed while `dragging` is still true, so the animated width jumps to
+       where the drag left it instead of easing there from where it started. */
+    flushSync(() => { commit(state.to); });
     setDragging(false);
-  }, []);
+    endResize();
+  }, [commit, paint]);
 
   const reset = useCallback(() => commit(SIDEBAR_DEFAULT_WIDTH), [commit]);
 
@@ -79,6 +109,9 @@ export function useSidebarWidth() {
     width,
     dragging,
     reset,
+    /** The elements whose size follows the drag: the clipping column, the
+     *  sheet inside it, and the divider. */
+    refs: { column, sheet, handle },
     /** Spread onto the divider element. */
     handleProps: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onDoubleClick: reset },
   };

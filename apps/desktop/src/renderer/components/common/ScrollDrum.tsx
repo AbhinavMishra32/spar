@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
+import { observeSize } from "../../lib/resizing";
 
 /** How deep each fade runs once it is on. Mirrors `--drum-fade` in theme.css. */
 const FADE = "2.25rem";
@@ -55,10 +56,7 @@ export function ScrollDrum({
     const inner = content.current;
     if (!box || !inner) return;
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(box);
-    observer.observe(inner);
-    return () => observer.disconnect();
+    return observeSize([box, inner], measure);
   }, [children, measure]);
 
   return (

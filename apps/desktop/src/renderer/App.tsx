@@ -189,7 +189,7 @@ export function App() {
   }, [data?.challenges, data?.concepts, detail?.question?.id, detail?.summary.id]);
 
   const [sidebar, setSidebar] = useState(() => localStorage.getItem("spar.sidebar") !== "hidden");
-  const { width: sidebarWidth, dragging, handleProps: sidebarHandle } = useSidebarWidth();
+  const { width: sidebarWidth, dragging, refs: sidebarRefs, handleProps: sidebarHandle } = useSidebarWidth();
   const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
   /* The back/forward mover, reachable from the window listener. `go` is defined
      below the loading guard — it needs the bootstrap to reopen a session — and a
@@ -920,6 +920,7 @@ export function App() {
             opened, whether the archive is showing — and unmounting it on collapse
             throws that away every time the column is hidden. */}
         <motion.div
+          ref={sidebarRefs.column}
           animate={{ width: sidebar ? sidebarWidth : 0 }}
           className="relative shrink-0 overflow-hidden"
           initial={false}
@@ -933,6 +934,7 @@ export function App() {
                ends. `will-change` because this is the one element in the window
                that is worth a compositor layer of its own — a whole source list
                being moved, sixty times a second. */
+            ref={sidebarRefs.sheet}
             animate={{ x: sidebar ? 0 : -sidebarWidth }}
             className="h-full will-change-transform"
             initial={false}
@@ -979,6 +981,7 @@ export function App() {
             divider would cut the sidebar off from the pane it flows into. */}
         {sidebar && (
           <div
+            ref={sidebarRefs.handle}
             aria-label="Resize sidebar"
             aria-orientation="vertical"
             className={cn(

@@ -6,6 +6,7 @@ import type { VisualizerView } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { TraceFigure } from "./TraceFigure";
 import type { ToolPart } from "./agentRun";
+import { observeSize } from "../../lib/resizing";
 
 /**
  * An explanation the agent animated.
@@ -224,10 +225,7 @@ function Stage({ focus, frame, previous, language }: {
       setScale((current) => (Math.abs(current - next) < 0.01 ? current : Math.max(next, 0.3)));
     };
     fit();
-    const observer = new ResizeObserver(fit);
-    observer.observe(outer);
-    observer.observe(inner);
-    return () => observer.disconnect();
+    return observeSize([outer, inner], fit);
   }, [frame, focus, scale]);
 
   return (

@@ -1,0 +1,7 @@
+/* While a divider is dragged, nothing eases: a transition on a colour, a
+   shadow or a size restarts on every frame of the drag and is pure cost. */
+html[data-resizing] *,
+html[data-resizing] *::before,
+html[data-resizing] *::after {
+  transition: none !important;
+}

@@ -26,6 +26,7 @@ import { solveStats, spentOn, type SolveStats } from "./solveStats";
 import { Clock, DraftTree, InsightTree, QuestionTitle, Reveal, StageTree, draftFromCall, type QuestionMark } from "./StageTree";
 import type { ChallengeDraft } from "../../../shared/api";
 import type { ChallengeStop, ChallengeTrail } from "../workspace/ChallengeStepper";
+import { observeSize } from "../../lib/resizing";
 
 type ToolPart = Extract<RunPart, { kind: "tool" }>;
 
@@ -1376,9 +1377,7 @@ export function ChallengePublished({
         : { width, radius });
     };
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(element);
-    return () => observer.disconnect();
+    return observeSize([element], measure);
   }, [compact]);
   const closedHeight = behind * 10;
   /* Give every card its own timestamp across one bounded deal. A fixed capped
