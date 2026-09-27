@@ -68,40 +68,48 @@ export function useSidebarWidth() {
     return value;
   }, []);
 
+  /* The drag is followed on the window from press to release rather than on
+     the divider: the pointer leaves the 8px handle within a frame, and a
+     release that lands anywhere — over the editor, outside the window — has to
+     end it. Anything that ends it (release, cancel, the window losing focus)
+     goes through `finish`, once. */
   const onPointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
+      if (event.button !== 0) return;
       event.preventDefault();
-      event.currentTarget.setPointerCapture(event.pointerId);
-      drag.current = { x: event.clientX, from: width, to: width, frame: 0 };
+      const state = drag.current;
+      state.x = event.clientX;
+      state.from = width;
+      state.to = width;
       beginResize();
       setDragging(true);
-    },
-    [width],
-  );
 
-  const onPointerMove = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-      const state = drag.current;
-      state.to = clamp(state.from + (event.clientX - state.x));
-      if (!state.frame) state.frame = requestAnimationFrame(() => { state.frame = 0; paint(state.to); });
+      const move = (next: PointerEvent) => {
+        state.to = clamp(state.from + (next.clientX - state.x));
+        if (!state.frame) state.frame = requestAnimationFrame(() => { state.frame = 0; paint(state.to); });
+      };
+      const finish = () => {
+        window.removeEventListener("pointermove", move);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", finish);
+        window.removeEventListener("blur", finish);
+        if (state.frame) cancelAnimationFrame(state.frame);
+        state.frame = 0;
+        paint(state.to);
+        /* Committed while `dragging` is still true, so the animated width jumps
+           to where the drag left it instead of easing there from where it
+           started. */
+        flushSync(() => { commit(state.to); });
+        setDragging(false);
+        endResize();
+      };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", finish);
+      window.addEventListener("blur", finish);
     },
-    [paint],
+    [width, paint, commit],
   );
-
-  const onPointerUp = useCallback((event: React.PointerEvent<HTMLElement>) => {
-    if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    const state = drag.current;
-    if (state.frame) cancelAnimationFrame(state.frame);
-    state.frame = 0;
-    paint(state.to);
-    /* Committed while `dragging` is still true, so the animated width jumps to
-       where the drag left it instead of easing there from where it started. */
-    flushSync(() => { commit(state.to); });
-    setDragging(false);
-    endResize();
-  }, [commit, paint]);
 
   const reset = useCallback(() => commit(SIDEBAR_DEFAULT_WIDTH), [commit]);
 
@@ -113,6 +121,6 @@ export function useSidebarWidth() {
      *  sheet inside it, and the divider. */
     refs: { column, sheet, handle },
     /** Spread onto the divider element. */
-    handleProps: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp, onDoubleClick: reset },
+    handleProps: { onPointerDown, onDoubleClick: reset },
   };
 }
