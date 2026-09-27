@@ -7,12 +7,12 @@ const STORAGE_KEY = "spar.sidebarWidth";
    before anyone drags it. */
 export const SIDEBAR_DEFAULT_WIDTH = 290;
 const MIN_WIDTH = 240;
-/* The widest a sidebar is still a list rather than a second page: long session
-   titles fit on one line well before this. */
-const MAX_WIDTH = 400;
+/* A little past the default: room for a longer Track name, and no more. The
+   sidebar is a list, and past this it only takes room from the work. */
+const MAX_WIDTH = 340;
 /* However wide it is allowed to be, it never takes more than this share of the
    window, so a small window keeps its room for the workspace. */
-const MAX_SHARE = 0.3;
+const MAX_SHARE = 0.25;
 
 const maxWidth = () => Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(window.innerWidth * MAX_SHARE)));
 const clamp = (value: number) => Math.min(maxWidth(), Math.max(MIN_WIDTH, Math.round(value)));
