@@ -56,8 +56,11 @@ const CODE_TTL_SECONDS = 10 * 60;
  *    us onto a new library. */
 export function createAuth(db: Database, env: Env, mailer: Mailer) {
   /* A deployment with no email provider cannot ask for a code, so it cannot
-     require one either — see `createMailer`. Production always has one. */
-  const verificationRequired = mailer.configured;
+     require one either — see `createMailer`. Production always has one. A
+     development API never asks, even with a mailer: signing up from source is
+     how onboarding gets tried, and a code for every test account is only in
+     the way. Password resets and sign-in codes still send. */
+  const verificationRequired = mailer.configured && env.NODE_ENV === "production";
   return betterAuth({
     appName: "Spar",
     secret: env.AUTH_SECRET,

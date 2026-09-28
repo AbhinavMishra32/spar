@@ -19,7 +19,7 @@ import path from "node:path";
  *  environment variable, and a build cut before anything was deployed still runs
  *  against a local API instead of a dead URL. */
 
-const DEV_API_ORIGIN = "http://localhost:4318";
+export const DEV_API_ORIGIN = "http://localhost:4318";
 
 let cached: string | undefined;
 

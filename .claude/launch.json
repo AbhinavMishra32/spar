@@ -18,9 +18,10 @@
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": [
         "-c",
-        "cd /Users/abhinavmishra/solin/spar/apps/desktop && exec node_modules/.bin/vite --port 5175 --strictPort"
+        "cd /Users/abhinavmishra/solin/spar/apps/desktop && exec node_modules/.bin/vite --port \"${PORT:-5175}\" --strictPort"
       ],
-      "port": 5175
+      "port": 5175,
+      "autoPort": true
     },
     {
       "name": "spar-hero",

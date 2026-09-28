@@ -8,7 +8,7 @@ import { installRoutes } from "./routes.js";
 import { ObjectStorage } from "./storage.js";
 import { AgentTraceExporter } from "./telemetry.js";
 
-export async function createServer(environment=process.env){const env=envSchema.parse(environment);const app=Fastify({logger:{level:env.NODE_ENV==="production"?"info":"debug"},requestIdHeader:"x-request-id",trustProxy:true});const database=createDatabase(env.DATABASE_URL);await app.register(cors,{origin:false});
+export async function createServer(environment=process.env){const env=envSchema.parse(environment);const app=Fastify({logger:{level:env.NODE_ENV==="production"?"info":"warn"},requestIdHeader:"x-request-id",trustProxy:true});const database=createDatabase(env.DATABASE_URL);await app.register(cors,{origin:false});
 /* The mailer is built before the auth config because the auth config reads it:
    whether an account has to confirm its address depends on whether this
    deployment can send it a code. */
