@@ -24,6 +24,13 @@ export default defineConfig({
        resolves against the real file and needs no rewriting at all. */
     exclude: ["web-tree-sitter"],
   },
-  build: { outDir: "../../dist/renderer", emptyOutDir: true },
+  build: {
+    outDir: "../../dist/renderer",
+    emptyOutDir: true,
+    /* The app, and the transparent layer the onboarding draws on outside its
+       window. A second page rather than a route in the first, so the overlay
+       does not load Monaco and the whole app to draw some dots. */
+    rollupOptions: { input: { index: path.resolve(root, "src/renderer/index.html"), arrival: path.resolve(root, "src/renderer/arrival.html") } },
+  },
   server: { port: 5173, strictPort: true },
 });
