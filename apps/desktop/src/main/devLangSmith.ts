@@ -60,6 +60,8 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
   private readonly config: Config | null;
   private readonly roots = new Map<string, RootState>();
   private pending = Promise.resolve();
+  private batch: { post: Array<Record<string, unknown>>; patch: Array<Record<string, unknown>> } = { post: [], patch: [] };
+  private timer: NodeJS.Timeout | null = null;
 
   constructor(private readonly request: typeof fetch = fetch, environment: NodeJS.ProcessEnv = process.env) {
     this.config = config(environment);
@@ -71,7 +73,8 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
     if (!this.config) return;
     const dottedOrder = order(value.startedAt, value.runId, 1);
     this.roots.set(value.runId, { dottedOrder, start: value, children: new Map(), childrenById: new Map(), nextExecutionOrder: 1 });
-    this.send({ post: [rootRun(value, this.config.project, dottedOrder)], patch: [] });
+    this.enqueue({ post: [rootRun(value, this.config.project, dottedOrder)], patch: [] });
+    this.flush();
   }
 
   record(value: TraceEvent) {
@@ -94,10 +97,12 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
     }
     const run = childRun(value, root.start, this.config.project, child);
     if (state === "end" && alreadyStarted) {
-      this.send({ post: [], patch: [run] });
+      const queuedStart = this.batch.post.find((item) => item.id === child.id);
+      if (queuedStart) Object.assign(queuedStart, run, { inputs: queuedStart.inputs });
+      else this.enqueue({ post: [], patch: [run] });
       return;
     }
-    this.send({ post: [run], patch: [] });
+    this.enqueue({ post: [run], patch: [] });
   }
 
   finish(value: RunFinish) {
@@ -105,7 +110,9 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
     const root = this.roots.get(value.id);
     if (!root) return;
     this.roots.delete(value.id);
-    this.send({ post: [], patch: [{
+    /* Child runs must be posted before the completed root is patched. */
+    this.flush();
+    this.enqueue({ post: [], patch: [{
       ...rootRun(root.start, this.config.project, root.dottedOrder),
       child_execution_order: root.nextExecutionOrder,
       end_time: Date.parse(value.completedAt),
@@ -125,9 +132,25 @@ export class DevLangSmithTraceSink implements AgentTraceSink {
         },
       },
     }] });
+    this.flush();
   }
 
-  private send(body: { post: unknown[]; patch: unknown[] }) {
+  private enqueue(body: { post: Array<Record<string, unknown>>; patch: Array<Record<string, unknown>> }) {
+    this.batch.post.push(...body.post);
+    this.batch.patch.push(...body.patch);
+    if (this.batch.post.length + this.batch.patch.length >= 8) this.flush();
+    else if (!this.timer) {
+      this.timer = setTimeout(() => this.flush(), 250);
+      this.timer.unref();
+    }
+  }
+
+  private flush() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    if (!this.batch.post.length && !this.batch.patch.length) return;
+    const body = this.batch;
+    this.batch = { post: [], patch: [] };
     const current = this.config;
     if (!current) return;
     this.pending = this.pending.then(async () => {

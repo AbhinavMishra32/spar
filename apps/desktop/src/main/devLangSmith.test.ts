@@ -25,14 +25,13 @@ describe("development LangSmith export", () => {
     sink.finish({ id:start.runId,status:"completed",output:{text:"done"},eventCount:2,latencyMs:3000,error:null,completedAt:"2026-09-22T12:00:03.000Z" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(bodies).toHaveLength(4);
+    expect(bodies).toHaveLength(3);
     expect(bodies[0]!.post[0]).toMatchObject({ id:start.runId,project_name:"spar-dev",tags:expect.arrayContaining(["spar-development"]) });
     expect(bodies[0]!.post[0]!.dotted_order).toMatch(/^20260922T120000\d{6}Z[0-9a-f-]{36}$/);
     expect(String(bodies[0]!.post[0]!.dotted_order).split("Z").at(-1)).toBe(start.runId);
-    expect(bodies[1]!.post[0]).toMatchObject({ name:"read_attempt",run_type:"tool",parent_run_id:start.runId });
+    expect(bodies[1]!.post[0]).toMatchObject({ name:"read_attempt",run_type:"tool",parent_run_id:start.runId,inputs:{attemptId:"a1"},outputs:{ok:true} });
     expect(String(bodies[1]!.post[0]!.dotted_order).split("Z").at(-1)).toBe(bodies[1]!.post[0]!.id);
-    expect(bodies[2]!.patch[0]).toMatchObject({ name:"read_attempt",outputs:{ok:true} });
-    expect(bodies[3]!.patch[0]).toMatchObject({ id:start.runId,outputs:{text:"done"} });
+    expect(bodies[2]!.patch[0]).toMatchObject({ id:start.runId,outputs:{text:"done"} });
   });
 
   it("is disabled outside development", () => {
@@ -49,8 +48,29 @@ describe("development LangSmith export", () => {
     const runId="11111111-1111-4111-a111-111111111111";
     sink.start({runId,sessionId:"22222222-2222-4222-a222-222222222222",provider:"openai",model:"gpt-test",turnKind:"learner-message",input:{message:"new question"},appVersion:"0.6.10",startedAt:"2026-09-22T12:00:00.000Z"});
     sink.record({id:"review-event",runId,sequence:0,kind:"event",name:"challenge-fit-verdict",callId:"review-1",level:"DEFAULT",payload:{parentCallId:"question-1",attributes:{pass:1,verdict:"revise",reason:"Previously solved",candidateTitle:"Next Greater Positions"}},occurredAt:"2026-09-22T12:00:01.000Z"});
-    await new Promise((resolve)=>setTimeout(resolve,0));
+    await new Promise((resolve)=>setTimeout(resolve,300));
     expect(bodies[1]!.post[0]).toMatchObject({name:"challenge-fit-verdict",parent_run_id:runId,outputs:{attributes:{verdict:"revise",reason:"Previously solved",candidateTitle:"Next Greater Positions"}}});
+  });
+
+  it("patches a child already sent in an earlier batch without repeating its input", async () => {
+    const bodies: Array<{ post: Array<Record<string, unknown>>; patch: Array<Record<string, unknown>> }> = [];
+    const request = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as typeof bodies[number]);
+      return new Response(null, { status: 202 });
+    }) as typeof fetch;
+    const sink = new DevLangSmithTraceSink(request, environment);
+    const runId="11111111-1111-4111-a111-111111111111";
+    sink.start({runId,sessionId:"22222222-2222-4222-a222-222222222222",provider:"openai",model:"gpt-test",turnKind:"learner-message",input:{message:"hello"},appVersion:"0.6.10",startedAt:"2026-09-22T12:00:00.000Z"});
+    sink.record({id:"start",runId,sequence:0,kind:"tool",name:"read_attempt",callId:"call-1",level:"DEFAULT",payload:{state:"start",input:{attemptId:"a1"}},occurredAt:"2026-09-22T12:00:01.000Z"});
+    await new Promise((resolve)=>setTimeout(resolve,300));
+    sink.record({id:"end",runId,sequence:1,kind:"tool",name:"read_attempt",callId:"call-1",level:"DEFAULT",payload:{state:"end",output:{ok:true}},occurredAt:"2026-09-22T12:00:02.000Z"});
+    sink.finish({id:runId,status:"completed",output:{text:"done"},eventCount:2,latencyMs:3000,error:null,completedAt:"2026-09-22T12:00:03.000Z"});
+    await new Promise((resolve)=>setTimeout(resolve,0));
+
+    expect(bodies).toHaveLength(4);
+    expect(bodies[1]!.post[0]).toMatchObject({inputs:{attemptId:"a1"}});
+    expect(bodies[2]!.patch[0]).not.toHaveProperty("inputs");
+    expect(bodies[2]!.patch[0]).toMatchObject({outputs:{ok:true}});
   });
 
   it("keeps private generations beneath their tool with stable span identity and order", async () => {
@@ -70,12 +90,11 @@ describe("development LangSmith export", () => {
     sink.finish({id:runId,status:"completed",output:{text:"done"},eventCount:4,latencyMs:5000,error:null,completedAt:"2026-09-22T12:00:05.000Z"});
     await new Promise((resolve)=>setTimeout(resolve,0));
     const tool=bodies[1]!.post[0]!;
-    const review=bodies[2]!.post[0]!;
+    const review=bodies[1]!.post[1]!;
     expect(review).toMatchObject({parent_run_id:tool.id,execution_order:3,child_execution_order:3});
     expect(String(review.dotted_order).startsWith(`${String(tool.dotted_order)}.`)).toBe(true);
-    expect(bodies[3]!.patch[0]).not.toHaveProperty("inputs");
-    expect(bodies[3]!.patch[0]).toMatchObject({id:review.id,dotted_order:review.dotted_order,start_time:review.start_time});
-    expect(bodies[4]!.patch[0]).toMatchObject({id:tool.id,dotted_order:tool.dotted_order,start_time:tool.start_time,child_execution_order:3});
-    expect(bodies[5]!.patch[0]).toMatchObject({id:runId,child_execution_order:3});
+    expect(review).toMatchObject({inputs:{candidate:"Histogram"},outputs:{verdict:"accept"}});
+    expect(tool).toMatchObject({inputs:{title:"Histogram"},outputs:{status:"playable"},child_execution_order:3});
+    expect(bodies[2]!.patch[0]).toMatchObject({id:runId,child_execution_order:3});
   });
 });

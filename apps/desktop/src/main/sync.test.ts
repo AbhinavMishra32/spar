@@ -57,6 +57,73 @@ describe("background sync failures", () => {
 
     expect(requests).toBe(1);
   });
+
+  it("defers a missing session's dependents without blocking unrelated sync", async () => {
+    const rows = [
+      { id: "checkpoint", kind: "checkpoint", payload: JSON.stringify({ sessionId: "missing", version: 1 }) },
+      { id: "message", kind: "agent-message", payload: JSON.stringify({ sessionId: "missing", messages: [] }) },
+      { id: "profile", kind: "profile-save", payload: "{}" },
+    ];
+    const deferred = new Set<string>();
+    const requested: string[] = [];
+    const acknowledged: string[][] = [];
+    const store = {
+      pendingSync: () => rows.filter((row) => !deferred.has(row.id)),
+      hasDeferredSync: () => deferred.size > 0,
+      isSyncDeferred: (id: string) => deferred.has(id),
+      deferSyncMissingSession: (sessionId: string) => {
+        for (const row of rows) if (JSON.parse(row.payload).sessionId === sessionId) deferred.add(row.id);
+      },
+      acknowledgeSync: (ids: string[]) => acknowledged.push(ids),
+    } as unknown as LocalStore;
+    const auth = { accessToken: async () => "token" } as unknown as AuthService;
+    const request = (async (input: string | URL | Request) => {
+      const url = String(input);
+      requested.push(url);
+      return new Response(null, { status: url.includes("/sessions/missing/") ? 404 : 204 });
+    }) as typeof fetch;
+    const sync = new CloudSyncService(store, auth, "https://api.test", () => undefined, request);
+
+    await sync.flush();
+    await sync.flush();
+
+    expect(requested).toEqual([
+      "https://api.test/v1/sessions/missing/checkpoints/1",
+      "https://api.test/v1/profile",
+      "https://api.test/v1/profile",
+    ]);
+    expect(acknowledged[0]).toEqual(["profile"]);
+    expect(deferred).toEqual(new Set(["checkpoint", "message"]));
+  });
+
+  it("sends consecutive attempt and trace events in one request per resource", async () => {
+    const rows = [
+      { id: "a1", kind: "attempt-event", payload: JSON.stringify({ id: "e1", attemptId: "attempt", sequence: 1 }) },
+      { id: "a2", kind: "attempt-event", payload: JSON.stringify({ id: "e2", attemptId: "attempt", sequence: 2 }) },
+      { id: "t1", kind: "agent-trace-event", payload: JSON.stringify({ id: "t1", runId: "run", sequence: 0 }) },
+      { id: "t2", kind: "agent-trace-event", payload: JSON.stringify({ id: "t2", runId: "run", sequence: 1 }) },
+    ];
+    const bodies: unknown[] = [];
+    const acknowledged: string[][] = [];
+    const store = {
+      pendingSync: () => rows,
+      hasDeferredSync: () => false,
+      acknowledgeSync: (ids: string[]) => acknowledged.push(ids),
+    } as unknown as LocalStore;
+    const auth = { accessToken: async () => "token" } as unknown as AuthService;
+    const request = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(null, { status: 202 });
+    }) as typeof fetch;
+
+    await new CloudSyncService(store, auth, "https://api.test", () => undefined, request).flush();
+
+    expect(bodies).toEqual([
+      { attemptId: "attempt", expectedSequence: 1, events: [{ id: "e1", attemptId: "attempt", sequence: 1 }, { id: "e2", attemptId: "attempt", sequence: 2 }] },
+      { events: [{ id: "t1", runId: "run", sequence: 0 }, { id: "t2", runId: "run", sequence: 1 }] },
+    ]);
+    expect(acknowledged).toEqual([["a1", "a2", "t1", "t2"]]);
+  });
 });
 
 /* The outbox is a table of `kind` strings and JSON payloads, and `route` is the
