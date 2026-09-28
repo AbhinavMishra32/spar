@@ -8,6 +8,10 @@ export const shots = {
   history: { src: "/shots/challenge-history.png", width: 1800, height: 1068 },
   concept: { src: "/shots/concept-sheet.png", width: 1554, height: 1568 },
   hovercard: { src: "/shots/concept-hovercard.png", width: 616, height: 500 },
+  liveWorkspace: { src: "/shots/live-adaptive-workspace-luna.png", width: 2400, height: 1726 },
+  liveAgent: { src: "/shots/live-agent-luna.png", width: 2400, height: 1726 },
+  liveHome: { src: "/shots/live-home-luna.png", width: 2400, height: 1726 },
+  liveHistory: { src: "/shots/live-history-luna.png", width: 2400, height: 1726 },
 } as const;
 
 /**

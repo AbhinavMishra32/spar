@@ -1,0 +1,99 @@
+/* The film takes no input (see inert.ts), but its text is text: a visitor can
+   select and copy it, as in the app. The cursor over it is the browser's own
+   — an I-beam on text, an arrow elsewhere — never the hand a button asks for,
+   since nothing here will answer a click. */
+html,
+body {
+  overflow: hidden;
+}
+
+*,
+*::before,
+*::after {
+  cursor: auto !important;
+}
+
+/* The window's own traffic lights. In the app the OS draws them into the
+   sidebar's reserved corner; here the corner is filled the same way. */
+body::before {
+  content: "";
+  position: fixed;
+  z-index: 60;
+  top: 18px;
+  left: 18px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #ff5f57;
+  box-shadow:
+    20px 0 0 #febc2e,
+    40px 0 0 #28c840;
+}
+
+/* The window has no ground of its own; the frame behind it supplies one. */
+html,
+body {
+  background: transparent;
+}
+
+/* Opened on its own (dev) there is no page behind it; on the site, the page's
+   own dot field is what shows through. */
+html.is-standalone body {
+  background: #000;
+}
+
+#root {
+  height: 100vh;
+  transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html.is-ending #root {
+  opacity: 0;
+}
+
+.hero-cursor {
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  left: 0;
+  width: 22px;
+  height: 22px;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 2px rgb(0 0 0 / 0.45));
+  transition: opacity 0.3s;
+  will-change: transform;
+}
+
+.hero-cursor > svg {
+  transition: scale 0.09s ease-out;
+  transform-origin: 30% 20%;
+}
+
+.hero-cursor.is-pressed > svg {
+  scale: 0.86;
+}
+
+.hero-cursor.is-hidden {
+  opacity: 0;
+}
+
+.hero-caret {
+  animation: hero-caret 1.05s steps(1) infinite;
+}
+
+@keyframes hero-caret {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* The app's glass dials, turned for the page behind the frame. The site's ground
+   is black with faint dots, darker and quieter than any desktop the app's own
+   values were tuned against, so at those values the field vanished. Same
+   relationship as the app — the sidebar the more open of the two — just
+   thinner. */
+html.dark {
+  --app-vibrant-tint: oklch(28.5% 0 0 / 30%);
+  --app-glass-fill: 78%;
+  --app-glass-fill-translucent: 72%;
+}
