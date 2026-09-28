@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, SquareCode } from "lucide-react";
+import { MessageSquare, Repeat2, SquareCode } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { ActiveQuestion, RatingPoint, SessionDetail } from "@spar/domain";
@@ -18,8 +18,8 @@ import { ComplexityCheckpoint, type ComplexityCheckpointState } from "./Complexi
 import type { ChallengeTrail } from "./ChallengeStepper";
 import { ChallengeComposerContext } from "../agent/ChallengeCardMeta";
 
-type View = "problem" | "chat";
-const ORDER: View[] = ["problem", "chat"];
+type View = "review" | "problem" | "chat";
+const ORDER: View[] = ["problem", "review", "chat"];
 /* Which tab each session was left on, so leaving for Home and coming back does
    not drop the learner onto the statement when they were mid-conversation. */
 const lastView = new Map<string, View>();
@@ -52,7 +52,15 @@ export function AgentPanel({
   onComplexityAcknowledge,
   optimisticMessages,
   trail,
+  brief,
+  banner,
 }: {
+  /** Shown above the problem: in a review session, which card it is for and
+   *  the coach's word on what to get right this time. */
+  banner?: React.ReactNode;
+  /** A review session's brief: the card under review and the rest of the
+   *  queue. Present only in a review session, where it is the first tab. */
+  brief?: React.ReactNode;
   answering: boolean;
   concepts?: ConceptContext | undefined;
   detail: SessionDetail;
@@ -81,7 +89,11 @@ export function AgentPanel({
   trail?: ChallengeTrail | undefined;
 }) {
   const sessionId = detail.summary.id;
-  const [view, setViewState] = useState<View>(() => lastView.get(sessionId) ?? "problem");
+  const [view, setViewState] = useState<View>(() => {
+    const kept = lastView.get(sessionId);
+    return kept && (kept !== "review" || brief) ? kept : "problem";
+  });
+  const views = brief ? ORDER : ORDER.filter((name) => name !== "review");
   const setView = useCallback((next: View) => {
     lastView.set(sessionId, next);
     setViewState(next);
@@ -138,10 +150,11 @@ export function AgentPanel({
         />
         <ViewSwitch<View>
           ariaLabel="Panel view"
-          className="ml-1 w-[12.5rem]"
+          className={cn("ml-1", brief ? "w-[17.5rem]" : "w-[12.5rem]")}
           onChange={setView}
           options={[
             { value: "problem", label: "Problem", icon: SquareCode },
+            ...(brief ? [{ value: "review" as const, label: "Review", icon: Repeat2 }] : []),
             {
               value: "chat",
               label: "Chat",
@@ -180,7 +193,7 @@ export function AgentPanel({
           the opposite direction, so the pose it was left in is exactly the
           pose it should arrive from. */}
       <div className="relative min-h-0 flex-1">
-        {ORDER.map((name) => {
+        {views.map((name) => {
           const active = name === view;
           return (
             <motion.div
@@ -213,8 +226,13 @@ export function AgentPanel({
               inert={!active}
               initial={false}
             >
-              {name === "problem" ? (
-                <ProblemView concepts={concepts} learnerRating={learnerRating} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
+              {name === "review" ? brief : name === "problem" ? (
+                banner ? (
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    {banner}
+                    <div className="relative min-h-0 flex-1"><div className="absolute inset-0"><ProblemView concepts={concepts} learnerRating={learnerRating} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} /></div></div>
+                  </div>
+                ) : <ProblemView concepts={concepts} learnerRating={learnerRating} onOpenExternal={onOpenExternal} question={question} testFiles={testFiles} />
               ) : (
                 <AgentThread className="[--transcript-width:46rem]" currentQuestionId={question.id} messages={detail.messages} onEditMessage={onEditMessage} optimisticMessages={optimisticMessages} run={run} scrollKey={`panel:${sessionId}`} trail={actionableTrail} undoable={undoable} />
               )}

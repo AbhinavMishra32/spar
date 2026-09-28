@@ -25,6 +25,7 @@ import { declaredCases, sourcedCases } from "@/lib/testCases";
 import { knownSuiteSize } from "@/lib/suiteSize";
 import { preferredEngine, rememberEngine, type TestEngine } from "./RunControls";
 import { ChallengeActions } from "./ChallengeActions";
+import { ChallengeMixMenu } from "./ChallengeMixMenu";
 import type { AgentRun } from "../agent/agentRun";
 import { AgentPanel } from "./AgentPanel";
 import { useEditMessage } from "@/hooks/use-edit-message";
@@ -37,6 +38,7 @@ import { ChallengeIntro } from "./ChallengeIntro";
 import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "./ResultPanel";
 import type { ComplexityCheckpointState } from "./ComplexityCheckpoint";
 import { expandMentions } from "../agent/Mentions";
+import { ReviewBanner, ReviewBrief } from "../review/ReviewDossier";
 
 /** Named here rather than derived, so the buttons say "LeetCode" instead of
  *  "leetcode" and a second source is one line rather than a search. */
@@ -51,6 +53,7 @@ export function Workspace({
   run,
   dark,
   onRefresh,
+  onConnectSources,
   onError,
   nav,
   onExpandSidebar,
@@ -68,6 +71,8 @@ export function Workspace({
   run: AgentRun | null;
   dark: boolean;
   onRefresh(): Promise<void>;
+  /** Opens Settings at the practice sources, to connect one. */
+  onConnectSources?(): void;
   onError(value: string): void;
   /** The window's back and forward, for the toolbar to draw while the sidebar is hidden. */
   nav?: { canBack: boolean; canForward: boolean; onBack(): void; onForward(): void } | undefined;
@@ -88,7 +93,14 @@ export function Workspace({
   const showTree = multiFile && (nested || solutionFiles.length > 3);
 
   const [activeFile, setActiveFile] = useState(solutionFiles[0]?.path ?? "");
+  /* The file as last loaded from disk, which is what the editor is seeded with.
+     What the learner types lives in `typed` and in the editor itself, not in
+     state: a controlled editor re-rendered this whole workspace — toolbar,
+     menus, dialogs, both panes — on every keystroke. State changes only when a
+     file loads and when the buffer first goes dirty. */
   const [content, setContent] = useState("");
+  const typed = useRef("");
+  const editorRef = useRef<{ getValue(): string; setValue(value: string): void } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [testFiles, setTestFiles] = useState<Record<string, string>>({});
   const [terminal, setTerminal] = useState("");
@@ -168,6 +180,7 @@ export function Workspace({
   const attemptLocked = running || submitting || givingUp || resetting || graded || Boolean(complexityCheckpoint);
   const languageLocked = busy || graded || switchingLanguage || (!question.source && agentBusy);
   const { undoable, edit } = useEditMessage(detail, run?.status === "streaming", onRefresh, onError);
+  const openExternal = useCallback((url: string) => void api?.openExternal(url), [api]);
 
   /* Tell the main process which file the learner is in, so the checkpoint it
      writes can reopen the session on the file they left rather than on the first
@@ -186,14 +199,26 @@ export function Workspace({
     }).catch(() => undefined);
   }, [activeFile, api, detail.summary.id, solutionFiles.map((file) => file.path).join("\0")]);
 
+  /* A file read from disk becomes what the editor shows. The editor is told
+     directly as well as through its value: a reset that reads back the same
+     text it was seeded with leaves the value prop unchanged, and the editor
+     would keep the learner's edits. */
+  const showLoaded = useCallback((text: string) => {
+    typed.current = text;
+    setContent(text);
+    const editor = editorRef.current;
+    const shown = question.source?.source === "leetcode" ? splitSolutionScaffold(text)?.body ?? text : text;
+    if (editor && editor.getValue() !== shown) editor.setValue(shown);
+  }, [question.source?.source]);
+
   const load = useCallback(
     async (path: string) => {
       if (!api || !path) return;
       setActiveFile(path);
-      setContent(await api.readWorkspaceFile({ sessionId: detail.summary.id, path }));
+      showLoaded(await api.readWorkspaceFile({ sessionId: detail.summary.id, path }));
       setDirty(false);
     },
-    [api, detail.summary.id],
+    [api, detail.summary.id, showLoaded],
   );
 
   useEffect(() => {
@@ -216,7 +241,7 @@ export function Workspace({
   useEffect(() => {
     if (!api || revision === seenRevision.current) return;
     seenRevision.current = revision;
-    if (activeFile && !dirty) void api.readWorkspaceFile({ sessionId: detail.summary.id, path: activeFile }).then(setContent).catch(() => undefined);
+    if (activeFile && !dirty) void api.readWorkspaceFile({ sessionId: detail.summary.id, path: activeFile }).then(showLoaded).catch(() => undefined);
   }, [revision]);
 
   useEffect(()=>{
@@ -277,6 +302,7 @@ export function Workspace({
 
   const save = async () => {
     if (!api || !activeFile || readOnly) return;
+    const content = typed.current;
     await api.writeWorkspaceFile({ sessionId: detail.summary.id, path: activeFile, content });
     await append("file_changed", { path: activeFile, bytes: content.length });
     setDirty(false);
@@ -539,8 +565,9 @@ export function Workspace({
     return undefined;
   }, [busy]);
 
+  const reviewSession = detail.summary.context === "review";
   return (
-    <div className="work-canvas relative flex h-full min-h-0 flex-col">
+    <div className={cn("work-canvas relative flex h-full min-h-0 flex-col", reviewSession && "review-canvas")}>
       <ChallengeIntro
         onDone={() => { markIntroSeen(question.attemptId); setIntroFor(null); }}
         question={introFor === question.attemptId ? question : null}
@@ -611,6 +638,18 @@ export function Workspace({
       <Toolbar
         actions={
           <>
+            {/* How the next challenge gets chosen. Not in a review session,
+                whose challenges come from the cards being reviewed. */}
+            {!reviewSession && (
+              <ChallengeMixMenu
+                api={api}
+                language={question.language}
+                onChanged={onRefresh}
+                onConnect={onConnectSources}
+                onError={onError}
+                session={detail.summary}
+              />
+            )}
             <ChallengeActions
               attemptLocked={attemptLocked}
               completedAt={question.attemptCompletedAt}
@@ -651,7 +690,7 @@ export function Workspace({
            how many — and is the way back to the rest of them. */
         title={trail && trail.stops.length > 1
           ? <ChallengeStepper currentId={question.id} trail={trail} />
-          : `Challenge ${question.ordinal}`}
+          : `${reviewSession ? "Review" : "Challenge"} ${question.ordinal}`}
       />
 
       {/* The conversation is the surface; the working panes are sheets inset into
@@ -662,6 +701,8 @@ export function Workspace({
       <PanelGroup autoSaveId="spar-challenge-pane" className="min-h-0 flex-1" direction="horizontal">
         <Panel defaultSize={44} minSize={32} order={1}>
           <AgentPanel
+            brief={reviewSession ? <ReviewBrief api={api} refreshKey={`${question.id}:${question.attemptCompletedAt ?? ""}:${detail.messages.length}`} sessionId={detail.summary.id} /> : undefined}
+            banner={reviewSession ? <ReviewBanner api={api} refreshKey={`${question.id}:${question.revision}`} sessionId={detail.summary.id} /> : undefined}
             answering={sending}
             concepts={concepts}
             learnerRating={learnerRating}
@@ -672,7 +713,7 @@ export function Workspace({
             onComplexityAcknowledge={()=>void acknowledgeComplexity()}
             onComplexityChange={(next)=>setComplexityCheckpoint((current)=>current?{...current,...next}:current)}
             onComplexityReview={()=>void reviewComplexity()}
-            onOpenExternal={(url) => void api?.openExternal(url)}
+            onOpenExternal={openExternal}
             onOpenSettings={onOpenSettings}
             optimisticMessages={optimisticMessages}
             onSend={(contextQuestionId) => void send(undefined, contextQuestionId)}
@@ -800,9 +841,10 @@ export function Workspace({
                       height="100%"
                       language={languageFor(activeFile)}
                       onChange={(value) => {
-                        setContent(scaffold ? withSolutionBody(scaffold, value ?? "") : value ?? "");
+                        typed.current = scaffold ? withSolutionBody(scaffold, value ?? "") : value ?? "";
                         setDirty(true);
                       }}
+                      onMount={(editor) => { editorRef.current = editor; }}
                       options={{ ...EDITOR_OPTIONS, ...intellisenseOptions(intellisense), ...editorFontOptions(codeFont), wordWrap: wordWrap ? "on" : "off", readOnly }}
                       theme={dark ? EDITOR_THEME_DARK : EDITOR_THEME_LIGHT}
                       value={scaffold?.body ?? content}

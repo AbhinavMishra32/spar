@@ -17,7 +17,7 @@ export function Segmented<T extends string>({
   className?: string;
   disabled?: boolean;
   onChange(value: T): void;
-  options: Array<{ value: T; label: string; icon?: React.ComponentType<{ className?: string }> }>;
+  options: Array<{ value: T; label: string; icon?: React.ComponentType<{ className?: string }>; disabled?: boolean; title?: string }>;
   value: T;
 }) {
   const index = Math.max(0, options.findIndex((option) => option.value === value));
@@ -42,16 +42,19 @@ export function Segmented<T extends string>({
           width: `calc((100% - 0.25rem) / ${options.length})`,
         }}
       />
-      {options.map(({ value: option, label, icon: Icon }) => (
+      {options.map(({ value: option, label, icon: Icon, disabled: off, title }) => (
         <button
           aria-checked={option === value}
           className={cn(
             "relative z-10 inline-flex h-7 items-center justify-center gap-1.5 px-2.5 text-ui font-medium transition-colors",
             option === value ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+            off && "cursor-not-allowed opacity-40 hover:text-muted-foreground",
           )}
+          disabled={off}
           key={option}
-          onClick={() => option !== value && onChange(option)}
+          onClick={() => option !== value && !off && onChange(option)}
           role="radio"
+          title={title}
           type="button"
         >
           {Icon && <Icon className="size-3.5" />}
