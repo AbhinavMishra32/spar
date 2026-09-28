@@ -2,12 +2,15 @@ import { promptRefs } from "../workers/prompts.js";
 import { BrowserWindow, dialog, ipcMain, nativeTheme, shell } from "electron";
 import { apiOriginIsUnconfigured } from "./apiOrigin.js";
 import { fitWindowTo } from "./window.js";
+import { finishOnboardingReplay, gatedProfile } from "./devProfile.js";
+import type { AccountFolders } from "./accounts.js";
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { z } from "zod";
 import { ESTABLISHED_DEVIATION, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { LEARNER_NOTEBOOK, reviewAnswerInput, reviewCommitInput, reviewResolveInput, reviewSettingsInput, reviewStartInput, reviewSuspendInput, reviewTargetsInput, type ReviewSettings } from "../shared/api.js";
 import { REVIEW_TARGET_MODE_KEY, ReviewService, reviewTargetMode } from "./reviewSession.js";
-import { attemptAppendInput, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionSourcesInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceLanguageInput, sourceSlugInput, skillDraftInput, skillEnabledInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
+import { attemptAppendInput, reviewSessionStartInput, type ReviewSessionState, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionMixInput, sessionSourcesInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceLanguageInput, sourceSlugInput, skillDraftInput, skillEnabledInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -36,7 +39,7 @@ import type { AgentQuestions } from "./agentQuestions.js";
 import type { AgentTelemetry } from "./agentTelemetry.js";
 import type { SkillService } from "./skills.js";
 
-export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentQuestions: AgentQuestions; agentRunSessions: Map<string, string>; telemetry:AgentTelemetry; appVersion:string; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; skills: SkillService; window: () => BrowserWindow | null; onReviewsChanged?: () => void }) {
+export function installIpc(deps: { store: LocalStore; accounts: { folders: AccountFolders; activate(accountId: string | null): Promise<void> }; workspaces: WorkspaceService; auth: AuthService; providers: ProviderService; practice: PracticeService; runner: UtilityClient; agent: UtilityClient; agentQuestions: AgentQuestions; agentRunSessions: Map<string, string>; telemetry:AgentTelemetry; appVersion:string; sync: CloudSyncService; checkpoints: CheckpointService; restore: RestoreService; web: WebSearchService; visualizer: VisualizerService; skills: SkillService; window: () => BrowserWindow | null; onReviewsChanged?: () => void }) {
   const activeAgentRuns = new Map<string, string>();
   // Reservation is set before credential/provider awaits. Without it, the
   // renderer's planning poll can launch several turns for one session.
@@ -66,7 +69,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
      them a second later. */
   ipcMain.handle(ipc.bootstrap, async () => {
     deps.store.decayAbilities();
-    return { account: await deps.auth.account(), profile: deps.store.getProfile(), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), reviews: deps.store.reviews.overview(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
+    return { account: await deps.auth.account(), profile: gatedProfile(deps.store.getProfile()), sessions: deps.store.listSessions(), challenges: deps.store.listChallenges(), saved: deps.store.listSavedProblems(), abilities: deps.store.listAbilities(), concepts: deps.store.listConcepts(), tracks: deps.store.listTracks(), activeTrack: deps.store.activeTrack(), recommendation: deps.store.todayRecommendation(), progress: deps.store.learnerProgress(), trackProgress: deps.store.progressByTrack(), reviews: deps.store.reviews.overview(), theme: themePreferenceSchema.catch("system").parse(deps.store.getSetting("theme", "system")), syncState: "offline", restore: deps.restore.current(), serverConfigured: !apiOriginIsUnconfigured() };
   });
   ipcMain.handle(ipc.restoreRetry, () => deps.restore.run());
   /* Checked before the session row exists, not after: a session created for a
@@ -81,6 +84,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   const notebookTrack=(value:unknown)=>value===null||value===undefined||value===""?null:value===LEARNER_NOTEBOOK?LEARNER_NOTEBOOK:zUuid(value);
   ipcMain.handle(ipc.notebookRead,(_event,value)=>deps.store.readNotebook(notebookTrack(value)));
   ipcMain.handle(ipc.notebookHistory,(_event,value)=>deps.store.notebookHistory(notebookTrack(value)));
+  /* Reading first brings the file up to date, or writes it if it has gone. */
+  ipcMain.handle(ipc.notebookReveal,()=>{deps.store.readNotebook(LEARNER_NOTEBOOK);const file=deps.store.userFilePath();if(file&&existsSync(file))shell.showItemInFolder(file);});
   ipcMain.handle(ipc.notebookWrite,(_event,value)=>{const input=value as {trackId?:unknown;markdown?:unknown;note?:unknown};if(typeof input.markdown!=="string")throw new Error("Notebook text is required");if(input.markdown.length>40_000)throw new Error("The notebook is too long");return deps.store.writeNotebook(notebookTrack(input.trackId),{markdown:input.markdown,note:typeof input.note==="string"?input.note:"Edited by you",author:"learner"}).saved;});
   /**
    * SQLite is the durable owner of an active challenge. A workspace can be
@@ -277,7 +282,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
     const reason = typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "";
     const result = deps.store.abandonAttempt(attemptId, reason);
     if (result.sessionId !== sessionId) throw new Error("Attempt does not belong to this session");
-    deps.store.addMessage(sessionId, "system", `The learner gave up on this challenge${reason ? `: ${reason}` : "."}`);
+    const reviewed = deps.store.reviews.reviewOfChallenge(result.questionId);
+    deps.store.addMessage(sessionId, "system", `The learner gave up on this challenge${reason ? `: ${reason}` : "."}${reviewed && reviewed.purpose === "review" && !reviewed.reviewed ? ` It was a review of card ${reviewed.card.id} ("${reviewed.card.title}"); judge it with file_review.` : ""}`);
   });
 
   ipcMain.handle(ipc.attemptReset, (_event, value) => {
@@ -317,6 +323,46 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.reviewAnswer, (_event, value) => { const input = reviewAnswerInput.parse(value); return reviews.answer(input.promptId, input.answer); });
   ipcMain.handle(ipc.reviewCommit, (_event, value) => { const input = reviewCommitInput.parse(value); const filed = reviews.commit(input.promptId, input.rating); deps.onReviewsChanged?.(); return filed; });
   ipcMain.handle(ipc.reviewResolve, (_event, value) => { const filed = reviews.resolve(reviewResolveInput.parse(value)); deps.onReviewsChanged?.(); return filed; });
+  ipcMain.handle(ipc.reviewActivity, (_event, value) => {
+    const days = typeof value === "number" && Number.isFinite(value) ? Math.min(730, Math.max(1, value)) : 180;
+    return deps.store.reviews.activity(new Date(Date.now() - days * 86_400_000));
+  });
+  /* A review session is a session: the same coach and workspace, opened on a
+     queue of cards. Which cards is the learner's pick, or what is due, or —
+     with nothing due — the ones slipping most. */
+  ipcMain.handle(ipc.reviewSessionStart, async (_event, value) => {
+    const input = reviewSessionStartInput.parse(value ?? {});
+    if (!await deps.providers.available()) throw new Error(NO_PROVIDER);
+    const active = deps.store.reviews.list().filter((card) => !card.suspended);
+    const named = (input.cardIds ?? []).filter((id) => active.some((card) => card.id === id));
+    const due = deps.store.reviews.due(new Date(), 8).map((card) => card.id);
+    const cardIds = named.length ? named : due.length ? due : [...active].sort((left, right) => left.retrievability - right.retrievability).slice(0, 5).map((card) => card.id);
+    if (!cardIds.length) throw new Error("There is nothing to review yet. Solve a challenge first and its idea is filed for review.");
+    const trackId = deps.store.reviews.card(cardIds[0]!)?.sessionId ? deps.store.trackIdForSession(deps.store.reviews.card(cardIds[0]!)!.sessionId) ?? undefined : undefined;
+    const created = deps.store.createReviewSession(cardIds, trackId);
+    const titles = cardIds.map((id) => deps.store.reviews.card(id)?.title).filter(Boolean);
+    await startAgentTurn(created.sessionId, `The learner started a review session with ${cardIds.length} ${cardIds.length === 1 ? "card" : "cards"}: ${titles.join("; ")}.`, "learner", "session-start", `Review ${titles.length === 1 ? "this card" : `these ${titles.length} cards`} with me.`);
+    return created;
+  });
+  ipcMain.handle(ipc.reviewSessionState, (_event, value): ReviewSessionState | null => {
+    const sessionId = zUuid(value);
+    const session = deps.store.readSession(sessionId);
+    if (!session || session.summary.context !== "review") return null;
+    const open = session.question && !session.question.attemptCompletedAt ? session.question : null;
+    const link = open ? deps.store.reviews.reviewOfChallenge(open.id) : null;
+    const here = new Set(session.summary.questionTitles.map((entry) => entry.id));
+    const queue = deps.store.reviewQueue(sessionId);
+    if (link && !queue.includes(link.card.id)) { deps.store.addToReviewQueue(sessionId, link.card.id); queue.push(link.card.id); }
+    return {
+      current: link ? { cardId: link.card.id, focus: link.focus, learnerNote: link.learnerNote, purpose: link.purpose } : null,
+      queue: queue.flatMap((cardId) => {
+        const detail = deps.store.reviews.detail(cardId);
+        if (!detail) return [];
+        const reviewedHere = [...detail.logs].reverse().find((log) => log.source === "coach" && log.challengeId && here.has(log.challengeId)) ?? null;
+        return [{ detail, reviewedHere, status: link?.card.id === cardId ? "current" as const : reviewedHere ? "reviewed" as const : "queued" as const }];
+      }),
+    };
+  });
   ipcMain.handle(ipc.reviewSuspend, (_event, value) => { const input = reviewSuspendInput.parse(value); deps.store.reviews.setSuspended(input.cardId, input.suspended); deps.onReviewsChanged?.(); });
   ipcMain.handle(ipc.reviewTargets, (_event, value) => { const input = reviewTargetsInput.parse(value); deps.store.reviews.setTargets(input.cardId, input.targets); deps.onReviewsChanged?.(); const card = deps.store.reviews.card(input.cardId); if (!card) throw new Error("That review card no longer exists."); return card; });
   const reviewSettings = (): ReviewSettings => ({ desiredRetention: Number(deps.store.getSetting<number>("review-desired-retention", 0.9)) || 0.9, reminders: deps.store.getSetting<boolean>("review-reminders-enabled", true), targets: reviewTargetMode(deps.store) });
@@ -369,6 +415,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.sessionsPin, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionPinned(input.sessionId, input.value); });
   ipcMain.handle(ipc.sessionsArchive, (_event, value) => { const input = sessionFlagInput.parse(value); deps.store.setSessionArchived(input.sessionId, input.value); });
   ipcMain.handle(ipc.sessionsSources, (_event, value) => { const input = sessionSourcesInput.parse(value); return deps.store.setSessionProblemSources(input.sessionId, input.sources); });
+  ipcMain.handle(ipc.sessionsMix, (_event, value) => { const input = sessionMixInput.parse(value); return deps.store.setSessionChallengeMix(input.sessionId, input.mix); });
   /* Calling a session finished is the learner's judgement, but only while nothing
      is live: a session with a challenge open on screen is described by that
      challenge, and a status behind it would contradict what they are looking at. */
@@ -869,7 +916,11 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        refused without their answer, so the choice holds even if this is missed. */
     const askToRemember=reviewTargetMode(deps.store)==="ask"?" The learner chose to decide what their reviews ask about: before record_insight, ask them with ask_user_question what they want to remember from this problem (multiple answers and custom answers on, options named from this solve: the step that cracked it, the general pattern, the problem itself), write the card about what they pointed at, and pass their words as remember.":"";
     const verdict=source?`${source.source==="leetcode"?"LeetCode":"Codeforces"} accepted the submission against every hidden case it has`:`every visible and hidden test passes${requirementsNote(bundle.design)}`;
-    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId}: ${verdict}.${complexityNote}${askToRemember}`,"system","attempt-complete");
+    const reviewed=deps.store.reviews.reviewOfChallenge(bundle.question_id);
+    const reviewNote=!reviewed?"":reviewed.purpose==="deeper"
+      ?` This was practice going deeper on card ${reviewed.card.id} ("${reviewed.card.title}")${reviewed.focus?`, aimed at: ${reviewed.focus}`:""}. Read how they did it and decide whether the weak spot is handled now — more practice, back to the card, or on to the next one.`
+      :reviewed.reviewed?"":` This challenge was set as a review of card ${reviewed.card.id} ("${reviewed.card.title}")${reviewed.focus?`, to see: ${reviewed.focus}`:""}. Read how they did it — the attempt and the code — against the card and its earlier reviews, and judge it with file_review.`;
+    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId}: ${verdict}.${complexityNote}${reviewNote}${lensNote(deps.store,sessionId)}${reviewed?"":askToRemember}`,"system","attempt-complete");
   };
   const submitToSource = async (input: { sessionId: string; attemptId: string; bundle: NonNullable<ReturnType<LocalStore["submissionBundle"]>>; source: NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"] }) => {
     const { sessionId, attemptId, bundle } = input;
@@ -999,6 +1050,8 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
   ipcMain.handle(ipc.authRequest, async (_event, value) => {
     const result = await deps.auth.request(authRequestInput.parse(value));
     if (result.status !== "signed-in") return result;
+    // Into this account's own folder before anything is read or restored.
+    await deps.accounts.activate(await deps.auth.currentAccountId());
     /* An account that has signed in before has a profile and a history waiting on
        the server, and this device may hold neither — it is a new machine, or the
        same one after a sign-out, which empties it by design. So the pull happens
@@ -1017,7 +1070,7 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
        A failed restore is deliberately *not* sent to the intake. The device does
        not know whether this account has been onboarded, and asking would overwrite
        a real profile with a second answer to the same questions. */
-    fitWindowTo(deps.window(), deps.store.getProfile() || restored === "failed" ? "app" : "onboarding");
+    fitWindowTo(deps.window(), gatedProfile(deps.store.getProfile()) || restored === "failed" ? "app" : "onboarding");
     return result;
   });
   /* Suggestions are drafted, never stored: until the learner opens one it is not
@@ -1039,25 +1092,50 @@ export function installIpc(deps: { store: LocalStore; workspaces: WorkspaceServi
       return { source: "starter" as const, suggestions: starterSuggestions(profile) };
     }
   });
-  /* The end of the intake is the moment Spar becomes a workspace rather than a
-     card, so it is where the window opens out. */
-  ipcMain.handle(ipc.profileSave, (_event, value) => { const input = profileInput.parse(value); const profile = { ...input, completedAt: new Date().toISOString() }; deps.store.saveProfile(profile); fitWindowTo(deps.window(), "app"); return profile; });
+  /* Saving the profile no longer opens the window out: the intake goes on after
+     it (the notebook, the first Track), and a window that fills the screen
+     halfway through reads as the arrival being cut short. Leaving onboarding is
+     the moment Spar becomes a workspace, so that is where it grows. */
+  ipcMain.handle(ipc.profileSave, (_event, value) => { const input = profileInput.parse(value); const profile = { ...input, completedAt: new Date().toISOString() }; deps.store.saveProfile(profile); finishOnboardingReplay(); return profile; });
+  ipcMain.handle(ipc.windowEnterApp, () => { fitWindowTo(deps.window(), "app"); });
   ipcMain.handle(ipc.profileLanguage, (_event, value) => { deps.store.setPreferredLanguage(languageSchema.parse(value)); });
   /* Signing out empties the device, not just the keychain. The local store has no
      account column — every read is device-wide — so anything left behind would be
      served straight to whoever signs in next. The outbox is flushed first, while
      the token still authenticates: after the wipe there is no pull path, so work
      that never reached the cloud is gone for good. */
-  ipcMain.handle(ipc.authSignOut, async () => {
-    await deps.sync.flush().catch(() => undefined);
+  /* Signing out removes this account from the device: its keychain entries and
+     its folder. Other accounts signed in here are untouched. */
+  const leaveDevice = async (remove: () => Promise<void>) => {
+    const accountId = await deps.auth.currentAccountId();
     await deps.practice.clearAllCredentials();
-    await deps.auth.signOut();
-    deps.store.clearAccountData();
-    await deps.workspaces.clear();
+    await remove();
+    await deps.accounts.activate(null);
+    if (accountId) deps.accounts.folders.remove(accountId);
     resetAppearance();
     fitWindowTo(deps.window(), "sign-in");
+  };
+  ipcMain.handle(ipc.authSignOut, async () => {
+    await deps.sync.flush().catch(() => undefined);
+    await leaveDevice(() => deps.auth.signOut());
   });
-  ipcMain.handle(ipc.authDeleteAccount, async () => { await deps.auth.deleteAccount(); await deps.practice.clearAllCredentials(); deps.store.clearAccountData(); await deps.workspaces.clear(); resetAppearance(); fitWindowTo(deps.window(), "sign-in"); });
+  ipcMain.handle(ipc.authDeleteAccount, () => leaveDevice(() => deps.auth.deleteAccount()));
+  /* Accounts signed in on this device, and moving between them. A switch keeps
+     both signed in; the window reloads onto the other account's data. */
+  ipcMain.handle(ipc.accountsList, () => deps.auth.savedAccounts());
+  ipcMain.handle(ipc.accountsSwitch, async (_event, value) => {
+    const accountId = z.string().min(1).max(200).parse(value);
+    await deps.auth.switchTo(accountId);
+    await deps.accounts.activate(accountId);
+    const restored = deps.store.getProfile() ? "idle" as const : await deps.restore.run();
+    fitWindowTo(deps.window(), gatedProfile(deps.store.getProfile()) || restored === "failed" ? "app" : "onboarding");
+  });
+  ipcMain.handle(ipc.accountsAdd, async () => {
+    await deps.sync.flush().catch(() => undefined);
+    await deps.auth.leave();
+    await deps.accounts.activate(null);
+    fitWindowTo(deps.window(), "sign-in");
+  });
   /* Light or dark is a choice someone made for their account, and the device is
      about to be handed to whoever signs in next — including, often enough, nobody.
      So the window goes back to following the OS, which is what a Spar nobody has
@@ -1173,6 +1251,15 @@ const MAX_SUBMIT_OUTPUT = 200_000;
  * with the event is what makes the review a check against something specific
  * rather than a general impression of the code.
  */
+/** The learner's lenses, named on the turn that reads their code: feedback is
+ *  where mention and teach happen, and a solve is the moment there is code to
+ *  read through them. */
+function lensNote(store: LocalStore, sessionId: string): string {
+  const lenses = store.challengeMixForSession(sessionId).lenses;
+  if (!lenses.length) return "";
+  return ` Read their code through the learner's lenses too (${lenses.map((lens) => `${lens.label ?? lens.id} at ${lens.depth}`).join(", ")}): put what it shows in review_solution's lenses and say it in your reply at each lens's depth.`;
+}
+
 function requirementsNote(design: { solutionRequirements?: string[] | undefined }): string {
   const requirements = design.solutionRequirements ?? [];
   if (!requirements.length) return " Review how they wrote it before you write anything down: read their code, say what approach and complexity it actually is, and accept it unless it defeats the point of the exercise.";

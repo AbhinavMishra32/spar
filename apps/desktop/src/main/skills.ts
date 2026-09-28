@@ -27,10 +27,16 @@ type Loaded = SkillSummary & { body: string };
 export class SkillService {
   constructor(
     private readonly builtInRoot: string,
-    private readonly userRoot: string,
+    private userRoot: string,
     private readonly settings: Settings,
   ) {
     mkdirSync(userRoot, { recursive: true });
+  }
+
+  /** Points at another account's own skills. */
+  setUserRoot(root: string) {
+    mkdirSync(root, { recursive: true });
+    this.userRoot = root;
   }
 
   /** Every skill on disk, built-in first, each with whether it is enabled. */

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sparkle, Sun, Trash2, UserRound } from "lucide-react";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type Language } from "@spar/domain";
-import type { SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ReviewTargetMode, ThemePreference, UsageWindow } from "../../../shared/api";
+import type { SavedAccount, SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ReviewTargetMode, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -40,7 +40,7 @@ import { ProviderConnectDialog } from "../settings/ProviderConnectDialog";
 import { SparDots } from "@/components/common/SparDots";
 
 type Provider = ProviderInventory["providers"][number];
-type SettingsSection = "account" | "activity" | "agent" | "usage" | "connections" | "learning" | "privacy" | "appearance";
+export type SettingsSection = "account" | "activity" | "agent" | "usage" | "connections" | "learning" | "privacy" | "appearance";
 type NavItem = SidebarGroup<SettingsSection>["items"][number];
 
 /**
@@ -571,7 +571,12 @@ export function SettingsPage({
   onSignedOut,
   onThemeChange,
   theme,
+  target,
 }: {
+  /** Open on this page and flash this heading — for a control elsewhere that
+   *  sends the learner here to finish something, like connecting a source.
+   *  A new object each time it is asked, so asking twice goes there twice. */
+  target?: { section: SettingsSection; heading?: string } | null;
   account: { displayName: string; email: string };
   api: SparApi | undefined;
   language: Language;
@@ -587,6 +592,16 @@ export function SettingsPage({
   const [themeBusy, setThemeBusy] = useState(false);
   const [languageBusy, setLanguageBusy] = useState(false);
   const [accountAction, setAccountAction] = useState<"sign-out" | "delete" | null>(null);
+  /* The other accounts signed in on this device. Switching keeps both signed in
+     and reloads the window onto the other one's own data. */
+  const [otherAccounts, setOtherAccounts] = useState<SavedAccount[]>([]);
+  useEffect(() => { void api?.savedAccounts?.().then((all) => setOtherAccounts(all.filter((entry) => entry.email !== account.email))).catch(() => undefined); }, [api, account.email]);
+  const moveTo = async (next: (api: SparApi) => Promise<void>) => {
+    if (!api || busy) return;
+    setBusy(true); setError("");
+    try { await next(api); location.reload(); }
+    catch (cause) { setError(message(cause)); setBusy(false); }
+  };
   const [section, setSection] = useState<SettingsSection>("account");
   const slot = useSettingsSlot();
   /* A skill's own page replaces the Agent page under it, title included. */
@@ -625,6 +640,8 @@ export function SettingsPage({
     };
     setTimeout(find, 0);
   }, []);
+
+  useEffect(() => { if (target) goto(target.section, target.heading); }, [target, goto]);
 
   /* A page you arrive at is a page you start at the top of. Without this,
      switching from a long page to a short one lands you in its footer. */
@@ -890,9 +907,32 @@ export function SettingsPage({
           <Row>
             <div className="min-w-0 flex-1">
               <p className="text-content font-medium">Sign out</p>
-              <p className="mt-0.5 text-ui text-muted-foreground">Remove this account and clear its sessions from this {deviceNoun}. Anything already synced stays in your cloud history.</p>
+              <p className="mt-0.5 text-ui text-muted-foreground">Remove this account and its local data from this {deviceNoun}. Anything already synced stays in your cloud history.</p>
             </div>
             <Button onClick={() => setAccountAction("sign-out")} size="sm" variant="secondary"><LogOut />Sign out</Button>
+          </Row>
+        </Group>
+        {/* Each account keeps its own profile, sessions and settings on this
+            device, so moving between them is a switch rather than a sign-out. */}
+        <Group label="Other accounts">
+          {otherAccounts.map((other) => (
+            <Row className="gap-3" key={other.id}>
+              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--color-background-elevated-secondary)] text-content font-semibold text-foreground">
+                {initials(other.displayName)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-content font-medium">{other.displayName}</p>
+                <p className="mt-0.5 truncate text-ui text-muted-foreground">{other.email}</p>
+              </div>
+              <Button disabled={busy} onClick={() => void moveTo((api) => api.switchAccount(other.id))} size="sm" variant="secondary">Switch</Button>
+            </Row>
+          ))}
+          <Row>
+            <div className="min-w-0 flex-1">
+              <p className="text-content font-medium">Add an account</p>
+              <p className="mt-0.5 text-ui text-muted-foreground">Sign in or create another account. This one stays signed in, with its own data.</p>
+            </div>
+            <Button disabled={busy} onClick={() => void moveTo((api) => api.addAccount())} size="sm" variant="secondary"><Plus />Add account</Button>
           </Row>
         </Group><AboutSpar /></>}
 
@@ -922,7 +962,7 @@ export function SettingsPage({
             <DialogDescription>
               {accountAction === "delete"
                 ? "This permanently deletes your account, synced sessions, attempts, ability evidence, and local workspaces."
-                : `This clears your sessions, challenges, and workspaces from this ${deviceNoun}. Spar pushes anything still pending first, and signing back in restores nothing that never reached the cloud.`}
+                : `This removes the account, its sessions, challenges and workspaces from this ${deviceNoun}. Other accounts here stay signed in. Spar pushes anything still pending first, and signing back in restores nothing that never reached the cloud.`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

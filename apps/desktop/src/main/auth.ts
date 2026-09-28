@@ -1,7 +1,8 @@
 import keytar from "keytar";
 import type { AuthCodePurpose, AuthRequest, AuthResult } from "../shared/api.js";
+import { credentialService } from "./devProfile.js";
 
-const service = "ai.spar.desktop";
+const service = credentialService();
 let reportedCredentialReadFailure = false;
 
 export class CredentialStoreError extends Error {
@@ -45,11 +46,33 @@ async function removePassword(account: string): Promise<boolean> {
     throw new CredentialStoreError("delete", cause);
   }
 }
+
+/** Every entry name under this app's service, for finding saved accounts and an
+ *  account's own secrets. */
+async function entryNames(): Promise<string[]> {
+  try {
+    return (await keytar.findCredentials(service)).map((entry) => entry.account);
+  } catch (cause) {
+    throw new CredentialStoreError("read", cause);
+  }
+}
 /** Where the session token lives. The fifteen-minute JWT this replaced was held
  *  under "access-token"; that entry is cleared whenever a token is written or
  *  dropped, so no install is left holding a credential nothing will accept. */
 const TOKEN = "session-token";
 const LEGACY_TOKEN = "access-token";
+
+/* Several accounts can be signed in on one device and switched between, so each
+   keeps its own entries: the account itself, its session, and every secret it
+   saved (model keys, provider sign-ins, practice sessions), all under
+   `acct:<id>:`. `current-account` says which one the app is using. The entries
+   from before this, `account` and `session-token` for the one account the device
+   had, are moved over the first time they are read. */
+const CURRENT = "current-account";
+const scope = (accountId: string) => `acct:${accountId}:`;
+const ACCOUNT_ENTRY = "account";
+
+export type SavedAccount = { id: string; displayName: string; email: string };
 
 /** What this app calls itself when it talks to the API.
  *
@@ -61,7 +84,7 @@ const LEGACY_TOKEN = "access-token";
  *  apps/api/src/auth.ts, and change neither without the other. */
 const DESKTOP_ORIGIN = "spar://desktop";
 
-type Account = { id: string; displayName: string; email: string };
+type Account = SavedAccount;
 /** What Better Auth answers with. `token` is absent when a deployment wants an
  *  address confirmed before it hands out a session. */
 type AuthPayload = { token?: string | null; user?: { id: string; email: string; name?: string | null }; message?: string; code?: string };
@@ -92,9 +115,71 @@ export class AuthService {
    *  `verify-email`, so the fact has to be remembered across the two calls. */
   private freshAccount = false;
   signedUpThisSession() { return this.freshAccount; }
-  async account() { const raw = await readPassword("account"); return raw ? JSON.parse(raw) as Account : null; }
+  /** The account in use, cached: it changes only through this class. */
+  private active: string | null | undefined;
+
+  /** Which saved account the app is using, or null when it is on the sign-in screen. */
+  async currentAccountId(): Promise<string | null> {
+    if (this.active !== undefined) return this.active;
+    await this.migrateSingleAccount();
+    const id = await readPassword(CURRENT);
+    this.active = id && await readPassword(scope(id) + ACCOUNT_ENTRY) ? id : null;
+    return this.active;
+  }
+
+  /** The layout from before accounts could be switched: one account, unscoped. */
+  private async migrateSingleAccount() {
+    const raw = await readPassword(ACCOUNT_ENTRY);
+    if (!raw) return;
+    const account = JSON.parse(raw) as Partial<Account>;
+    const token = await readPassword(TOKEN);
+    if (token && account.id) {
+      await writePassword(scope(account.id) + TOKEN, token);
+      await writePassword(scope(account.id) + ACCOUNT_ENTRY, raw);
+      await writePassword(CURRENT, account.id);
+    }
+    await removePassword(TOKEN).catch(() => false);
+    await removePassword(LEGACY_TOKEN).catch(() => false);
+    await removePassword(ACCOUNT_ENTRY);
+  }
+
+  async account() {
+    const id = await this.currentAccountId();
+    const raw = id ? await readPassword(scope(id) + ACCOUNT_ENTRY) : null;
+    return raw ? JSON.parse(raw) as Account : null;
+  }
   /** The bearer token every authenticated request carries. */
-  async accessToken() { return readPassword(TOKEN); }
+  async accessToken() {
+    const id = await this.currentAccountId();
+    return id ? readPassword(scope(id) + TOKEN) : null;
+  }
+
+  /** Every account signed in on this device, the one in use included. */
+  async savedAccounts(): Promise<SavedAccount[]> {
+    const names = await entryNames();
+    const ids = names.filter((name) => name.startsWith("acct:") && name.endsWith(`:${ACCOUNT_ENTRY}`)).map((name) => name.slice(5, -(ACCOUNT_ENTRY.length + 1)));
+    const accounts = await Promise.all(ids.map(async (id) => {
+      const [raw, token] = await Promise.all([readPassword(scope(id) + ACCOUNT_ENTRY), readPassword(scope(id) + TOKEN)]);
+      return raw && token ? JSON.parse(raw) as Account : null;
+    }));
+    return accounts.filter((account): account is Account => account !== null).sort((a, b) => a.email.localeCompare(b.email));
+  }
+
+  /** Makes another saved account the one in use. Its session is already here,
+   *  so there is nothing to type. */
+  async switchTo(accountId: string) {
+    if (!await readPassword(scope(accountId) + TOKEN)) throw new Error("That account is no longer signed in on this device. Sign in to it again.");
+    await writePassword(CURRENT, accountId);
+    this.active = accountId;
+    this.freshAccount = false;
+  }
+
+  /** Back to the sign-in screen to add another account, keeping this one saved. */
+  async leave() {
+    await removePassword(CURRENT).catch(() => false);
+    this.active = null;
+    this.freshAccount = false;
+  }
 
   /** One entry point for every step of signing in. Each case is one call to
    *  Better Auth and, on success, one of two outcomes: the device is signed in,
@@ -168,9 +253,11 @@ export class AuthService {
   private async persist(payload: AuthPayload): Promise<AuthResult> {
     if (!payload.token || !payload.user) throw new AuthError("The server did not return a session. Try signing in again.");
     const account: Account = { id: payload.user.id, email: payload.user.email, displayName: payload.user.name ?? payload.user.email.split("@")[0] ?? "Learner" };
-    await writePassword(TOKEN, payload.token);
-    await writePassword("account", JSON.stringify(account));
-    await removePassword(LEGACY_TOKEN).catch(() => undefined);
+    await writePassword(scope(account.id) + TOKEN, payload.token);
+    await writePassword(scope(account.id) + ACCOUNT_ENTRY, JSON.stringify(account));
+    await writePassword(CURRENT, account.id);
+    await removePassword(LEGACY_TOKEN).catch(() => false);
+    this.active = account.id;
     return { status: "signed-in" };
   }
 
@@ -180,9 +267,15 @@ export class AuthService {
        out of a device has to work on a plane. */
     const token = await this.accessToken();
     if (token) await fetch(`${this.apiOrigin}/v1/auth/sign-out`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", origin: DESKTOP_ORIGIN }, body: "{}" }).catch(() => undefined);
-    await removePassword(TOKEN);
-    await removePassword(LEGACY_TOKEN).catch(() => undefined);
-    await removePassword("account");
+    /* Signing out removes the account from this device: its session and every
+       secret it saved. The other saved accounts are left as they are. */
+    const id = await this.currentAccountId();
+    if (id) {
+      const prefix = scope(id);
+      await Promise.all((await entryNames()).filter((name) => name.startsWith(prefix)).map((name) => removePassword(name)));
+    }
+    await removePassword(CURRENT).catch(() => false);
+    this.active = null;
     /* Whoever signs in next is not the account that was just created here, so the
        next sign-in must restore rather than assume there is nothing to pull. */
     this.freshAccount = false;
@@ -195,27 +288,47 @@ export class AuthService {
       const payload = await response.json().catch(() => ({})) as { error?: string };
       throw new Error(payload.error ?? `Account deletion failed (${response.status})`);
     }
+    // Signing out already empties every entry this account owns, the model
+    // keys, provider sign-ins and practice sessions included.
     await this.signOut();
-    await Promise.all([
-      // `exa` and the practice sessions are not model providers, but they are keys
-      // held under the same prefix, and deleting the account has to empty the
-      // keychain rather than most of it. A LeetCode session left behind would be a
-      // live credential for somebody else's account on a machine its owner
-      // believes they have wiped.
-      "openai-codex", "claude-code", "github-copilot", "openai", "anthropic", "google", "xai", "openrouter", "cline", "opencode", "opencode-go", "deepseek", "minimax", "moonshotai", "kimi-coding", "zai", "vercel-ai-gateway", "cloudflare-ai-gateway", "ollama", "lm-studio", "custom", "exa",
-      "practice:leetcode:global", "practice:leetcode:cn", "practice:codeforces:global",
-    ].flatMap((provider) => [this.deleteSecret(provider), this.deleteProviderOAuth(provider)]));
   }
-  saveSecret(account: string, secret: string) { return writePassword(`provider:${account}`, secret); }
-  readSecret(account: string) { return readPassword(`provider:${account}`); }
-  deleteSecret(account: string) { return removePassword(`provider:${account}`).then(() => undefined); }
-  saveProviderOAuth(provider: string, credentials: unknown) { return writePassword(`provider-oauth:${provider}`, JSON.stringify(credentials)); }
+
+  /** A secret's entry for the account in use. With nobody signed in there is
+   *  nowhere to keep one. */
+  private async secretEntry(name: string) {
+    const id = await this.currentAccountId();
+    if (!id) throw new Error("Sign in before saving credentials");
+    return scope(id) + name;
+  }
+  /** Reads a secret, adopting the device-wide entry an older version saved: it
+   *  belongs to whoever was signed in when it was made, which is the account
+   *  that first asks for it after the upgrade. */
+  private async readScoped(name: string) {
+    const id = await this.currentAccountId();
+    if (!id) return null;
+    const value = await readPassword(scope(id) + name);
+    if (value !== null) return value;
+    const legacy = await readPassword(name);
+    if (legacy === null) return null;
+    await writePassword(scope(id) + name, legacy);
+    await removePassword(name).catch(() => false);
+    return legacy;
+  }
+  private async removeScoped(name: string) {
+    const id = await this.currentAccountId();
+    if (id) await removePassword(scope(id) + name);
+    await removePassword(name).catch(() => false);
+  }
+  async saveSecret(account: string, secret: string) { await writePassword(await this.secretEntry(`provider:${account}`), secret); }
+  readSecret(account: string) { return this.readScoped(`provider:${account}`); }
+  deleteSecret(account: string) { return this.removeScoped(`provider:${account}`); }
+  async saveProviderOAuth(provider: string, credentials: unknown) { await writePassword(await this.secretEntry(`provider-oauth:${provider}`), JSON.stringify(credentials)); }
   async readProviderOAuth<T>(provider: string): Promise<T | null> {
-    const raw = await readPassword(`provider-oauth:${provider}`);
+    const raw = await this.readScoped(`provider-oauth:${provider}`);
     if (!raw) return null;
     try { return JSON.parse(raw) as T; } catch { return null; }
   }
-  deleteProviderOAuth(provider: string) { return removePassword(`provider-oauth:${provider}`).then(() => undefined); }
+  deleteProviderOAuth(provider: string) { return this.removeScoped(`provider-oauth:${provider}`); }
 }
 
 /** A failure with a sentence in it that can be shown as-is, and the server's own

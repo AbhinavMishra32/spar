@@ -39,6 +39,8 @@ export class RestoreService {
   ) {}
 
   current() { return this.state; }
+  /** Forgets the last outcome, for a switch to another account's store. */
+  reset() { if (!this.inFlight) this.state = "idle"; }
 
   /** Restore, or join the restore already running. Never throws: the outcome is
    *  the returned state, because every caller's next move is to show a screen

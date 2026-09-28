@@ -4,17 +4,18 @@ import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spa
 import type { AgentActivityStep } from "@spar/domain";
 export type { VisualizerSpec, VisualizerTrace };
 import type { SubmissionRecord, SubmissionRow } from "./submissions.js";
-import { attemptEventSchema, problemSourcesSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal } from "@spar/domain";
+import { attemptEventSchema, challengeMixSchema, problemSourcesSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal, type ReviewActivityEntry } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
-  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", notebookRead: "notebook:read", notebookHistory: "notebook:history", notebookWrite: "notebook:write",
+  tracksDelete: "tracks:delete", tracksCreate: "tracks:create", tracksActive: "tracks:active", notebookRead: "notebook:read", notebookHistory: "notebook:history", notebookWrite: "notebook:write", notebookReveal: "notebook:reveal",
   /* The window reports its own state; the main process decides when that becomes
      a checkpoint. Named for what it carries after "checkpoint:save" turned out to
      be a channel nothing ever called — see CheckpointService. */
   workspaceStateSave: "workspace:state-save", attemptAppend: "attempt:append", workspaceRead: "workspace:read",
   workspaceWrite: "workspace:write", runnerRun: "runner:run", agentSend: "agent:send", agentAnswer: "agent:answer", agentStop: "agent:stop", agentEdit: "agent:edit", attemptSubmit: "attempt:submit",
-  authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account", settingsSaveSecret: "settings:save-secret",
+  authRequest: "auth:request", authSignOut: "auth:sign-out", authDeleteAccount: "auth:delete-account",
+  accountsList: "accounts:list", accountsSwitch: "accounts:switch", accountsAdd: "accounts:add", settingsSaveSecret: "settings:save-secret",
   settingsProviders: "settings:providers", settingsProviderDisconnect: "settings:provider-disconnect",
   settingsProviderDefault: "settings:provider-default", settingsProviderUsage: "settings:provider-usage", settingsUsageReport: "settings:usage-report", settingsActivityReport: "settings:activity-report", settingsProviderAccount: "settings:provider-account", settingsProviderOauthStart: "settings:provider-oauth-start",
   settingsProviderOauthSubmit: "settings:provider-oauth-submit", settingsProviderOauthCancel: "settings:provider-oauth-cancel",
@@ -25,7 +26,10 @@ export const ipc = {
   attemptComplexityStatus: "attempt:complexity-status", attemptComplexityReview: "attempt:complexity-review", attemptComplexityAcknowledge: "attempt:complexity-acknowledge",
   attemptAbandon: "attempt:abandon", attemptReset: "attempt:reset", sessionNextChallenge: "session:next-challenge",
   profileSave: "profile:save", profileLanguage: "profile:language", sessionsSuggest: "sessions:suggest",
-  sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive", sessionsSources: "sessions:sources",
+  /* The arrival: the window opening out onto the app, and the transparent layer
+     over the desktop that the onboarding's few big moments ripple out across. */
+  windowEnterApp: "window:enter-app", arrivalOpen: "arrival:open", arrivalClose: "arrival:close", arrivalPulse: "arrival:pulse",
+  sessionsRename: "sessions:rename", sessionsPin: "sessions:pin", sessionsArchive: "sessions:archive", sessionsSources: "sessions:sources", sessionsMix: "sessions:mix",
   sessionsStatus: "sessions:status", sessionsDelete: "sessions:delete",
   challengePreviews: "challenges:previews", challengeRead: "challenges:read", challengeWrite: "challenges:write",
   challengeSubmissions: "challenges:submissions", submissionRead: "submissions:read", sessionSubmissions: "sessions:submissions",
@@ -45,7 +49,7 @@ export const ipc = {
   /* Spaced review of what each solve taught. See main/reviews.ts. */
   reviewQueue: "reviews:queue", reviewCard: "reviews:card", reviewForChallenge: "reviews:for-challenge",
   reviewStart: "reviews:start", reviewCue: "reviews:cue", reviewReveal: "reviews:reveal", reviewAbandon: "reviews:abandon", reviewAnswer: "reviews:answer", reviewCommit: "reviews:commit",
-  reviewResolve: "reviews:resolve", reviewSuspend: "reviews:suspend", reviewTargets: "reviews:targets", reviewSettings: "reviews:settings", reviewSettingsSave: "reviews:settings-save",
+  reviewResolve: "reviews:resolve", reviewActivity: "reviews:activity", reviewSessionStart: "reviews:session-start", reviewSessionState: "reviews:session-state", reviewSuspend: "reviews:suspend", reviewTargets: "reviews:targets", reviewSettings: "reviews:settings", reviewSettingsSave: "reviews:settings-save",
   restoreRetry: "restore:retry",
   updateState: "update:state", updateCheck: "update:check", updateDownload: "update:download",
   updateDismissChangelog: "update:dismiss-changelog",
@@ -94,6 +98,7 @@ export const sessionRenameInput = z.object({ sessionId: z.string().uuid(), title
 export const sessionFlagInput = z.object({ sessionId: z.string().uuid(), value: z.boolean() });
 /* Which sources a session may take its challenges from. Never empty. */
 export const sessionSourcesInput = z.object({ sessionId: z.string().uuid(), sources: problemSourcesSchema });
+export const sessionMixInput = z.object({ sessionId: z.string().uuid(), mix: challengeMixSchema });
 /* Only the two the learner can mean by hand. `planning` and `active` are the
    agent's to set — they promise a turn or a live challenge behind them. */
 export const sessionStatusInput = z.object({ sessionId: z.string().uuid(), status: z.enum(["completed", "paused"]) });
@@ -144,6 +149,7 @@ export const reviewStartInput = z.object({ cardId: z.string().uuid(), fresh: z.b
 export const reviewAnswerInput = z.object({ promptId: z.string().uuid(), answer: z.string().max(8_000) });
 export const reviewCommitInput = z.object({ promptId: z.string().uuid(), rating: z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)]) });
 export const reviewResolveInput = z.object({ cardId: z.string().uuid(), promptId: z.string().uuid().optional(), passed: z.boolean(), checks: z.number().int().min(0).max(1_000), elapsedMs: z.number().min(0).max(86_400_000) });
+export const reviewSessionStartInput = z.object({ cardIds: z.array(z.string().uuid()).max(20).optional() });
 export const reviewSuspendInput = z.object({ cardId: z.string().uuid(), suspended: z.boolean() });
 export const reviewTargetsInput = z.object({ cardId: z.string().uuid(), targets: z.array(reviewTargetSchema).min(1).max(5) });
 /** `targets`: whether the agent decides what a new card rehearses (`auto`) or
@@ -152,6 +158,10 @@ export const reviewTargetModeSchema = z.enum(["auto", "ask"]);
 export type ReviewTargetMode = z.infer<typeof reviewTargetModeSchema>;
 export const reviewSettingsInput = z.object({ desiredRetention: z.number().min(0.75).max(0.97), reminders: z.boolean(), targets: reviewTargetModeSchema }).partial();
 export type ReviewSettings = { desiredRetention: number; reminders: boolean; targets: ReviewTargetMode };
+/** One card in a review session, with the whole history the brief draws. */
+export type ReviewSessionCard = { detail: ReviewCardDetail; status: "reviewed" | "current" | "queued"; reviewedHere: ReviewLog | null };
+/** What a review session's workspace shows: its queue, and the card the open challenge reviews. */
+export type ReviewSessionState = { queue: ReviewSessionCard[]; current: { cardId: string; focus: string | null; learnerNote: string | null; purpose: "review" | "deeper" } | null };
 export type ReviewFiled = { card: ReviewCard; log: ReviewLog; siblings: number; overview: ReviewOverview };
 export type { FsrsRating };
 /** How the window has this session arranged. Everything else in a checkpoint is
@@ -240,7 +250,7 @@ export type AgentUsageRow = { runId: string; sessionId: string; provider: string
  *  is estimated from list prices, so on a subscription it is the API-equivalent. */
 /** One saved version of the coach's notebook. `author` says who wrote this
  *  version: the coach through update_notebook, or the learner from Track settings. */
-/** The notebook key for the learner notebook: the one about the person rather
+/** The notebook key for user.md: the one about the person rather
  *  than a Track, which every Track's turns read. Passed where a trackId goes. */
 export const LEARNER_NOTEBOOK = "learner";
 
@@ -464,6 +474,7 @@ export type VisualizerProblem = {
   paidOnly: boolean;
 };
 
+export type SavedAccount = { id: string; displayName: string; email: string };
 export type BootstrapData ={ account: { id: string; displayName: string; email: string } | null; profile: LearnerProfile | null; sessions: z.infer<typeof sessionSummarySchema>[]; challenges: ChallengeHistorySummary[]; saved: SavedProblem[]; abilities: AbilityHistorySummary[]; concepts: ConceptSummary[]; tracks: Track[]; activeTrack: Track | null; recommendation: TodayRecommendation | null; progress: LearnerProgress; trackProgress: Record<string, LearnerProgress>; theme: ThemePreference; syncState: "offline" | "synced" | "pending";
   /** The spaced-review queue and each challenge's place in it. */
   reviews: ReviewOverview;
@@ -615,6 +626,16 @@ export type UpdateState = {
   changelog: { version: string; notes: string } | null;
 };
 
+export type ArrivalPulse = { x: number; y: number; strength: number; kind?: "ring" | "bloom" };
+/** What the desktop layer is told, in its own coordinates: where the app window
+ *  sits (so it is never drawn over, and its grid can be continued), whether it
+ *  is the window in front, and each pulse. */
+export type ArrivalEvent =
+  | { type: "window"; x: number; y: number; width: number; height: number }
+  | { type: "focus"; focused: boolean }
+  | { type: "pulse"; x: number; y: number; strength: number; kind: "ring" | "bloom" }
+  | { type: "fade" };
+
 export interface SparApi {
   bootstrap(): Promise<BootstrapData>;
   createSession(input: z.infer<typeof createSessionInput>): Promise<{ sessionId: string }>;
@@ -627,6 +648,8 @@ export interface SparApi {
   readNotebook(trackId: string | null): Promise<CoachNotebookVersion | null>;
   notebookHistory(trackId: string | null): Promise<CoachNotebookVersion[]>;
   writeNotebook(input: { trackId: string | null; markdown: string; note?: string }): Promise<CoachNotebookVersion>;
+  /** Show user.md, the file the learner notebook is kept in, in Finder or Explorer. */
+  revealUserFile(): Promise<void>;
   openSession(sessionId: string): Promise<SessionDetail | null>;
   /** Tell the main process how this session's window is arranged. It folds this
    *  into the checkpoint it writes on its own schedule, along with the workspace
@@ -684,6 +707,8 @@ export interface SparApi {
   setSessionArchived(input: z.infer<typeof sessionFlagInput>): Promise<void>;
   /** Where this session's challenges may come from. Read by the next agent turn. */
   setSessionProblemSources(input: z.input<typeof sessionSourcesInput>): Promise<z.infer<typeof problemSourcesSchema>>;
+  /** How the coach balances the session's sources and what it teaches on the side. Read by the next turn. */
+  setSessionChallengeMix(input: z.input<typeof sessionMixInput>): Promise<z.infer<typeof challengeMixSchema>>;
   setSessionStatus(input: z.infer<typeof sessionStatusInput>): Promise<void>;
   /** Permanent: the session, its challenges, its attempt evidence and its workspace. */
   deleteSession(sessionId: string): Promise<void>;
@@ -741,6 +766,11 @@ export interface SparApi {
   commitReview(input: z.infer<typeof reviewCommitInput>): Promise<ReviewFiled>;
   /** A challenge solved again from a blank file, as a review. */
   resolveReview(input: z.infer<typeof reviewResolveInput>): Promise<ReviewFiled>;
+  /** Every review filed in the last `days` days, newest first, for the calendar. */
+  reviewActivity(days?: number): Promise<ReviewActivityEntry[]>;
+  /** Open a session of review challenges: the named cards, or what is due. */
+  startReviewSession(input: z.infer<typeof reviewSessionStartInput>): Promise<{ sessionId: string }>;
+  reviewSessionState(sessionId: string): Promise<ReviewSessionState | null>;
   suspendReview(input: z.infer<typeof reviewSuspendInput>): Promise<void>;
   /** What a card rehearses, as the learner set it. */
   setReviewTargets(input: z.infer<typeof reviewTargetsInput>): Promise<ReviewCard>;
@@ -790,8 +820,28 @@ export interface SparApi {
    *  of the two things happened — see `AuthResult`. */
   auth(request: AuthRequest): Promise<AuthResult>;
   signOut(): Promise<void>;
+  /** Every account signed in on this device. */
+  savedAccounts(): Promise<SavedAccount[]>;
+  /** Moves the app onto another saved account; reload the window after. */
+  switchAccount(accountId: string): Promise<void>;
+  /** Keeps this account signed in and goes to the sign-in screen for another. */
+  addAccount(): Promise<void>;
   /** Finish onboarding; resolves with the stored profile. */
   saveProfile(input: z.infer<typeof profileInput>): Promise<LearnerProfile>;
+  /** Open the window out to the working size. Onboarding calls this as it
+   *  leaves, so the growth is the last beat of the arrival rather than a jump
+   *  halfway through it. */
+  enterApp(): Promise<void>;
+  /** The layer over the desktop that the onboarding's pulses cross. Everything
+   *  is fire and forget: a platform without transparent windows draws nothing. */
+  arrival: {
+    open(): void;
+    close(): void;
+    /** A ring out across the desktop from a point in this window's client coordinates. */
+    pulse(input: ArrivalPulse): void;
+    /** Only the overlay listens. */
+    onEvent(listener: (event: ArrivalEvent) => void): () => void;
+  };
   /** Change the language new sessions start in, without touching the rest of the profile. */
   setPreferredLanguage(language: Language): Promise<void>;
   /** Sparring sessions drafted from the intake. `source` is "starter" when no

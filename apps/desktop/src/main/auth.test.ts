@@ -9,6 +9,7 @@ vi.mock("keytar", () => ({
     getPassword: vi.fn(async (_service: string, account: string) => keychain.get(account) ?? null),
     setPassword: vi.fn(async (_service: string, account: string, secret: string) => void keychain.set(account, secret)),
     deletePassword: vi.fn(async (_service: string, account: string) => keychain.delete(account)),
+    findCredentials: vi.fn(async () => [...keychain].map(([account, password]) => ({ account, password }))),
   },
 }));
 
@@ -28,6 +29,7 @@ beforeEach(() => {
   vi.mocked(keytar.getPassword).mockImplementation(async (_service: string, account: string) => keychain.get(account) ?? null);
   vi.mocked(keytar.setPassword).mockImplementation(async (_service: string, account: string, secret: string) => void keychain.set(account, secret));
   vi.mocked(keytar.deletePassword).mockImplementation(async (_service: string, account: string) => keychain.delete(account));
+  vi.mocked(keytar.findCredentials).mockImplementation(async () => [...keychain].map(([account, password]) => ({ account, password })));
   calls = [];
   origins = [];
   routes = {};
@@ -69,8 +71,9 @@ describe("signing in", () => {
   it("keeps the signed token from the bearer header, not the one in the body", async () => {
     routes["sign-in/email"] = () => session("raw-token");
     await expect(service().request({ action: "sign-in", email: "learner@example.com", password: "a-good-password" })).resolves.toEqual({ status: "signed-in" });
-    expect(keychain.get("session-token")).toBe("raw-token.signature");
-    expect(JSON.parse(keychain.get("account") ?? "{}")).toEqual({ id: "8f1c", email: "learner@example.com", displayName: "learner" });
+    expect(keychain.get("acct:8f1c:session-token")).toBe("raw-token.signature");
+    expect(JSON.parse(keychain.get("acct:8f1c:account") ?? "{}")).toEqual({ id: "8f1c", email: "learner@example.com", displayName: "learner" });
+    expect(keychain.get("current-account")).toBe("8f1c");
   });
 
   it("clears the fifteen-minute token the old scheme left in the keychain", async () => {
@@ -122,7 +125,7 @@ describe("an account that has not confirmed its address", () => {
   it("signs in once the code is confirmed", async () => {
     routes["email-otp/verify-email"] = () => session("raw-token");
     await expect(service().request({ action: "verify-email", email: "learner@example.com", code: "123456" })).resolves.toEqual({ status: "signed-in" });
-    expect(keychain.get("session-token")).toBe("raw-token.signature");
+    expect(keychain.get("acct:8f1c:session-token")).toBe("raw-token.signature");
   });
 });
 
@@ -154,10 +157,18 @@ describe("recovering an account", () => {
   });
 });
 
+const account = (id: string, email: string) => JSON.stringify({ id, email, displayName: email.split("@")[0] });
+/** An account signed in on this device, the way `persist` leaves it. */
+const signedIn = (id: string, email: string, current = true) => {
+  keychain.set(`acct:${id}:session-token`, `${id}-token`);
+  keychain.set(`acct:${id}:account`, account(id, email));
+  if (current) keychain.set("current-account", id);
+};
+
 describe("signing out", () => {
   it("revokes the session on the server and empties the keychain", async () => {
-    keychain.set("session-token", "raw-token.signature");
-    keychain.set("account", "{}");
+    signedIn("8f1c", "learner@example.com");
+    keychain.set("acct:8f1c:provider:openai", "sk-mine");
     routes["sign-out"] = () => json({ success: true });
     await service().signOut();
     expect(calls).toEqual(["sign-out"]);
@@ -165,11 +176,61 @@ describe("signing out", () => {
   });
 
   it("empties the keychain even when the server cannot be told", async () => {
-    keychain.set("session-token", "raw-token.signature");
-    keychain.set("account", "{}");
+    signedIn("8f1c", "learner@example.com");
     vi.stubGlobal("fetch", async () => { throw new TypeError("fetch failed"); });
     await service().signOut();
     expect(keychain.size).toBe(0);
+  });
+
+  it("leaves the other accounts on this device signed in", async () => {
+    signedIn("a1", "first@example.com", false);
+    keychain.set("acct:a1:provider:openai", "sk-first");
+    signedIn("b2", "second@example.com");
+    routes["sign-out"] = () => json({ success: true });
+    const auth = service();
+    await auth.signOut();
+    expect(await auth.account()).toBeNull();
+    expect((await auth.savedAccounts()).map((entry) => entry.id)).toEqual(["a1"]);
+    expect(keychain.get("acct:a1:provider:openai")).toBe("sk-first");
+  });
+});
+
+describe("several accounts on one device", () => {
+  it("switches without a password, each with its own session and secrets", async () => {
+    signedIn("a1", "first@example.com", false);
+    signedIn("b2", "second@example.com");
+    const auth = service();
+    await auth.saveSecret("openai", "sk-second");
+    await auth.switchTo("a1");
+    expect((await auth.account())?.email).toBe("first@example.com");
+    expect(await auth.accessToken()).toBe("a1-token");
+    expect(await auth.readSecret("openai")).toBeNull();
+    await auth.switchTo("b2");
+    expect(await auth.readSecret("openai")).toBe("sk-second");
+  });
+
+  it("keeps an account saved while another is added", async () => {
+    signedIn("a1", "first@example.com");
+    const auth = service();
+    await auth.leave();
+    expect(await auth.account()).toBeNull();
+    expect((await auth.savedAccounts()).map((entry) => entry.email)).toEqual(["first@example.com"]);
+  });
+
+  it("refuses to switch to an account whose session is gone", async () => {
+    keychain.set("acct:a1:account", account("a1", "first@example.com"));
+    await expect(service().switchTo("a1")).rejects.toThrow(/Sign in to it again/);
+  });
+
+  it("moves the single account an older version saved into its own entries", async () => {
+    keychain.set("session-token", "old-token");
+    keychain.set("account", account("8f1c", "learner@example.com"));
+    keychain.set("provider:openai", "sk-old");
+    const auth = service();
+    expect((await auth.account())?.id).toBe("8f1c");
+    expect(await auth.accessToken()).toBe("old-token");
+    expect(await auth.readSecret("openai")).toBe("sk-old");
+    expect([...keychain.keys()].sort()).toEqual(["acct:8f1c:account", "acct:8f1c:provider:openai", "acct:8f1c:session-token", "current-account"]);
   });
 });
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Eye, EyeOff } from "lucide-react";
 import { motion } from "motion/react";
-import type { AuthCodePurpose, AuthRequest, SparApi } from "../../../shared/api";
+import type { AuthCodePurpose, AuthRequest, SavedAccount, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
@@ -102,6 +102,21 @@ export function AuthPage({
   const [sent, setSent] = useState<string | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const passwordRef = useRef<HTMLInputElement>(null);
+  /* Accounts still signed in on this device, when this screen is adding
+     another. Going back to one needs no password: its session is still here. */
+  const [saved, setSaved] = useState<SavedAccount[]>([]);
+  useEffect(() => { void api?.savedAccounts?.().then(setSaved).catch(() => undefined); }, [api]);
+  const continueAs = async (account: SavedAccount) => {
+    if (!api || busy) return;
+    setBusy(true);
+    try {
+      await api.switchAccount(account.id);
+      location.reload();
+    } catch (cause) {
+      onError(message(cause));
+      setBusy(false);
+    }
+  };
   /* The mark runs one pass for every choice the learner makes, and keeps passing
      while a request is in flight. */
   const { pass, awake, rouse } = useMarkPass(busy);
@@ -387,6 +402,15 @@ export function AuthPage({
               <Link disabled={busy || cooldown > 0} onClick={resend}>
                 {cooldown > 0 ? `Send another code in ${cooldown}s` : "Send another code"}
               </Link>
+            </motion.div>
+          )}
+          {step.name === "credentials" && saved.length > 0 && (
+            <motion.div animate={{ opacity: 1 }} className="mt-3 flex flex-col items-center gap-1.5" initial={{ opacity: 0 }} key="saved" transition={TEXT}>
+              {saved.map((account) => (
+                <Link disabled={busy} key={account.id} onClick={() => void continueAs(account)}>
+                  Continue as <span className="text-foreground">{account.email}</span>
+                </Link>
+              ))}
             </motion.div>
           )}
           {step.name !== "credentials" && (

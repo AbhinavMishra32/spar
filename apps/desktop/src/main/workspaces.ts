@@ -11,7 +11,9 @@ export class WorkspaceService {
    */
   private readonly replacements = new Map<string, Promise<void>>();
 
-  constructor(private readonly root: string) {}
+  constructor(private root: string) {}
+  /** Points at another account's workspaces. Nothing is cached per path. */
+  setRoot(root: string) { this.root = root; }
   async read(sessionId: string, relativePath: string) {
     await this.waitForReplacement(sessionId);
     return readFile(this.resolve(sessionId, relativePath), "utf8");

@@ -21,6 +21,9 @@ import { recordAgentActivity } from "./agentActivity.js";
 import { PracticeService } from "./practice.js";
 import { ProviderService } from "./provider.js";
 import { createMainWindow, fitWindowTo } from "./window.js";
+import { gatedProfile, isolateDevProfile } from "./devProfile.js";
+import { AccountFolders, swappable } from "./accounts.js";
+import { installArrivalOverlay } from "./arrivalOverlay.js";
 import { WorkspaceService } from "./workspaces.js";
 import { themePreferenceSchema } from "../shared/api.js";
 import { AgentQuestions } from "./agentQuestions.js";
@@ -31,11 +34,21 @@ let mainWindow: BrowserWindow | null = null;
 let store: LocalStore;
 let updates: UpdateService | null = null;
 
+isolateDevProfile();
 if (!app.requestSingleInstanceLock()) app.quit();
 else {
   void app.whenReady().then(async () => {
-    const root = path.join(app.getPath("userData"), "spar"); await mkdir(path.join(root, "workspaces"), { recursive: true });
-    store = new LocalStore(path.join(root, "state.sqlite3")); nativeTheme.themeSource = themePreferenceSchema.catch("system").parse(store.getSetting("theme", "system")); const origin = apiOrigin(); const auth = new AuthService(origin); const workspaces = new WorkspaceService(path.join(root, "workspaces"));
+    const root = path.join(app.getPath("userData"), "spar"); await mkdir(root, { recursive: true });
+    const origin = apiOrigin(); const auth = new AuthService(origin);
+    /* Each account on this device has its own folder (see accounts.ts). The
+       services below all hold `store`, which points at the folder of the
+       account in use and is re-pointed when the learner switches. */
+    const folders = new AccountFolders(root);
+    const startingAccount = await auth.currentAccountId();
+    folders.migrateLegacy(startingAccount);
+    let active = folders.paths(startingAccount);
+    const stores = swappable(new LocalStore(active.db, { userFile: active.userFile }));
+    store = stores.proxy; nativeTheme.themeSource = themePreferenceSchema.catch("system").parse(store.getSetting("theme", "system")); const workspaces = new WorkspaceService(active.workspaces);
     const providers = new ProviderService(auth, store, (event) => mainWindow?.webContents.send("provider:oauth-event", event));
     /* Where real problems come from. Holds the source's session in the keychain,
        mounts one of its problems as a challenge, and is the only thing in the app
@@ -66,7 +79,7 @@ else {
        app like the runtime icons; the learner's own live with their data. */
     const skills = new SkillService(
       app.isPackaged ? path.join(process.resourcesPath, "skills") : path.join(app.getAppPath(), "build", "skills"),
-      path.join(root, "skills"),
+      active.skills,
       store,
     );
     /* Keeps the Dock badge on the number of spaced reviews due, and announces new
@@ -109,16 +122,41 @@ else {
        A signed-in device with no profile is not necessarily a new account — far
        more often it is a machine that has not finished restoring one. So it opens
        at "restoring" and the pull below settles which of the two it was. */
+    /* Moves the app onto another account's folder, or the signed-out one. Work
+       in flight is written out first, and the workers are stopped: a turn that
+       outlived the switch would write into the wrong account. They start again
+       on the next request. */
+    const activateAccount = async (accountId: string | null) => {
+      const next = folders.paths(accountId);
+      if (next.root === active.root) return;
+      await sync.flush().catch(() => undefined);
+      await checkpoints.flushAll().catch(() => undefined);
+      checkpoints.stop();
+      agent.stop();
+      runner.stop();
+      practice.stop();
+      stores.swap(new LocalStore(next.db, { userFile: next.userFile })).close();
+      workspaces.setRoot(next.workspaces);
+      skills.setUserRoot(next.skills);
+      restore.reset();
+      active = next;
+      const theme = themePreferenceSchema.catch("system").parse(store.getSetting("theme", "system"));
+      nativeTheme.themeSource = theme;
+      mainWindow?.webContents.send("window:theme", theme);
+      reminders.refresh(false);
+    };
+    const accounts = { folders, activate: activateAccount };
     const signedIn = Boolean(await auth.account());
     const needsRestore = signedIn && !store.getProfile();
-    const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : "app" as const;
-    installIpc({ store, workspaces, auth, providers, practice, runner, agent, agentQuestions, agentRunSessions, telemetry, appVersion:app.getVersion(), sync, checkpoints, restore, web, visualizer, skills, window: () => mainWindow, onReviewsChanged: () => reminders.refresh(false) });
+    const stage = !signedIn ? "sign-in" as const : needsRestore ? "restoring" as const : gatedProfile(store.getProfile()) ? "app" as const : "onboarding" as const;
+    installIpc({ store, accounts, workspaces, auth, providers, practice, runner, agent, agentQuestions, agentRunSessions, telemetry, appVersion:app.getVersion(), sync, checkpoints, restore, web, visualizer, skills, window: () => mainWindow, onReviewsChanged: () => reminders.refresh(false) });
     updates = new UpdateService(store, () => mainWindow, prepareToExit);
     updates.installIpc();
-    installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage }); updates.start(); reminders.start();
+    installMenu(() => mainWindow); installDockIcon(); mainWindow = createMainWindow({ stage });
+    installArrivalOverlay(() => mainWindow); updates.start(); reminders.start();
     /* Started after the window exists, so its progress has somewhere to be
        reported. The renderer holds the restoring screen until this settles. */
-    if (needsRestore) void restore.run().then((state) => { if (state !== "failed") fitWindowTo(mainWindow, store.getProfile() ? "app" : "onboarding"); });
+    if (needsRestore) void restore.run().then((state) => { if (state !== "failed") fitWindowTo(mainWindow, gatedProfile(store.getProfile()) ? "app" : "onboarding"); });
     /* Checkpoints are flushed before the store closes: quitting is the one moment
        there is no next debounce tick to wait for, and the session the learner just
        closed the laptop on is exactly the one worth not losing. */

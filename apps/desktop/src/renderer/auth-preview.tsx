@@ -78,6 +78,12 @@ const api = {
     await new Promise((resolve) => setTimeout(resolve, 400));
     sourceConnections.delete(source);
   },
+  async readNotebook() { return null; },
+  async writeNotebook(input: { markdown: string }) { console.info("notebook", input.markdown); return input; },
+  async revealUserFile() { console.info("→ reveal user.md"); },
+  async enterApp() { console.info("→ enter app"); },
+  arrival: { open() {}, close() {}, pulse() {}, onEvent: () => () => undefined },
+  async setTheme(theme: string) { console.info("→ theme", theme); },
   onProviderOAuthEvent: () => () => undefined,
   onAgentEvent: () => () => undefined,
   onRunnerEvent: () => () => undefined,
@@ -92,11 +98,13 @@ const api = {
 function Harness() {
   const [error, setError] = useState<string | null>(null);
   const [dark, setDark] = useState(false);
-  const [page, setPage] = useState<"auth" | "onboarding">("auth");
+  const [page, setPage] = useState<"auth" | "onboarding">(new URLSearchParams(location.search).has("onboarding") ? "onboarding" : "auth");
   document.documentElement.classList.toggle("dark", dark);
+  const framed = new URLSearchParams(location.search).has("window");
+  const onboarding = <OnboardingPage api={api} displayName="abhinav" onDone={async () => undefined} onStartTrack={async (input) => console.info("→ track", input)} onTheme={async (theme) => setDark(theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches))} theme={dark ? "dark" : "light"} />;
   return (
     <div className="h-screen w-screen">
-      <div className="fixed top-3 right-3 z-50 flex gap-1.5">
+      <div className="fixed bottom-3 right-3 z-50 flex gap-1.5">
         <button className="rounded border border-border bg-background px-2 py-1 text-ui" onClick={() => setPage((value) => (value === "auth" ? "onboarding" : "auth"))} type="button">
           {page === "auth" ? "Onboarding" : "Sign in"}
         </button>
@@ -112,8 +120,14 @@ function Harness() {
           onError={(value) => setError(value || null)}
           serverConfigured
         />
+      ) : framed ? (
+        /* The onboarding window at its real size, on a stand-in desktop, for
+           judging the composition when the pane itself is a different shape. */
+        <div className="grid h-full w-full place-items-center bg-[linear-gradient(160deg,#5d6f86,#a58c7a)]">
+          <div className="relative h-[780px] w-[720px] overflow-hidden rounded-[12px] shadow-[0_30px_80px_-20px_rgba(0,0,0,0.6)]">{onboarding}</div>
+        </div>
       ) : (
-        <OnboardingPage api={api} displayName="abhinav" onDone={async () => undefined} onStartSession={async () => undefined} />
+        onboarding
       )}
     </div>
   );
