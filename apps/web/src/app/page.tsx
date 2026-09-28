@@ -7,7 +7,6 @@ import { SmoothScroll } from "@/components/SmoothScroll";
 import { AgentFeature } from "@/components/sections/AgentFeature";
 import { Download } from "@/components/sections/Download";
 import { Evidence } from "@/components/sections/Evidence";
-import { Faq } from "@/components/sections/Faq";
 import { Languages } from "@/components/sections/Languages";
 import { NextMove } from "@/components/sections/NextMove";
 import { Providers } from "@/components/sections/Providers";
@@ -36,7 +35,6 @@ export default async function Home() {
         <Providers />
         <Yours />
         <Download release={release} />
-        <Faq />
       </main>
       <Footer />
     </>

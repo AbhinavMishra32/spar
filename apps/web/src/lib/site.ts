@@ -18,7 +18,6 @@ export const nav = [
   { label: "How it works", href: "#how" },
   { label: "Agent", href: "#agent" },
   { label: "Privacy", href: "#yours" },
-  { label: "FAQ", href: "#faq" },
 ] as const;
 
 /** The languages a challenge can be set in, by the id their mark is drawn from.

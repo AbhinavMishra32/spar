@@ -8,18 +8,6 @@ import { site } from "@/lib/site";
 
 const GLYPHS = { macOS: AppleGlyph, Windows: WindowsGlyph, Linux: LinuxGlyph };
 
-/** The two things worth knowing before the download finishes. */
-const NEEDS = [
-  {
-    title: "The first session teaches it about you",
-    body: "Seven questions once, then it starts from evidence instead. Every problem gives Spar a better picture of you, and every better picture makes the next problem more useful.",
-  },
-  {
-    title: "A model to run the agent on",
-    body: "The one thing Spar doesn't ship. A subscription you already have, a key, or Ollama on your own machine.",
-  },
-];
-
 export function Download({ release }: { release: Release }) {
   return (
     <Section id="download">
@@ -50,72 +38,52 @@ export function Download({ release }: { release: Release }) {
         </div>
       </Reveal>
 
-      {/* Every build, as a manifest rather than as three cards. Three cards
-          side by side ask you to compare them, and there is nothing to compare:
-          you are on one of these machines and you want that row. A list with the
-          version and the source above it reads the way a release page reads. */}
-      <Reveal className="mt-10">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-line pb-3">
-          <p className="font-mono text-[11px] tracking-[0.16em] text-faint uppercase">
-            All builds — v{release.version}
-          </p>
+      {/* Every build, one card per machine. Which one is yours is obvious;
+          the card just has to make that one easy to hit. */}
+      <Reveal className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 px-1">
+          <p className="text-[0.9rem] text-faint">All builds · v{release.version}</p>
           <a
             href={site.releases}
             target="_blank"
             rel="noreferrer"
-            className="group inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.16em] text-ghost uppercase transition-colors hover:text-paper"
+            className="group inline-flex items-center gap-1.5 text-[0.9rem] text-faint transition-colors hover:text-paper"
           >
-            Checksums and notes on GitHub
+            Checksums on GitHub
             <ArrowGlyph className="size-3 transition-transform group-hover:translate-x-0.5" />
           </a>
         </div>
 
-        <ul className="divide-y divide-line border-b border-line">
+        <ul className="mt-4 grid gap-3 sm:grid-cols-3">
           {release.builds.map((build) => {
             const Glyph = GLYPHS[build.platform as keyof typeof GLYPHS];
             return (
               <li
                 key={build.platform}
-                className="flex flex-col gap-4 py-5 transition-colors hover:bg-white/[0.015] sm:flex-row sm:items-center sm:gap-6 sm:px-2"
+                className="build-card"
               >
-                <Glyph className="size-[17px] shrink-0 text-paper" />
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-[1.02rem] leading-none">{build.platform}</h3>
-                  <p className="mt-2 font-mono text-[11px] tracking-[0.1em] text-ghost">{build.detail}</p>
-                </div>
-                <div className="flex shrink-0 items-center gap-5">
+                <Glyph aria-hidden className="build-card-ghost" />
+                <span className="build-card-mark">
+                  <Glyph className="size-[42%] text-paper" />
+                </span>
+                <h3 className="mt-5 text-[1.1rem] leading-none">{build.platform}</h3>
+                <p className="mt-2 text-[0.88rem] text-faint">{build.detail}</p>
+                <div className="mt-6 flex items-center gap-4">
+                  <a href={build.href} download="" className="build-card-download group">
+                    Download
+                    <ArrowGlyph className="size-3.5 rotate-90 transition-transform group-hover:translate-y-0.5" />
+                  </a>
                   {build.alt ? (
-                    <a
-                      href={build.alt.href}
-                      download=""
-                      className="font-mono text-[11px] tracking-[0.1em] text-faint transition-colors hover:text-paper"
-                    >
+                    <a href={build.alt.href} download="" className="text-[0.85rem] text-faint transition-colors hover:text-paper">
                       {build.alt.label}
                     </a>
                   ) : null}
-                  <a
-                    href={build.href}
-                    download=""
-                    className="group inline-flex items-center gap-1.5 text-[0.9rem] text-paper"
-                  >
-                    Download
-                    <ArrowGlyph className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-                  </a>
                 </div>
               </li>
             );
           })}
         </ul>
       </Reveal>
-
-      <div className="mt-14 grid gap-10 md:grid-cols-2 md:gap-16">
-        {NEEDS.map((need, index) => (
-          <Reveal key={need.title} delay={index * 90}>
-            <h3 className="text-[1.1rem]">{need.title}</h3>
-            <p className="mt-3 text-[0.94rem] leading-relaxed text-muted">{need.body}</p>
-          </Reveal>
-        ))}
-      </div>
     </Section>
   );
 }
