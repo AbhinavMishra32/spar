@@ -109,7 +109,10 @@ export const insightClickSchema = z.object({
   diff: z.string().max(1_600).nullable(),
 });
 
-export const reviewSourceSchema = z.enum(["solve", "recall", "resolve", "implicit"]);
+/** Where a review came from: the solve that filed the card, a recall card, a
+ *  re-solve from a blank file, a sibling's share, or the coach judging an
+ *  attempt it set as this card's review. */
+export const reviewSourceSchema = z.enum(["solve", "recall", "resolve", "implicit", "coach"]);
 export type ReviewSource = z.infer<typeof reviewSourceSchema>;
 
 export const reviewCardSchema = z.object({
@@ -133,6 +136,9 @@ export const reviewCardSchema = z.object({
   /** What the learner said they want to remember from this problem, in their
    *  words, when they were asked. Reviews aim at it. */
   remember: z.string().nullable().optional(),
+  /** The coach's standing note on this card: what its next review should
+   *  press on, rewritten as the learner's hold on it changes. */
+  coachNote: z.string().nullable().optional(),
   state: z.enum(["new", "review", "relearning"]),
   stability: z.number(),
   difficulty: z.number(),
@@ -163,6 +169,14 @@ export const reviewLogSchema = z.object({
   prompt: z.string().nullable(),
   answer: z.string().nullable(),
   feedback: z.string().nullable(),
+  /** What held and what did not, from a graded answer or the coach's read of an attempt. */
+  held: z.array(z.string()).optional(),
+  missed: z.array(z.string()).optional(),
+  misconception: z.string().nullable().optional(),
+  /** The work the review was judged on, when it was a solve. */
+  challengeId: z.string().nullable().optional(),
+  attemptId: z.string().nullable().optional(),
+  submissionId: z.string().nullable().optional(),
   elapsedDays: z.number(),
   scheduledDays: z.number(),
   retrievability: z.number(),
@@ -258,4 +272,11 @@ export type ReviewOverview = {
   byQuestion: Record<string, ReviewScheduleEntry>;
 };
 
-export type ReviewCardDetail = { card: ReviewCard; logs: ReviewLog[]; intervals: ReviewIntervalPreview };
+/** A challenge the coach set as a review of a card, and what it was told to watch. */
+/** `deeper` is practice past the review itself, aimed at the weak spot it found. */
+export type ReviewChallengeLink = { challengeId: string; challengeTitle: string; cardId: string; focus: string | null; learnerNote: string | null; purpose: "review" | "deeper"; createdAt: string; outcome: "passed" | "failed" | "abandoned" | "open" | null; reviewed: boolean };
+
+export type ReviewCardDetail = { card: ReviewCard; logs: ReviewLog[]; intervals: ReviewIntervalPreview; challenges?: ReviewChallengeLink[] };
+
+/** One filed review across every card, for the calendar. */
+export type ReviewActivityEntry = ReviewLog & { cardTitle: string; questionId: string; questionTitle: string };

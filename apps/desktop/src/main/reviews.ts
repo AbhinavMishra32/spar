@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
 import {
+  type ReviewActivityEntry, type ReviewChallengeLink,
   DEFAULT_FSRS, DEFAULT_REVIEW_TARGETS, implicitCredit, newMemoryState, previewSchedule, retrievability, reviewGradeSchema, reviewPromptSchema, scheduleReview,
   type ConceptTag, type FsrsParameters, type FsrsRating, type InsightIndependence, type MemoryState, type ReviewCard, type ReviewCardDetail,
   type ReviewFormat, type ReviewGrade, type ReviewIntervalPreview, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewPrompt,
@@ -27,6 +28,8 @@ export const REVIEW_SCHEMA = `
   CREATE INDEX IF NOT EXISTS review_logs_time_idx ON review_logs(reviewed_at);
   CREATE TABLE IF NOT EXISTS review_prompts (id TEXT PRIMARY KEY, card_id TEXT NOT NULL REFERENCES review_cards(id) ON DELETE CASCADE, payload TEXT NOT NULL, cue_shown INTEGER NOT NULL DEFAULT 0, answer TEXT, grade TEXT, suggested_rating INTEGER, created_at TEXT NOT NULL, graded_at TEXT, closed_at TEXT);
   CREATE INDEX IF NOT EXISTS review_prompts_card_idx ON review_prompts(card_id, created_at);
+  CREATE TABLE IF NOT EXISTS review_challenges (question_id TEXT PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE, card_id TEXT NOT NULL REFERENCES review_cards(id) ON DELETE CASCADE, focus TEXT, learner_note TEXT, purpose TEXT NOT NULL DEFAULT 'review', created_at TEXT NOT NULL);
+  CREATE INDEX IF NOT EXISTS review_challenges_card_idx ON review_challenges(card_id, created_at);
 `;
 
 /** How far a review of one card moves its siblings — cards whose primary concept
@@ -58,15 +61,19 @@ export type InsightInput = {
 
 type CardRow = {
   id: string; question_id: string; session_id: string; attempt_id: string | null; title: string; trigger_cue: string; insight: string; invariant: string | null;
-  click: string; independence: string; pitfalls: string; rubric: string; transfer: string; concept_slugs: string; targets: string | null; remember: string | null; state: string; stability: number; difficulty: number;
+  click: string; independence: string; pitfalls: string; rubric: string; transfer: string; concept_slugs: string; targets: string | null; remember: string | null; coach_note?: string | null; state: string; stability: number; difficulty: number;
   due_at: string; last_review_at: string | null; reps: number; lapses: number; suspended: number; version: number; created_at: string; updated_at: string;
   question_title?: string;
 };
 type LogRow = {
   id: string; card_id: string; reviewed_at: string; source: string; format: string | null; target: string | null; rating: number; suggested_rating: number | null; prompt: string | null;
-  answer: string | null; feedback: string | null; elapsed_days: number; scheduled_days: number; retrievability: number; stability_before: number; stability_after: number;
+  answer: string | null; feedback: string | null; grade?: string | null; held?: string | null; missed?: string | null; challenge_id?: string | null; attempt_id?: string | null; submission_id?: string | null; elapsed_days: number; scheduled_days: number; retrievability: number; stability_before: number; stability_after: number;
   difficulty_before: number; difficulty_after: number;
 };
+/** The work a review was judged on, when there was work: the challenge, the
+ *  attempt and the submission, and what held and what did not. */
+export type ReviewWork = { challengeId?: string | null; attemptId?: string | null; submissionId?: string | null; held?: string[] | undefined; missed?: string[] | undefined };
+
 type PromptRow = { id: string; card_id: string; payload: string; cue_shown: number; revealed_at?: string | null; answer: string | null; grade: string | null; suggested_rating: number | null; created_at: string; graded_at: string | null; closed_at: string | null };
 
 export class ReviewLedger {
@@ -76,6 +83,10 @@ export class ReviewLedger {
     this.ensureColumn("review_logs", "target", "TEXT");
     this.ensureColumn("review_prompts", "revealed_at", "TEXT");
     this.ensureColumn("review_cards", "remember", "TEXT");
+    this.ensureColumn("review_cards", "coach_note", "TEXT");
+    this.ensureColumn("review_challenges", "purpose", "TEXT NOT NULL DEFAULT 'review'");
+    this.ensureColumn("review_challenges", "learner_note", "TEXT");
+    for (const column of ["held", "missed", "challenge_id", "attempt_id", "submission_id"]) this.ensureColumn("review_logs", column, "TEXT");
   }
 
   private ensureColumn(table: string, column: string, declaration: string) {
@@ -110,7 +121,7 @@ export class ReviewLedger {
       this.db.prepare(`INSERT INTO review_cards (id, question_id, session_id, attempt_id, title, trigger_cue, insight, invariant, click, independence, pitfalls, rubric, transfer, concept_slugs, targets, remember, state, stability, difficulty, due_at, last_review_at, reps, lapses, suspended, version, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, ?, ?)`)
         .run(id, input.questionId, question.session_id, ...content, targets ?? JSON.stringify(DEFAULT_REVIEW_TARGETS), remember, scheduled.next.state, scheduled.next.stability, scheduled.next.difficulty, scheduled.next.dueAt, scheduled.next.lastReviewAt, scheduled.next.reps, scheduled.next.lapses, stamp, stamp);
-      this.insertLog({ cardId: id, source: "solve", format: null, target: null, rating: input.firstRating, suggestedRating: null, prompt: null, answer: null, feedback: input.click.summary, grade: null }, newMemoryState(now), scheduled, now);
+      this.insertLog({ cardId: id, source: "solve", format: null, target: null, rating: input.firstRating, suggestedRating: null, prompt: null, answer: null, feedback: input.click.summary, grade: null, challengeId: input.questionId, attemptId: input.attemptId, missed: input.pitfalls.map((pitfall) => pitfall.mistake) }, newMemoryState(now), scheduled, now);
       return { card: this.card(id)!, created: true };
     })();
   }
@@ -146,7 +157,7 @@ export class ReviewLedger {
   detail(id: string, now = new Date()): ReviewCardDetail | null {
     const card = this.card(id, now);
     if (!card) return null;
-    return { card, logs: this.logs(id), intervals: this.intervals(card, now) };
+    return { card, logs: this.logs(id), intervals: this.intervals(card, now), challenges: this.challengeLinks(id) };
   }
 
   logs(cardId: string): ReviewLog[] {
@@ -234,7 +245,7 @@ export class ReviewLedger {
    * to refit the parameters to this learner later. Implicit credit is logged
    * too, as `implicit`, so an optimiser can leave it out.
    */
-  review(cardId: string, rating: FsrsRating, detail: { source: ReviewSource; format: ReviewFormat | null; target?: ReviewTarget | null | undefined; prompt: string | null; answer: string | null; feedback: string | null; grade: ReviewGrade | null; suggestedRating: FsrsRating | null; promptId?: string }, now = new Date()): { card: ReviewCard; log: ReviewLog; siblings: number } {
+  review(cardId: string, rating: FsrsRating, detail: { source: ReviewSource; format: ReviewFormat | null; target?: ReviewTarget | null | undefined; prompt: string | null; answer: string | null; feedback: string | null; grade: ReviewGrade | null; suggestedRating: FsrsRating | null; promptId?: string } & ReviewWork, now = new Date()): { card: ReviewCard; log: ReviewLog; siblings: number } {
     return this.db.transaction(() => {
       const card = this.card(cardId, now);
       if (!card) throw new Error("That review card no longer exists.");
@@ -296,9 +307,9 @@ export class ReviewLedger {
     for (const card of cards) {
       byQuestion[card.questionId] = { cardId: card.id, title: card.title, state: card.state, dueAt: card.dueAt, lastReviewAt: card.lastReviewAt, reps: card.reps, lapses: card.lapses, retrievability: card.retrievability, createdAt: card.createdAt, suspended: card.suspended };
     }
-    const reviewDays = new Set((this.db.prepare("SELECT reviewed_at FROM review_logs WHERE source IN ('recall','resolve') AND reviewed_at>=?").all(new Date(now.getTime() - 400 * DAY_MS).toISOString()) as Array<{ reviewed_at: string }>).map((row) => localDate(new Date(row.reviewed_at))));
+    const reviewDays = new Set((this.db.prepare("SELECT reviewed_at FROM review_logs WHERE source IN ('recall','resolve','coach') AND reviewed_at>=?").all(new Date(now.getTime() - 400 * DAY_MS).toISOString()) as Array<{ reviewed_at: string }>).map((row) => localDate(new Date(row.reviewed_at))));
     const today = localDate(now);
-    const reviewedToday = (this.db.prepare("SELECT reviewed_at FROM review_logs WHERE source IN ('recall','resolve') AND reviewed_at>=?").all(new Date(now.getTime() - 2 * DAY_MS).toISOString()) as Array<{ reviewed_at: string }>).filter((row) => localDate(new Date(row.reviewed_at)) === today).length;
+    const reviewedToday = (this.db.prepare("SELECT reviewed_at FROM review_logs WHERE source IN ('recall','resolve','coach') AND reviewed_at>=?").all(new Date(now.getTime() - 2 * DAY_MS).toISOString()) as Array<{ reviewed_at: string }>).filter((row) => localDate(new Date(row.reviewed_at)) === today).length;
     return {
       totalCards: cards.length,
       dueCount: active.filter((card) => Date.parse(card.dueAt) <= now.getTime()).length,
@@ -312,8 +323,49 @@ export class ReviewLedger {
     };
   }
 
+  /* ---- The coach's side: reviews it sets, reads and judges --------------- */
+
+  /** The coach's standing note on what this card's next review should press on. */
+  setCoachNote(cardId: string, note: string | null, now = new Date()) {
+    this.db.prepare("UPDATE review_cards SET coach_note=?, updated_at=? WHERE id=?").run(note?.trim().slice(0, 1_500) || null, now.toISOString(), cardId);
+  }
+
+  /** File a challenge the coach set as this card's review, and what it meant to watch. */
+  linkChallenge(questionId: string, cardId: string, focus: string | null, purpose: ReviewChallengeLink["purpose"] = "review", learnerNote: string | null = null, now = new Date()) {
+    if (!this.card(cardId, now)) throw new Error("That review card no longer exists.");
+    this.db.prepare("INSERT INTO review_challenges (question_id, card_id, focus, learner_note, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(question_id) DO UPDATE SET card_id=excluded.card_id, focus=excluded.focus, learner_note=excluded.learner_note, purpose=excluded.purpose")
+      .run(questionId, cardId, focus?.trim().slice(0, 1_500) || null, learnerNote?.trim().slice(0, 600) || null, purpose, now.toISOString());
+  }
+
+  /** The card a challenge was set to review, if it was set as one. */
+  reviewOfChallenge(questionId: string, now = new Date()): { card: ReviewCard; focus: string | null; learnerNote: string | null; purpose: ReviewChallengeLink["purpose"]; reviewed: boolean } | null {
+    const row = this.db.prepare("SELECT card_id, focus, learner_note, purpose FROM review_challenges WHERE question_id=?").get(questionId) as { card_id: string; focus: string | null; learner_note: string | null; purpose: string | null } | undefined;
+    const card = row ? this.card(row.card_id, now) : null;
+    if (!row || !card) return null;
+    const reviewed = Boolean(this.db.prepare("SELECT 1 FROM review_logs WHERE card_id=? AND challenge_id=? AND source='coach' LIMIT 1").get(row.card_id, questionId));
+    return { card, focus: row.focus, learnerNote: row.learner_note, purpose: row.purpose === "deeper" ? "deeper" : "review", reviewed };
+  }
+
+  challengeLinks(cardId: string): ReviewChallengeLink[] {
+    const rows = this.db.prepare(`SELECT rc.question_id, rc.card_id, rc.focus, rc.learner_note, rc.purpose, rc.created_at, q.title,
+        (SELECT json_extract(e.payload,'$.outcome') FROM attempt_events e JOIN attempts a ON a.id=e.attempt_id WHERE a.question_id=rc.question_id AND e.type='attempt_completed' ORDER BY e.occurred_at DESC LIMIT 1) outcome,
+        EXISTS(SELECT 1 FROM review_logs l WHERE l.card_id=rc.card_id AND l.challenge_id=rc.question_id AND l.source='coach') reviewed
+      FROM review_challenges rc JOIN questions q ON q.id=rc.question_id WHERE rc.card_id=? ORDER BY rc.created_at`).all(cardId) as Array<{ question_id: string; card_id: string; focus: string | null; learner_note: string | null; purpose: string | null; created_at: string; title: string; outcome: string | null; reviewed: number }>;
+    return rows.map((row) => ({
+      challengeId: row.question_id, challengeTitle: row.title, cardId: row.card_id, focus: row.focus, learnerNote: row.learner_note, purpose: row.purpose === "deeper" ? "deeper" as const : "review" as const, createdAt: row.created_at,
+      outcome: row.outcome === "passed" || row.outcome === "failed" || row.outcome === "abandoned" ? row.outcome : "open", reviewed: row.reviewed === 1,
+    }));
+  }
+
+  /** Every review filed since `since`, across all cards, newest first — the calendar's past. */
+  activity(since: Date, includeImplicit = false): ReviewActivityEntry[] {
+    const rows = this.db.prepare(`SELECT l.*, c.title card_title, c.question_id, q.title question_title FROM review_logs l JOIN review_cards c ON c.id=l.card_id JOIN questions q ON q.id=c.question_id
+      WHERE l.reviewed_at>=? ${includeImplicit ? "" : "AND l.source!='implicit'"} ORDER BY l.reviewed_at DESC LIMIT 2000`).all(since.toISOString()) as Array<LogRow & { card_title: string; question_id: string; question_title: string }>;
+    return rows.map((row) => ({ ...toLog(row), cardTitle: row.card_title, questionId: row.question_id, questionTitle: row.question_title }));
+  }
+
   clear() {
-    for (const table of ["review_prompts", "review_logs", "review_cards"]) this.db.prepare(`DELETE FROM ${table}`).run();
+    for (const table of ["review_challenges", "review_prompts", "review_logs", "review_cards"]) this.db.prepare(`DELETE FROM ${table}`).run();
   }
 
   /* ---- Internals ---------------------------------------------------------- */
@@ -345,16 +397,19 @@ export class ReviewLedger {
       .run(memory.state, memory.stability, memory.difficulty, memory.dueAt, memory.lastReviewAt, memory.reps, memory.lapses, now.toISOString(), cardId);
   }
 
-  private insertLog(detail: { cardId: string; source: ReviewSource; format: ReviewFormat | null; target?: ReviewTarget | null | undefined; rating: FsrsRating; suggestedRating: FsrsRating | null; prompt: string | null; answer: string | null; feedback: string | null; grade: ReviewGrade | null }, before: MemoryState, scheduled: ReturnType<typeof scheduleReview>, now: Date): ReviewLog {
+  private insertLog(detail: { cardId: string; source: ReviewSource; format: ReviewFormat | null; target?: ReviewTarget | null | undefined; rating: FsrsRating; suggestedRating: FsrsRating | null; prompt: string | null; answer: string | null; feedback: string | null; grade: ReviewGrade | null } & ReviewWork, before: MemoryState, scheduled: ReturnType<typeof scheduleReview>, now: Date): ReviewLog {
     const row: LogRow = {
       id: randomUUID(), card_id: detail.cardId, reviewed_at: now.toISOString(), source: detail.source, format: detail.format, target: detail.target ?? null, rating: detail.rating,
       suggested_rating: detail.suggestedRating, prompt: detail.prompt, answer: detail.answer, feedback: detail.feedback,
+      grade: detail.grade ? JSON.stringify(detail.grade) : null,
+      held: detail.held?.length ? JSON.stringify(detail.held) : null, missed: detail.missed?.length ? JSON.stringify(detail.missed) : null,
+      challenge_id: detail.challengeId ?? null, attempt_id: detail.attemptId ?? null, submission_id: detail.submissionId ?? null,
       elapsed_days: scheduled.elapsedDays, scheduled_days: scheduled.scheduledDays, retrievability: scheduled.retrievability,
       stability_before: before.stability, stability_after: scheduled.next.stability, difficulty_before: before.difficulty, difficulty_after: scheduled.next.difficulty,
     };
-    this.db.prepare(`INSERT INTO review_logs (id, card_id, reviewed_at, source, format, target, rating, suggested_rating, prompt, answer, feedback, grade, elapsed_days, scheduled_days, retrievability, stability_before, stability_after, difficulty_before, difficulty_after)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(row.id, row.card_id, row.reviewed_at, row.source, row.format, row.target, row.rating, row.suggested_rating, row.prompt, row.answer, row.feedback, detail.grade ? JSON.stringify(detail.grade) : null, row.elapsed_days, row.scheduled_days, row.retrievability, row.stability_before, row.stability_after, row.difficulty_before, row.difficulty_after);
+    this.db.prepare(`INSERT INTO review_logs (id, card_id, reviewed_at, source, format, target, rating, suggested_rating, prompt, answer, feedback, grade, held, missed, challenge_id, attempt_id, submission_id, elapsed_days, scheduled_days, retrievability, stability_before, stability_after, difficulty_before, difficulty_after)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(row.id, row.card_id, row.reviewed_at, row.source, row.format, row.target, row.rating, row.suggested_rating, row.prompt, row.answer, row.feedback, row.grade, row.held, row.missed, row.challenge_id, row.attempt_id, row.submission_id, row.elapsed_days, row.scheduled_days, row.retrievability, row.stability_before, row.stability_after, row.difficulty_before, row.difficulty_after);
     return toLog(row);
   }
 
@@ -390,6 +445,7 @@ export class ReviewLedger {
       concepts: this.conceptTags(parseList(row.concept_slugs)),
       targets: row.targets ? orDefault(cleanTargets(parseList(row.targets))) : [...DEFAULT_REVIEW_TARGETS],
       remember: row.remember ?? null,
+      coachNote: row.coach_note ?? null,
       state: row.state === "review" || row.state === "relearning" ? row.state : "new",
       stability: row.stability,
       difficulty: row.difficulty,
@@ -411,9 +467,17 @@ function memoryOf(card: ReviewCard): MemoryState {
 }
 
 function toLog(row: LogRow): ReviewLog {
+  /* A typed recall answer keeps its hits and misses inside the grade; the
+     coach's own judgement writes them as columns. Either way the log says
+     what held and what did not. */
+  const grade = row.grade ? reviewGradeSchema.safeParse(parseObject(row.grade)).data : undefined;
+  const held = row.held ? parseList(row.held) : grade?.hits ?? [];
+  const missed = row.missed ? parseList(row.missed) : grade?.misses ?? [];
   return {
+    held, missed, misconception: grade?.misconception ?? null,
+    challengeId: row.challenge_id ?? null, attemptId: row.attempt_id ?? null, submissionId: row.submission_id ?? null,
     id: row.id, cardId: row.card_id, reviewedAt: row.reviewed_at,
-    source: row.source === "solve" || row.source === "resolve" || row.source === "implicit" ? row.source : "recall",
+    source: row.source === "solve" || row.source === "resolve" || row.source === "implicit" || row.source === "coach" ? row.source : "recall",
     format: (row.format as ReviewFormat | null) ?? null, target: reviewTargetSchema.safeParse(row.target).data ?? null, rating: row.rating, suggestedRating: row.suggested_rating,
     prompt: row.prompt, answer: row.answer, feedback: row.feedback, elapsedDays: row.elapsed_days, scheduledDays: row.scheduled_days,
     retrievability: row.retrievability, stabilityBefore: row.stability_before, stabilityAfter: row.stability_after, difficultyAfter: row.difficulty_after,

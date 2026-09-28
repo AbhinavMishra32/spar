@@ -19,7 +19,7 @@ import { ProblemsPage } from "./components/pages/ProblemsPage";
 import { registerShelfRoute, seedSavedProblems } from "./hooks/use-saved-problems";
 import { VisualizerPage } from "./components/pages/VisualizerPage";
 import { SessionsPage } from "./components/pages/SessionsPage";
-import { SettingsPage } from "./components/pages/SettingsPage";
+import { SettingsPage, type SettingsSection } from "./components/pages/SettingsPage";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
 import type { ReviewStart } from "./components/review/ReviewSession";
 import { ConceptSheet } from "./components/concepts/ConceptSheet";
@@ -31,6 +31,7 @@ import { AuthPage } from "./components/pages/AuthPage";
 import { OnboardingPage } from "./components/pages/OnboardingPage";
 import { Workspace } from "./components/workspace/Workspace";
 import { PlanningView } from "./components/workspace/PlanningView";
+import { ReviewBrief } from "./components/review/ReviewDossier";
 import { ChatView } from "./components/workspace/ChatView";
 import { reduceRunBatch, type AgentRun } from "./components/agent/agentRun";
 import { canGoBack, canGoForward, forget, step, visit, type History, type View } from "./hooks/navigation";
@@ -47,6 +48,9 @@ export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<Page>("home");
+  /* Where Settings opens when a control elsewhere sends the learner there to
+     finish something. */
+  const [settingsTarget, setSettingsTarget] = useState<{ section: SettingsSection; heading?: string } | null>(null);
   /* Where the window has been. A browser's model, not a stack's — see
      `hooks/navigation`. Every place-changing call below records into it exactly
      once, and `applyView` is the only thing that moves without recording. */
@@ -289,6 +293,15 @@ export function App() {
     }
   }, [openSession, refresh]);
 
+  /* A review session is opened like any session, then opened into. Errors go
+     back to the caller, which says them where the button was. */
+  const startReviewSession = useCallback(async (cardIds?: string[]) => {
+    if (!api) return;
+    const result = await api.startReviewSession(cardIds?.length ? { cardIds } : {});
+    await refresh();
+    await openSession(result.sessionId);
+  }, [openSession, refresh]);
+
   /* The main process writes the token and the account into the keychain, but the
      renderer's copy of the bootstrap is what decides which page is mounted — so
      authenticating has to re-read it, exactly as signing out does. Declared up
@@ -468,7 +481,10 @@ export function App() {
   // Sync progress is pushed from the main process rather than polled at bootstrap.
   useEffect(() => {
     if (!api) return;
-    return api.onSyncState((syncState) => setData((current) => (current ? { ...current, syncState } : current)));
+    /* Sync reports its state on every five-second flush, changed or not. A new
+       object each time re-rendered the whole app — sidebar, workspace and
+       transcript — for nothing, so a repeat keeps the one we have. */
+    return api.onSyncState((syncState) => setData((current) => (current && current.syncState !== syncState ? { ...current, syncState } : current)));
   }, []);
 
   /* A review notification was clicked. */
@@ -530,8 +546,29 @@ export function App() {
       <OnboardingPage
         api={api}
         displayName={data.account.displayName}
+        theme={data.theme}
         onDone={async (profile) => { setData((current) => (current ? { ...current, profile } : current)); await refresh(); }}
-        onStartSession={start}
+        /* Set as the arrival leaves, so the app opens in the lights the learner
+           picked. The onboarding keeps its own dark whatever this says. */
+        onTheme={async (theme) => {
+          if (!api) return;
+          await api.setTheme(theme);
+          setData((current) => (current ? { ...current, theme } : current));
+        }}
+        /* The first pick becomes a Track, not a loose session: v0.7 is built
+           around them, and the user.md written a moment ago is the
+           first thing that Track's coach reads. */
+        onSignOut={async () => {
+          if (!api) return;
+          await api.signOut();
+          await refresh();
+        }}
+        onStartTrack={async (input) => {
+          if (!api) return;
+          const created = await api.createTrack(input);
+          await refresh();
+          await openSession(created.sessionId);
+        }}
       />
     );
   }
@@ -1088,12 +1125,15 @@ export function App() {
                 }}
                 onReviewsChanged={setReviewOverview}
                 onStartHandled={() => setReviewStart(null)}
+                onStartSession={startReviewSession}
+                initialTab={page === "review" ? "review" : undefined}
                 reviews={data.reviews}
                 startReview={reviewStart}
               />
             )}
             {page === "settings" && (
               <SettingsPage
+                target={settingsTarget}
                 // Same identity the sidebar row shows: the onboarding name, not the one derived from their email.
                 account={{ ...data.account, displayName: data.profile.name || data.account.displayName }}
                 api={api}
@@ -1149,12 +1189,15 @@ export function App() {
                             onError={setError}
                             onExpandSidebar={expandSidebar}
                             onOpenSettings={() => navigate("settings")}
+                            onConnectSources={() => { setSettingsTarget({ section: "connections", heading: "Practice sources" }); navigate("settings"); }}
                             onRefresh={() => openSession(detail.summary.id)}
                             question={detail.question}
                             run={runs[detail.summary.id] ?? null}
                             trail={trailFor(detail.summary.id)}
                           />
-                        ) : sessionMode(detail) === "chat" ? (
+                        ) : (
+                          <ReviewFrame api={api} detail={detail}>
+                          {sessionMode(detail) === "chat" ? (
                           <ChatView
                             api={api}
                             detail={detail}
@@ -1176,6 +1219,8 @@ export function App() {
                             onRefresh={() => openSession(detail.summary.id)}
                             run={runs[detail.summary.id] ?? null}
                           />
+                          )}
+                          </ReviewFrame>
                         )}
                       </motion.div>
                     </AnimatePresence>
@@ -1257,6 +1302,25 @@ export function App() {
  * Which mode the session is in. A paused session with no live question is one
  * the learner walked away from, which is general chat rather than planning.
  */
+/**
+ * A review session between challenges: the conversation on the left, as in
+ * any session, and the review queue with each card's dossier beside it, in the
+ * review session's own light. Any other session passes straight through.
+ */
+function ReviewFrame({ api, detail, children }: { api: SparApi | undefined; detail: SessionDetail; children: React.ReactNode }) {
+  if (detail.summary.context !== "review") return <>{children}</>;
+  return (
+    <div className="work-canvas review-canvas flex h-full min-h-0">
+      <div className="min-w-0 flex-1">{children}</div>
+      <aside className="flex w-[26rem] shrink-0 flex-col py-2 pr-2 pt-[calc(var(--titlebar-height)+0.25rem)] max-lg:hidden">
+        <div className="work-blob min-h-0 flex-1 bg-[var(--color-background-surface)]">
+          <ReviewBrief api={api} refreshKey={`${detail.messages.length}:${detail.summary.status}`} sessionId={detail.summary.id} />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 function sessionMode(detail: SessionDetail): "challenge" | "chat" | "planning" {
   if (detail.question) return "challenge";
   if (detail.summary.status === "paused" || detail.summary.status === "completed") return "chat";

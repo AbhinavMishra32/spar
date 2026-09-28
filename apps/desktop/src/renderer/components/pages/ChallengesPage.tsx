@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Clock, Check, CheckCircle2, ChevronRight, CornerDownRight, Flag, History, Pause, Play, Search, XCircle } from "lucide-react";
+import { ArrowRight, Clock, CheckCircle2, ChevronRight, CornerDownRight, Flag, History, Pause, Play, Repeat2, Search, XCircle } from "lucide-react";
 import type { ChallengeCodePreview, ChallengeHistorySummary, ConceptSummary, ReviewCard, ReviewOverview, ReviewScheduleEntry, ReviewTarget } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -12,10 +12,11 @@ import { LanguageGlyph, LANGUAGE_LABEL } from "../common/LanguageGlyph";
 import { ChallengeEmblem } from "../workspace/ChallengeEmblem";
 import { DifficultyPill } from "../workspace/Difficulty";
 import { dueLabel, dueTone, isDue, percent, shortDate, TONE_CLASS } from "../review/schedule";
-import { Button } from "@/components/ui/button";
 import { message } from "@/lib/format";
 import { CardNotes } from "../review/InsightCard";
 import { ReviewSession, type ReviewStart } from "../review/ReviewSession";
+import { ReviewHub } from "../review/ReviewHub";
+import { Segmented } from "@/components/ui/segmented";
 
 type Filter = "all" | "due" | "passed" | "open" | "replaced";
 
@@ -268,7 +269,13 @@ export function ChallengesPage({
   onResolve,
   startReview,
   onStartHandled,
+  onStartSession,
+  initialTab,
 }: {
+  /** Open a review session on these cards, or on what is due. */
+  onStartSession(cardIds?: string[]): Promise<void>;
+  /** Which half to open on; the review hub whenever there is anything to review. */
+  initialTab?: "review" | "challenges" | undefined;
   api: SparApi | undefined;
   challenges: ChallengeHistorySummary[];
   concepts: ConceptSummary[];
@@ -349,6 +356,8 @@ export function ChallengesPage({
     }
   };
 
+  const [tab, setTab] = useState<"review" | "challenges">(() => initialTab ?? (reviews && reviews.totalCards > 0 ? "review" : "challenges"));
+  useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [previews, setPreviews] = useState<Record<string, ChallengeCodePreview>>({});
@@ -388,13 +397,45 @@ export function ChallengesPage({
   return (
     <div className="app-scroll h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-[62rem] px-18 pb-16 pt-8">
-        <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">History</h1>
-        <p className="mt-1 text-content text-muted-foreground">
-          Every challenge you've worked on. Each solved one comes back to practise again just before you'd forget it — or, short on time, one question about it.
-        </p>
+        <div className="flex items-end gap-4">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">History</h1>
+            <p className="mt-1 text-content text-muted-foreground">
+              {tab === "review"
+                ? "What each solve taught, coming back just before you'd forget it — with every review, what held and what slipped."
+                : "Every challenge you've worked on, with the code you wrote and how it ended."}
+            </p>
+          </div>
+          <Segmented<"review" | "challenges">
+            ariaLabel="History view"
+            className="w-[15rem]"
+            onChange={setTab}
+            options={[
+              { value: "review", label: due.length ? `Review · ${due.length}` : "Review", icon: Repeat2 },
+              { value: "challenges", label: "Challenges", icon: History },
+            ]}
+            value={tab}
+          />
+        </div>
 
-        {reviews && reviews.totalCards > 0 && <ReviewBand dueCount={due.length} overview={reviews} onStart={(which) => void review(which)} />}
+        {tab === "review" && (
+          <div className="mt-5">
+            {reviews ? (
+              <ReviewHub
+                api={api}
+                cards={cards}
+                due={due}
+                onChanged={() => void loadCards().then((queue) => queue && onReviewsChanged(queue.overview))}
+                onError={onError}
+                onQuickRecall={(ids) => void review(ids?.length ? ids : "auto", false)}
+                onStartSession={onStartSession}
+                overview={reviews}
+              />
+            ) : null}
+          </div>
+        )}
 
+        {tab === "challenges" && (<>
         <div className="mt-5 flex items-center gap-2">
           <div className="inline-flex rounded-lg border border-border bg-[var(--color-background-elevated-secondary)] p-0.5">
             {FILTERS.map((item) => (
@@ -435,7 +476,7 @@ export function ChallengesPage({
                 onOpen={() => onOpen(item)}
                 onOpenConcept={onOpenConcept}
                 card={cardFor.get(item.id)}
-                onReview={(cardId) => void review(cardId)}
+                onReview={(cardId) => void onStartSession([cardId]).catch((error) => onError(message(error)))}
                 onSuspend={(card) => void suspend(card)}
                 onTargets={(card, targets) => void retarget(card, targets)}
                 preview={previews[item.id]}
@@ -457,6 +498,7 @@ export function ChallengesPage({
             />
           )}
         </div>
+        </>)}
       </div>
       <ReviewSession
         api={api}
@@ -474,49 +516,6 @@ export function ChallengesPage({
         }}
         open={Boolean(session?.cards.length)}
       />
-    </div>
-  );
-}
-
-/**
- * The review queue, as one line at the top of History: how many are due, the
- * next two weeks at a glance, and the button that starts them.
- */
-function ReviewBand({ overview, dueCount, onStart }: { overview: ReviewOverview; dueCount: number; onStart(which: "due" | "all"): void }) {
-  const peak = Math.max(1, ...overview.upcoming.map((day) => day.count));
-  return (
-    <div className="mt-5 flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-3 shadow-[var(--app-shadow-card)] max-sm:flex-wrap">
-      <span className={cn("grid size-9 shrink-0 place-items-center rounded-lg", dueCount ? "bg-[var(--warning)]/14 text-[var(--warning)]" : "bg-[var(--success)]/12 text-[var(--success)]")}>
-        {dueCount ? <Clock className="size-4.5" /> : <Check className="size-4.5" />}
-      </span>
-      <div className="min-w-0">
-        <p className="text-content font-semibold tracking-[-0.01em]">{dueCount ? `${dueCount} to review` : "All caught up"}</p>
-        <p className="text-ui-sm text-muted-foreground">
-          {dueCount ? "Solve each again, or answer its card." : overview.nextDueAt ? `Next review ${dueLabel(overview.nextDueAt).toLowerCase()}.` : "Nothing scheduled."}
-          {overview.retention !== null && <> · Recall {percent(overview.retention)}</>}
-          {overview.streakDays > 1 && <> · {overview.streakDays}-day streak</>}
-        </p>
-      </div>
-      <div className="ml-auto flex h-7 w-36 shrink-0 items-end gap-[3px] max-sm:hidden" title="Reviews due over the next two weeks">
-        {overview.upcoming.map((day, index) => (
-          <div
-            className={cn("flex-1 rounded-[2px]", index === 0 ? "bg-foreground/60" : "bg-foreground/20", day.count === 0 && "bg-foreground/8")}
-            key={day.date}
-            style={{ height: `${day.count ? Math.max(18, (day.count / peak) * 100) : 8}%` }}
-            title={`${new Date(`${day.date}T12:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}: ${day.count}`}
-          />
-        ))}
-      </div>
-      <div className="flex shrink-0 items-center gap-1">
-        {dueCount > 0 && overview.totalCards > dueCount && (
-          <Button onClick={() => onStart("all")} title="Every card, weakest first — reviewing early is fine" variant="ghost">
-            Review all
-          </Button>
-        )}
-        <Button onClick={() => onStart(dueCount ? "due" : "all")} title={dueCount ? undefined : "Every card, weakest first — reviewing early is fine"} variant={dueCount ? "default" : "outline"}>
-          {dueCount ? "Start review" : "Review anyway"} <ArrowRight className="size-3.5" />
-        </Button>
-      </div>
     </div>
   );
 }

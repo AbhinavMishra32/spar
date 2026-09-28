@@ -102,6 +102,11 @@
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-warning: var(--warning);
+  --color-recall: var(--recall);
+  --color-rate-again: var(--rate-again);
+  --color-rate-hard: var(--rate-hard);
+  --color-rate-good: var(--rate-good);
+  --color-rate-easy: var(--rate-easy);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -421,6 +426,13 @@
   --work-transfer: oklch(52% 0.1 205);
   --work-advance: oklch(52% 0.11 158);
   --work-retain: oklch(52% 0.035 255);
+  /* Review mode: the one hue that says "this is a review", on the review
+     session's canvas and on History's calendar. Ratings read Again → Easy. */
+  --recall: oklch(54% 0.17 292);
+  --rate-again: oklch(58% 0.19 27);
+  --rate-hard: oklch(66% 0.15 65);
+  --rate-good: oklch(60% 0.13 155);
+  --rate-easy: oklch(58% 0.14 245);
 
   /* Spar's stance on an ability, for the belief surface.
      Aliases rather than new hues: attention, not-knowing and at-rest are the
@@ -652,6 +664,11 @@
   --work-transfer: oklch(78% 0.11 205);
   --work-advance: oklch(78% 0.14 158);
   --work-retain: oklch(74% 0.04 255);
+  --recall: oklch(76% 0.12 292);
+  --rate-again: oklch(70% 0.16 27);
+  --rate-hard: oklch(78% 0.13 70);
+  --rate-good: oklch(76% 0.13 155);
+  --rate-easy: oklch(74% 0.12 245);
 
   --stance-training: var(--work-diagnose);
   --stance-unsure: var(--work-teach);
@@ -1746,6 +1763,18 @@
     background: transparent;
   }
 
+  /* A review session is the same workspace in a different light: a violet wash
+     from the top and a tinted rim on each sheet, so it is never mistaken for
+     training at a glance. */
+  .review-canvas {
+    background:
+      radial-gradient(90% 38% at 30% -8%, color-mix(in oklch, var(--recall) 14%, transparent), transparent 72%),
+      radial-gradient(70% 30% at 90% -6%, color-mix(in oklch, var(--recall) 8%, transparent), transparent 70%);
+  }
+  .review-canvas .work-blob {
+    box-shadow: var(--app-shadow-sheet), 0 0 0 1px color-mix(in oklch, var(--recall) 20%, transparent);
+  }
+
   /* A sheet is inset into a canvas of almost its own value, so the 0.5px
      hairline the glass surfaces use disappears and the panes read as one
      undivided field. A full 1px edge plus a wider ambient shadow is what makes
@@ -2646,6 +2675,24 @@
   100% {
     mask-position: 0% 0%;
   }
+}
+
+/* The onboarding stands on the same field, with its grid pinned to the window's
+   corner: an overhang of whole tiles rather than a percentage, so the first dot
+   sits half a tile in from the corner at any window size, and the layer over the
+   desktop (arrival.ts) can carry the grid on past the window's edges. */
+.onboarding-field::before,
+.onboarding-field::after {
+  inset: calc(var(--auth-dot-pitch) * -3);
+}
+
+/* The look step shows a new theme as a circle growing out of the card that
+   picked it. The browser's own cross-fade is turned off so the circle is the
+   only thing that moves; the page animates the clip itself. */
+html.theme-reveal::view-transition-old(root),
+html.theme-reveal::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
 }
 
 @media (prefers-reduced-motion: reduce) {

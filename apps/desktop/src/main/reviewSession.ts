@@ -123,9 +123,13 @@ export class ReviewService {
     const feedback = input.passed
       ? `Solved again in about ${minutes} minute${minutes === 1 ? "" : "s"}, ${input.checks <= 1 ? "on the first check" : `after ${input.checks} checks`}.`
       : "Did not get it back this time — the card comes round again tomorrow.";
+    /* The re-solve's own last submission, so the review can show the code it
+       was judged on and the coach can read it later. */
+    const last = store.submissionsForQuestion(card.questionId).at(-1);
     const result = store.reviews.review(card.id, rating, {
       source: "resolve", format: "resolve", target: "problem", prompt: `Solve "${card.questionTitle}" again from a blank file.`, answer: null,
       feedback, grade: null, suggestedRating: null, ...(input.promptId ? { promptId: input.promptId } : {}),
+      challengeId: card.questionId, attemptId: last?.attemptId ?? null, submissionId: last?.id ?? null,
     });
     return { ...result, overview: store.reviews.overview() };
   }

@@ -4,6 +4,7 @@ import type { ReviewCard, ReviewOverview, ReviewPending } from "@spar/domain";
 import { ChallengesPage } from "./components/pages/ChallengesPage";
 import { ToolRow } from "./components/agent/ActivityRow";
 import { TrackPage } from "./components/pages/TrackPage";
+import { ReviewBanner, ReviewBrief } from "./components/review/ReviewDossier";
 import "./theme.css";
 
 /* A harness for the spaced-review page and the thread's filed-insight view,
@@ -28,7 +29,7 @@ const base: Omit<ReviewCard, "id" | "questionId" | "title" | "questionTitle" | "
   state: "review", stability: 3.2, difficulty: 5.1, lastReviewAt: iso(-4), reps: 2, lapses: 0, retrievability: 0.81, suspended: false, version: 1, createdAt: iso(-9), updatedAt: iso(-4),
 };
 const cards: ReviewCard[] = [
-  { ...base, id: "00000000-0000-4000-8000-00000000000a", questionId: "q1", title: "Shrink the window from the left", questionTitle: "Longest calm stretch", dueAt: iso(-1) },
+  { ...base, id: "00000000-0000-4000-8000-00000000000a", questionId: "q1", title: "Shrink the window from the left", questionTitle: "Longest calm stretch", dueAt: iso(-1), lapses: 1, retrievability: 0.62, coachNote: "They reach for the window straight away now; what still slips is updating the best length before the window is valid again. Next review should make that ordering matter.", remember: "the moment to move left is when the rule breaks, not every step" },
   { ...base, id: "00000000-0000-4000-8000-00000000000b", questionId: "q2", title: "Monotonic stack for next greater", questionTitle: "Next warmer day", dueAt: iso(-0.1), retrievability: 0.88, concepts: [] },
   { ...base, id: "00000000-0000-4000-8000-00000000000c", questionId: "q3", title: "Prefix sums turn ranges into subtraction", questionTitle: "Range totals", dueAt: iso(6), retrievability: 0.97, reps: 4, stability: 11 },
 ];
@@ -43,11 +44,27 @@ const pending = (card: ReviewCard): ReviewPending => ({
   prompt: "What's the recipe for a **fixed-size sliding window** over an array?",
   cue: "What should happen to the stretch the moment it breaks the rule?",
 });
+const log = (id: string, cardId: string, days: number, source: string, rating: number, extra: Record<string, unknown> = {}) => ({ id, cardId, reviewedAt: iso(days), source, format: null, target: null, rating, suggestedRating: null, prompt: null, answer: null, feedback: null, held: [], missed: [], misconception: null, challengeId: null, attemptId: null, submissionId: null, elapsedDays: 0, scheduledDays: 2, retrievability: 0.8, stabilityBefore: 1, stabilityAfter: 2, difficultyAfter: 5, ...extra });
+const logsFor = (cardId: string) => [
+  log("l1", cardId, -9, "solve", 3, { feedback: "Replaced the restart-from-scratch scan with a left pointer (run 4).", missed: ["Reset the window on every violation"], submissionId: "s1" }),
+  log("l2", cardId, -6, "recall", 2, { format: "invariant", prompt: "State the invariant the window keeps.", answer: "It stays under k after the loop?", feedback: "Close — but you measured before shrinking.", held: ["left only moves forward"], missed: ["Measure the window only after it is valid again"] }),
+  log("l3", cardId, -2, "coach", 2, { prompt: "Whether they shrink before measuring", feedback: "You found the window fast and kept it O(n), but updated best inside the while loop again — the same ordering slip as the first solve. It passed because the tests rarely hit it.", held: ["Reached for two pointers without prompting", "Kept the left edge monotonic"], missed: ["Measure the window only after it is valid again"], submissionId: "s2", challengeId: "q9" }),
+];
+const activity = cards.flatMap((card, index) => logsFor(card.id).map((entry, at) => ({ ...entry, id: `${entry.id}-${index}`, reviewedAt: iso(-(index * 3 + at * 4 + 1)), rating: ((index + at) % 4) + 1, cardTitle: card.title, questionId: card.questionId, questionTitle: card.questionTitle })));
+const submission = (id: string, ordinal: number, passed: boolean, title: string) => ({ id, attemptId: "a1", questionId: "q1", ordinal, outcome: passed ? "passed" : "failed", judge: "local", status: passed ? "passed" : "exit 1", passedCases: passed ? 28 : 21, failedCases: passed ? 0 : 7, totalCases: 28, durationMs: 120, runtime: null, memory: null, url: null, submittedAt: iso(-ordinal * 2), challengeId: "q1", challengeTitle: title, challengeOrdinal: 1, language: "python", sessionId: "s", sessionTitle: "Windows", attemptOrdinal: 1 });
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const api = {
   reviewQueue: async () => ({ due, cards, overview: overview(due.length) }),
-  readReviewCard: async (id: string) => ({ card: cards.find((card) => card.id === id)!, logs: [
+  reviewActivity: async () => activity,
+  startReviewSession: async () => { await wait(600); throw new Error("Harness: a review session would open here."); },
+  listChallengeSubmissions: async (id: string) => id === "q1" ? [submission("s1", 3, true, "Longest calm stretch"), submission("s0", 2, false, "Longest calm stretch")] : [submission("s2", 1, true, "Quietest k-hour stretch")],
+  readSubmission: async (id: string) => ({ ...submission(id, 1, id !== "s0", "Longest calm stretch"), code: { path: "solution.py", text: "class Solution:\n    def longest(self, nums: list[int], k: int) -> int:\n        left = best = total = 0\n        for right, value in enumerate(nums):\n            total += value\n            best = max(best, right - left + 1)  # measured before shrinking\n            while total > k:\n                total -= nums[left]\n                left += 1\n        return best\n", truncated: false }, cases: id === "s0" ? [{ name: "all values above k", status: "failed" }, { name: "single spike at the end", status: "failed" }] : [], output: "" }),
+  reviewSessionState: async () => ({
+    current: { cardId: cards[0]!.id, purpose: "review" as const, learnerNote: "Last time you measured the window before shrinking it back to valid — the tests happened to pass. This time, make it valid first, then measure.", focus: "Whether they shrink the window back to valid before measuring it — both earlier solves measured first and got lucky on the tests." },
+    queue: cards.map((card, index) => ({ detail: { card, logs: logsFor(card.id), intervals: {}, challenges: [{ challengeId: "q9", challengeTitle: "Quietest k-hour stretch", cardId: card.id, focus: "shrink before measuring", learnerNote: null, purpose: "review" as const, createdAt: iso(-2), outcome: "passed", reviewed: true }] }, status: index === 0 ? "current" : index === 1 ? "reviewed" : "queued", reviewedHere: index === 1 ? log("x", card.id, 0, "coach", 3) : null })),
+  }),
+  readReviewCard: async (id: string) => ({ card: cards.find((card) => card.id === id)!, challenges: [{ challengeId: "q9", challengeTitle: "Quietest k-hour stretch", cardId: id, focus: "shrink before measuring", learnerNote: null, purpose: "review" as const, createdAt: iso(-2), outcome: "passed", reviewed: true }], logs: [...logsFor(id),
     { id: "l1", cardId: id, reviewedAt: iso(-9), source: "solve", format: null, rating: 3, suggestedRating: null, prompt: null, answer: null, feedback: "Filed on solve", elapsedDays: 0, scheduledDays: 2, retrievability: 1, stabilityBefore: 0, stabilityAfter: 2.3, difficultyAfter: 5 },
     { id: "l2", cardId: id, reviewedAt: iso(-4), source: "recall", format: "invariant", rating: 3, suggestedRating: 3, prompt: "State the invariant the window keeps.", answer: "It is always valid after shrinking.", feedback: "Right — and that is why its length is a candidate.", elapsedDays: 5, scheduledDays: 3.4, retrievability: 0.85, stabilityBefore: 2.3, stabilityAfter: 3.2, difficultyAfter: 5.1 },
   ], intervals: { again: { days: 1, dueAt: iso(1) }, hard: { days: 4, dueAt: iso(4) }, good: { days: 9, dueAt: iso(9) }, easy: { days: 16, dueAt: iso(16) } } }),
@@ -73,6 +90,10 @@ const api = {
 
 function Harness() {
   const [error, setError] = useState("");
+  /* ?brief: the review session's Review tab, on the review canvas. */
+  if (new URLSearchParams(location.search).has("brief")) {
+    return <div className="work-canvas review-canvas flex h-screen bg-background p-3"><div className="work-blob mx-auto flex h-full w-[34rem] flex-col bg-[var(--color-background-surface)]"><ReviewBanner api={api as never} refreshKey={0} sessionId="s" /><div className="min-h-0 flex-1"><ReviewBrief api={api as never} refreshKey={0} sessionId="s" /></div></div></div>;
+  }
   /* ?sources: the Track page, for its New session dialog. */
   if (new URLSearchParams(location.search).has("sources")) {
     return <div className="h-screen bg-background"><TrackPage api={api as never} busy={false} challenges={[]} onCreate={async () => {}} onOpen={() => {}} runs={{} as never} sessions={[]} track={{ id: "t", title: "Learn binary tree from basics", goal: "learn binary tree from basics" } as never} /></div>;
@@ -80,7 +101,7 @@ function Harness() {
   return (
     <div className="min-h-screen bg-background">
       {error && <p className="p-2 text-destructive">{error}</p>}
-      <div className={new URLSearchParams(location.search).has("tool") ? "hidden" : "h-[720px]"}>
+      <div className={new URLSearchParams(location.search).has("tool") ? "hidden" : "h-screen"}>
         <ChallengesPage
           api={api as never}
           challenges={cards.map((card, index) => ({ id: card.questionId, title: card.questionTitle, sessionTitle: "Sliding windows", sessionId: card.sessionId, language: "python", difficulty: "developing", status: "completed", lastOutcome: "passed", testRunCount: 4 + index, attemptCount: 1, updatedAt: iso(-index - 1), concepts: [], source: null, replacesQuestionId: null, replacedByQuestionId: null, replacesQuestionTitle: null, replacedByQuestionTitle: null, assistance: "independent" }) as never)}
@@ -90,6 +111,7 @@ function Harness() {
           onOpenConcept={() => {}}
           onResolve={(id, review, rest) => setError(`resolve ${id} card=${review.cardId} rest=${rest.length}`)}
           onReviewsChanged={() => {}}
+          onStartSession={async () => { await api.startReviewSession(); }}
           reviews={{ ...overview(due.length), byQuestion: Object.fromEntries(cards.map((card) => [card.questionId, { cardId: card.id, title: card.title, state: card.state, dueAt: card.dueAt, lastReviewAt: card.lastReviewAt, reps: card.reps, lapses: card.lapses, retrievability: card.retrievability, createdAt: card.createdAt, suspended: card.suspended }])) }}
         />
       </div>
