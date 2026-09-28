@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ArrowDown, Check, Copy, Pencil, ThumbsDown, ThumbsUp } from "lucide-react";
 import { ThinkingOrb } from "thinking-orbs";
@@ -763,7 +763,13 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
    outlive the component, not the app. */
 const savedScroll = new Map<string, { top: number; pinned: boolean }>();
 
-export function AgentThread({
+/**
+ * Memoised because it stays mounted behind the Problem tab: the workspace
+ * re-renders on every keystroke in the editor, and without this each one
+ * re-rendered the whole transcript — every row, tooltip and motion node — for
+ * a thread nobody was looking at.
+ */
+export const AgentThread = memo(function AgentThread({
   messages,
   run,
   phase,
@@ -1036,4 +1042,4 @@ export function AgentThread({
       )}
     </div>
   );
-}
+});

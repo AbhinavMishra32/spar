@@ -128,7 +128,7 @@ function Submission({ api, onToggle, open, row, scrollIntoView }: {
                 ? (
                   <div className="min-w-0 overflow-hidden rounded-[var(--radius-md)] bg-[var(--code-background)] ring-[0.5px] ring-[var(--border-surface-strong)]">
                     <div className="px-2.5 pt-2 font-mono text-[0.625rem] text-muted-foreground/70">{detail.code.path}</div>
-                    <CodePeek className="max-h-72 overflow-auto px-2.5 pb-2 pt-1 text-[0.6875rem]" code={detail.code.text} />
+                    <CodePeek className="max-h-72 overflow-auto px-2.5 pb-2 pt-1 text-[0.6875rem]" code={detail.code.text} path={detail.code.path} />
                   </div>
                 )
                 : <p className="text-ui-sm text-muted-foreground">This submission was recorded before Spar kept a copy of what was sent.</p>}

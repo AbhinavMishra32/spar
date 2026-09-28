@@ -1,7 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { cn } from "@/lib/utils";
-import { fileName } from "@/lib/format";
+import { fileName, languageFor } from "@/lib/format";
+import { highlight, type Span } from "@/lib/highlight";
+import { useCodeTheme } from "@/hooks/use-code-theme";
 
 /**
  * A few lines of a challenge's own code, at a size meant to be recognised rather
@@ -74,20 +76,38 @@ const TONE: Record<Token["kind"], string> = {
   punctuation: "color-mix(in oklab, var(--code-punctuation) 70%, transparent)",
 };
 
-export function CodePeek({ code, className }: { code: string; className?: string }) {
+export function CodePeek({ code, className, path }: { code: string; className?: string; path?: string }) {
+  const { theme } = useCodeTheme();
+  const [colored, setColored] = useState<{ code: string; path: string; spans: Span[] } | null>(null);
   const tokens = useMemo(() => tokenize(code), [code]);
+
+  useEffect(() => {
+    if (!path) return;
+    let alive = true;
+    void highlight(code, languageFor(path)).then((spans) => {
+      if (alive) setColored({ code, path, spans });
+    });
+    return () => { alive = false; };
+  }, [code, path]);
+
+  const spans = colored?.code === code && colored.path === path ? colored.spans : null;
 
   return (
     <pre
       aria-hidden
       className={cn("overflow-hidden whitespace-pre font-mono text-[0.625rem] leading-[1.55]", className)}
+      style={path ? { color: theme.slots.foreground } : undefined}
     >
       <code>
-        {tokens.map((token, index) => (
-          <span key={index} style={token.kind === "plain" ? undefined : { color: TONE[token.kind] }}>
-            {token.text}
-          </span>
-        ))}
+        {path
+          ? (spans ?? [{ text: code, slot: null }]).map((span, index) => (
+              <span key={index} style={span.slot ? { color: theme.slots[span.slot] } : undefined}>{span.text}</span>
+            ))
+          : tokens.map((token, index) => (
+              <span key={index} style={token.kind === "plain" ? undefined : { color: TONE[token.kind] }}>
+                {token.text}
+              </span>
+            ))}
       </code>
     </pre>
   );

@@ -487,11 +487,13 @@ const TOOL_VERBS: Record<string, string> = {
   create_question: "Created challenge",
   replace_current_question: "Replaced challenge",
   set_challenge: "Built challenge",
+  reopen_challenge: "Set a challenge again",
   edit_challenge: "Edited challenge",
   search_record: "Searched your record",
   read_record: "Read a record",
   update_ability: "Updated ability",
   update_notebook: "Updated notebook",
+  set_challenge_mix: "Updated coaching settings",
   search_challenge_history: "Searched challenge history",
   read_challenge: "Read challenge history",
   upsert_ability: "Updated ability",
@@ -500,6 +502,7 @@ const TOOL_VERBS: Record<string, string> = {
   evaluate_attempt: "Evaluated your attempt",
   propose_ability_update: "Updated ability document",
   record_insight: "Filed what made it click",
+  file_review: "Judged the review",
   commit_session_decision: "Committed next action",
   open_visualizer: "Opened the visualiser",
   visualize_run: "Traced the code",
@@ -555,6 +558,7 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   set_training_target: ["Update training target", "Updated training target"],
   propose_ability_update: ["Prepare ability update", "Prepared ability update"],
   record_insight: ["Filing what made it click for review", "Filed what made it click for review"],
+  file_review: ["Judging the review", "Judged the review"],
   upsert_ability: ["Update ability", "Updated ability"],
   commit_session_decision: ["Choose next step", "Chose next step"],
   create_question: ["Build challenge", "Built challenge"],
@@ -562,11 +566,13 @@ const SAFE_TOOL_LABELS: Record<string, [string, string]> = {
   /* v0.7's one challenge tool. It writes a new challenge, revises the open one
      or replaces it, and says which in its `mode` — see `safeToolLabel`. */
   set_challenge: ["Building challenge", "Built challenge"],
+  reopen_challenge: ["Setting a challenge again", "Set a challenge again"],
   edit_challenge: ["Editing challenge", "Edited challenge"],
   search_record: ["Searching your record", "Searched your record"],
   read_record: ["Reading a record", "Read a record"],
   update_ability: ["Updating ability", "Updated ability"],
   update_notebook: ["Updating notebook", "Updated notebook"],
+  set_challenge_mix: ["Updating coaching settings", "Updated coaching settings"],
   create_fallback_question: ["Set a standard challenge", "Set a standard challenge"],
   /* Named for the thing the learner watched happen. "Prepared a question" is
      the tool's own view of itself — the question had already been asked, and
@@ -639,7 +645,7 @@ export function challengeMode(input: string): "new" | "revise" | "replace" | nul
   return mode === "new" || mode === "revise" || mode === "replace" ? mode : null;
 }
 
-const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "set_challenge", "create_fallback_question", "assign_practice_problem"];
+const CHALLENGE_TOOLS = ["create_question", "replace_current_question", "set_challenge", "create_fallback_question", "assign_practice_problem", "reopen_challenge"];
 
 /**
  * A challenge that actually reached durable storage. `phase === "done"` is the

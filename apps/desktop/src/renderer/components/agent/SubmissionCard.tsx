@@ -142,20 +142,6 @@ export function FailingCase({ failure }: { failure: SubmissionCase }) {
   );
 }
 
-/** Lines of the submitted solution the hover card shows. Enough to recognise the
- *  approach — the loop, the data structure, the name they reached for — and not
- *  so many that the card becomes a file viewer. */
-const PEEK_LINES = 10;
-
-function excerpt(code: string): { text: string; remaining: number } {
-  const lines = code.replace(/\t/g, "  ").split("\n");
-  /* Leading blank lines and a shebang are not the solution. */
-  let start = 0;
-  while (start < lines.length && !(lines[start] ?? "").trim()) start += 1;
-  const kept = lines.slice(start, start + PEEK_LINES);
-  return { text: kept.join("\n"), remaining: Math.max(0, lines.length - start - kept.length) };
-}
-
 /**
  * What a submission reference opens under the pointer.
  *
@@ -167,7 +153,6 @@ function excerpt(code: string): { text: string; remaining: number } {
  */
 export function SubmissionPeek({ submission }: { submission: SubmissionRecord }) {
   const failure = submission.cases.find((item) => item.status === "failed");
-  const peek = submission.code ? excerpt(submission.code.text) : null;
 
   return (
     <div className="flex w-[22rem] max-w-full min-w-0 flex-col gap-2">
@@ -185,17 +170,20 @@ export function SubmissionPeek({ submission }: { submission: SubmissionRecord })
 
       {failure && <FailingCase failure={failure} />}
 
-      {peek && submission.code && (
+      {submission.code && (
         <div className="min-w-0 overflow-hidden rounded-[var(--radius-md)] bg-[var(--code-background)] ring-[0.5px] ring-[var(--border-surface-strong)]">
           <div className="flex min-w-0 items-center justify-between gap-2 px-2 pt-1.5 font-mono text-[0.625rem] text-muted-foreground/70">
             <span className="min-w-0 truncate">{submission.code.path}</span>
-            {peek.remaining > 0 && <span className="shrink-0">+{peek.remaining}</span>}
           </div>
-          <CodePeek className="px-2 pb-1.5 pt-1" code={peek.text} />
+          <CodePeek
+            className="app-scroll max-h-[10.3125rem] overflow-auto overscroll-contain px-2 pb-1.5 pt-1"
+            code={submission.code.text.replace(/\t/g, "  ")}
+            path={submission.code.path}
+          />
         </div>
       )}
 
-      {!peek && (
+      {!submission.code && (
         /* Submissions recorded before the code was snapshotted. Said plainly,
            because an empty panel reads as a submission with no code in it. */
         <div className="text-thread-tool text-muted-foreground/70">

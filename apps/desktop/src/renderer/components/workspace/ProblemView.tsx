@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { ArrowRight, FlaskConical } from "lucide-react";
 import type { ActiveQuestion, RatingPoint } from "@spar/domain";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,9 @@ import { SourceGlyph } from "../common/SourceGlyph";
  * against, and why it was set. No transcript, so a long conversation cannot
  * push the problem out of reach when you need to re-read it mid-attempt.
  */
-export function ProblemView({
+/** Memoised for the same reason as the thread: it sits beside an editor whose
+ *  every keystroke re-renders the workspace. */
+export const ProblemView = memo(function ProblemView({
   concepts,
   learnerRating,
   onOpenExternal,
@@ -135,4 +137,4 @@ export function ProblemView({
       </ChallengeRoll>
     </div>
   );
-}
+});

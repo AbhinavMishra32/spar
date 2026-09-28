@@ -38,10 +38,12 @@ const VERBS: Record<string, [done: string, running: string]> = {
   "flow-memory-patch": ["Updated memory", "Updating memory"],
   /* Named by the card, because the card is what comes back later. */
   record_insight: ["Filed for review:", "Filing for review:"],
+  file_review: ["Reviewed:", "Reviewing:"],
   load_skill: ["Used", "Using"],
   search_record: ["Searched your record for", "Searching your record for"],
   update_ability: ["Updated ability:", "Updating ability:"],
   update_notebook: ["Updated notebook:", "Updating notebook:"],
+  set_challenge_mix: ["Updated coaching settings:", "Updating coaching settings:"],
   edit_challenge: ["Edited challenge:", "Editing challenge:"],
 };
 
@@ -160,6 +162,10 @@ export function toolSubject(tool: string, input: string, running = false): ToolS
       const topics = memoryTopics(files);
       return { verb, subject: topics ? `about ${topics}` : "about everything it knows" };
     }
+    case "file_review": {
+      const rating = text(args.rating);
+      return rating ? { verb, subject: `graded ${rating}` } : { verb: running ? "Updating review note" : "Updated review note", subject: "" };
+    }
     case "record_insight":
     case "update_ability": {
       const title = text(args.title);
@@ -171,11 +177,12 @@ export function toolSubject(tool: string, input: string, running = false): ToolS
     }
     case "update_notebook": {
       const note = text(args.note);
-      /* The learner notebook is the one about them, not this Track's. */
-      const named = args.notebook === "learner" ? (running ? "Updating notes about you:" : "Updated notes about you:") : verb;
+      /* user.md is the one about them, not this Track's. */
+      const named = args.notebook === "user" || args.notebook === "learner" ? (running ? "Updating user.md:" : "Updated user.md:") : verb;
       return note ? { verb: named, subject: oneLine(note, 64) } : null;
     }
-    case "edit_challenge": {
+    case "edit_challenge":
+    case "set_challenge_mix": {
       const note = text(args.note);
       return note ? { verb, subject: oneLine(note, 64) } : null;
     }

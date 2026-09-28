@@ -206,6 +206,7 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "edit_challenge":
     case "create_fallback_question":
     case "assign_practice_problem":
+    case "reopen_challenge":
       return <IconPuzzle className={MARK} />;
     /* Lucide already ships the combined document-lines + search glyph. It says
        both what is being read and that this row is inspecting it. */
@@ -234,6 +235,7 @@ function ToolIcon({ part }: { part: ToolPart }) {
       return <IconDossier className={MARK} />;
     /* The one call that files something for the learner to keep. */
     case "record_insight":
+    case "file_review":
       return <IconSparkle className={MARK} />;
     default:
       break;

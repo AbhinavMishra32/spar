@@ -13,7 +13,9 @@ import { SparDots } from "../common/SparDots";
  */
 
 const SUBMISSION = /submitted attempt\s+([0-9a-f-]{36})\.\s*Deterministic .*?outcome\s+(passed|failed)\s+with exit code\s+(\d+)/i;
-const SOLVED_ATTEMPT = /^The learner solved attempt\s+([0-9a-f-]{36})\s+—\s+([\s\S]+)$/i;
+/* The host wrote "attempt <id> — verdict" until v0.7 and "attempt <id>: verdict"
+   since; both are in people's transcripts. */
+const SOLVED_ATTEMPT = /^The learner solved attempt\s+([0-9a-f-]{36})(?:\s+—\s+|:\s*)([\s\S]+)$/i;
 const RESUME = /^Resume this persisted planning session/i;
 const NEW_GOAL = /^Start a new adaptive session for this learner goal:\s*(.*)$/i;
 
@@ -64,7 +66,7 @@ export function SystemEvent({ body }: { body: string }) {
 function SolvedAttempt({ body, id, verdict }: { body: string; id: string; verdict: string }) {
   const requirementText = body.match(/This challenge required:\s*([\s\S]*?)\.\s*Read their code/i)?.[1] ?? "";
   const requirements = Array.from(requirementText.matchAll(/"([^"]+)"/g), (match) => match[1]!).filter(Boolean);
-  const source = verdict.match(/^(.+?) accepted their submission/i)?.[1];
+  const source = verdict.match(/^(.+?) accepted (?:their|the) submission/i)?.[1];
   const sourceKind = source?.toLowerCase() === "leetcode"
     ? "leetcode"
     : source?.toLowerCase() === "codeforces"
@@ -89,7 +91,7 @@ function SolvedAttempt({ body, id, verdict }: { body: string; id: string; verdic
       <span className="flex min-w-0 items-center gap-2">
         <span aria-hidden className="grid size-4 shrink-0 place-items-center">
           {sourceKind
-            ? <SourceGlyph className="size-4 opacity-80" source={sourceKind} />
+            ? <SourceGlyph className="size-3.5 text-[var(--success)]" mono source={sourceKind} />
             : <SparDots className="text-[var(--success)]" pattern="still" size={15} />}
         </span>
         <span className="shrink-0 text-thread font-semibold tracking-[-0.01em] text-[var(--success)]">Solved</span>
