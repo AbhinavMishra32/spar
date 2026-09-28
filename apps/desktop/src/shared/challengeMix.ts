@@ -95,7 +95,7 @@ export function sparChoice(sources: ProblemSource[], mix: ChallengeMix): SparCho
 }
 
 const SPAR_USE_RULE: Record<SparUse, string> = {
-  struggling: "Default to a real LeetCode or Codeforces problem. Write a Spar problem only when the learner is struggling with a concept — a fail, a give-up, heavy hints, a long grind — to repair that one gap, then go back to real problems.",
+  struggling: "Default to a real LeetCode or Codeforces problem. Write a Spar problem when the learner is struggling with a concept — a fail, a give-up, heavy hints, a long grind — to repair that one gap, or as a short bridge when the next real problem needs a mechanism they have not yet shown on their own and no easier real problem isolates it. Then go back to real problems.",
   less: "Mostly real LeetCode or Codeforces problems. Write a Spar problem now and then — roughly one in four — when no real problem isolates the idea well enough, or to repair a struggle.",
   balanced: "",
   more: "Mostly Spar-written problems aimed at the exact gap. Assign a real LeetCode or Codeforces problem roughly one in four, usually once an idea is landing, to prove it holds on something unfamiliar.",

@@ -109,18 +109,33 @@ describe("assign_practice_problem", () => {
     } finally { store.close(); }
   });
 
-  it("reports a surprising provider choice without vetoing the agent", async () => {
+  const hardMount = () => vi.fn(async () => ({
+    problem: { ...problem, difficulty: "hard" as const, concepts: [{ slug: "graphs", role: "primary" as const }] },
+    design: { ...design, difficulty: "advanced" as const },
+    source: { ...source, difficulty: "hard" as const },
+    files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "",
+  }));
+
+  it("does not set a problem priced outside the learner's window without a reason", async () => {
     const store = new LocalStore(":memory:");
-    const { service, workspaces } = practiceStub({
-      mount: vi.fn(async () => ({
-        problem: { ...problem, difficulty: "hard", concepts: [{ slug: "graphs", role: "primary" as const }] },
-        design: { ...design, difficulty: "advanced" as const },
-        source: { ...source, difficulty: "hard" as const },
-        files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "",
-      })),
-    });
+    const { service, workspaces } = practiceStub({ mount: hardMount() });
     try {
-      const result = await assign(store, targetedSession(store), service, workspaces, { why: "This is a generally useful contest problem." });
+      const sessionId = targetedSession(store);
+      const result = await assign(store, sessionId, service, workspaces);
+      expect(result.status).toBe("invalid");
+      expect((result.report as { checks: Array<{ name: string }> }).checks.map((check) => check.name)).toEqual(["learner level"]);
+      expect(result.window).toMatchObject({ minRating: expect.any(Number), maxRating: expect.any(Number) });
+      expect(String(result.note)).toContain("bridge");
+      expect(workspaces.replaceAll).not.toHaveBeenCalled();
+      expect(store.readSession(sessionId)?.question).toBeFalsy();
+    } finally { store.close(); }
+  });
+
+  it("sets a deliberate stretch, still reporting the other comparisons without vetoing", async () => {
+    const store = new LocalStore(":memory:");
+    const { service, workspaces } = practiceStub({ mount: hardMount() });
+    try {
+      const result = await assign(store, targetedSession(store), service, workspaces, { why: "This is a generally useful contest problem.", levelReason: "The learner asked for a hard contest problem to see where they stand." });
       const notes = result.selectionNotes as Array<{ name: string; passed: boolean }>;
       expect(result.status).toBe("playable");
       expect(notes.filter((check) => !check.passed).map((check) => check.name))

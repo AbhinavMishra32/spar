@@ -5,6 +5,7 @@ type RunStart = {
   sessionId: string;
   provider: string;
   model: string;
+  reasoningEffort?: string | undefined;
   turnKind: string;
   input: Record<string, unknown>;
   appVersion: string;
@@ -255,6 +256,7 @@ function metadata(value: RunStart) {
       sparMode: "live",
       provider: value.provider,
       model: value.model,
+      ...(value.reasoningEffort ? { reasoningEffort: value.reasoningEffort } : {}),
       release: value.appVersion,
       runtime: "pi",
       transport: "desktop-direct",

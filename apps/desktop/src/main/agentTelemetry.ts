@@ -7,6 +7,7 @@ export type AgentRunStart = {
   sessionId: string;
   provider: string;
   model: string;
+  reasoningEffort?: string | undefined;
   turnKind: string;
   input: Record<string, unknown>;
   appVersion: string;

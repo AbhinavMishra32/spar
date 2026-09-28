@@ -253,7 +253,7 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
       const startedAt=Date.now();
       const claim=(runId:string)=>{activeAgentRuns.set(sessionId,runId);deps.agentRunSessions.set(runId,sessionId);return runId;};
       const release=(runId:string)=>{activeAgentRuns.delete(sessionId);deps.agentRunSessions.delete(runId);};
-      const beginTelemetry=(runId:string,index:number)=>deps.telemetry.start({runId,sessionId,provider:providers[index]!.provider,model:providers[index]!.model,turnKind,input:{message,visibleMessage,role,context:payload.context,activeQuestion:payload.activeQuestion??null},prompts:promptRefs(),appVersion:deps.appVersion});
+      const beginTelemetry=(runId:string,index:number)=>deps.telemetry.start({runId,sessionId,provider:providers[index]!.provider,model:providers[index]!.model,reasoningEffort:providers[index]!.reasoningEffort,turnKind,input:{message,visibleMessage,role,context:payload.context,activeQuestion:payload.activeQuestion??null},prompts:promptRefs(),appVersion:deps.appVersion});
       const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);beginTelemetry(first.id,0);
       const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string;usage?:unknown;finishReason?:string;phaseSteps?:number};
         /* The turn's own steps go into storage with the reply they produced. The

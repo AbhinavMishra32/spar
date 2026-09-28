@@ -73,7 +73,7 @@
     }
   },
   "assign_practice_problem": {
-    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. Use the learner's rating in the journey document to decide what level serves this step. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
+    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. Use the learner's rating in the journey document to decide what level serves this step: a problem priced outside the window it gives is refused unless you pass levelReason. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -161,6 +161,12 @@
             "ruby"
           ],
           "description": "The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn."
+        },
+        "levelReason": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 600,
+          "description": "Required only when the problem is priced outside the rating window the journey gives for this step: why a harder or easier problem is deliberate here (the learner asked for it, a first look at new ground, a confidence repeat). Without it, an out-of-window problem is not assigned and the reply says what fits."
         },
         "replaceReason": {
           "type": "string",
@@ -967,7 +973,7 @@
     }
   },
   "search_practice_problems": {
-    "description": "Search every available problem provider for real problems. Results carry `source`; keep it paired with `slug` when reading or assigning a candidate. Prefer a fitting real problem over writing one because it carries a real judge, calibrated difficulty, and—when that provider is connected—the learner's own history. Search by Spar concept slug (translated separately to each provider's tags) and narrow by difficulty. `todo` is useful when you want something new.",
+    "description": "Search every available problem provider for real problems. Results carry `source`; keep it paired with `slug` when reading or assigning a candidate. Prefer a fitting real problem over writing one because it carries a real judge, calibrated difficulty, and—when that provider is connected—the learner's own history. Search by Spar concept slug (translated separately to each provider's tags) and narrow by rating: set minRating and maxRating to the window the journey gives (\"Provider problems that fit them now are rated about …\") rather than guessing a difficulty word — a LeetCode medium is priced 1600 and may sit well above a developing learner. `todo` is useful when you want something new.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -998,13 +1004,13 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4000,
-          "description": "Lowest problem rating to return, on the Codeforces scale — use learnerStanding.setProblemsRated.minRating. Codeforces filters on each problem's own rating; LeetCode is narrowed to the difficulty bands whose price falls inside the window (easy 1200, medium 1600, hard 2100)."
+          "description": "Lowest problem rating to return, on the Codeforces scale — the low end of the window in the journey's Learner section. Codeforces filters on each problem's own rating; LeetCode is narrowed to the difficulty bands whose price falls inside the window (easy 1200, medium 1600, hard 2100)."
         },
         "maxRating": {
           "type": "integer",
           "minimum": 0,
           "maximum": 4000,
-          "description": "Highest problem rating to return — use learnerStanding.setProblemsRated.maxRating."
+          "description": "Highest problem rating to return — the high end of the window in the journey's Learner section."
         },
         "status": {
           "type": "string",

@@ -30,7 +30,7 @@ describe("coaching settings", () => {
       store.setSessionChallengeMix(sessionId, { ...DEFAULT_CHALLENGE_MIX, sparUse: "struggling", lenses: [{ id: "lang-idioms", depth: "mention" }, { id: "from-scratch", depth: "drill" }], instructions: "Always give me a TreeNode class" });
       const context = turn(store, sessionId);
       expect(context).toContain("## Coaching settings");
-      expect(context).toContain("Write a Spar problem only when the learner is struggling");
+      expect(context).toContain("Write a Spar problem when the learner is struggling");
       expect(context).toContain("idioms (lang-idioms) — mention:");
       expect(context).toContain("- Build it yourself (from-scratch) — drill:");
       expect(context).toContain("Always give me a TreeNode class");

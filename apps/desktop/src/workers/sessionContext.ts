@@ -23,12 +23,7 @@ export function sessionSourcesSection(problemSources: string[] | undefined, prac
     if (!practiceSource) return `${header} No provider tool is available this turn, so you cannot set a challenge. Say so plainly and suggest they connect ${names} in Settings or allow Spar-written challenges for this session.`;
     return `${header} ${scope} You cannot write a challenge: set_challenge is not available. Every challenge is a real ${names} problem you found.
 
-Finding the right one is the work:
-1. Decide the concept and the level first, from the journey and the learner's rating.
-2. Search by that concept and rating window, with status "todo" when the provider is connected. Skip what they have already been assigned or solved unless a repeat is the point, and anything paid-only.
-3. Shortlist two or three and read each with read_practice_problem. Choose on what the statement actually makes them do, not on tags.
-4. If nothing fits, widen one thing at a time: the parent concept, a free-text query for the technique, a neighbouring rating band.
-5. Assign with assign_practice_problem, preserving source and slug, tagging the concept it really exercises. If it is refused, read why and pick another.
+Finding the right one is the work, as your instructions set out: level first, search the rating window, shortlist and read two or three. With no Spar problems to bridge with, the bridge before a hard problem is an easier real one that isolates the mechanism it adds. If nothing fits, widen one thing at a time: the parent concept, a free-text query for the technique, a neighbouring rating band.
 Real problems are coarser than lessons: choose the problem first and teach toward it, and when the learner asks to practise, assign the closest real problem this turn and say what in it will be new.`;
   }
   return `${header} ${scope} Write your own with set_challenge when no ${names} problem fits.`;

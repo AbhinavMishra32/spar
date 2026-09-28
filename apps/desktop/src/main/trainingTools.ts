@@ -12,7 +12,7 @@ import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
-import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
+import { assessPracticeAssignment, trainingWindow } from "./practiceAssignmentPolicy.js";
 import { reviewTargetMode } from "./reviewSession.js";
 import { practiceSourceName } from "./practiceChoice.js";
 import { SOURCE_READ_TOOLS, VISUALIZER_TOOLS } from "../workers/agentPolicy.js";
@@ -403,25 +403,46 @@ async function assignPracticeProblem(
     return refuse("grading", `${practiceSourceName(provider)} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
   }
 
-  /* Keep the rating and concept comparison as evidence, without letting its
-     heuristic override the agent's choice of a transfer or repeat problem. */
+  /* The concept and rationale comparisons stay advisory: the agent owns the
+     choice of a transfer or repeat problem. */
   const target = local.latestTarget(sessionId);
   if (!target) return refuse("training target", "A persisted training target is required before assigning a provider problem.");
   const ability = local.readAbilityDetail(String(target.ability_id));
+  const targetSnapshot = {
+    abilityTitle: String(target.ability_title),
+    specificGap: String(target.specific_gap),
+    desiredEvidence: String(target.desired_evidence),
+    abilityStatus: ability?.ability.status ?? "uncertain",
+    abilityConcepts: ability?.ability.concepts.map((concept) => concept.slug) ?? [],
+    experience: local.getProfile()?.experience ?? "new",
+    rating: local.currentRating(),
+  };
   const adaptiveChecks = assessPracticeAssignment({
-    target: {
-      abilityTitle: String(target.ability_title),
-      specificGap: String(target.specific_gap),
-      desiredEvidence: String(target.desired_evidence),
-      abilityStatus: ability?.ability.status ?? "uncertain",
-      abilityConcepts: ability?.ability.concepts.map((concept) => concept.slug) ?? [],
-      experience: local.getProfile()?.experience ?? "new",
-      rating: local.currentRating(),
-    },
+    target: targetSnapshot,
     candidate: { difficulty: mounted.problem.difficulty, concepts: mounted.problem.concepts.map((concept) => concept.slug), source: mounted.problem.source, sourceRating: mounted.problem.sourceRating },
     proposedConcepts: conceptTags(value.concepts),
     why: String(value.why ?? ""),
   });
+
+  /* The level check is the one comparison that runs before anything is set.
+     It used to come back only with the assignment, beside an instruction not to
+     act on it, so a problem priced far above a developing ability went straight
+     to the learner with the warning filed underneath. A problem outside the
+     window is often the right call, but the agent has to say so: that is what
+     `levelReason` is for. Without one, nothing is mounted into the workspace and
+     the agent can search the window, set a smaller bridge first, or come back
+     with the reason. */
+  const level = adaptiveChecks.find((check) => check.name === "learner level");
+  const levelReason = String(value.levelReason ?? "").trim();
+  if (level && !level.passed && !levelReason) {
+    const window = trainingWindow(targetSnapshot);
+    return {
+      status: "invalid" as const,
+      report: { valid: false, checks: [level] },
+      window,
+      note: `Not assigned. Problems that fit this step are rated about ${window.minRating}–${window.maxRating}; search with minRating and maxRating set to that window. If this problem needs a mechanism they have not shown on their own yet, set a smaller bridge first (an easier real problem, or set_challenge) that isolates it, and come back to this one once it lands. If the stretch is deliberate (they asked for it, or it is a first look at new ground), assign it again with levelReason saying why.`,
+    };
+  }
 
   /* Mounting went to the source, which takes as long as a network call takes. The
      challenge underneath can have changed in that time — the learner may have
