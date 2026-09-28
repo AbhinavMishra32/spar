@@ -1,10 +1,11 @@
 import { LEARNER_NOTEBOOK } from "../shared/api.js";
 import { normalizeStatementText } from "../shared/statementText.js";
 import { figureProblems } from "../shared/figure.js";
+import { lensInfo } from "../shared/challengeMix.js";
 import type { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { compileQuestion, type DesignOrigin } from "@spar/training";
-import { REVIEW_TARGETS, abilityStatusSchema, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput, type ReviewTarget } from "@spar/domain";
+import { REVIEW_TARGETS, abilityStatusSchema, challengeMixSchema, type ChallengeMix, type ProblemSource, languageSchema, lessonInputSchema, type AbilityStatus, type AskUserQuestionInput, type ReviewTarget } from "@spar/domain";
 import { DEFAULT_SECTIONS, foldAttempt, formatSolveLog, type CaseFilter, type ReplaySection } from "../shared/attemptReplay.js";
 import type { ConceptTagInput, LocalStore } from "./store.js";
 import type { UtilityClient } from "./utilityClient.js";
@@ -118,6 +119,7 @@ export async function executeTrainingTool(
     }
     return assignPracticeProblem(value, sessionId, local, workspaces, practice);
   }
+  if (name === "reopen_challenge") return reopenChallenge(value, sessionId, trackId, local, workspaces, practice, providers);
   if ((name === "create_question" || name === "replace_current_question") && !problemSources.includes("spar")) {
     return { status: "invalid", report: { valid: false, checks: [{ name: "session sources", passed: false, detail: `This session only takes real problems from ${providers.map(practiceSourceName).join(" and ")}, so Spar does not write challenges for it. Search for one and assign it with assign_practice_problem.` }] } };
   }
@@ -144,11 +146,11 @@ export async function executeTrainingTool(
      narrows with `kinds` when it knows what it is after. */
   if (name === "search_record") return searchRecord(local, value, trackId);
   if (name === "read_record") return readRecord(local, value, trackId);
-  /* The coach's own notebooks: this Track's, or the learner notebook every
-     Track reads. The previous version goes back with the result so the thread
+  /* The coach's own notebooks: this Track's, or user.md, the one about the
+     person that every Track reads. The previous version goes back with the result so the thread
      can draw what changed; the worker drops it from what the model reads. */
   if (name === "update_notebook") {
-    const key = value.notebook === "learner" ? LEARNER_NOTEBOOK : trackId;
+    const key = value.notebook === "user" || value.notebook === "learner" ? LEARNER_NOTEBOOK : trackId;
     const edited = applyNotebookEdits(local.readNotebook(key)?.markdown ?? null, value);
     if ("error" in edited) return { status: "invalid", note: edited.error };
     const markdown = edited.markdown;
@@ -156,10 +158,13 @@ export async function executeTrainingTool(
     const unchanged = previous !== null && previous.version === saved.version;
     return { status: unchanged ? "unchanged" : "saved", version: saved.version, note: saved.note, markdown: saved.markdown, previous: unchanged ? null : previous?.markdown ?? null, previousAuthor: previous?.author ?? null };
   }
+  /* The learner's mix, changed because they asked in chat. Only the fields
+     sent move; the rest stays as the mix menu left it. */
+  if (name === "set_challenge_mix") return setChallengeMix(value, sessionId, local);
   /* What the builder needs to write a challenge that fits the Track: the open
      challenge when one is being revised, and the starters the learner has been
      handed so the next one has the same shape. Worker-only. */
-  if (name === "challenge_builder_context") return builderContext(local, sessionId, trackId);
+  if (name === "challenge_builder_context") return builderContext(local, sessionId, trackId, value);
   if (name === "ask_user_question") {
     if (questions) return questions.ask(sessionId, value as AskUserQuestionInput);
     /* `pending` says whether the learner still has to answer. It used to be a
@@ -205,6 +210,7 @@ export async function executeTrainingTool(
     const id = randomUUID();
     const lesson = { ...parsed.data, references };
     local.saveLesson({ id, sessionId, title: lesson.title, summary: lesson.summary, concepts: lesson.concepts, payload: lesson });
+    if (lesson.lens) local.logLens(sessionId, lesson.lens, "lesson", `"${lesson.title}" — ${lesson.summary}`);
     return {
       status: "taught",
       lessonId: id,
@@ -267,8 +273,9 @@ export async function executeTrainingTool(
     await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     commitCandidateTarget(local, sessionId, trackId, value);
     const question = local.createQuestion(sessionId, compiled.design, compiled.report, { concepts: conceptTags(value.concepts), introductionReason: String(value.why ?? "").trim() });
+    if (compiled.design.lens) local.logLens(sessionId, compiled.design.lens.id, "challenge", `"${compiled.design.title}" — ${compiled.design.lens.sideQuest}`);
     rememberTrackLanguage(local, trackId, value);
-    return { status: "playable", question, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
+    return { status: "playable", question, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId), ...linkReview(local, sessionId, question.id, value.review) };
   }
   if (name === "replace_current_question") {
     const activeQuestion = openChallenge(local, sessionId);
@@ -280,14 +287,16 @@ export async function executeTrainingTool(
     await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     commitCandidateTarget(local, sessionId, trackId, value);
     const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."), conceptTags(value.concepts), undefined, String(value.why ?? "").trim());
+    if (compiled.design.lens) local.logLens(sessionId, compiled.design.lens.id, "challenge", `"${compiled.design.title}" — ${compiled.design.lens.sideQuest}`);
     rememberTrackLanguage(local, trackId, value);
-    return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId) };
+    return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId), ...linkReview(local, sessionId, question.id, value.review) };
   }
   if (name === "edit_challenge") return editChallenge(local, sessionId, value, workspaces, runner, progress);
   if (name === "review_solution") {
     const attemptId = String(value.attemptId);
     const verdict = value.verdict === "rework" ? "rework" : "accepted";
     const reasons = Array.isArray(value.reasons) ? value.reasons.map((entry) => String(entry)).slice(0, 6) : [];
+    logLensNotes(local, sessionId, value.lenses);
     local.appendNextEvent({ id: randomUUID(), attemptId, type: "submission_evaluated", occurredAt: new Date().toISOString(), payload: { review: verdict, reasons, approach: String(value.approach ?? ""), observedComplexity: String(value.observedComplexity ?? "") }, source: "system", schemaVersion: 1 });
     if (verdict === "accepted") {
       const settled = settleBlockedAttempt(local, attemptId);
@@ -302,6 +311,7 @@ export async function executeTrainingTool(
     return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
   }
   if (name === "record_insight") return recordInsight(local, value, sessionId);
+  if (name === "file_review") return fileReview(local, value, sessionId);
   if (name === "read_attempt") return readAttemptForAgent(local, value, sessionId, workspaces);
   if (name === "read_submissions") return readSubmissionsForAgent(local, value, sessionId);
   /* The document plus what is open under it. The markdown is the claim; the
@@ -438,6 +448,7 @@ async function assignPracticeProblem(
   return {
     status: "playable",
     question,
+    ...linkReview(local, sessionId, question.id, value.review),
     source: { slug: source.slug, title: design.title, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
     judge: source.judge,
     localCases: source.localCaseCount,
@@ -450,6 +461,65 @@ async function assignPracticeProblem(
     ...followsLesson(local, concepts, local.trackIdForSession(sessionId)),
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
+  };
+}
+
+/**
+ * A challenge the learner has done, set again as it was.
+ *
+ * A review is sometimes best answered by the very problem it came from — the
+ * classic they should own, the card whose target is the problem itself. The
+ * design is already validated, so nothing is rebuilt: its starter and visible
+ * tests go back into the workspace under the target it was first set for, and
+ * the attempt starts clean. A sourced problem is mounted from its source again,
+ * because its files and judge live there. Any change of wording is the coach's
+ * to make afterwards with edit_challenge.
+ */
+async function reopenChallenge(
+  value: Record<string, unknown>,
+  sessionId: string,
+  trackId: string | null | undefined,
+  local: LocalStore,
+  workspaces: WorkspaceService,
+  practice: PracticeService | undefined,
+  providers: Array<"leetcode" | "codeforces">,
+) {
+  const refuse = (checkName: string, detail: string) => ({ status: "invalid" as const, report: { valid: false, checks: [{ name: checkName, passed: false, detail }] } });
+  const challengeId = String(value.challengeId ?? "");
+  const past = local.readChallenge(challengeId);
+  if (!past) return refuse("challenge", "No challenge with that id. read_record kind review names a card's own challenge; search_record finds others.");
+  const why = String(value.why ?? "").trim();
+  const source = past.source_ref ? (() => { try { return JSON.parse(past.source_ref) as { source?: unknown; slug?: unknown }; } catch { return null; } })() : null;
+  if (source && (source.source === "leetcode" || source.source === "codeforces") && typeof source.slug === "string") {
+    if (!practice || !providers.includes(source.source)) return refuse("session sources", `This challenge is ${practiceSourceName(source.source)}'s "${past.title}", and this session does not take problems from ${practiceSourceName(source.source)}. Write a fresh problem around the same idea with set_challenge instead.`);
+    const assigned = await assignPracticeProblem({ source: source.source, slug: source.slug, language: past.language, concepts: past.concepts, why, review: value.review, replaceReason: value.replaceReason }, sessionId, local, workspaces, practice);
+    return assigned.status === "playable" ? { ...assigned, reopened: challengeId } : assigned;
+  }
+
+  const activeQuestion = openChallenge(local, sessionId);
+  const replaceReason = String(value.replaceReason ?? "").trim();
+  if (activeQuestion && !replaceReason) return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already open. Set this one with replaceReason only if the learner asked to leave it; otherwise end the turn.`);
+  const stored = local.questionDesign(challengeId);
+  if (!stored) return refuse("challenge", "That challenge has no stored design to set again. Write a fresh problem with set_challenge.");
+  const target = local.questionTarget(challengeId);
+  if (target) commitCandidateTarget(local, sessionId, trackId, { trainingTarget: target });
+  else if (!local.latestTarget(sessionId)) return refuse("training target", "That challenge's training target is gone. Write a fresh problem with set_challenge.");
+
+  const { design, report } = stored;
+  await workspaces.replaceAll(sessionId, { ...design.starterFiles, ...design.visibleTests });
+  const concepts = conceptTags(past.concepts);
+  const question = activeQuestion
+    ? local.replaceQuestion(sessionId, design, report, replaceReason, concepts, null, why)
+    : local.createQuestion(sessionId, design, report, { concepts, introductionReason: why });
+  return {
+    status: "playable",
+    question,
+    title: design.title,
+    reopened: challengeId,
+    report,
+    ...linkReview(local, sessionId, question.id, value.review),
+    note: "The same problem, with fresh starter code; their earlier code is not in the workspace. To change its wording — say, to point at what went wrong last time — use edit_challenge on the statement.",
+    ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
   };
 }
 
@@ -519,12 +589,126 @@ function readRecord(local: LocalStore, value: Record<string, unknown>, trackId: 
     const report = local.conceptEvidenceReport(id, 3, trackId);
     return { concepts: report, note: report.length ? "Read subConcepts before the totals: an area's average hides the one that is failing." : "No tagged challenges under this concept yet." };
   }
-  return { error: "unknown-kind", note: "kind is one of challenge, ability, lesson, concept." };
+  if (value.kind === "review") return readReview(local, id);
+  return { error: "unknown-kind", note: "kind is one of challenge, ability, lesson, concept, review." };
 }
 
-function builderContext(local: LocalStore, sessionId: string, trackId: string | null) {
+/**
+ * A review card in full, for the coach deciding what to review or judging a
+ * review: the card, its schedule, its standing note, every review it has had
+ * and the work each one was judged on. Ids only for the work itself — the code
+ * is one read_submissions away, and most reads never need it.
+ */
+function readReview(local: LocalStore, cardId: string) {
+  const detail = local.reviews.detail(cardId);
+  if (!detail) return { error: "not-found", note: "No review card with that id. The journey's Spaced review section lists card ids." };
+  const { card, logs, challenges } = detail;
+  const now = Date.now();
+  const solveSubmissions = local.submissionsForQuestion(card.questionId).map((row) => ({ submissionId: row.id, attemptId: row.attemptId, ordinal: row.ordinal, outcome: row.outcome, passed: `${row.passedCases}/${row.totalCases}`, submittedAt: row.submittedAt }));
+  return {
+    cardId: card.id,
+    title: card.title,
+    challenge: { id: card.questionId, title: card.questionTitle, solvedInAttempt: card.attemptId, setAgain: "reopen_challenge with this id sets this exact problem again" },
+    concepts: card.concepts.map((tag) => tag.slug),
+    trigger: card.trigger, insight: card.insight, invariant: card.invariant,
+    click: card.click, independence: card.independence, pitfalls: card.pitfalls, rubric: card.rubric, transfer: card.transfer,
+    targets: card.targets, remember: card.remember ?? null, note: card.coachNote ?? null,
+    memory: {
+      state: card.state, dueAt: card.dueAt, due: Date.parse(card.dueAt) <= now, recallChance: Math.round(card.retrievability * 100) / 100,
+      stabilityDays: Math.round(card.stability * 10) / 10, reps: card.reps, lapses: card.lapses, suspended: card.suspended, lastReviewAt: card.lastReviewAt,
+    },
+    reviews: logs.filter((log) => log.source !== "implicit").map((log) => ({
+      at: log.reviewedAt, source: log.source, format: log.format, target: log.target, rating: RATING_NAME[log.rating as 1 | 2 | 3 | 4],
+      ...(log.prompt ? { asked: log.prompt.slice(0, 600) } : {}), ...(log.answer ? { answer: log.answer.slice(0, 600) } : {}),
+      ...(log.feedback ? { feedback: log.feedback } : {}), held: log.held ?? [], missed: log.missed ?? [],
+      ...(log.misconception ? { misconception: log.misconception } : {}),
+      ...(log.challengeId ? { challengeId: log.challengeId } : {}), ...(log.attemptId ? { attemptId: log.attemptId } : {}), ...(log.submissionId ? { submissionId: log.submissionId } : {}),
+    })),
+    reviewChallenges: challenges ?? [],
+    solveSubmissions,
+    howToUse: "read_attempt with an attemptId shows how any of this work went; read_submissions with a submissionId returns its code. Judge a review with file_review.",
+  };
+}
+
+/* Reviews happen in review sessions, which the learner opens from History. A
+   training session is theirs for the next step, and a review slipped into one
+   is a step they did not ask to spend. */
+const NOT_A_REVIEW_SESSION = "This is a training session, and reviews happen only in review sessions, which the learner starts from History. Do not set or judge reviews here; if they ask to review something, tell them to start a review session.";
+
+const RATING_NAME = { 1: "again", 2: "hard", 3: "good", 4: "easy" } as const;
+
+/** Tie a just-published challenge to the review card it was set to review. */
+function linkReview(local: LocalStore, sessionId: string, questionId: string, review: unknown): Record<string, unknown> {
+  if (!review || typeof review !== "object") return {};
+  if (local.sessionContext(sessionId) !== "review") return { review: { linked: false, note: NOT_A_REVIEW_SESSION } };
+  const { cardId, focus, purpose, forLearner } = review as { cardId?: unknown; focus?: unknown; purpose?: unknown; forLearner?: unknown };
+  if (typeof cardId !== "string") return {};
+  const kind = purpose === "deeper" ? "deeper" : "review";
+  try {
+    local.reviews.linkChallenge(questionId, cardId, typeof focus === "string" ? focus : null, kind, typeof forLearner === "string" ? forLearner : null);
+    const card = local.reviews.card(cardId);
+    return { review: { cardId, card: card?.title ?? null, purpose: kind, note: kind === "review"
+      ? "Linked as a review of this card. When the attempt ends, judge it against the card with file_review."
+      : "Linked as practice going deeper on this card's weak spot. When it ends, decide whether the weak spot is handled; file_review only if the evidence changes what you believe about the card." } };
+  } catch (error) {
+    return { review: { linked: false, note: error instanceof Error ? error.message : "That review card could not be linked." } };
+  }
+}
+
+/**
+ * The coach's judgement of a review, filed.
+ *
+ * The rating is the coach's to decide from what it read — nothing here grades
+ * the attempt. The host only works out which challenge, attempt and submission
+ * the judgement is about when the coach leaves them out, so the review shows
+ * the code it was about.
+ */
+function fileReview(local: LocalStore, value: Record<string, unknown>, sessionId: string) {
+  if (local.sessionContext(sessionId) !== "review") return { status: "invalid", note: NOT_A_REVIEW_SESSION };
+  const cardId = String(value.cardId ?? "");
+  const card = local.reviews.card(cardId);
+  if (!card) return { status: "invalid", note: "No review card with that id. The journey's Spaced review section lists card ids." };
+  const note = typeof value.note === "string" && value.note.trim() ? value.note.trim() : null;
+  const ratingName = typeof value.rating === "string" ? value.rating as keyof typeof RATING_VALUE : null;
+  const rating = ratingName ? RATING_VALUE[ratingName] : undefined;
+  if (!rating) {
+    if (!note) return { status: "invalid", note: "Nothing to file: give a rating to file a review, or a note to update the card." };
+    local.reviews.setCoachNote(card.id, note);
+    return { status: "noted", cardId: card.id, note: "The card's note is updated. Its schedule is unchanged." };
+  }
+  const summary = typeof value.summary === "string" ? value.summary.trim() : "";
+  if (!summary) return { status: "invalid", note: "A filed review needs a summary: what you saw, written to the learner." };
+  const current = local.readSession(sessionId)?.question ?? null;
+  const challengeId = typeof value.challengeId === "string" && value.challengeId ? value.challengeId : current?.id ?? null;
+  const submissions = challengeId ? local.submissionsForQuestion(challengeId) : [];
+  const attemptId = typeof value.attemptId === "string" && value.attemptId ? value.attemptId : submissions.at(-1)?.attemptId ?? (challengeId === current?.id ? current?.attemptId ?? null : null);
+  const submissionId = typeof value.submissionId === "string" && value.submissionId
+    ? value.submissionId
+    : [...submissions].reverse().find((row) => !attemptId || row.attemptId === attemptId)?.id ?? null;
+  const link = challengeId ? local.reviews.reviewOfChallenge(challengeId) : null;
+  const filed = local.reviews.review(card.id, rating, {
+    source: "coach", format: null, target: null,
+    prompt: link?.card.id === card.id && link.focus ? `${link.purpose === "deeper" ? "Going deeper: " : ""}${link.focus}` : challengeId ? `Reviewed through "${local.readChallenge(challengeId)?.title ?? "a challenge"}".` : null,
+    answer: null, feedback: summary, grade: null, suggestedRating: null,
+    challengeId, attemptId, submissionId, held: stringList(value.held).slice(0, 6), missed: stringList(value.missed).slice(0, 6),
+  });
+  if (note) local.reviews.setCoachNote(card.id, note);
+  const days = Math.max(1, Math.round((Date.parse(filed.card.dueAt) - Date.now()) / 86_400_000));
+  return {
+    status: "filed", cardId: card.id, rating: ratingName, nextReviewInDays: days, lapses: filed.card.lapses, siblingsCredited: filed.siblings,
+    note: `Filed. "${card.title}" comes back in about ${days} day${days === 1 ? "" : "s"}. Tell the learner what you saw in a sentence or two; if the weak spot is still there, ask whether they want to work on it now.`,
+  };
+}
+
+const RATING_VALUE = { again: 1, hard: 2, good: 3, easy: 4 } as const;
+
+function builderContext(local: LocalStore, sessionId: string, trackId: string | null, value: Record<string, unknown> = {}) {
   const open = openChallenge(local, sessionId);
   const track = trackId ? local.listTracks().find((entry) => entry.id === trackId) ?? null : null;
+  const language = languageSchema.catch("javascript").parse(track?.language ?? local.getProfile()?.language ?? "javascript");
+  const refused = lensRefusal(local, sessionId, trackId, value, language);
+  if (refused) return { refused };
+  const chosen = value.lens && typeof value.lens === "object" ? lensInfo({ id: String((value.lens as { id?: unknown }).id ?? "") }, language) : null;
   let openDesign: Record<string, unknown> | null = null;
   if (open) {
     const record = local.readChallenge(open.id);
@@ -532,7 +716,44 @@ function builderContext(local: LocalStore, sessionId: string, trackId: string | 
     openDesign = { title: open.title, statement: open.statement, language: open.language, kind: open.kind, difficulty: open.difficulty, starterFiles: design.starterFiles, referenceFiles: design.referenceFiles, visibleTests: design.visibleTests, solutionRequirements: design.solutionRequirements };
   }
   const recent = local.journey(trackId, 4).challenges.filter((entry) => entry.source === "spar" && entry.starter).slice(-3).map((entry) => ({ title: entry.title, language: entry.language, difficulty: entry.difficulty, starter: entry.starter }));
-  return { preferredLanguage: track?.language ?? local.getProfile()?.language ?? "javascript", open: openDesign, recentStarters: recent };
+  return { preferredLanguage: track?.language ?? local.getProfile()?.language ?? "javascript", open: openDesign, recentStarters: recent, lens: chosen ? { label: chosen.label, about: chosen.about } : null };
+}
+
+/**
+ * Holds a Spar-written challenge to the learner's drill lenses: it names the
+ * one it carries, or says why this one cannot — and never skips twice running.
+ * A revise keeps its task and a review is aimed at a card, so neither is held.
+ */
+function lensRefusal(local: LocalStore, sessionId: string, trackId: string | null, value: Record<string, unknown>, language: ReturnType<typeof languageSchema.parse>): string | null {
+  if (value.mode === "revise" || value.review) return null;
+  if (!local.problemSourcesForSession(sessionId).includes("spar")) return null;
+  const mix = local.challengeMixForSession(sessionId);
+  const drills = mix.lenses.filter((lens) => lens.depth === "drill");
+  if (!drills.length) return null;
+  const names = drills.map((lens) => `${lensInfo(lens, language)?.label ?? lens.id} (${lens.id})`).join(", ");
+  const lens = value.lens && typeof value.lens === "object" ? value.lens as { id?: unknown } : null;
+  if (lens) {
+    const id = String(lens.id ?? "");
+    if (mix.lenses.some((entry) => entry.id === id)) return null;
+    return `"${id}" is not one of the learner's lenses. The ones at drill are: ${names}.`;
+  }
+  if (typeof value.skipLens !== "string" || !value.skipLens.trim()) {
+    return `The learner set ${names} to drill, so a Spar problem carries one of them as a side quest. Add lens with its id and the side quest built into the task — rotating by the lens history in Coaching settings — or skipLens with why this problem cannot.`;
+  }
+  const last = local.journey(trackId, 6).challenges.filter((entry) => entry.source === "spar").at(-1);
+  const lastCarried = last ? Boolean((local.readChallenge(last.id)?.design as { lens?: unknown } | undefined)?.lens) : true;
+  if (!lastCarried) return `The last Spar problem ("${last?.title}") carried no lens either. Two in a row is not what the learner asked for: this one carries one of ${names}.`;
+  return null;
+}
+
+function logLensNotes(local: LocalStore, sessionId: string, notes: unknown) {
+  if (!Array.isArray(notes)) return;
+  const known = new Set(local.challengeMixForSession(sessionId).lenses.map((lens) => lens.id));
+  for (const entry of notes.slice(0, 3)) {
+    const id = String((entry as { id?: unknown })?.id ?? "");
+    const note = String((entry as { note?: unknown })?.note ?? "").trim();
+    if (known.has(id) && note) local.logLens(sessionId, id, "feedback", note);
+  }
 }
 
 /**
@@ -1019,4 +1240,57 @@ async function attemptFiles(sessionId: string, workspaces: WorkspaceService, edi
     return { path, text };
   }));
   return files.filter((file) => file.text.trim());
+}
+
+function setChallengeMix(value: Record<string, unknown>, sessionId: string, local: LocalStore) {
+  const current = local.challengeMixForSession(sessionId);
+  const sources = local.problemSourcesForSession(sessionId);
+  const list = (entry: unknown) => (Array.isArray(entry) ? entry.filter((item): item is Record<string, unknown> => !!item && typeof item === "object") : []);
+
+  /* "never" and "always" are the sources, not the mix: Spar off, or Spar alone. */
+  const spar = typeof value.spar === "string" ? value.spar : null;
+  let nextSources: ProblemSource[] = sources;
+  let sparUse = current.sparUse;
+  if (spar === "never") {
+    const external = sources.filter((source) => source !== "spar");
+    nextSources = external.length ? external : ["leetcode"];
+  } else if (spar === "always") nextSources = ["spar"];
+  else if (spar) {
+    sparUse = spar as ChallengeMix["sparUse"];
+    /* Between the ends needs both kinds allowed. */
+    const external = sources.filter((source) => source !== "spar");
+    nextSources = ["spar", ...(external.length ? external : ["leetcode" as const])];
+  }
+
+  const lenses = [...current.lenses];
+  for (const change of list(value.lenses)) {
+    const id = String(change.id ?? "");
+    const at = lenses.findIndex((lens) => lens.id === id);
+    if (change.depth === "off") { if (at >= 0) lenses.splice(at, 1); continue; }
+    const label = typeof change.label === "string" ? change.label : at >= 0 ? lenses[at]!.label : undefined;
+    const example = change.example && typeof change.example === "object" ? change.example : at >= 0 ? lenses[at]!.example : undefined;
+    const lens = { id, depth: change.depth as ChallengeMix["lenses"][number]["depth"], ...(label ? { label } : {}), ...(example ? { example } : {}) } as ChallengeMix["lenses"][number];
+    if (at >= 0) lenses[at] = lens; else lenses.push(lens);
+  }
+  /* A suggestion is only news if it is not already on, pending or turned down. */
+  const taken = new Set([...lenses.map((lens) => lens.id), ...current.suggestions.map((entry) => entry.id), ...current.dismissed]);
+  const offered = list(value.suggest)
+    .map((entry) => ({ id: String(entry.id ?? ""), ...(typeof entry.label === "string" ? { label: entry.label } : {}), reason: String(entry.reason ?? ""), ...(entry.example && typeof entry.example === "object" ? { example: entry.example as ChallengeMix["suggestions"][number]["example"] } : {}) }))
+    .filter((entry) => entry.id && !taken.has(entry.id));
+  const settled = new Set(lenses.map((lens) => lens.id));
+  const suggestions = [...current.suggestions.filter((entry) => !settled.has(entry.id)), ...offered].slice(-6);
+
+  const next = challengeMixSchema.safeParse({ ...current, sparUse, lenses, suggestions });
+  if (!next.success) return { status: "invalid", note: next.error.issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") };
+  const saved = local.setSessionChallengeMix(sessionId, next.data);
+  const savedSources = local.setSessionProblemSources(sessionId, nextSources);
+  const unchanged = JSON.stringify(saved) === JSON.stringify(current) && savedSources.join() === sources.join();
+  const skipped = list(value.suggest).length - offered.length;
+  return {
+    status: unchanged ? "unchanged" : "saved",
+    note: String(value.note ?? ""),
+    settings: saved,
+    problemSources: savedSources,
+    ...(skipped > 0 ? { skippedSuggestions: `${skipped} suggestion${skipped === 1 ? " was" : "s were"} already on, pending or turned down.` } : {}),
+  };
 }

@@ -168,6 +168,43 @@
           "maxLength": 1500,
           "description": "Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."
         },
+        "review": {
+          "type": "object",
+          "properties": {
+            "cardId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The review card this challenge is about, from the journey's Review session section or read_record kind review."
+            },
+            "purpose": {
+              "type": "string",
+              "enum": [
+                "review",
+                "deeper"
+              ],
+              "default": "review",
+              "description": "review: this attempt is the card's review, judged with file_review when it ends. deeper: practice beyond the review, aimed at the weak spot a review exposed — the learner chose to dig in, or you judged they need it before moving on. A deeper challenge is practice, not a review; file_review only if its evidence changes what you believe about the card."
+            },
+            "focus": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1500,
+              "description": "Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."
+            },
+            "forLearner": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 600,
+              "description": "Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."
+            }
+          },
+          "required": [
+            "cardId",
+            "focus"
+          ],
+          "additionalProperties": false,
+          "description": "When this problem is a spaced review of a card: it needs the card's idea, aimed at what it and its past reviews say they missed. The attempt is linked to the card, and when it ends you judge it with file_review."
+        },
         "actionTitle": {
           "type": "string",
           "minLength": 3,
@@ -584,7 +621,7 @@
     }
   },
   "read_record": {
-    "description": "Read one record in full: a challenge (design, validation, attempts and test history), an ability (versioned document with its patterns and recent evidence), a lesson (its pages), or a concept (this learner's evidence under it, by sub-concept, with the challenges behind it).",
+    "description": "Read one record in full: a challenge (design, validation, attempts and test history), an ability (versioned document with its patterns and recent evidence), a lesson (its pages), a concept (this learner's evidence under it, by sub-concept, with the challenges behind it), or a review card (the insight, the pitfalls, your standing note, its memory state and every review it has had — what was asked, what held, what was missed — with the challenge, attempt and submission ids each was judged on, so read_attempt and read_submissions can open the code).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -594,13 +631,14 @@
             "challenge",
             "ability",
             "lesson",
-            "concept"
+            "concept",
+            "review"
           ]
         },
         "id": {
           "type": "string",
           "minLength": 2,
-          "description": "The challenge, ability or lesson id, or the concept slug."
+          "description": "The challenge, ability, lesson or review card id, or the concept slug."
         },
         "actionTitle": {
           "type": "string",
@@ -881,6 +919,33 @@
           },
           "maxItems": 6,
           "description": "For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner."
+        },
+        "lenses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": "A lens id from Coaching settings."
+              },
+              "note": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 300,
+                "description": "What their code showed through that lens, which you then say in your reply — a line from their code and the idiomatic or deeper take on it."
+              }
+            },
+            "required": [
+              "id",
+              "note"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 3,
+          "description": "Their code read through the learner's lenses: for each lens it has something to say about, what it showed. Logged in the lens's history, so later turns know what was covered. Say these in your reply at each lens's depth."
         },
         "actionTitle": {
           "type": "string",
@@ -1168,7 +1233,7 @@
         },
         "requiresComplexityAnalysis": {
           "type": "boolean",
-          "description": "True only when asymptotic time and space reasoning is part of what this trains."
+          "description": "Whether the learner states the time and space complexity of their solution after it passes. True for any algorithm or data-structure problem — trees, graphs, arrays, recursion, searching, DP — even when complexity is not the idea being taught: saying what their own code costs is part of solving one. False only for syntax, API use, debugging, UI, refactoring, repository mechanics and similar work where Big-O says nothing."
         },
         "solutionRequirements": {
           "type": "array",
@@ -1201,6 +1266,72 @@
           "minLength": 3,
           "maxLength": 1500,
           "description": "For revise or replace: what the learner asked for, or why the open challenge has to change."
+        },
+        "lens": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60,
+              "description": "A lens the Coaching settings list at drill, by its id."
+            },
+            "sideQuest": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 600,
+              "description": "What this problem makes them practise through that lens, built into the task — a requirement, part of the starter, or the shape of the data — not a footnote. The builder names it in one line of the statement."
+            }
+          },
+          "required": [
+            "id",
+            "sideQuest"
+          ],
+          "additionalProperties": false,
+          "description": "Required when the Coaching settings list a lens at drill: the one this problem carries. Rotate between them; the journey shows which lens each challenge drilled. The host refuses a brief that leaves it out, unless skipLens says why."
+        },
+        "skipLens": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 400,
+          "description": "Instead of lens, only when a side quest would get in the way of this problem — a repair aimed at a struggle, say. Never twice in a row: the host refuses a second skip."
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "cardId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The review card this challenge is about, from the journey's Review session section or read_record kind review."
+            },
+            "purpose": {
+              "type": "string",
+              "enum": [
+                "review",
+                "deeper"
+              ],
+              "default": "review",
+              "description": "review: this attempt is the card's review, judged with file_review when it ends. deeper: practice beyond the review, aimed at the weak spot a review exposed — the learner chose to dig in, or you judged they need it before moving on. A deeper challenge is practice, not a review; file_review only if its evidence changes what you believe about the card."
+            },
+            "focus": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1500,
+              "description": "Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."
+            },
+            "forLearner": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 600,
+              "description": "Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."
+            }
+          },
+          "required": [
+            "cardId",
+            "focus"
+          ],
+          "additionalProperties": false,
+          "description": "When this challenge is a spaced review of a card: a fresh problem that needs the card's idea, aimed at what it and its past reviews say they missed. The attempt is then linked to the card, and when it ends you judge it with file_review."
         },
         "actionTitle": {
           "type": "string",
@@ -1406,6 +1537,12 @@
           },
           "maxItems": 6,
           "default": []
+        },
+        "lens": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The id of a lens in Coaching settings this lesson teaches through, when it does. Logged in that lens's history."
         },
         "actionTitle": {
           "type": "string",
@@ -1633,7 +1770,7 @@
     }
   },
   "update_notebook": {
-    "description": "Change one of your notebooks, your primary memory of this learner: the one for this Track, or the learner notebook every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both; keep each under about 1,200 words and delete what is no longer true.",
+    "description": "Change one of your notebooks, your primary memory of this learner: the one for this Track, or user.md, the one about the person that every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both; keep each under about 1,200 words and delete what is no longer true.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1641,10 +1778,11 @@
           "type": "string",
           "enum": [
             "track",
+            "user",
             "learner"
           ],
           "default": "track",
-          "description": "track: their progress on this Track. learner: the person across every Track — who they are, how they like to be taught, what helps them, habits seen wherever they work."
+          "description": "track: their progress on this Track. user: user.md, the person across every Track — their onboarding answers, who they are, how they like to be taught, what helps them, habits seen wherever they work."
         },
         "edits": {
           "type": "array",
@@ -1966,6 +2104,291 @@
       },
       "required": [
         "query",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "file_review": {
+    "description": "File your judgement of a spaced-review card, from evidence you have read: usually an attempt at a challenge set as its review, or at the card's own challenge again, sometimes a conversation where they explained the idea. Compare what they did with what the card and its past reviews say they missed — read_record kind review, then read_attempt and read_submissions for the code — and decide for yourself how well the idea held. The rating moves the card's schedule, so it should be honest in both directions: a pass that still fumbled the step the review was about is not good. Omit rating to only rewrite the card's note without filing a review.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The card being reviewed."
+        },
+        "rating": {
+          "type": "string",
+          "enum": [
+            "again",
+            "hard",
+            "good",
+            "easy"
+          ],
+          "description": "How well the idea held in this evidence, as a spaced-review grade you decide: again — they did not have it; hard — got there, but the weak spot showed again or needed help; good — held with ordinary friction; easy — clean and immediate. Omit to leave the schedule alone."
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 1500,
+          "description": "What you saw, written to the learner: how this attempt compares with how they handled the idea before. Required with a rating."
+        },
+        "held": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 400
+          },
+          "maxItems": 6,
+          "description": "What they now do right that the card or an earlier review said they missed."
+        },
+        "missed": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 400
+          },
+          "maxItems": 6,
+          "description": "What is still missing or shaky, specifically enough that the next review can aim at it."
+        },
+        "note": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 1500,
+          "description": "Replaces the card's standing note: what its next review should press on, given everything so far. Keep it current; drop what is fixed."
+        },
+        "challengeId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The challenge the evidence came from. Omit for the one this turn is about."
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The attempt judged. Omit for the latest attempt at that challenge."
+        },
+        "submissionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The submission that carried the evidence, when one did. Omit for the latest."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "cardId",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "reopen_challenge": {
+    "description": "Set a challenge the learner has already done as this session's challenge again: the same problem with fresh starter code — for a review card, usually its own original challenge (read_record kind review names it). Use it when doing that exact problem again is the right test — a classic they should own, or a card whose problem target is the problem itself; write a fresh problem with set_challenge when the idea in a new story is the better test. Reword or add to it afterwards with edit_challenge if the statement should change.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "challengeId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The challenge to set again."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 1500,
+          "description": "Why this problem again, for this learner now. Stored with the challenge for later turns."
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "cardId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The review card this challenge is about, from the journey's Review session section or read_record kind review."
+            },
+            "purpose": {
+              "type": "string",
+              "enum": [
+                "review",
+                "deeper"
+              ],
+              "default": "review",
+              "description": "review: this attempt is the card's review, judged with file_review when it ends. deeper: practice beyond the review, aimed at the weak spot a review exposed — the learner chose to dig in, or you judged they need it before moving on. A deeper challenge is practice, not a review; file_review only if its evidence changes what you believe about the card."
+            },
+            "focus": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1500,
+              "description": "Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."
+            },
+            "forLearner": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 600,
+              "description": "Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."
+            }
+          },
+          "required": [
+            "cardId",
+            "focus"
+          ],
+          "additionalProperties": false,
+          "description": "When this repeat is a review of a card, or practice going deeper on one. Its forLearner is the place to say what went wrong last time and what this attempt should show."
+        },
+        "replaceReason": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 1500,
+          "description": "Required only when a challenge is already open and this one is to take its place — say what the learner asked for."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "challengeId",
+        "why",
+        "actionTitle"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "set_challenge_mix": {
+    "description": "Change this session's coaching settings, or suggest a lens. Change settings only when the learner asks in chat: when to write a Spar problem versus assigning a real LeetCode/Codeforces problem, and lenses — areas to go deeper on, each at a depth (mention: a line in feedback; teach: explain it when relevant; drill: Spar problems that force it). Send only what they asked for. Attach an example lifted from their own code whenever you have one — it is what the learner sees on the lens. suggest is the one part you may use on your own: when their code shows a pattern a lens would fix (range(len(xs)) loops, a hand-rolled heap), propose that lens with the reason in one line; it waits in the learner's settings menu until they accept or dismiss it. Never suggest one the journey lists as pending or turned down.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "spar": {
+          "type": "string",
+          "enum": [
+            "never",
+            "struggling",
+            "less",
+            "balanced",
+            "more",
+            "always"
+          ],
+          "description": "When to write a Spar problem. never: real problems only. struggling: real by default, Spar to repair a concept they are stuck on. less / more: mostly real / mostly Spar. balanced: your call. always: only Spar problems."
+        },
+        "lenses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": "A catalogue id — lang-idioms, lang-stdlib, lang-types, lang-deep (the Track's language), from-scratch, under-the-hood, complexity, edge-cases, clean-code — or custom:<slug> for one the learner named or you name in a suggestion."
+              },
+              "depth": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "mention",
+                  "teach",
+                  "drill"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60,
+                "description": "Required for a custom lens: its name, in the learner's words."
+              },
+              "example": {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "description": "A short line from their code, as they wrote it."
+                  },
+                  "after": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80,
+                    "description": "The same line through the lens."
+                  }
+                },
+                "required": [
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "depth"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 8,
+          "description": "Lenses to add, change or turn off. Others keep their current depth."
+        },
+        "suggest": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "example": {
+                "$ref": "#/properties/lenses/items/properties/example"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 3,
+                "maxLength": 240,
+                "description": "What you saw in their code, in one line to the learner: \"You hand-rolled a heap twice — heapq does it in one line.\""
+              }
+            },
+            "required": [
+              "id",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
+          "maxItems": 2
+        },
+        "note": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200,
+          "description": "One line saying what changed, shown to the learner."
+        },
+        "actionTitle": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 70,
+          "description": "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs."
+        }
+      },
+      "required": [
+        "note",
         "actionTitle"
       ],
       "additionalProperties": false,

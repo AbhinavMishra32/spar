@@ -1,6 +1,6 @@
 import { afterEach,describe,expect,it,vi } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
@@ -10,6 +10,22 @@ import { ABILITY_STALE_AFTER_DAYS, LocalStore, validatedHiddenCaseCount } from "
 import type { QuestionDesign } from "@spar/domain";
 
 const design=(title:string):QuestionDesign=>({title,language:"javascript",kind:"function",statement:"Implement the target behavior while preserving the declared invariant through every transition.",starterFiles:{"src/index.js":"export function solve(){ throw new Error(\"implement\") }"},referenceFiles:{"src/index.js":"export function solve(){ return true }"},visibleTests:{"tests/visible.test.js":"// visible"},hiddenTests:{"tests/hidden.test.js":"// hidden"},knownIncorrectFiles:[{"src/index.js":"export function solve(){ return false }"}],runCommand:"node --test",accidentalDifficulty:[],expectedFailureSignatures:["returns before restoring the invariant"]});
+
+it("defers a missing session's outbox family while retaining its create record",()=>{
+  const store=new LocalStore(":memory:");
+  try{
+    const {sessionId}=store.createSession("Practise arrays");
+    store.setTrainingTarget(sessionId,{ability:"Arrays",specificGap:"Track the position",desiredEvidence:"Correct index",avoidTesting:[]});
+    const question=store.createQuestion(sessionId,design("Find position"),{valid:true});
+    store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"test_run",occurredAt:new Date().toISOString(),payload:{scope:"visible",passed:true},source:"runner",schemaVersion:1});
+    const until=new Date(Date.now()+60_000).toISOString();
+    store.deferSyncMissingSession(sessionId,until);
+    expect(store.hasDeferredSync()).toBe(true);
+    expect(store.pendingSync().map((item)=>item.kind)).toContain("session-create");
+    expect(store.pendingSync().map((item)=>item.kind)).not.toContain("question-create");
+    expect(store.pendingSync().map((item)=>item.kind)).not.toContain("attempt-event");
+  }finally{store.close();}
+});
 
 describe("validated hidden case count",()=>{
   it("reads the structured count from new validation reports",()=>{
@@ -1007,16 +1023,16 @@ describe("coach's notebook",()=>{
       const {sessionId}=store.createSession("Practise graphs");
       const input={store,sessionId,message:"hi",turnKind:"learner-message" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
       const empty=agentTurnPayload(input).context;
-      expect(empty).toContain("## Learner notebook — read this first\n_Empty.");
+      expect(empty).toContain("## user.md — who they are, on every Track; read this first\n_Empty.");
       expect(empty).toContain("## Track notebook\n_Empty.");
-      expect(empty.indexOf("## Learner notebook")).toBeLessThan(empty.indexOf("## Track notebook"));
+      expect(empty.indexOf("## user.md")).toBeLessThan(empty.indexOf("## Track notebook"));
       expect(empty.indexOf("## Track notebook")).toBeLessThan(empty.indexOf("## Learner\n"));
       const trackId=store.readSession(sessionId)!.summary.trackId??null;
       store.writeNotebook(trackId,{markdown:"Forgets visited sets.",author:"coach"});
       store.writeNotebook(trackId,{markdown:"Forgets visited sets on grids.",author:"learner"});
       store.writeNotebook(LEARNER_NOTEBOOK,{markdown:"New programmer; wants diagrams.",author:"coach"});
       const context=agentTurnPayload(input).context;
-      expect(context).toMatch(/## Learner notebook — read this first \(v1, last written by you [^)]*\)\nNew programmer; wants diagrams\./);
+      expect(context).toMatch(/## user\.md — who they are, on every Track; read this first \(v1, last written by you [^)]*\)\nNew programmer; wants diagrams\./);
       expect(context).toMatch(/## Track notebook \(v2, last edited by the learner [^)]*\)\nForgets visited sets on grids\./);
       expect(context).not.toContain("_Empty.");
     }finally{store.close();}
@@ -1033,6 +1049,23 @@ describe("coach's notebook",()=>{
       expect(context).toContain("Likes one question at a time.");
       expect(context).not.toContain("Graphs notes");
     }finally{store.close();}
+  });
+  it("keeps user.md on disk, and takes an edit to the file back in as the learner's",()=>{
+    const root=mkdtempSync(path.join(tmpdir(),"spar-user-"));
+    const file=path.join(root,"user.md");
+    const store=new LocalStore(":memory:",{userFile:file});
+    try{
+      store.writeNotebook(LEARNER_NOTEBOOK,{markdown:"# About Ada\n- Writes Rust.",author:"coach"});
+      expect(readFileSync(file,"utf8")).toBe("# About Ada\n- Writes Rust.\n");
+      expect(store.readNotebook(LEARNER_NOTEBOOK)?.version).toBe(1);
+      writeFileSync(file,"# About Ada\n- Writes Rust and Go.\n");
+      const later=new Date(Date.now()+5_000);utimesSync(file,later,later);
+      const edited=store.readNotebook(LEARNER_NOTEBOOK)!;
+      expect(edited).toMatchObject({version:2,author:"learner",markdown:"# About Ada\n- Writes Rust and Go."});
+      rmSync(file);
+      expect(store.readNotebook(LEARNER_NOTEBOOK)?.version).toBe(2);
+      expect(readFileSync(file,"utf8")).toContain("Rust and Go");
+    }finally{store.close();rmSync(root,{recursive:true,force:true});}
   });
 });
 

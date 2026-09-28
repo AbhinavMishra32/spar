@@ -320,13 +320,13 @@ async function callHostTool(runId: string, sessionId: string, name: string, inpu
     const value = await requestHostTool(id, runId, sessionId, name, args);
     /* An assignment the host refused is an expected result, not an IPC error,
        but it must never draw as a set challenge. */
-    const ok = name !== "assign_practice_problem" || isPlayableQuestion(value);
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok, input: telemetryValue(args), output: telemetryValue(value) } });
+    const ok = (name !== "assign_practice_problem" && name !== "reopen_challenge") || isPlayableQuestion(value);
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok, output: telemetryValue(value) } });
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok, detail: describeToolResult(name, value), ...titled, ...payload, output: toolPayload(name, value) } });
     return value;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok: false, input: telemetryValue(args), error: message, level: "ERROR" } });
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "tool", name, phase: "end", callId: id, ok: false, error: message, level: "ERROR" } });
     parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "tool", tool: name, phase: "end", callId: id, ok: false, detail: message, ...titled, ...payload, output: toolPayload(name, { error: message }) } });
     throw error;
   }
@@ -351,6 +351,10 @@ function forModel(name: string, value: unknown): unknown {
 }
 
 type BuilderContext = {
+  /** Why the host will not build this brief, when it will not. */
+  refused?: string;
+  /** The drill lens, as the learner named it, for the builder's brief. */
+  lens?: { label: string; about: string } | null;
   preferredLanguage?: string;
   open?: Record<string, unknown> | null;
   recentStarters?: Array<{ title: string; language: string; difficulty: string; starter: { path: string; text: string } | null }>;
@@ -369,6 +373,7 @@ function builderMessage(brief: SetChallengeInput, context: BuilderContext): stri
     `Concepts: ${brief.concepts.map((tag) => tag.slug).join(", ")}.`,
     brief.solutionRequirements?.length ? `The solution must be written this way (the host adds these to the statement): ${brief.solutionRequirements.join("; ")}.` : "",
     `Task:\n${brief.brief}`,
+    brief.lens ? `Side quest — the learner asked to drill "${context.lens?.label ?? brief.lens.id}"${context.lens?.about ? ` (${context.lens.about})` : ""}. Build this into the task itself, so the solution cannot avoid it: ${brief.lens.sideQuest}\nName it in the statement in one line starting "Side quest:", after the rules and before the examples.` : "",
   ];
   if (brief.mode !== "new" && context.open) {
     sections.push(brief.mode === "revise"
@@ -419,7 +424,16 @@ async function setChallenge(
   emit({ type: "tool", tool: "set_challenge", phase: "start", callId: id, detail: "Writing the challenge", ...titled, input: toolPayload("set_challenge", brief) });
   let candidate: Record<string, unknown> = { mode: brief.mode };
   try {
-    const builderContext = await requestHostTool(randomUUID(), runId, sessionId, "challenge_builder_context", {}) as BuilderContext;
+    const builderContext = await requestHostTool(randomUUID(), runId, sessionId, "challenge_builder_context", { mode: brief.mode, lens: brief.lens, skipLens: brief.skipLens, review: brief.review }) as BuilderContext;
+    /* Checked before a builder is paid for: a brief that ignores the learner's
+       drill lenses is refused with what to change, like any failed check. */
+    if (builderContext.refused) {
+      const value = { status: "invalid", report: { valid: false, checks: [{ name: "lenses", passed: false, detail: builderContext.refused }] } };
+      stages.note("outcome", "failed", "Not written", "The brief left out a drill lens");
+      emit({ type: "telemetry", kind: "tool", name: "set_challenge", phase: "end", callId: id, ok: false, input: telemetryValue(brief), output: telemetryValue(value) });
+      emit({ type: "tool", tool: "set_challenge", phase: "end", callId: id, ok: false, detail: builderContext.refused, ...titled, ...staged(), input: toolPayload("set_challenge", brief), output: toolPayload("set_challenge", value) });
+      return { full: value, forModel: { ...value, note: "Nothing was built. Add lens (or skipLens) to the brief and call set_challenge again." } };
+    }
     /* Skills the brief names are the builder's to follow, not the coach's: the
        figure spec, say, is about what goes in the statement. */
     const skillTexts: string[] = [];
@@ -461,6 +475,8 @@ async function setChallenge(
       why: brief.why,
       trainingTarget: { ability: brief.aim.ability, specificGap: brief.aim.gap, desiredEvidence: brief.aim.evidence, avoidTesting: [] },
       ...(hostName === "replace_current_question" ? { reason: brief.reason ?? brief.stretch } : {}),
+      ...(brief.review ? { review: brief.review } : {}),
+      ...(brief.lens ? { lens: brief.lens } : {}),
     };
     const lines = summarizeToolInput("create_question", candidate).files?.reduce((total, file) => total + file.added, 0) ?? 0;
     if (design) draft?.end("done", { verb: "Written", detail: typeof candidate.title === "string" ? candidate.title : "challenge", badge: lines ? `+${lines}` : undefined });
@@ -1055,6 +1071,7 @@ function summarizeToolInput(name: string, input: unknown): { label?: string; fil
   if (name === "load_skill") { const skill = text("name"); return skill ? { label: skill } : {}; }
   if (name === "read_record") return { label: [text("kind"), text("id")].filter(Boolean).join(" ") };
   if (name === "update_notebook") { const note = text("note"); return note ? { label: note } : {}; }
+  if (name === "set_challenge_mix") { const note = text("note"); return note ? { label: note } : {}; }
   if (name === "set_challenge") { const stretch = text("stretch"); return stretch ? { label: stretch.slice(0, 120) } : {}; }
   if (name === "create_question" || name === "replace_current_question") {
     const files: AgentActivityFile[] = [];
@@ -1143,6 +1160,7 @@ function describeToolResult(name: string, value: unknown): string {
   if (name === "read_attempt") return describeReplay(value);
   const record = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   if (name === "load_skill") return typeof record.note === "string" ? record.note : "";
+  if (name === "set_challenge_mix" && typeof record.status === "string") return record.status === "saved" ? "saved" : record.status === "unchanged" ? "no changes" : String(record.note ?? record.status);
   if (name === "update_notebook" && typeof record.status === "string") return record.status === "saved" ? `version ${String(record.version)}` : record.status === "unchanged" ? "no changes" : String(record.note ?? record.status);
   if ((name === "set_challenge" || name === "create_question" || name === "replace_current_question") && typeof record.status === "string") {
     const report = record.report && typeof record.report === "object" ? record.report as Record<string, unknown> : {};
@@ -1160,7 +1178,7 @@ function describeToolResult(name: string, value: unknown): string {
     }
     return [`status ${record.status}`, ...failedChecks(value)].join(" · ").slice(0, 320);
   }
-  if (name === "assign_practice_problem" && typeof record.status === "string") {
+  if ((name === "assign_practice_problem" || name === "reopen_challenge") && typeof record.status === "string") {
     // The transcript row only has one line to spare; the agent's own repair
     // feedback is built separately and is not clipped to fit a UI label.
     return [`status ${record.status}`, ...failedChecks(value)].join(" · ").slice(0, 320);

@@ -51,7 +51,17 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * revise mode now points at it. `update_notebook` takes `notebook`, so the
  * coach can also write the learner notebook every Track reads; `set_challenge`'s
  * aim asks for an existing ability's exact title, and `update_ability`'s
- * evidence says contradictory counts as much as supporting.
+ * evidence says contradictory counts as much as supporting. The learner
+ * notebook is now called user.md, and `notebook` takes "user" for it, with
+ * "learner" kept for threads that still use the old name. Review sessions
+ * added `file_review` — the coach's own judgement of a review card — a
+ * `review` kind for `read_record`, and a `review` link on `set_challenge` and
+ * `assign_practice_problem` that ties a challenge to the card it reviews;
+ * that link's `purpose` says whether it is the review or practice going
+ * deeper on the weak spot a review found, and its `forLearner` is the note
+ * shown above the problem. `reopen_challenge` sets a past challenge again. `set_challenge_mix` is new, and `set_challenge`, `review_solution` and `teach_lesson` gained a lens field each:
+ * the learner's choice of when to use real problems and which side quests to
+ * weave in, changed by the coach only when they ask in chat.
  */
 describe("the tool contract, against the pinned reference", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;

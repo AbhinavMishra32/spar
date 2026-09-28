@@ -1,17 +1,19 @@
 import Database from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import type { ActivityReport, AgentUsageRow, CoachNotebookVersion, UsageReport, UsageTotals } from "../shared/api.js";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { LEARNER_NOTEBOOK, type ActivityReport, type AgentUsageRow, type CoachNotebookVersion, type UsageReport, type UsageTotals } from "../shared/api.js";
 import type { ChallengeCodePreview } from "@spar/domain";
 import { challengeFileEntries, codePreview } from "./challengeFiles.js";
 import { foldSubmissions, submissionSummary, type SubmissionContext, type SubmissionRecord, type SubmissionRow } from "../shared/submissions.js";
 import { challengeItemRating, decay as decayRating, updateRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, INITIAL_RATING, INITIAL_VOLATILITY, type Rating } from "@spar/domain";
 import { challengeResult, elapsedDays } from "./rating.js";
 import { ReviewLedger } from "./reviews.js";
-import { DEFAULT_FSRS, DEFAULT_PROBLEM_SOURCES, problemSourcesSchema, type ProblemSource } from "@spar/domain";
+import { DEFAULT_CHALLENGE_MIX, DEFAULT_FSRS, DEFAULT_PROBLEM_SOURCES, challengeMixSchema, problemSourcesSchema, type ChallengeMix, type ProblemSource } from "@spar/domain";
 import { askUserQuestionRequestSchema, languageSchema, challengeSourceSchema, chooseCheckpoint, conceptSlug, conceptStanding, conceptStrength, conceptTitleFromSlug, learnerProfileSchema, seededConcept, savedProblemSchema, sessionCheckpointSchema, CONCEPT_STANDING_LABEL, CONCEPT_TAXONOMY, agentActivityStepSchema, type AbilityDetail, type AbilityHistorySummary, type AbilityStatus, type AgentActivityStep, type AskUserQuestionInput, type AskUserQuestionRequest, type AttemptEvent, type ChallengeHistorySummary, type ChallengeSource, type ConceptDetail, type ConceptEvidence, type ConceptKind, type ConceptRole, type ConceptSummary, type ConceptTag, type Language, type LearnerAbilityState, type LearnerEvidence, type LearnerPattern, type LearnerProfile, type LearnerProgress, type QuestionDesign, type RatingPoint, type SavedProblem, type SessionCheckpoint, type SessionDetail, type SessionSummary, type SparNotice, type TodayRecommendation, type Track, type TrainingTarget } from "@spar/domain";
 
-type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null; problem_sources:string|null };
-const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at,problem_sources";
+type SessionRow = { id:string; track_id:string|null; context:"training"|"baseline"|"review"; title:string; original_goal:string; objective:string; status:SessionSummary["status"]; total_seconds:number; updated_at:string; pinned_at:string|null; archived_at:string|null; problem_sources:string|null; challenge_mix:string|null };
+const SESSION_COLUMNS="id,track_id,context,title,original_goal,objective,status,total_seconds,updated_at,pinned_at,archived_at,problem_sources,challenge_mix";
 type QuestionRow = { id:string; session_id:string; training_target_id:string; ordinal:number; title:string; statement:string; language:Language; kind:"function"|"module"|"repair"|"extension"|"repository"; status:"generating"|"validating"|"playable"|"active"|"completed"|"invalid"|"abandoned"; difficulty:"foundation"|"developing"|"proficient"|"advanced"; design:string; validation_report:string; replaces_question_id:string|null; source_ref:string|null; introduction_reason:string; revision?:number; created_at:string };
 type ConceptRow = { id:string; slug:string; title:string; kind:string; parent_slug:string|null; description:string };
 type TrackRow = { id:string;title:string;goal:string;status:Track["status"];language:string|null;emphasis:string;priorities:string;investigating:string;monitoring:string;created_at:string;updated_at:string };
@@ -109,7 +111,10 @@ export class LocalStore {
   private lastStamp = "";
   /** Insight cards and their spaced-review schedule. See reviews.ts. */
   readonly reviews: ReviewLedger;
-  constructor(path: string) {
+  /** Where user.md is kept on disk, when this store has a home for it. */
+  private readonly userFile: string | null;
+  constructor(path: string, options: { userFile?: string } = {}) {
+    this.userFile = options.userFile ?? null;
     this.db = new Database(path);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
@@ -217,6 +222,11 @@ export class LocalStore {
        than overwritten, so the learner can see what changed and when, and edit it
        themselves. `track_key` is the Track id, or '' for sessions outside one. */
     this.db.exec("CREATE TABLE IF NOT EXISTS coach_notebooks (track_key TEXT NOT NULL, version INTEGER NOT NULL, markdown TEXT NOT NULL, note TEXT NOT NULL DEFAULT '', author TEXT NOT NULL, session_id TEXT, created_at TEXT NOT NULL, PRIMARY KEY (track_key, version));");
+    /* What the coach has done through each lens on a Track: challenges that
+       carried one, lessons taught through one, feedback that read the code
+       through one. The coach reads it every turn, so a lens the learner set is
+       a thread through the whole Track rather than a setting it forgets. */
+    this.db.exec("CREATE TABLE IF NOT EXISTS lens_log (id TEXT PRIMARY KEY, track_key TEXT NOT NULL, session_id TEXT NOT NULL, lens_id TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS lens_log_track ON lens_log(track_key, lens_id, created_at);");
     this.ensureColumn("questions", "introduction_reason", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("questions", "revision", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("ability_documents", "evidence_ids", "TEXT NOT NULL DEFAULT '[]'");
@@ -258,6 +268,9 @@ export class LocalStore {
        every reply written before this column existed look like it had been
        judged. */
     this.ensureColumn("agent_messages", "rating", "TEXT");
+    /* A missing cloud parent can leave many dependent outbox rows behind. Keep
+       them recoverable, but do not retry the same 404 on every sync tick. */
+    this.ensureColumn("sync_outbox", "retry_after", "TEXT");
     this.ensureColumn("sessions", "pinned_at", "TEXT");
     this.ensureColumn("sessions", "archived_at", "TEXT");
     this.ensureColumn("sessions", "track_id", "TEXT");
@@ -265,6 +278,7 @@ export class LocalStore {
     /* Null means every source, which is what a session written before this
        column existed was allowed — and what one nobody narrowed still is. */
     this.ensureColumn("sessions", "problem_sources", "TEXT");
+    this.ensureColumn("sessions", "challenge_mix", "TEXT");
     // Remove the exact prototype fixture; it was never learner data.
     this.db.prepare("DELETE FROM sessions WHERE title = ? AND original_goal = ? AND objective = ?").run("Deep JavaScript Runtime", "Understand JavaScript runtime behavior deeply", "Build reliable reasoning about reference ownership and asynchronous state.");
     // Earlier builds stored a pending question as plain text. Upgrade it once so
@@ -286,7 +300,38 @@ export class LocalStore {
   /** Pinned first, then last touched. Archived rows stay in the list — they are
    *  filed away, not deleted, and their attempts still count toward progress. */
   listSessions(): SessionSummary[] { return (this.db.prepare(`SELECT ${SESSION_COLUMNS} FROM sessions ORDER BY (pinned_at IS NULL), updated_at DESC`).all() as SessionRow[]).map(row => this.toSession(row)); }
-  createSession(goal: string, trackId?: string, problemSources?: ProblemSource[]): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;const resolvedTrack=trackId??this.activeTrack()?.id??this.createTrackRecord(goal,title).id;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,problem_sources) VALUES (?,?,?,?,?,'[]','[]',0,?,?,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now,resolvedTrack,storedProblemSources(problemSources));this.setActiveTrack(resolvedTrack);this.enqueue("session-create",{sessionId,goal,title,trackId:resolvedTrack,createdAt:now});this.queueLearningState();return{sessionId}; }
+  /**
+   * A session whose every challenge is a spaced review. It is an ordinary
+   * session — same coach, same workspace — marked by its context, with the
+   * cards it was opened for kept beside it so the journey can hand the coach
+   * each one's whole history.
+   */
+  createReviewSession(cardIds: string[], trackId?: string, problemSources?: ProblemSource[]): { sessionId: string } {
+    const titles = cardIds.map((id) => this.reviews.card(id)?.title).filter(Boolean) as string[];
+    const goal = `Review ${titles.length} ${titles.length === 1 ? "card" : "cards"}: ${titles.slice(0, 3).join("; ")}${titles.length > 3 ? "; …" : ""}`;
+    const created = this.createSession(goal, trackId, problemSources);
+    const title = `Review · ${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
+    this.db.prepare("UPDATE sessions SET context='review', title=?, objective=? WHERE id=?").run(title, "Reviewing what past solves taught, one card at a time.", created.sessionId);
+    this.setSetting(reviewQueueKey(created.sessionId), cardIds);
+    return created;
+  }
+
+  sessionContext(sessionId: string): SessionRow["context"] {
+    return (this.db.prepare("SELECT context FROM sessions WHERE id=?").get(sessionId) as { context: SessionRow["context"] } | undefined)?.context ?? "training";
+  }
+
+  /** The cards a review session was opened for, in order. */
+  reviewQueue(sessionId: string): string[] {
+    return this.getSetting<string[]>(reviewQueueKey(sessionId), []).filter((id) => typeof id === "string");
+  }
+
+  /** A card the learner or coach adds to a running review session. */
+  addToReviewQueue(sessionId: string, cardId: string) {
+    const queue = this.reviewQueue(sessionId);
+    if (!queue.includes(cardId)) this.setSetting(reviewQueueKey(sessionId), [...queue, cardId]);
+  }
+
+  createSession(goal: string, trackId?: string, problemSources?: ProblemSource[]): { sessionId: string } { const sessionId=randomUUID();const now=new Date().toISOString();const title=goal.length>80?`${goal.slice(0,77)}...`:goal;const resolvedTrack=trackId??this.activeTrack()?.id??this.createTrackRecord(goal,title).id;/* A new session on a Track carries on the mix the last one was left on: it is how the learner wants to learn here, not a property of one sitting. */const inherited=(this.db.prepare("SELECT challenge_mix FROM sessions WHERE track_id=? AND challenge_mix IS NOT NULL ORDER BY updated_at DESC LIMIT 1").get(resolvedTrack) as {challenge_mix:string}|undefined)?.challenge_mix??null;this.db.prepare("INSERT INTO sessions (id,title,original_goal,objective,status,current_focus,questions,total_seconds,created_at,updated_at,track_id,problem_sources,challenge_mix) VALUES (?,?,?,?,?,'[]','[]',0,?,?,?,?,?)").run(sessionId,title,goal,"Investigating your prior evidence and defining the first training target.","planning",now,now,resolvedTrack,storedProblemSources(problemSources),inherited);this.setActiveTrack(resolvedTrack);this.enqueue("session-create",{sessionId,goal,title,trackId:resolvedTrack,createdAt:now});this.queueLearningState();return{sessionId}; }
 
 
   createTrack(goal:string,title?:string,language?:Language|null,problemSources?:ProblemSource[]){const track=this.createTrackRecord(goal,title,language);const session=this.createSession(goal,track.id,problemSources);return{track,sessionId:session.sessionId};}
@@ -345,7 +390,7 @@ export class LocalStore {
     const windowStart=Math.max(0,rows.length-TRANSCRIPT_ACTIVITY_WINDOW);
     const messages=rows.map((m,index)=>{
       if(index>=windowStart)return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,activity:parseActivity(m.activity),activityCount:0,workedMs:m.worked_ms,rating:m.rating};
-      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,rating:m.rating,activity:parseActivity(m.activity).filter((step)=>step.kind==="tool" && step.ok && (["set_challenge","create_question","replace_current_question","assign_practice_problem"].includes(step.tool) || (step.tool==="teach_lesson" && /"lessonId"\s*:\s*"[^"\s]+"/.test(step.output)))),activityCount:countActivity(m.activity),workedMs:m.worked_ms};
+      return{id:m.id,role:m.role,body:m.body,createdAt:m.created_at,rating:m.rating,activity:parseActivity(m.activity).filter((step)=>step.kind==="tool" && step.ok && (["set_challenge","create_question","replace_current_question","assign_practice_problem","reopen_challenge"].includes(step.tool) || (step.tool==="teach_lesson" && /"lessonId"\s*:\s*"[^"\s]+"/.test(step.output)))),activityCount:countActivity(m.activity),workedMs:m.worked_ms};
     });
     return{summary:this.toSession(row),question:active,checkpoint:this.latestCheckpoint(id),pendingLearnerQuestion:this.pendingIntake(id)??null,messages,events};
   }
@@ -376,6 +421,8 @@ export class LocalStore {
    *  knows to re-read what it is showing. */
   editQuestion(questionId:string,design:QuestionDesign,report:unknown){const row=this.db.prepare("SELECT revision FROM questions WHERE id=?").get(questionId) as {revision:number}|undefined;if(!row)throw new Error("No challenge to edit");const revision=Number(row.revision??0)+1;this.db.prepare("UPDATE questions SET title=?,statement=?,design=?,validation_report=?,revision=? WHERE id=?").run(design.title,design.statement,JSON.stringify(design),JSON.stringify(report),revision,questionId);return revision;}
   /** A challenge's stored design and validation report, parsed. */
+  /** The training target a challenge was set under, as `setTrainingTarget` takes it, so the same challenge can be set again under it. */
+  questionTarget(questionId:string):{ability:string;specificGap:string;desiredEvidence:string;avoidTesting:string[]}|null{const row=this.db.prepare("SELECT t.ability_title,t.specific_gap,t.desired_evidence,t.avoid_testing FROM questions q JOIN training_targets t ON t.id=q.training_target_id WHERE q.id=?").get(questionId) as {ability_title:string;specific_gap:string;desired_evidence:string;avoid_testing:string}|undefined;if(!row)return null;let avoidTesting:string[]=[];try{avoidTesting=JSON.parse(row.avoid_testing) as string[];}catch{}return{ability:row.ability_title,specificGap:row.specific_gap,desiredEvidence:row.desired_evidence,avoidTesting};}
   questionDesign(questionId:string):{design:QuestionDesign;report:unknown}|null{const row=this.db.prepare("SELECT design,validation_report FROM questions WHERE id=?").get(questionId) as {design:string;validation_report:string}|undefined;return row?{design:JSON.parse(row.design) as QuestionDesign,report:JSON.parse(row.validation_report) as unknown}:null;}
   replaceQuestion(sessionId:string,design:QuestionDesign,report:unknown,reason:string,concepts?:ConceptTagInput[],source?:ChallengeSource|null,introductionReason=""){const active=this.db.prepare("SELECT q.id,a.id attempt_id FROM questions q JOIN attempts a ON a.question_id=q.id WHERE q.session_id=? AND q.status='active' AND a.status='active' ORDER BY q.ordinal DESC LIMIT 1").get(sessionId) as {id:string;attempt_id:string}|undefined;if(!active)throw new Error("No active challenge exists to replace");this.abandonAttempt(active.attempt_id,reason,"agent","replaced");return this.createQuestion(sessionId,design,report,{replacesQuestionId:active.id,...(concepts?{concepts}:{}),...(source!==undefined?{source}:{}),introductionReason});}
   /** Returns null when the session is gone: a turn can outlive the session the
@@ -644,6 +691,11 @@ export class LocalStore {
   /** Local only, like the rest of how a session is configured on this machine:
    *  the server's session record has no field for it. */
   setSessionProblemSources(sessionId:string,sources:ProblemSource[]){const parsed=problemSourcesSchema.parse(sources);const result=this.db.prepare("UPDATE sessions SET problem_sources=? WHERE id=?").run(storedProblemSources(parsed),sessionId);if(result.changes!==1)throw new Error("Session not found");return parsed;}
+  setSessionChallengeMix(sessionId:string,mix:ChallengeMix){const parsed=challengeMixSchema.parse(mix);const result=this.db.prepare("UPDATE sessions SET challenge_mix=? WHERE id=?").run(storedChallengeMix(parsed),sessionId);if(result.changes!==1)throw new Error("Session not found");return parsed;}
+  logLens(sessionId:string,lensId:string,kind:LensLogKind,note:string){this.db.prepare("INSERT INTO lens_log (id,track_key,session_id,lens_id,kind,note,created_at) VALUES (?,?,?,?,?,?,?)").run(randomUUID(),this.trackIdForSession(sessionId)??"",sessionId,lensId,kind,note.trim().slice(0,400),new Date().toISOString());}
+  /** The latest entries per lens on the session's Track, newest first. */
+  lensLog(sessionId:string,perLens=3):Record<string,LensLogEntry[]>{const rows=this.db.prepare("SELECT lens_id,kind,note,created_at FROM lens_log WHERE track_key=? ORDER BY created_at DESC LIMIT 200").all(this.trackIdForSession(sessionId)??"") as Array<{lens_id:string;kind:LensLogKind;note:string;created_at:string}>;const log:Record<string,LensLogEntry[]>={};for(const row of rows){const list=(log[row.lens_id]??=[]);if(list.length<perLens)list.push({kind:row.kind,note:row.note,at:row.created_at});}return log;}
+  challengeMixForSession(sessionId:string):ChallengeMix{const row=this.db.prepare("SELECT challenge_mix FROM sessions WHERE id=?").get(sessionId) as {challenge_mix:string|null}|undefined;return parseChallengeMix(row?.challenge_mix??null);}
   problemSourcesForSession(sessionId:string):ProblemSource[]{const row=this.db.prepare("SELECT problem_sources FROM sessions WHERE id=?").get(sessionId) as {problem_sources:string|null}|undefined;return parseProblemSources(row?.problem_sources??null);}
   setSessionArchived(sessionId:string,archived:boolean){const archivedAt=archived?new Date().toISOString():null;this.db.prepare("UPDATE sessions SET archived_at=?,pinned_at=CASE WHEN ? THEN NULL ELSE pinned_at END WHERE id=?").run(archivedAt,archived?1:0,sessionId);this.enqueue("session-flags",{sessionId,archivedAt,...(archived?{pinnedAt:null}:{})});}
   /* Permanent, and the learner is told so before it runs. Cascades cover the
@@ -1055,10 +1107,38 @@ export class LocalStore {
   private stamp(){const now=new Date().toISOString();const next=now>this.lastStamp?now:new Date(Date.parse(this.lastStamp)+1).toISOString();this.lastStamp=next;return next;}
 
   /* ---- Coach's notebook ---------------------------------------------------- */
-  readNotebook(trackId:string|null):CoachNotebookVersion|null{const row=this.db.prepare("SELECT * FROM coach_notebooks WHERE track_key=? ORDER BY version DESC LIMIT 1").get(trackId??"") as NotebookRow|undefined;return row?toNotebook(row):null;}
+  readNotebook(trackId:string|null):CoachNotebookVersion|null{if(trackId===LEARNER_NOTEBOOK)this.syncUserFile();return this.latestNotebook(trackId);}
+  private latestNotebook(trackId:string|null):CoachNotebookVersion|null{const row=this.db.prepare("SELECT * FROM coach_notebooks WHERE track_key=? ORDER BY version DESC LIMIT 1").get(trackId??"") as NotebookRow|undefined;return row?toNotebook(row):null;}
   notebookHistory(trackId:string|null,limit=40):CoachNotebookVersion[]{return (this.db.prepare("SELECT * FROM coach_notebooks WHERE track_key=? ORDER BY version DESC LIMIT ?").all(trackId??"",limit) as NotebookRow[]).map(toNotebook);}
   writeNotebook(trackId:string|null,input:{markdown:string;note?:string;author:"coach"|"learner";sessionId?:string|null}):{saved:CoachNotebookVersion;previous:CoachNotebookVersion|null}{
     const previous=this.readNotebook(trackId);
+    const result=this.insertNotebook(trackId,input,previous);
+    if(trackId===LEARNER_NOTEBOOK)this.writeUserFile(result.saved.markdown);
+    return result;
+  }
+  /** Where user.md lives on disk, or null for a store without one. */
+  userFilePath(){return this.userFile;}
+  /* user.md as a real file. The table stays the record — versions, who wrote
+     each one — and the file is its current page, rewritten on every save. An
+     edit made to the file itself comes back in as the learner's own version the
+     next time anything reads it, so the coach sees it on its very next turn. */
+  private syncUserFile(){
+    const file=this.userFile;if(!file)return;
+    try{
+      const latest=this.latestNotebook(LEARNER_NOTEBOOK);
+      if(!existsSync(file)){if(latest)this.writeUserFile(latest.markdown);return;}
+      const markdown=readFileSync(file,"utf8").replace(/\r\n/g,"\n").trim();
+      if(!markdown||markdown===latest?.markdown)return;
+      // Our own write is older than the version it wrote; only a later edit counts.
+      if(latest&&statSync(file).mtimeMs<=Date.parse(latest.createdAt)+1_000)return;
+      this.insertNotebook(LEARNER_NOTEBOOK,{markdown,note:"Edited user.md",author:"learner"},latest);
+    }catch{/* The file is a convenience; the table is the record. */}
+  }
+  private writeUserFile(markdown:string){
+    const file=this.userFile;if(!file)return;
+    try{mkdirSync(dirname(file),{recursive:true});writeFileSync(file,`${markdown}\n`,"utf8");}catch{/* As above. */}
+  }
+  private insertNotebook(trackId:string|null,input:{markdown:string;note?:string;author:"coach"|"learner";sessionId?:string|null},previous:CoachNotebookVersion|null):{saved:CoachNotebookVersion;previous:CoachNotebookVersion|null}{
     const markdown=input.markdown.replace(/\r\n/g,"\n").trim();
     if(previous&&previous.markdown===markdown)return{saved:previous,previous};
     const version=(previous?.version??0)+1;const now=new Date().toISOString();
@@ -1408,7 +1488,19 @@ export class LocalStore {
   setPreferredLanguage(language:Language){const current=this.getProfile();if(!current)return;this.saveProfile({...current,language});}
   getSetting<T>(key:string,fallback:T):T{const row=this.db.prepare("SELECT value FROM settings WHERE key=?").get(key) as {value:string}|undefined;return row?JSON.parse(row.value) as T:fallback;}
   setSetting(key:string,value:unknown){this.db.prepare("INSERT INTO settings VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at").run(key,JSON.stringify(value),new Date().toISOString());}
-  pendingSync(limit=100){return this.db.prepare("SELECT id,kind,payload,attempts FROM sync_outbox ORDER BY created_at,rowid LIMIT ?").all(limit) as Array<{id:string;kind:string;payload:string;attempts:number}>;}
+  pendingSync(limit=100){return this.db.prepare("SELECT id,kind,payload,attempts FROM sync_outbox WHERE retry_after IS NULL OR retry_after <= ? ORDER BY created_at,rowid LIMIT ?").all(new Date().toISOString(),limit) as Array<{id:string;kind:string;payload:string;attempts:number}>;}
+  hasDeferredSync(){return Boolean(this.db.prepare("SELECT 1 FROM sync_outbox WHERE retry_after > ? LIMIT 1").get(new Date().toISOString()));}
+  isSyncDeferred(id:string){return Boolean(this.db.prepare("SELECT 1 FROM sync_outbox WHERE id=? AND retry_after > ?").get(id,new Date().toISOString()));}
+  deferSync(id:string,until:string){this.db.prepare("UPDATE sync_outbox SET retry_after=?,attempts=attempts+1 WHERE id=?").run(until,id);}
+  deferSyncMissingSession(sessionId:string,until:string){
+    this.db.prepare(`UPDATE sync_outbox SET retry_after=?,attempts=attempts+1 WHERE kind<>'session-create' AND (
+      json_extract(payload,'$.sessionId')=? OR
+      json_extract(payload,'$.attemptId') IN (SELECT id FROM attempts WHERE session_id=?) OR
+      json_extract(payload,'$.runId') IN (SELECT json_extract(payload,'$.id') FROM sync_outbox WHERE kind='agent-run-start' AND json_extract(payload,'$.sessionId')=?) OR
+      (kind='agent-run-finish' AND json_extract(payload,'$.id') IN (SELECT json_extract(payload,'$.id') FROM sync_outbox WHERE kind='agent-run-start' AND json_extract(payload,'$.sessionId')=?)))`).run(until,sessionId,sessionId,sessionId,sessionId);
+  }
+  deferSyncMissingAttempt(attemptId:string,until:string){this.db.prepare("UPDATE sync_outbox SET retry_after=?,attempts=attempts+1 WHERE json_extract(payload,'$.attemptId')=?").run(until,attemptId);}
+  deferSyncMissingRun(runId:string,until:string){this.db.prepare("UPDATE sync_outbox SET retry_after=?,attempts=attempts+1 WHERE (kind='agent-trace-event' AND json_extract(payload,'$.runId')=?) OR ((kind='agent-run-start' OR kind='agent-run-finish') AND json_extract(payload,'$.id')=?)").run(until,runId,runId);}
   acknowledgeSync(ids:string[]){const remove=this.db.prepare("DELETE FROM sync_outbox WHERE id=?");this.db.transaction(()=>ids.forEach(id=>remove.run(id)))();}
   markSyncFailed(id:string){this.db.prepare("UPDATE sync_outbox SET attempts=attempts+1 WHERE id=?").run(id);}
   /** Agent telemetry uses the same durable, authenticated outbox as learner
@@ -1775,7 +1867,7 @@ export class LocalStore {
      uploading the account to itself. */
   private restoring=false;
   private enqueue(kind:string,payload:unknown){if(this.restoring)return;this.db.prepare("INSERT INTO sync_outbox (id,kind,payload,created_at) VALUES (?,?,?,?)").run(randomUUID(),kind,JSON.stringify(payload),new Date().toISOString());}
-  private toSession(row:SessionRow):SessionSummary{const questions=this.db.prepare("SELECT id,title,status FROM questions WHERE session_id=? ORDER BY ordinal").all(row.id) as Array<{id:string;title:string;status:SessionSummary["questionTitles"][number]["status"]}>;const active=questions.find(q=>q.status==="active");const focus=(this.db.prepare("SELECT ability_title FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 3").all(row.id) as Array<{ability_title:string}>).map(v=>v.ability_title);return{id:row.id,trackId:row.track_id,context:row.context,title:row.title,originalGoal:row.original_goal,objective:row.objective,status:row.status,currentFocus:focus,completedQuestions:questions.filter(q=>q.status==="completed").length,activeQuestion:active?{id:active.id,title:active.title,ordinal:questions.indexOf(active)+1}:null,questionTitles:questions,totalSeconds:row.total_seconds,updatedAt:row.updated_at,pinnedAt:row.pinned_at,archivedAt:row.archived_at,problemSources:parseProblemSources(row.problem_sources)};}
+  private toSession(row:SessionRow):SessionSummary{const questions=this.db.prepare("SELECT id,title,status FROM questions WHERE session_id=? ORDER BY ordinal").all(row.id) as Array<{id:string;title:string;status:SessionSummary["questionTitles"][number]["status"]}>;const active=questions.find(q=>q.status==="active");const focus=(this.db.prepare("SELECT ability_title FROM training_targets WHERE session_id=? ORDER BY created_at DESC LIMIT 3").all(row.id) as Array<{ability_title:string}>).map(v=>v.ability_title);return{id:row.id,trackId:row.track_id,context:row.context,title:row.title,originalGoal:row.original_goal,objective:row.objective,status:row.status,currentFocus:focus,completedQuestions:questions.filter(q=>q.status==="completed").length,activeQuestion:active?{id:active.id,title:active.title,ordinal:questions.indexOf(active)+1}:null,questionTitles:questions,totalSeconds:row.total_seconds,updatedAt:row.updated_at,pinnedAt:row.pinned_at,archivedAt:row.archived_at,problemSources:parseProblemSources(row.problem_sources),challengeMix:parseChallengeMix(row.challenge_mix)};}
 }
 
 /** A concept kind the agent named, or the safest default. "engineering" is that
@@ -1788,6 +1880,8 @@ function trackTitle(goal:string){const clean=goal.replace(/^(i want to|i'd like 
 function firstNarrativeLine(markdown:string){return markdown.split("\n").map((line)=>line.replace(/^#+\s*/,"").trim()).find((line)=>line.length>8)??"Spar is still forming a reliable belief.";}
 type NotebookRow={track_key:string;version:number;markdown:string;note:string;author:string;session_id:string|null;created_at:string};
 function toNotebook(row:NotebookRow):CoachNotebookVersion{return{trackId:row.track_key||null,version:row.version,markdown:row.markdown,note:row.note,author:row.author==="learner"?"learner":"coach",sessionId:row.session_id,createdAt:row.created_at};}
+export type LensLogKind="challenge"|"lesson"|"feedback";
+export type LensLogEntry={kind:LensLogKind;note:string;at:string};
 export type JourneyChallenge={id:string;title:string;sessionId:string;createdAt:string;source:"spar"|"leetcode"|"codeforces";difficulty:string;itemRating:number;language:string;outcome:string|null;assistance:string;elapsedMs:number|null;testRuns:number;passedCases:number|null;totalCases:number|null;replacesTitle:string|null;replacedByTitle:string|null;concepts:string[];why:string;task:string;requirements:string[];statement:string;starter:{path:string;text:string}|null};
 type AbilityRow={id:string;track_id:string|null;title:string;markdown:string;version:number;status:AbilityStatus;updated_at:string;evidence_ids:string;summary:string;practice:string;earned_at:string|null};
 
@@ -1867,3 +1961,16 @@ function parseProblemSources(value: string | null): ProblemSource[] {
   if (!value) return [...DEFAULT_PROBLEM_SOURCES];
   try { return problemSourcesSchema.parse(JSON.parse(value)); } catch { return [...DEFAULT_PROBLEM_SOURCES]; }
 }
+
+/** The default mix is stored as null, like the default sources. */
+function storedChallengeMix(mix: ChallengeMix): string | null {
+  const parsed = challengeMixSchema.parse(mix);
+  return JSON.stringify(parsed) === JSON.stringify(DEFAULT_CHALLENGE_MIX) ? null : JSON.stringify(parsed);
+}
+
+function parseChallengeMix(value: string | null): ChallengeMix {
+  if (!value) return structuredClone(DEFAULT_CHALLENGE_MIX);
+  try { return challengeMixSchema.parse(JSON.parse(value)); } catch { return structuredClone(DEFAULT_CHALLENGE_MIX); }
+}
+
+function reviewQueueKey(sessionId: string) { return `review-session-queue:${sessionId}`; }

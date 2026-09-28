@@ -5,6 +5,7 @@ import { LEARNER_NOTEBOOK, type CoachNotebookVersion } from "../shared/api.js";
 import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 import { sessionSourcesSection, skillsSection } from "../workers/sessionContext.js";
+import { challengeMixInstructions } from "../shared/challengeMix.js";
 
 /**
  * Everything the coach is told before a turn, in one place.
@@ -91,13 +92,13 @@ export function journeyDocument(input: TurnPayloadInput): string {
 
   /* First, because they are the coach's own running account of this learner:
      everything below is the record, and this is what the record means. The
-     learner notebook is about the person and every Track reads it; the Track
+     user.md is about the person and every Track reads it; the Track
      notebook is about their progress here. */
   const written = (notebook: CoachNotebookVersion) => `v${notebook.version}, ${notebook.author === "learner" ? "last edited by the learner" : "last written by you"} ${ago(notebook.createdAt)}`;
   const learnerNotebook = store.readNotebook(LEARNER_NOTEBOOK);
   sections.push(learnerNotebook
-    ? `## Learner notebook — read this first (${written(learnerNotebook)})\n${learnerNotebook.markdown}`
-    : "## Learner notebook — read this first\n_Empty. Start it with update_notebook (notebook \"learner\") this turn: who they are, how they like to be taught, and anything you already know about them that is true beyond this Track._");
+    ? `## user.md — who they are, on every Track; read this first (${written(learnerNotebook)})\n${learnerNotebook.markdown}`
+    : "## user.md — who they are, on every Track; read this first\n_Empty. Start it with update_notebook (notebook \"user\") this turn: who they are, what they are working towards, how they like to be taught, and anything you already know about them that is true beyond this Track._");
   const notebook = store.readNotebook(trackId);
   sections.push(notebook
     ? `## Track notebook (${written(notebook)})\n${notebook.markdown}`
@@ -118,6 +119,7 @@ export function journeyDocument(input: TurnPayloadInput): string {
     sources ? `Problem sources: ${sources}` : "",
     practiceLine(input.practiceSummary),
   ].filter(Boolean).join("\n"));
+
 
   const journey = store.journey(trackId, 14);
   if (!journey.challenges.length) {
@@ -158,8 +160,10 @@ export function journeyDocument(input: TurnPayloadInput): string {
   const lessons = store.recentLessons(6, trackId);
   if (lessons.length) sections.push(["## Lessons you have taught", ...lessons.map((entry) => `- [[lesson:${entry.id}|${entry.title}]] — ${entry.summary} (${ago(entry.taughtAt)})`)].join("\n"));
 
-  const reviews = reviewLines(store);
-  if (reviews) sections.push(reviews);
+  /* Reviews live in review sessions only. A training session is about the
+     next step, and a due card in its journey is how reviews used to leak into
+     one the learner never asked to spend on review. */
+  if (session.summary.context === "review") sections.push(reviewSessionSection(store, sessionId));
 
   const intake = store.freshIntakeAnswer(sessionId);
   if (intake) sections.push(`## The learner's answer to your question\nYou asked: ${intake.question}\nThey answered: ${intake.answer}`);
@@ -171,6 +175,12 @@ export function journeyDocument(input: TurnPayloadInput): string {
 
   const skills = skillsSection(input.skills ?? []);
   if (skills) sections.push(`## Skills\n${skills}`);
+  /* The learner's standing instructions, set from the workspace's settings
+     menu or by set_challenge_mix. Last before the turn's facts on purpose: in
+     the middle of a long journey they read as background and were skimmed; here
+     they are the frame the turn is answered in. Absent at the defaults. */
+  const mix = challengeMixInstructions(session.summary.challengeMix, session.summary.problemSources, language, store.lensLog(sessionId));
+  if (mix) sections.push(`## Coaching settings (the learner's, for every turn)\n${mix}`);
   sections.push(`## Available this turn\n- Web search: ${input.webSearch ? "yes" : "no"}\n- Provider problems: ${input.practiceSource ? "yes" : "no"}\n- Spar-written challenges: ${session.summary.problemSources.includes("spar") ? "yes" : "no"}`);
 
   return sections.join("\n\n");
@@ -213,16 +223,55 @@ function practiceLine(summary: unknown): string {
   return [providers.length ? `Providers: ${providers.join("; ")}.` : "", assigned.length ? `Already assigned from providers: ${assigned.join(", ")}.` : ""].filter(Boolean).join("\n");
 }
 
-function reviewLines(store: LocalStore): string {
-  const due = store.reviews.due(new Date(), 6);
-  const lapsing = store.reviews.list().filter((card) => card.lapses >= 2).slice(0, 4);
-  if (!due.length && !lapsing.length) return "";
-  const line = (card: (typeof due)[number]) => `- ${card.title} (from "${card.questionTitle}"; ${card.concepts.map((tag) => tag.slug).join(", ")}; recall chance ${Math.round(card.retrievability * 100)}%, ${card.lapses} lapses)`;
-  return [
-    "## Spaced review",
-    due.length ? `Due now (${store.reviews.overview().dueCount}):\n${due.map(line).join("\n")}` : "",
-    lapsing.length ? `Repeatedly forgotten — treat as gaps, not solved topics:\n${lapsing.map(line).join("\n")}` : "",
-  ].filter(Boolean).join("\n");
+const RATING_WORD: Record<number, string> = { 1: "again", 2: "hard", 3: "good", 4: "easy" };
+
+/**
+ * A review session's cards, each with everything there is to know about it.
+ *
+ * Nothing here decides anything: which card next, what to set, how it went
+ * are the coach's. This is the dossier it decides from — the idea, how the
+ * learner first got it, where they slipped, what every later review found,
+ * and the ids of the work behind each, so the code is one read away.
+ */
+function reviewSessionSection(store: LocalStore, sessionId: string): string {
+  const now = Date.now();
+  const queue = store.reviewQueue(sessionId);
+  const open = store.readSession(sessionId)?.question;
+  const current = open && !open.attemptCompletedAt ? store.reviews.reviewOfChallenge(open.id) : null;
+  const sessionChallenges = new Set((store.readSession(sessionId)?.summary.questionTitles ?? []).map((entry) => entry.id));
+  const lines = [
+    "## Review session",
+    "The learner opened this session to review what earlier solves taught: the cards below, in the order they were queued; the order you take them in is yours. Challenges here are reviews of these cards, or practice going deeper on a weak spot a review exposed.",
+    current ? `The open challenge ${current.purpose === "deeper" ? "is practice going deeper on" : "reviews"} card ${current.card.id} ("${current.card.title}")${current.focus ? `, ${current.purpose === "deeper" ? "aimed at" : "watching for"}: ${current.focus}` : ""}.${current.learnerNote ? ` Above the problem you told them: "${current.learnerNote}"` : ""}` : "",
+  ];
+  if (!queue.length) lines.push("No cards were queued. Ask the learner what they want to review, or pick from their weakest cards with search_record.");
+  queue.forEach((cardId, index) => {
+    const detail = store.reviews.detail(cardId);
+    if (!detail) return;
+    const { card, logs } = detail;
+    const links = detail.challenges ?? [];
+    const here = logs.filter((log) => log.source === "coach" && log.challengeId && sessionChallenges.has(log.challengeId)).at(-1);
+    const status = here ? `reviewed here: ${RATING_WORD[here.rating]}` : current?.card.id === card.id ? "being reviewed now" : "not reviewed yet";
+    const dueDays = Math.round((Date.parse(card.dueAt) - now) / 86_400_000);
+    const submissions = store.submissionsForQuestion(card.questionId);
+    const past = logs.filter((log) => log.source !== "implicit").reverse().slice(0, 6);
+    lines.push([
+      `### ${index + 1}. ${card.title} — card ${card.id} (${status})`,
+      `From "${card.questionTitle}" (challenge ${card.questionId}${card.attemptId ? `, solved in attempt ${card.attemptId}` : ""}). Concepts: ${card.concepts.map((tag) => tag.slug).join(", ") || "none"}.`,
+      `Memory: recall chance ${Math.round(card.retrievability * 100)}%, ${card.suspended ? "paused" : dueDays < 0 ? `overdue ${-dueDays} days` : dueDays === 0 ? "due today" : `due in ${dueDays} days`}, ${Math.max(0, card.reps - 1)} reviews since the solve, ${card.lapses} forgotten. Rehearses: ${card.targets.join(", ")}.`,
+      `Cue: ${card.trigger}`,
+      `The idea: ${card.insight}`,
+      card.invariant ? `Why it holds: ${card.invariant}` : "",
+      `How it clicked on the solve (${card.independence}): ${card.click.summary}`,
+      card.pitfalls.length ? `Slips on the solve: ${card.pitfalls.map((pitfall) => `${pitfall.mistake} → ${pitfall.fix}`).join("; ")}` : "",
+      card.remember ? `What they said they want to remember: ${card.remember}` : "",
+      card.coachNote ? `Your note on this card: ${card.coachNote}` : "",
+      past.length ? `Reviews, newest first:\n${past.map((log) => `- ${ago(log.reviewedAt)} · ${log.source}${log.format && log.source === "recall" ? ` (${log.format})` : ""} · ${RATING_WORD[log.rating]}${log.feedback ? ` · ${log.feedback.replace(/\s+/g, " ").slice(0, 300)}` : ""}${log.held?.length ? ` · held: ${log.held.join("; ")}` : ""}${log.missed?.length ? ` · missed: ${log.missed.join("; ")}` : ""}${log.submissionId ? ` · submission ${log.submissionId}` : log.attemptId ? ` · attempt ${log.attemptId}` : ""}`).join("\n")}` : "",
+      submissions.length ? `Submissions on the original challenge: ${submissions.length}, the last ${submissions.at(-1)!.outcome} (${submissions.at(-1)!.passedCases}/${submissions.at(-1)!.totalCases}), id ${submissions.at(-1)!.id}.` : "",
+      links.length ? `Challenges set for this card: ${links.map((link) => `"${link.challengeTitle}" (${link.purpose === "deeper" ? "going deeper" : "review"}, ${link.challengeId}, ${link.outcome}${link.purpose === "review" ? link.reviewed ? ", judged" : ", not judged" : ""})`).join("; ")}` : "",
+    ].filter(Boolean).join("\n"));
+  });
+  return lines.filter(Boolean).join("\n\n");
 }
 
 function minutes(ms: number): string {

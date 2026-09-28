@@ -121,7 +121,7 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
             onChange={setScope}
             options={[
               { value: "track", label: "This Track" },
-              { value: "learner", label: "About you" },
+              { value: "learner", label: "user.md" },
             ]}
             value={scope}
           />

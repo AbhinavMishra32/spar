@@ -750,3 +750,65 @@ describe("edit_challenge", () => {
     }
   });
 });
+
+describe("review sessions", () => {
+  const card = {
+    title: "Slide the window by one", trigger: "Aggregate over every block of the same length", insight: "Adjacent windows share all but one item, so update the sum instead of recomputing it.",
+    click: { summary: "Moved the comparison outside the first-window loop." }, independence: "independent", pitfalls: [],
+    rubric: ["add the incoming item", "drop the outgoing item"], transfer: ["Average of every block of k"], firstGrade: "hard",
+  };
+  const solveAndFile = async (store: LocalStore) => {
+    const { sessionId } = store.createSession("Practise windows");
+    store.setTrainingTarget(sessionId, { ability: "Windows", specificGap: "Sliding", desiredEvidence: "Linear pass", avoidTesting: [] });
+    const solved = store.createQuestion(sessionId, design("Window sums"), { valid: true });
+    store.appendNextEvent({ id: randomUUID(), attemptId: solved.attemptId, type: "attempt_completed", occurredAt: new Date().toISOString(), payload: { outcome: "passed" }, source: "system", schemaVersion: 1 });
+    const filed = await executeTrainingTool("record_insight", { ...card, attemptId: solved.attemptId }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { cardId: string };
+    return { sessionId, solved, cardId: filed.cardId };
+  };
+
+  it("sets a card's own challenge again with fresh starter code and the coach's note to the learner", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { solved, cardId } = await solveAndFile(store);
+      const review = store.createReviewSession([cardId]);
+      const written: Array<Record<string, string>> = [];
+      const workspaces = { ...workspaceStub(), replaceAll: async (_id: string, files: Record<string, string>) => { written.push(files); } } as unknown as WorkspaceService;
+
+      const result = await executeTrainingTool("reopen_challenge", {
+        challengeId: solved.id, why: "The card rehearses this exact problem.",
+        review: { cardId, focus: "Compares only full windows", forLearner: "Last time partial windows were compared. Make every compared sum a full window." },
+      }, review.sessionId, store, workspaces, {} as UtilityClient) as { status: string; reopened: string; question: { id: string }; title: string };
+
+      expect(result.status).toBe("playable");
+      expect(result.reopened).toBe(solved.id);
+      expect(result.title).toBe("Window sums");
+      expect(written[0]).toEqual({ "src/count.js": "", "test/count.test.js": "" });
+      const link = store.reviews.reviewOfChallenge(result.question.id);
+      expect(link).toMatchObject({ card: { id: cardId }, focus: "Compares only full windows", learnerNote: expect.stringContaining("full window"), purpose: "review" });
+
+      const again = await executeTrainingTool("reopen_challenge", { challengeId: solved.id, why: "Once more." }, review.sessionId, store, workspaces, {} as UtilityClient) as { status: string; report: { checks: Array<{ name: string }> } };
+      expect(again.status).toBe("invalid");
+      expect(again.report.checks[0]?.name).toBe("session lifecycle");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("files the coach's judgement only in a review session", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId, cardId } = await solveAndFile(store);
+      const refused = await executeTrainingTool("file_review", { cardId, rating: "good", summary: "Held the window this time." }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string };
+      expect(refused.status).toBe("invalid");
+
+      const review = store.createReviewSession([cardId]);
+      const filed = await executeTrainingTool("file_review", { cardId, rating: "hard", summary: "Passed, but compared a partial window again first.", missed: ["compares before the window is full"], note: "Press on the first window." }, review.sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status?: string };
+      expect(filed.status).not.toBe("invalid");
+      const detail = store.reviews.detail(cardId);
+      expect(detail?.card.coachNote).toBe("Press on the first window.");
+      expect(detail?.logs.at(-1)).toMatchObject({ source: "coach", rating: 2, missed: ["compares before the window is full"] });
+    } finally {
+      store.close();
+    }
+  });
+});

@@ -45,6 +45,13 @@ export const questionDesignSchema = z.object({
    * can decide.
    */
   solutionRequirements: z.array(z.string().min(4).max(160)).max(4).optional(),
+  /**
+   * The lens this challenge drills, when the learner set one to Drill: which
+   * one, and the side quest it carries. Kept with the challenge so the journey
+   * can show which lens each problem served and the host can hold the coach to
+   * rotating through them.
+   */
+  lens: z.object({ id: z.string().min(1).max(60), sideQuest: z.string().min(10).max(600) }).optional(),
   starterFiles: fileMapSchema,
   referenceFiles: fileMapSchema,
   visibleTests: fileMapSchema,

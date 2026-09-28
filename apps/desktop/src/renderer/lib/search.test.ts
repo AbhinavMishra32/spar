@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ChallengeHistorySummary, ConceptSummary, SessionSummary } from "@spar/domain";
+import { DEFAULT_CHALLENGE_MIX, type ChallengeHistorySummary, type ConceptSummary, type SessionSummary } from "@spar/domain";
 import { matchRank, searchEverything } from "./search";
 
 function session(over: Partial<SessionSummary> & { id: string; title: string }): SessionSummary {
   return {
+    challengeMix: DEFAULT_CHALLENGE_MIX,
     originalGoal: "",
     objective: "",
     context: "training",

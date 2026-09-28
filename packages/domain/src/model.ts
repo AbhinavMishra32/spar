@@ -103,10 +103,59 @@ export const problemSourcesSchema = z.array(problemSourceSchema).min(1).max(PROB
   .transform((sources) => PROBLEM_SOURCES.filter((source) => sources.includes(source)));
 export const DEFAULT_PROBLEM_SOURCES: ProblemSource[] = [...PROBLEM_SOURCES];
 
+/**
+ * When the coach writes a Spar problem rather than assigning a real one, and
+ * what else it teaches along the way.
+ *
+ * `sparUse` only applies when the session allows Spar and at least one provider;
+ * "never" and "always" are the sources themselves (Spar off, or Spar alone), so
+ * they are not stored here and cannot disagree with them.
+ *
+ * `lenses` are the areas the coach goes deeper on — the language's idioms,
+ * building a TreeNode by hand, complexity, or one the learner named — each at a
+ * depth:
+ * mention it in feedback, teach it when it comes up, or drill it with Spar
+ * problems written to force it. A lens that is off is simply absent. Its
+ * `example` is the coach's, lifted from the learner's code, so what a lens
+ * does is shown in their own terms rather than from a table per language.
+ * `suggestions` are lenses the coach proposed from what it saw in their code,
+ * waiting for the learner; `dismissed` are ones they turned down, so the coach
+ * does not offer them again. `instructions` is the learner's own addition to
+ * the coach's instructions, in their words.
+ */
+export const SPAR_USES = ["struggling", "less", "balanced", "more"] as const;
+export const sparUseSchema = z.enum(SPAR_USES);
+export type SparUse = z.infer<typeof sparUseSchema>;
+export const LENS_DEPTHS = ["mention", "teach", "drill"] as const;
+export const lensDepthSchema = z.enum(LENS_DEPTHS);
+export type LensDepth = z.infer<typeof lensDepthSchema>;
+/** A catalogue id, or `custom:<slug>` for one the learner named — which then
+ *  carries its own label. */
+const lensId = z.string().min(1).max(60);
+/** What a lens changes, taken from the learner's own code by the coach. */
+export const lensExampleSchema = z.object({ before: z.string().trim().max(80).optional(), after: z.string().trim().min(1).max(80) });
+export type LensExample = z.infer<typeof lensExampleSchema>;
+export const lensSchema = z.object({ id: lensId, depth: lensDepthSchema, label: z.string().trim().min(1).max(60).optional(), example: lensExampleSchema.optional() });
+export type Lens = z.infer<typeof lensSchema>;
+export const lensSuggestionSchema = z.object({ id: lensId, label: z.string().trim().min(1).max(60).optional(), reason: z.string().trim().min(3).max(240), example: lensExampleSchema.optional() });
+export type LensSuggestion = z.infer<typeof lensSuggestionSchema>;
+export const challengeMixSchema = z.object({
+  sparUse: sparUseSchema.default("balanced"),
+  /** Unknown catalogue ids are kept and ignored, so a catalogue change never
+   *  throws away a learner's choice. */
+  lenses: z.array(lensSchema).max(24).default([]),
+  suggestions: z.array(lensSuggestionSchema).max(6).default([]),
+  dismissed: z.array(lensId).max(60).default([]),
+  instructions: z.string().max(2_000).default(""),
+});
+export type ChallengeMix = z.infer<typeof challengeMixSchema>;
+export const DEFAULT_CHALLENGE_MIX: ChallengeMix = challengeMixSchema.parse({});
+
 export const sessionSummarySchema = z.object({
   id,
   trackId: id.nullable().optional(),
-  context: z.enum(["training", "baseline"]).default("training"),
+  /** "review" is a session whose every challenge is a spaced review. */
+  context: z.enum(["training", "baseline", "review"]).default("training"),
   title: z.string().min(1),
   originalGoal: z.string().min(1),
   objective: z.string(),
@@ -123,6 +172,8 @@ export const sessionSummarySchema = z.object({
   archivedAt: isoDate.nullable(),
   /** Where this session's challenges may come from — see `problemSourcesSchema`. */
   problemSources: problemSourcesSchema.default(DEFAULT_PROBLEM_SOURCES),
+  /** How the coach balances those sources — see `challengeMixSchema`. */
+  challengeMix: challengeMixSchema.default(DEFAULT_CHALLENGE_MIX),
 });
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 

@@ -33,6 +33,8 @@ const conceptTagInputSchema=z.object({
 });
 const questionInputSchema=z.object({ concepts:z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, most specific first. Exactly one entry has role primary: the concept the challenge is aimed at."),title:z.string().min(3).describe("A concise, professional problem title naming the operation or result; never an agent action, lesson, file, or bug category."),language:languageSchema,kind:z.enum(["function","module","repair","extension","repository"]),difficulty:z.enum(["foundation","developing","proficient","advanced"]).describe("How hard to write it, as an absolute price rather than a feeling: foundation is rated 900, developing 1200, proficient 1500, advanced 1800, on the same scale as the learner's own rating. Chosen by the coach from the learner's rating and the step it wants."),requiresComplexityAnalysis:z.boolean().describe("Choose true only when asymptotic time and auxiliary-space reasoning is part of what this challenge trains: algorithms, data structures, or scaling-sensitive implementation. Choose false for syntax, API use, debugging, UI, refactoring, repository mechanics, and semantic behavior where Big-O adds no useful evidence."),statement:z.string().min(30).describe("The complete learner-facing problem page, in this order and nothing else: one paragraph saying what to implement; one line per rule it must satisfy; then `Examples`, and under it each example as `Input:` / `Output:` / `Explanation:` lines, the explanation being why that answer is the answer; then `Constraints`. Do not write a heading over the description or number the examples yourself — the app draws that hierarchy and your own headings and numbering appear on top of it. No agent commentary, selection rationale, validation notes, or hidden-test details."),starterFiles:z.record(z.string()),referenceFiles:z.record(z.string()),visibleTests:z.record(z.string()).describe("The contract the learner reads. At least four cases, each named and written by hand: the ordinary one and each boundary. Every known-incorrect implementation must pass all of them, so the case that exposes the plausible wrong idea belongs in hiddenTests, not here. No generated sweep here."),hiddenTests:z.record(z.string()).describe("The grader. It must run at least twenty-four cases, which means a generated sweep and not a longer list typed out: loop over inputs from a seeded pseudo-random generator, compute each expected answer with a brute-force oracle written inside the test file itself, and emit one verdict line per case whose name contains the actual input. Keep your targeted cases for the known misconceptions alongside it. On failure every case must print its input, expected and actual — the learner cannot see this file, so a failure that does not say what it ran leaves them guessing."),knownIncorrectFiles:z.array(z.record(z.string())).min(1).describe("Plausible wrong implementations at the reference's own path. Each must be genuinely wrong: it returns a different answer from the reference on at least one input the statement allows, which a hidden case contains, and it passes every visible case. A change that cannot alter any allowed answer is not a misconception, for example a shrinking `while` turned into `if` in a sliding window over non-negative values. The host executes each one beside the reference and replaces one that never disagrees."),runCommand:z.string().min(1).optional(),accidentalDifficulty:z.array(z.string()).max(3).default([]),expectedFailureSignatures:z.array(z.string()).default([]).describe("Observable ways the known-incorrect implementations fail."),solutionRequirements:z.array(z.string().min(4).max(400)).max(4).optional().describe("How the solution must be written, when the point of the challenge depends on it: \"linear time, one pass\", \"recursive\", \"no built-in sort\". Shown to the learner with the problem, and checked by review_solution after the tests pass — a solution that passes but ignores these is sent back. State a requirement only when a different approach would defeat the exercise; a challenge with nothing to insist on omits this entirely.") });
 const authoredQuestionInputSchema = questionInputSchema.extend({
+  lens: z.object({ id: z.string().min(1).max(60), sideQuest: z.string().min(10).max(600) }).optional().describe("Carried from set_challenge: the drill lens this challenge carries."),
+  review: z.object({ cardId: z.string().uuid(), focus: z.string().max(1_500), purpose: z.enum(["review", "deeper"]).optional() }).optional().describe("Carried from set_challenge: the review card this challenge reviews."),
   why: z.string().min(10).max(1_500).describe("Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."),
   runCommand: z.string().min(1).optional().describe("A descriptive command for the challenge. The host uses its fixed language runner for validation and learner tests; this value cannot select pytest or change execution. Python test files execute directly with python3 and must call any defined test functions themselves."),
   hiddenTests: z.record(z.string()).describe("The unseen grading contract. For a function, execute at least twenty-four cases, preferably a seeded sweep checked against a simple oracle. For a module, execute at least twelve cases. For a repair, extension, or repository task, execute at least eight meaningful scenarios covering the defect, boundaries, and interactions. Emit one verdict per case and show input, expected, and actual on failure. Choose the tests that prove this task, rather than padding case counts."),
@@ -60,6 +62,18 @@ const abilityClaimShape = {
 } as const;
 
 /**
+ * A challenge set as a spaced review of a card. The link is what lets the host
+ * tell the coach, when the attempt ends, which card it was judging and what it
+ * meant to watch; the judgement itself is the coach's, filed with file_review.
+ */
+const reviewLinkSchema = z.object({
+  cardId: z.string().uuid().describe("The review card this challenge is about, from the journey's Review session section or read_record kind review."),
+  purpose: z.enum(["review", "deeper"]).default("review").describe("review: this attempt is the card's review, judged with file_review when it ends. deeper: practice beyond the review, aimed at the weak spot a review exposed — the learner chose to dig in, or you judged they need it before moving on. A deeper challenge is practice, not a review; file_review only if its evidence changes what you believe about the card."),
+  focus: z.string().min(8).max(1_500).describe("Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."),
+  forLearner: z.string().min(8).max(600).optional().describe("Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."),
+});
+
+/**
  * What the coach hands the builder.
  *
  * The coach owns the teaching decision — what this challenge is for, what is new
@@ -83,15 +97,27 @@ export const setChallengeInputSchema = z.object({
   kind: z.enum(["function", "module", "repair", "extension", "repository"]),
   difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]).describe("An absolute price on the learner's rating scale: foundation 900, developing 1200, proficient 1500, advanced 1800."),
   concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, most specific first. Exactly one entry has role primary."),
-  requiresComplexityAnalysis: z.boolean().describe("True only when asymptotic time and space reasoning is part of what this trains."),
+  requiresComplexityAnalysis: z.boolean().describe("Whether the learner states the time and space complexity of their solution after it passes. True for any algorithm or data-structure problem — trees, graphs, arrays, recursion, searching, DP — even when complexity is not the idea being taught: saying what their own code costs is part of solving one. False only for syntax, API use, debugging, UI, refactoring, repository mechanics and similar work where Big-O says nothing."),
   solutionRequirements: z.array(z.string().min(4).max(400)).max(4).optional().describe("How the solution must be written when a different approach would defeat the exercise (\"recursive\", \"one pass\"). Shown to the learner and checked by review_solution. Omit when there is nothing to insist on."),
   skills: z.array(z.string().min(1).max(48)).max(3).optional().describe("Skills from the skills list the builder should follow for this challenge, for example one about figures in statements."),
   why: z.string().min(10).max(1_500).describe("Why this challenge for this learner now. Stored with the challenge for later turns."),
   reason: z.string().min(3).max(1_500).optional().describe("For revise or replace: what the learner asked for, or why the open challenge has to change."),
+  lens: z.object({
+    id: z.string().min(1).max(60).describe("A lens the Coaching settings list at drill, by its id."),
+    sideQuest: z.string().min(10).max(600).describe("What this problem makes them practise through that lens, built into the task — a requirement, part of the starter, or the shape of the data — not a footnote. The builder names it in one line of the statement."),
+  }).optional().describe("Required when the Coaching settings list a lens at drill: the one this problem carries. Rotate between them; the journey shows which lens each challenge drilled. The host refuses a brief that leaves it out, unless skipLens says why."),
+  skipLens: z.string().min(10).max(400).optional().describe("Instead of lens, only when a side quest would get in the way of this problem — a repair aimed at a struggle, say. Never twice in a row: the host refuses a second skip."),
+  review: reviewLinkSchema.optional().describe("When this challenge is a spaced review of a card: a fresh problem that needs the card's idea, aimed at what it and its past reviews say they missed. The attempt is then linked to the card, and when it ends you judge it with file_review."),
 });
 export type SetChallengeInput = z.infer<typeof setChallengeInputSchema>;
 
 const RECORD_KINDS = ["abilities", "patterns", "attempts", "challenges", "concepts", "lessons"] as const;
+
+/** A lens's before and after, taken from the learner's own code. */
+const LENS_EXAMPLE = z.object({
+  before: z.string().min(1).max(80).optional().describe("A short line from their code, as they wrote it."),
+  after: z.string().min(1).max(80).describe("The same line through the lens."),
+});
 
 /**
  * The tools the coach is offered, the same set on every turn of a session.
@@ -102,15 +128,16 @@ const RECORD_KINDS = ["abilities", "patterns", "attempts", "challenges", "concep
  * because a tool list that changes between model requests throws away the
  * provider's prompt cache and teaches the model nothing.
  */
+
 export const toolDefinitions = {
   search_record: ["Search this learner's record on this Track: abilities (standing claims), patterns (your open hypotheses about how they go wrong, with observations), attempts (by failure signature), challenges (with outcomes and replacement lineage), concepts (the tag vocabulary with their evidence under each, split by sub-concept), and lessons you have taught. Use it to find what the journey document does not already show.", z.object({
     query: z.string().min(2).describe("Words or a concept slug."),
     kinds: z.array(z.enum(RECORD_KINDS)).min(1).max(6).optional().describe("Which parts of the record to search. Omit for all."),
     limit: z.number().int().min(1).max(12).default(6),
   })],
-  read_record: ["Read one record in full: a challenge (design, validation, attempts and test history), an ability (versioned document with its patterns and recent evidence), a lesson (its pages), or a concept (this learner's evidence under it, by sub-concept, with the challenges behind it).", z.object({
-    kind: z.enum(["challenge", "ability", "lesson", "concept"]),
-    id: z.string().min(2).describe("The challenge, ability or lesson id, or the concept slug."),
+  read_record: ["Read one record in full: a challenge (design, validation, attempts and test history), an ability (versioned document with its patterns and recent evidence), a lesson (its pages), a concept (this learner's evidence under it, by sub-concept, with the challenges behind it), or a review card (the insight, the pitfalls, your standing note, its memory state and every review it has had — what was asked, what held, what was missed — with the challenge, attempt and submission ids each was judged on, so read_attempt and read_submissions can open the code).", z.object({
+    kind: z.enum(["challenge", "ability", "lesson", "concept", "review"]),
+    id: z.string().min(2).describe("The challenge, ability, lesson or review card id, or the concept slug."),
   })],
   read_attempt: [
     "Read an attempt's current code, deterministic runner verdict, and recorded solve history. The runner is the authority on correctness. Returns the complete report and source files, plus a sequence-to-event-ID index for ability evidence. Payloads are represented once in the report instead of duplicated as raw events. Start with one call and work from that evidence. Use sections, eventTypes, cases or scope when you want a focused view.",
@@ -149,6 +176,10 @@ export const toolDefinitions = {
     observedComplexity: z.string().min(2).max(500).describe("The time complexity of what they actually wrote, e.g. \"O(n)\" or \"O(n log n) from the sort\"."),
     approach: z.string().min(10).max(1_500).describe("What they actually did, in one sentence, in their own terms."),
     reasons: z.array(z.string().min(8).max(1_000)).max(6).describe("For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner."),
+    lenses: z.array(z.object({
+      id: z.string().min(1).max(60).describe("A lens id from Coaching settings."),
+      note: z.string().min(8).max(300).describe("What their code showed through that lens, which you then say in your reply — a line from their code and the idiomatic or deeper take on it."),
+    })).max(3).optional().describe("Their code read through the learner's lenses: for each lens it has something to say about, what it showed. Logged in the lens's history, so later turns know what was covered. Say these in your reply at each lens's depth."),
   })],
   update_ability: ["Introduce an ability as uncertain when you start training it, or append an evidence-backed version to one. Give it the summary, concepts and practice drills that make it something the learner can see and train once the evidence supports it. Never grant from one pass or from a challenge they walked away from.", z.object({
     abilityId: z.string().uuid().optional().describe("The ability to update. Omit to introduce one by title (an existing ability with the same title is updated)."),
@@ -157,14 +188,31 @@ export const toolDefinitions = {
     evidenceEventIds: z.array(z.string().uuid()).default([]),
     ...abilityClaimShape,
   })],
-  update_notebook: ["Change one of your notebooks, your primary memory of this learner: the one for this Track, or the learner notebook every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both; keep each under about 1,200 words and delete what is no longer true.", z.object({
-    notebook: z.enum(["track", "learner"]).default("track").describe("track: their progress on this Track. learner: the person across every Track — who they are, how they like to be taught, what helps them, habits seen wherever they work."),
+  update_notebook: ["Change one of your notebooks, your primary memory of this learner: the one for this Track, or user.md, the one about the person that every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both; keep each under about 1,200 words and delete what is no longer true.", z.object({
+    /* "learner" is user.md's earlier name, still accepted from older threads. */
+    notebook: z.enum(["track", "user", "learner"]).default("track").describe("track: their progress on this Track. user: user.md, the person across every Track — their onboarding answers, who they are, how they like to be taught, what helps them, habits seen wherever they work."),
     edits: z.array(z.object({
       find: z.string().min(1).max(4_000).describe("Text copied exactly from the current notebook, long enough to occur only once."),
       replace: z.string().max(6_000).describe("What it becomes. Empty to delete it."),
     })).min(1).max(20).optional().describe("Replacements applied in order to the current notebook."),
     markdown: z.string().min(1).max(12_000).optional().describe("The whole notebook, replacing the current one. Only to start it or reorganise it; otherwise use edits."),
     note: z.string().min(3).max(300).describe("One line saying what changed, shown to the learner."),
+  })],
+  set_challenge_mix: ["Change this session's coaching settings, or suggest a lens. Change settings only when the learner asks in chat: when to write a Spar problem versus assigning a real LeetCode/Codeforces problem, and lenses — areas to go deeper on, each at a depth (mention: a line in feedback; teach: explain it when relevant; drill: Spar problems that force it). Send only what they asked for. Attach an example lifted from their own code whenever you have one — it is what the learner sees on the lens. suggest is the one part you may use on your own: when their code shows a pattern a lens would fix (range(len(xs)) loops, a hand-rolled heap), propose that lens with the reason in one line; it waits in the learner's settings menu until they accept or dismiss it. Never suggest one the journey lists as pending or turned down.", z.object({
+    spar: z.enum(["never", "struggling", "less", "balanced", "more", "always"]).optional().describe("When to write a Spar problem. never: real problems only. struggling: real by default, Spar to repair a concept they are stuck on. less / more: mostly real / mostly Spar. balanced: your call. always: only Spar problems."),
+    lenses: z.array(z.object({
+      id: z.string().min(1).max(60).describe("A catalogue id — lang-idioms, lang-stdlib, lang-types, lang-deep (the Track's language), from-scratch, under-the-hood, complexity, edge-cases, clean-code — or custom:<slug> for one the learner named or you name in a suggestion."),
+      depth: z.enum(["off", "mention", "teach", "drill"]),
+      label: z.string().min(1).max(60).optional().describe("Required for a custom lens: its name, in the learner's words."),
+      example: LENS_EXAMPLE.optional(),
+    })).max(8).optional().describe("Lenses to add, change or turn off. Others keep their current depth."),
+    suggest: z.array(z.object({
+      id: z.string().min(1).max(60),
+      label: z.string().min(1).max(60).optional(),
+      example: LENS_EXAMPLE.optional(),
+      reason: z.string().min(3).max(240).describe("What you saw in their code, in one line to the learner: \"You hand-rolled a heap twice — heapq does it in one line.\""),
+    })).max(2).optional(),
+    note: z.string().min(3).max(200).describe("One line saying what changed, shown to the learner."),
   })],
   edit_challenge: ["Change the open Spar-written challenge in place: reword a sentence that confused them, add or fix a figure, add an example, fix a typo, add a visible test case, adjust a type in the starter. Each edit replaces one exact passage — copied from the current text, occurring once — in one part of the challenge. Nothing is rebuilt and the learner keeps their place and their code: a statement or title edit is checked for its figures, and an edit to the starter, reference or tests reruns the full validation before it lands. The journey shows the open challenge's statement and starter; read_record the challenge for its reference and tests. Use set_challenge revise instead when the task, its contract or its code shape changes.", z.object({
     edits: z.array(z.object({
@@ -197,6 +245,29 @@ export const toolDefinitions = {
       targets: z.array(z.enum(["problem", "pattern", "concept", "turning-point", "pitfall"])).min(1).max(5).optional().describe("What later reviews should make them recall — each review rehearses one: `problem` — this exact challenge again, worth it for a classic they will meet in interviews; `pattern` — spotting and applying the technique in a new story; `concept` — the invariant or property that makes it correct; `turning-point` — the realisation that got them unstuck, the default when there was a real struggle; `pitfall` — the mistake they kept making, when it cost them several runs. Pick the ones this solve earned, usually two or three. If the learner said what they want to remember, follow that. The learner can change these on the card. Omit to use turning-point and pattern."),
       remember: z.string().min(3).max(1_500).optional().describe("What the learner said they want to remember from this problem, when you asked them — their words, lightly cleaned up, not your summary. Reviews aim at it, so the card's insight, click and targets must be about what they pointed at. Required for a new card when they have chosen to decide what their reviews ask about; omit otherwise."),
       firstGrade: z.enum(["again", "hard", "good", "easy"]).describe("How well the idea is held right now, as a first spaced-review grade, judged from the whole solve: `again` — solved only after being walked to it; `hard` — got there with real struggle, help, or several wrong turns; `good` — worked it out themselves with ordinary friction; `easy` — clean and fast from the first draft. This decides when the first review comes due (roughly 1, 1, 2 and 8 days)."),
+    }),
+  ],
+  reopen_challenge: [
+    "Set a challenge the learner has already done as this session's challenge again: the same problem with fresh starter code — for a review card, usually its own original challenge (read_record kind review names it). Use it when doing that exact problem again is the right test — a classic they should own, or a card whose problem target is the problem itself; write a fresh problem with set_challenge when the idea in a new story is the better test. Reword or add to it afterwards with edit_challenge if the statement should change.",
+    z.object({
+      challengeId: z.string().uuid().describe("The challenge to set again."),
+      why: z.string().min(10).max(1_500).describe("Why this problem again, for this learner now. Stored with the challenge for later turns."),
+      review: reviewLinkSchema.optional().describe("When this repeat is a review of a card, or practice going deeper on one. Its forLearner is the place to say what went wrong last time and what this attempt should show."),
+      replaceReason: z.string().min(3).max(1_500).optional().describe("Required only when a challenge is already open and this one is to take its place — say what the learner asked for."),
+    }),
+  ],
+  file_review: [
+    "File your judgement of a spaced-review card, from evidence you have read: usually an attempt at a challenge set as its review, or at the card's own challenge again, sometimes a conversation where they explained the idea. Compare what they did with what the card and its past reviews say they missed — read_record kind review, then read_attempt and read_submissions for the code — and decide for yourself how well the idea held. The rating moves the card's schedule, so it should be honest in both directions: a pass that still fumbled the step the review was about is not good. Omit rating to only rewrite the card's note without filing a review.",
+    z.object({
+      cardId: z.string().uuid().describe("The card being reviewed."),
+      rating: z.enum(["again", "hard", "good", "easy"]).optional().describe("How well the idea held in this evidence, as a spaced-review grade you decide: again — they did not have it; hard — got there, but the weak spot showed again or needed help; good — held with ordinary friction; easy — clean and immediate. Omit to leave the schedule alone."),
+      summary: z.string().min(8).max(1_500).optional().describe("What you saw, written to the learner: how this attempt compares with how they handled the idea before. Required with a rating."),
+      held: z.array(z.string().min(4).max(400)).max(6).optional().describe("What they now do right that the card or an earlier review said they missed."),
+      missed: z.array(z.string().min(4).max(400)).max(6).optional().describe("What is still missing or shaky, specifically enough that the next review can aim at it."),
+      note: z.string().min(8).max(1_500).optional().describe("Replaces the card's standing note: what its next review should press on, given everything so far. Keep it current; drop what is fixed."),
+      challengeId: z.string().uuid().optional().describe("The challenge the evidence came from. Omit for the one this turn is about."),
+      attemptId: z.string().uuid().optional().describe("The attempt judged. Omit for the latest attempt at that challenge."),
+      submissionId: z.string().uuid().optional().describe("The submission that carried the evidence, when one did. Omit for the latest."),
     }),
   ],
   ask_user_question: ["Suspend the session for one focused learner answer. Offer 2-3 mutually exclusive choices. Each option is one self-contained line the learner can scan — no subtitle, no second sentence — so write the whole choice into the label. Always allow a custom answer.", askUserQuestionInputSchema],
@@ -266,6 +337,7 @@ export const toolDefinitions = {
       why: z.string().min(20).max(1_500).describe("One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns."),
       language: languageSchema.optional().describe("The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn."),
       replaceReason: z.string().min(3).max(1_500).optional().describe("Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."),
+      review: reviewLinkSchema.optional().describe("When this problem is a spaced review of a card: it needs the card's idea, aimed at what it and its past reviews say they missed. The attempt is linked to the card, and when it ends you judge it with file_review."),
     }),
   ],
 } as const;

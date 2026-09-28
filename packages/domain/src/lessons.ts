@@ -87,6 +87,8 @@ export const lessonInputSchema = z.object({
     .describe("concept slugs, primary first, in the same vocabulary challenges are tagged with"),
   pages: z.array(lessonPageSchema).min(1).max(8),
   references: z.array(lessonReferenceSchema).max(6).default([]),
+  lens: z.string().min(1).max(60).optional()
+    .describe("The id of a lens in Coaching settings this lesson teaches through, when it does. Logged in that lens's history."),
 });
 export type LessonInput = z.infer<typeof lessonInputSchema>;
 

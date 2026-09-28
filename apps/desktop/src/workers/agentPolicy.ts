@@ -24,7 +24,7 @@ export const SOURCE_TOOLS = [...SOURCE_READ_TOOLS, "assign_practice_problem"];
 /** The coach's own tools, offered on every turn. */
 export const CORE_TOOLS = [
   "read_attempt", "read_submissions", "search_record", "read_record",
-  "update_ability", "update_notebook", "record_insight", "review_solution",
+  "update_ability", "update_notebook", "set_challenge_mix", "record_insight", "file_review", "reopen_challenge", "review_solution",
   "ask_user_question", "teach_lesson", ...VISUALIZER_TOOLS,
 ];
 
@@ -48,7 +48,7 @@ export function coachTools(context: { webSearch?: boolean; practiceSource?: bool
 }
 
 /** The tools that can put a playable challenge in front of the learner. */
-export const CHALLENGE_PUBLISHING_TOOLS = ["set_challenge", "assign_practice_problem"];
+export const CHALLENGE_PUBLISHING_TOOLS = ["set_challenge", "assign_practice_problem", "reopen_challenge"];
 
 export type Outcomes = Map<string, Array<{ input: unknown; result: unknown }>>;
 
