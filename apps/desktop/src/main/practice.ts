@@ -1,15 +1,16 @@
 import { app, type BrowserWindow } from "electron";
 import path from "node:path";
 import {
-  buildHarness, buildProgramHarness, CodeforcesGateway, effectiveCapabilities, judgeDescription, judgeInputBlock, LeetCodeGateway, practiceSource, submittableCode,
+  buildHarness, buildProgramHarness, CodeforcesGateway, effectiveCapabilities, judgeDescription, judgeInputBlock, LeetCodeGateway, practiceSource, submittableCode, verifyLeetCodeSession,
   type CodeforcesSession, type LeetCodeSession, type PracticeAccount, type PracticeCase, type PracticeConnectionState,
   type PracticeGateway, type PracticeProblem, type PracticeProblemBundle, type PracticeRegion, type PracticeSourceId, type PracticeVerdict,
 } from "@spar/practice";
 import { connectPracticeMcp, PRACTICE_READ_TOOLS, type PracticeMcpConnection } from "@spar/practice/mcp";
 import { practiceProblemSchema, practiceRegionSchema, PRACTICE_SOURCES } from "@spar/practice";
 import { itemRating, type ChallengeSource, type Language, type QuestionDesign } from "@spar/domain";
-import { clearCodeforcesSignIn, clearLeetCodeSignIn, signInToCodeforces, signInToLeetCode } from "./practiceSignIn.js";
+import { clearCodeforcesSignIn, clearLeetCodeSignIn, refreshLeetCodeSignIn, signInToCodeforces, signInToLeetCode } from "./practiceSignIn.js";
 import { launchCodeforcesSessionBrowser, type CodeforcesBrowser } from "./codeforcesBrowser.js";
+import { LeetCodePage } from "./leetCodePage.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
 
@@ -73,6 +74,12 @@ const EXPIRED_KEY = (source: PracticeSourceId, region: PracticeRegion) => `pract
  *  is why a mount re-reads and a browse does not. */
 const PROBLEM_CACHE_MS = 14 * 24 * 60 * 60 * 1_000;
 const ACCOUNT_CACHE_MS = 5 * 60 * 1_000;
+/** How soon after a refresh another may open a browser. A profile that has
+ *  really signed out must not bring a window up on every request. */
+const REFRESH_COOLDOWN_MS = 5 * 60 * 1_000;
+/** How long the hidden LeetCode page stays open after its last request, so a
+ *  learner re-running challenged code does not open it again every time. */
+const LEETCODE_PAGE_IDLE_MS = 5 * 60 * 1_000;
 
 export class PracticeService {
   private connections = new Map<PracticeSourceId, PracticeMcpConnection>();
@@ -82,7 +89,11 @@ export class PracticeService {
    *  cancellation handle here lets a region change close the obsolete site's
    *  window before the new selection becomes authoritative. */
   private connectionAttempts = new Map<PracticeSourceId, AbortController>();
+  private refreshing = new Map<PracticeRegion, Promise<boolean>>();
+  private lastRefresh = new Map<PracticeRegion, number>();
   private codeforcesBrowser: Promise<CodeforcesBrowser> | null = null;
+  private leetCodePages = new Map<PracticeRegion, Promise<LeetCodePage | null>>();
+  private leetCodePageIdle = new Map<PracticeRegion, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly auth: AuthService,
@@ -231,7 +242,7 @@ export class PracticeService {
   async account(source: PracticeSourceId): Promise<PracticeAccount | null> {
     const cached = this.accountCache.get(source);
     if (cached && Date.now() - cached.at < ACCOUNT_CACHE_MS) return cached.account;
-    const account = await this.gatewayFor(source, this.region(source)).account().catch(() => null);
+    const account = await this.withRefresh(source, this.region(source), () => this.gatewayFor(source, this.region(source)).account()).catch(() => null);
     this.accountCache.set(source, { at: Date.now(), account });
     return account;
   }
@@ -254,7 +265,7 @@ export class PracticeService {
       const parsed = cached ? practiceProblemSchema.safeParse(cached.payload) : null;
       if (parsed?.success) return this.bundleFor(parsed.data);
     }
-    const bundle = await this.gatewayFor(source, region).problem(slug);
+    const bundle = await this.withRefresh(source, region, () => this.gatewayFor(source, region).problem(slug));
     this.store.cachePracticeProblem({
       source,
       region,
@@ -424,13 +435,13 @@ export class PracticeService {
 
   /** A scratch run at the source. Costs nothing on the learner's record. */
   async run(input: { source: ChallengeSource; code: string; language: Language; testcases?: string }): Promise<PracticeVerdict> {
-    return this.gatewayFor(input.source.source, input.source.region).run({
+    return this.withRefresh(input.source.source, input.source.region, () => this.gatewayFor(input.source.source, input.source.region).run({
       slug: input.source.slug,
       externalId: input.source.externalId,
       language: input.language,
       code: submittableCode(input.code),
       ...(input.testcases ? { dataInput: input.testcases } : {}),
-    });
+    }));
   }
 
   /**
@@ -441,12 +452,12 @@ export class PracticeService {
    * coding gym whose tutor can submit on your behalf is not measuring you.
    */
   async submit(input: { source: ChallengeSource; code: string; language: Language }): Promise<PracticeVerdict> {
-    return this.gatewayFor(input.source.source, input.source.region).submit({
+    return this.withRefresh(input.source.source, input.source.region, () => this.gatewayFor(input.source.source, input.source.region).submit({
       slug: input.source.slug,
       externalId: input.source.externalId,
       language: input.language,
       code: submittableCode(input.code),
-    });
+    }));
   }
 
   /* ---- The agent's connection -------------------------------------------- */
@@ -472,7 +483,7 @@ export class PracticeService {
       const replies = await Promise.all(searched.map(async ({ id: source }) => {
         try {
           const calls = searchCallsFor(source, args);
-          const results = await Promise.all(calls.map(async (call) => await (await this.mcp(source)).call(name, call) as Record<string, unknown>));
+          const results = await Promise.all(calls.map(async (call) => await this.withRefresh(source, this.region(source), async () => (await this.mcp(source)).call(name, call)) as Record<string, unknown>));
           const problems = interleaveProviderResults(results.map((result) => Array.isArray(result.problems)
             ? result.problems.map((problem) => ({ ...(problem as Record<string, unknown>), source, sourceName: practiceSource(source).name }))
             : []));
@@ -496,7 +507,7 @@ export class PracticeService {
     }
     const source = args.source;
     if (source !== "leetcode" && source !== "codeforces") throw new Error(`"${name}" needs the result's \`source\` (leetcode or codeforces).`);
-    return (await this.mcp(source)).call(name, args);
+    return this.withRefresh(source, this.region(source), async () => (await this.mcp(source)).call(name, args));
   }
 
   private async mcp(source: PracticeSourceId): Promise<PracticeMcpConnection> {
@@ -513,6 +524,61 @@ export class PracticeService {
 
   /* ---- Internals ---------------------------------------------------------- */
 
+  /**
+   * One LeetCode call, retried once on a fresh session when LeetCode refuses the
+   * stored one.
+   *
+   * A refused session is usually not a signed-out learner: the Spar-owned
+   * browser profile is still signed in and only the copy of its cookies Spar
+   * holds has gone stale. Reconnecting by hand fixed it in a second, so it is
+   * done here instead, and the learner only hears about it when the refresh
+   * fails too. A submission is safe to retry: a refused one never reached the
+   * judge.
+   */
+  private async withRefresh<T>(source: PracticeSourceId, region: PracticeRegion, call: () => Promise<T>): Promise<T> {
+    try {
+      return await call();
+    } catch (error) {
+      /* Only a session already flagged as refused. A Cloudflare challenge on a
+         good session is retried from the browser inside `leetCodeFetch`; one
+         that still fails here is not something a fresh cookie changes. */
+      if (source !== "leetcode" || !this.sessionExpired(source, region)) throw error;
+      if (!(await this.refreshLeetCode(region))) throw error;
+      return call();
+    }
+  }
+
+  /** Shared by every call that was refused at the same moment, and at most one
+   *  browser per cooldown. */
+  private refreshLeetCode(region: PracticeRegion): Promise<boolean> {
+    const running = this.refreshing.get(region);
+    if (running) return running;
+    if (Date.now() - (this.lastRefresh.get(region) ?? 0) < REFRESH_COOLDOWN_MS) return Promise.resolve(false);
+    this.lastRefresh.set(region, Date.now());
+    const refresh = (async () => {
+      /* First the cookie Spar already holds. A session is flagged on the first
+         refusal and then never sent again, so one stray refusal used to leave a
+         perfectly good cookie unused for good. If LeetCode still says it is
+         signed in, clearing the flag is the whole fix and no browser opens. */
+      const raw = await this.auth.readSecret(this.keychainAccount("leetcode", region)).catch(() => null);
+      const stored = raw ? (() => { try { return JSON.parse(raw) as LeetCodeSession; } catch { return null; } })() : null;
+      if (stored && await verifyLeetCodeSession(stored, region).catch(() => null)) {
+        this.setSessionExpired("leetcode", region, false);
+        this.accountCache.delete("leetcode");
+        this.emit({ source: "leetcode", state: "connected", message: "Reconnected to LeetCode." });
+        return true;
+      }
+      const result = await refreshLeetCodeSignIn(region).catch(() => null);
+      if (!result) return false;
+      await this.saveSession("leetcode", region, result.session);
+      this.accountCache.delete("leetcode");
+      this.emit({ source: "leetcode", state: "connected", message: `Reconnected as ${result.username}.` });
+      return true;
+    })().finally(() => this.refreshing.delete(region));
+    this.refreshing.set(region, refresh);
+    return refresh;
+  }
+
   private gatewayFor(source: PracticeSourceId, region: PracticeRegion): PracticeGateway {
     const key = `${source}:${region}`;
     const cached = this.gatewayCache.get(key);
@@ -523,7 +589,10 @@ export class PracticeService {
       },
     };
     const gateway = source === "leetcode"
-      ? new LeetCodeGateway(region, () => this.readSession(source, region) as Promise<LeetCodeSession | null>, options)
+      ? new LeetCodeGateway(region, () => this.readSession(source, region) as Promise<LeetCodeSession | null>, {
+          ...options,
+          fetcher: (input, init) => this.leetCodeFetch(region, input, init),
+        })
       : new CodeforcesGateway(() => this.readSession(source, region) as Promise<CodeforcesSession | null>, {
           ...options,
           fetcher: (input, init) => this.codeforcesFetch(input, init),
@@ -542,6 +611,7 @@ export class PracticeService {
       for (const key of this.gatewayCache.keys()) if (key.startsWith(`${source}:`)) this.gatewayCache.delete(key);
       this.store.setSetting(CACHE_KEY(source, this.region(source)), Date.now());
       if (source === "codeforces") this.closeCodeforcesBrowser();
+      if (source === "leetcode") this.closeLeetCodePage();
       return;
     }
     for (const connection of this.connections.values()) void connection.close();
@@ -549,6 +619,7 @@ export class PracticeService {
     this.gatewayCache.clear();
     this.accountCache.clear();
     this.closeCodeforcesBrowser();
+    this.closeLeetCodePage();
   }
 
   /** Stops the real-browser transport before Electron exits. Chrome is a child
@@ -580,6 +651,68 @@ export class PracticeService {
          back, verdict polling uses Codeforces' public API and the temporary
          Chrome window has no reason to remain open. */
       if (posting) this.closeCodeforcesBrowser();
+    }
+  }
+
+  /**
+   * LeetCode over Node, and what Cloudflare challenges through a hidden page.
+   *
+   * Cloudflare's firewall reads the code in a run or a submission and challenges
+   * some of it, which only a browser can pass (see `LeetCodePage`). Reads and
+   * verdict polling stay on Node. Once a POST has been challenged, the next ones
+   * go straight to the page while it is open rather than paying for a refusal
+   * first: code that tripped the check once almost always trips it again on the
+   * next run. The page closes after a quiet minute, and with no session to give
+   * it the challenge is returned as it came and reported as one.
+   */
+  private async leetCodeFetch(region: PracticeRegion, input: string | URL | Request, init?: RequestInit): Promise<Response> {
+    const url = input instanceof Request ? input.url : String(input);
+    const posting = (init?.method ?? "GET").toUpperCase() === "POST";
+    const open = posting && this.leetCodePages.has(region) ? await this.leetCodePage(region) : null;
+    if (open) {
+      const response = await this.throughPage(region, open, url, init);
+      if (response) return response;
+    }
+    const response = await fetch(input, init);
+    if (response.status !== 403 || !response.headers.get("cf-mitigated")) return response;
+    const page = await this.leetCodePage(region);
+    return (page && await this.throughPage(region, page, url, init)) || response;
+  }
+
+  private async throughPage(region: PracticeRegion, page: LeetCodePage, url: string, init?: RequestInit): Promise<Response | null> {
+    clearTimeout(this.leetCodePageIdle.get(region));
+    this.leetCodePageIdle.set(region, setTimeout(() => this.closeLeetCodePage(region), LEETCODE_PAGE_IDLE_MS));
+    return page.request(url, init).catch(() => {
+      this.closeLeetCodePage(region);
+      return null;
+    });
+  }
+
+  private leetCodePage(region: PracticeRegion): Promise<LeetCodePage | null> {
+    const current = this.leetCodePages.get(region);
+    if (current) {
+      return current.then((page) => {
+        if (page && !page.closed) return page;
+        this.leetCodePages.delete(region);
+        return this.leetCodePage(region);
+      });
+    }
+    const opening = (async () => {
+      const session = await this.readSession("leetcode", region) as LeetCodeSession | null;
+      return session ? LeetCodePage.open(region, session, this.window()).catch(() => null) : null;
+    })();
+    this.leetCodePages.set(region, opening);
+    void opening.then((page) => { if (!page && this.leetCodePages.get(region) === opening) this.leetCodePages.delete(region); });
+    return opening;
+  }
+
+  private closeLeetCodePage(region?: PracticeRegion): void {
+    for (const key of region ? [region] : [...this.leetCodePages.keys()]) {
+      clearTimeout(this.leetCodePageIdle.get(key));
+      this.leetCodePageIdle.delete(key);
+      const page = this.leetCodePages.get(key);
+      this.leetCodePages.delete(key);
+      if (page) void page.then((value) => value?.close()).catch(() => undefined);
     }
   }
 

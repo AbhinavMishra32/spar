@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, session as electronSession, type Session } from "electron";
@@ -226,6 +227,44 @@ async function signInToLeetCodeInBrowser(input: { region: PracticeRegion; signal
   });
 }
 
+/**
+ * A fresh session from the browser profile a previous sign-in left behind, with
+ * nothing for the learner to do.
+ *
+ * Reconnecting by hand already worked this way: the Spar-owned profile is still
+ * signed in, so the browser opens, LeetCode hands it current cookies, and the
+ * sign-in finishes on the first check. This is that same path, off-screen and
+ * bounded, for when LeetCode refuses the stored session mid-session. Null when
+ * there is no profile to refresh from or it is no longer signed in — then the
+ * learner has to sign in again, and Settings says so.
+ */
+export async function refreshLeetCodeSignIn(region: PracticeRegion): Promise<{ session: LeetCodeSession; username: string } | null> {
+  const profile = leetCodeProfile(region);
+  if (!existsSync(profile) || !(await hasChromiumBrowser())) return null;
+  const origin = region === "cn" ? "https://leetcode.cn/" : "https://leetcode.com/";
+  const browser = await launchSignInBrowser(profile, origin, { background: true }).catch(() => null);
+  if (!browser) return null;
+  try {
+    const deadline = Date.now() + REFRESH_TIMEOUT_MS;
+    let checkedCookie = "";
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      const session = await readBrowserSession(browser, origin, region).catch(() => null);
+      if (!session || session.cookie === checkedCookie) continue;
+      checkedCookie = session.cookie;
+      const identity = await verifyLeetCodeSession(session, region).catch(() => null);
+      if (identity) return { session, username: identity.username };
+    }
+    return null;
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Long enough for the page to load and set its cookies, short enough that a
+ *  profile which is no longer signed in fails quickly into "reconnect". */
+const REFRESH_TIMEOUT_MS = 20_000;
+
 function leetCodeProfile(region: PracticeRegion): string {
   return path.join(app.getPath("userData"), region === "cn" ? "leetcode-cn-browser" : "leetcode-browser");
 }
@@ -302,14 +341,14 @@ async function readSession(partition: Session, region: PracticeRegion): Promise<
   const cookies = await partition.cookies.get({ domain });
   if (!cookies.length) return null;
   const header = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-  const parsed = parseLeetCodeCookie(header, region);
+  const parsed = parseLeetCodeCookie(header, region, partition.getUserAgent());
   return "error" in parsed ? null : parsed.session;
 }
 
 async function readBrowserSession(browser: ChromiumBrowser, origin: string, region: PracticeRegion): Promise<LeetCodeSession | null> {
   const cookies = await browser.cookies(origin);
   if (!cookies.length) return null;
-  const parsed = parseLeetCodeCookie(cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; "), region);
+  const parsed = parseLeetCodeCookie(cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; "), region, await browser.userAgent());
   return "error" in parsed ? null : parsed.session;
 }
 

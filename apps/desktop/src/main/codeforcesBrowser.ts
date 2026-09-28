@@ -44,8 +44,8 @@ export async function launchCodeforcesSessionBrowser(profileDir: string): Promis
  * Keychain, a phone over QR, a security key) and Google sign-in, none of which
  * Electron's embedded Chromium provides. The profile is Spar's, never the
  * learner's everyday one. */
-export async function launchSignInBrowser(profileDir: string, url: string): Promise<ChromiumBrowser> {
-  const { child, port } = await startChromium(profileDir);
+export async function launchSignInBrowser(profileDir: string, url: string, options: { background?: boolean } = {}): Promise<ChromiumBrowser> {
+  const { child, port } = await startChromium(profileDir, options.background ? BACKGROUND_WINDOW : []);
   const browser = new ChromiumBrowser(child, port);
   try {
     await browser.open(url);
@@ -65,7 +65,12 @@ async function launch(profileDir: string): Promise<CodeforcesBrowser> {
   return new CodeforcesBrowser(child, port);
 }
 
-async function startChromium(profileDir: string): Promise<{ child: ChildProcess; port: number }> {
+/* A window placed off-screen, for refreshing a session the profile already
+   holds. Still a real, headed browser: headless Chrome reports a different
+   User-Agent, and Cloudflare's cookies are bound to the one that earned them. */
+const BACKGROUND_WINDOW = ["--window-position=-10000,-10000", "--window-size=800,600"];
+
+async function startChromium(profileDir: string, extraArgs: string[] = []): Promise<{ child: ChildProcess; port: number }> {
   const executable = await findChromiumBrowser();
   if (!executable) throw new Error("Signing in needs Google Chrome, Microsoft Edge, Brave, or Chromium. Install one and try again.");
   /* Chrome deliberately exposes navigator.webdriver when the magic value
@@ -80,6 +85,7 @@ async function startChromium(profileDir: string): Promise<{ child: ChildProcess;
     "--no-first-run",
     "--no-default-browser-check",
     "--new-window",
+    ...extraArgs,
     "about:blank",
   ], { stdio: "ignore" });
   try {
@@ -105,6 +111,14 @@ export class ChromiumBrowser {
     const response = await fetch(`http://127.0.0.1:${this.port}/json/list`).catch(() => null);
     if (!response?.ok) return false;
     return (await response.json() as DevToolsTarget[]).some((entry) => entry.type === "page");
+  }
+
+  /** The browser's own User-Agent, which its cookies must be sent with. */
+  async userAgent(): Promise<string | undefined> {
+    const response = await fetch(`http://127.0.0.1:${this.port}/json/version`).catch(() => null);
+    if (!response?.ok) return undefined;
+    const version = await response.json().catch(() => null) as { "User-Agent"?: string } | null;
+    return version?.["User-Agent"] || undefined;
   }
 
   /** Cookies the browser would send to `url`, whichever tab the learner is in. */
@@ -149,6 +163,68 @@ export class ChromiumBrowser {
     });
   }
 
+  /** Loads `url` in the first page and waits for it to finish. */
+  protected async navigate(url: string): Promise<void> {
+    const target = await this.pageTarget(() => true);
+    if (!target?.webSocketDebuggerUrl) throw new Error("The browser did not open a page.");
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+    try {
+      await client.command("Page.navigate", { url });
+      const started = Date.now();
+      while (Date.now() - started < START_TIMEOUT_MS) {
+        const state = await client.command<{ result?: { value?: string } }>("Runtime.evaluate", { expression: "document.readyState", returnByValue: true });
+        if (state.result?.value === "complete") return;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("The page did not finish loading.");
+    } finally { client.close(); }
+  }
+
+  /** `fetch` run inside `target`, so the request carries the page's cookies and
+   * the browser's own identity. The returned object is a normal Response so the
+   * provider package stays independent of Chrome. */
+  protected async fetchInPage(target: DevToolsTarget, url: string, init: RequestInit): Promise<Response> {
+    if (!target.webSocketDebuggerUrl) throw new Error("The browser page has no debugging connection.");
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+    try {
+      const request = {
+        url: new URL(url).href,
+        method: init.method ?? "GET",
+        headers: browserSafeHeaders(init.headers),
+        body: typeof init.body === "string" ? init.body : undefined,
+      };
+      const evaluated = await client.command<{
+        result?: { value?: { status: number; statusText: string; url: string; headers: Array<[string, string]>; body: string } };
+        exceptionDetails?: { text?: string };
+      }>("Runtime.evaluate", {
+        expression: `(async () => {
+          const request = ${JSON.stringify(request)};
+          const response = await fetch(request.url, {
+            method: request.method,
+            headers: request.headers,
+            body: request.body,
+            credentials: "include",
+            redirect: "follow"
+          });
+          return {
+            status: response.status,
+            statusText: response.statusText,
+            url: response.url,
+            headers: [...response.headers.entries()],
+            body: await response.text()
+          };
+        })()`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      const value = evaluated.result?.value;
+      if (!value) throw new Error(evaluated.exceptionDetails?.text || "Chrome did not return the response.");
+      const response = new Response(value.body, { status: value.status, statusText: value.statusText, headers: value.headers });
+      Object.defineProperty(response, "url", { value: value.url });
+      return response;
+    } finally { client.close(); }
+  }
+
   protected async pageTarget(accept: (url: string) => boolean): Promise<DevToolsTarget | null> {
     const response = await fetch(`http://127.0.0.1:${this.port}/json/list`).catch(() => null);
     if (!response?.ok) return null;
@@ -181,52 +257,12 @@ export class CodeforcesBrowser extends ChromiumBrowser {
   /** Performs an HTTP request in the real browser process. Forbidden browser
    * headers are omitted deliberately: Chrome supplies its own Cookie,
    * User-Agent, Origin and Referer, which is exactly the identity Cloudflare
-   * verified. The returned object is a normal Response so the provider package
-   * remains independent of Electron and Chrome. */
+   * verified. */
   async request(url: string, init: RequestInit = {}): Promise<Response> {
-    const destination = new URL(url);
-    if (!isCodeforcesUrl(destination.href)) throw new Error("The Codeforces browser can only request Codeforces URLs.");
+    if (!isCodeforcesUrl(url)) throw new Error("The Codeforces browser can only request Codeforces URLs.");
     const target = await this.target();
     if (!target?.webSocketDebuggerUrl) throw new Error("The Codeforces browser no longer has an open page.");
-    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
-    try {
-      const headers = browserSafeHeaders(init.headers);
-      const request = {
-        url: destination.href,
-        method: init.method ?? "GET",
-        headers,
-        body: typeof init.body === "string" ? init.body : undefined,
-      };
-      const evaluated = await client.command<{
-        result?: { value?: { status: number; statusText: string; url: string; headers: Array<[string, string]>; body: string } };
-        exceptionDetails?: { text?: string };
-      }>("Runtime.evaluate", {
-        expression: `(async () => {
-          const request = ${JSON.stringify(request)};
-          const response = await fetch(request.url, {
-            method: request.method,
-            headers: request.headers,
-            body: request.body,
-            credentials: "include",
-            redirect: "follow"
-          });
-          return {
-            status: response.status,
-            statusText: response.statusText,
-            url: response.url,
-            headers: [...response.headers.entries()],
-            body: await response.text()
-          };
-        })()`,
-        awaitPromise: true,
-        returnByValue: true,
-      });
-      const value = evaluated.result?.value;
-      if (!value) throw new Error(evaluated.exceptionDetails?.text || "Chrome did not return the Codeforces response.");
-      const response = new Response(value.body, { status: value.status, statusText: value.statusText, headers: value.headers });
-      Object.defineProperty(response, "url", { value: value.url });
-      return response;
-    } finally { client.close(); }
+    return this.fetchInPage(target, url, init);
   }
 
   async identity(): Promise<CodeforcesBrowserIdentity | null> {
@@ -258,22 +294,6 @@ export class CodeforcesBrowser extends ChromiumBrowser {
     try {
       const result = await client.command<{ cookies?: Array<{ name: string; value: string }> }>("Network.getCookies", { urls: ["https://codeforces.com/"] });
       return (result.cookies ?? []).map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
-    } finally { client.close(); }
-  }
-
-  private async navigate(url: string): Promise<void> {
-    const target = await this.pageTarget(() => true);
-    if (!target?.webSocketDebuggerUrl) throw new Error("The Codeforces browser did not open a page.");
-    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
-    try {
-      await client.command("Page.navigate", { url });
-      const started = Date.now();
-      while (Date.now() - started < START_TIMEOUT_MS) {
-        const state = await client.command<{ result?: { value?: string } }>("Runtime.evaluate", { expression: "document.readyState", returnByValue: true });
-        if (state.result?.value === "complete") return;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      throw new Error("The Codeforces page did not finish loading.");
     } finally { client.close(); }
   }
 

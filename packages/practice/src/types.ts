@@ -295,3 +295,9 @@ export class PracticeAuthError extends Error {
 export class PracticeSourceError extends Error {
   constructor(message: string, readonly status?: number) { super(message); this.name = "PracticeSourceError"; }
 }
+
+/** The source's bot check (Cloudflare) stopped a request. Not a verdict on the
+ *  session: a fresh visit from the browser that signed in clears it. */
+export class PracticeChallengeError extends PracticeSourceError {
+  constructor(message: string) { super(message, 403); this.name = "PracticeChallengeError"; }
+}

@@ -28,6 +28,11 @@ export type LeetCodeSession = {
    *  reads region and A/B cookies on some endpoints, and dropping them turns a
    *  working session into an intermittent one. */
   cookie: string;
+  /** The User-Agent of the browser that signed in. Cloudflare binds its
+   *  clearance cookie to it, so the jar above only works when sent with the
+   *  same one: a different UA gets 403 on the challenged endpoints (run,
+   *  submit) even though the sign-in check passes. */
+  userAgent?: string;
   capturedAt: string;
 };
 
@@ -86,7 +91,7 @@ export async function verifyLeetCodeSession(
  * carry any number of cookies Spar does not care about. It fails only when one
  * of the two load-bearing values is missing, and says which.
  */
-export function parseLeetCodeCookie(raw: string, region: PracticeRegion): { session: LeetCodeSession } | { error: string } {
+export function parseLeetCodeCookie(raw: string, region: PracticeRegion, userAgent?: string): { session: LeetCodeSession } | { error: string } {
   const text = raw.trim();
   if (!text) return { error: "No cookies were captured from the sign-in window." };
   const jar = new Map<string, string>();
@@ -107,6 +112,7 @@ export function parseLeetCodeCookie(raw: string, region: PracticeRegion): { sess
       session,
       csrfToken,
       cookie: [...jar].map(([name, value]) => `${name}=${value}`).join("; "),
+      ...(userAgent?.trim() ? { userAgent: userAgent.trim() } : {}),
       capturedAt: new Date().toISOString(),
     },
   };
@@ -130,7 +136,7 @@ export function leetCodeHeaders(session: LeetCodeSession | null, region: Practic
     referer: slug ? `${origin}/problems/${slug}/` : `${origin}/`,
     /* A real browser UA. LeetCode serves an interstitial to clients it does not
        recognise, and an interstitial parses as neither JSON nor an error. */
-    "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "user-agent": session?.userAgent || "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     ...(session ? { cookie: session.cookie, "x-csrftoken": session.csrfToken } : {}),
   };
 }

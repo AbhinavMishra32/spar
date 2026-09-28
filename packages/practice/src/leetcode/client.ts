@@ -1,7 +1,7 @@
 import type { Language } from "@spar/domain";
 import { sourceTagsForConcept } from "../concepts.js";
 import {
-  PracticeAuthError, PracticeSourceError,
+  PracticeAuthError, PracticeChallengeError, PracticeSourceError,
   type PracticeAccount, type PracticeProblem, type PracticeProblemSummary, type PracticeRegion,
   type PracticeSearchInput, type PracticeSubmission, type PracticeVerdict,
 } from "../types.js";
@@ -394,8 +394,19 @@ export class LeetCodeClient {
     });
 
     if (response.status === 401 || response.status === 403) {
+      /* Two different refusals share this status. LeetCode itself answers a
+         signed-out session with JSON ("User is not authenticated"). Cloudflare,
+         in front of it, answers a request it wants to check with an HTML
+         "Just a moment" page and `cf-mitigated: challenge`. The second says
+         nothing about the session, and treating it as expiry used to disconnect
+         a learner who was signed in: the next request then went without the
+         cookie, which Cloudflare challenges every time. */
+      const detail = await response.text().catch(() => "");
+      if (response.headers.get("cf-mitigated") || looksLikeHtml(detail)) {
+        throw new PracticeChallengeError("Cloudflare, in front of LeetCode, stopped this request. It sometimes reacts to the code itself, and Spar could not pass it from its signed-in browser. Reconnect LeetCode in Settings and try again.");
+      }
       this.onExpired();
-      throw new PracticeAuthError("LeetCode refused this session. It has either expired or LeetCode is rate-limiting this machine — reconnect LeetCode in Settings.");
+      throw new PracticeAuthError(`LeetCode says this session is not signed in (HTTP ${response.status}). Reconnect LeetCode in Settings.`);
     }
     if (response.status === 429) throw new PracticeSourceError("LeetCode is rate-limiting this machine. Wait a few seconds and try again.", 429);
     if (!response.ok) {

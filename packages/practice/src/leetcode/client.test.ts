@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { LeetCodeClient } from "./client.js";
-import { parseLeetCodeCookie } from "./session.js";
-import { PracticeAuthError, PracticeSourceError } from "../types.js";
+import { leetCodeHeaders, parseLeetCodeCookie } from "./session.js";
+import { PracticeAuthError, PracticeChallengeError, PracticeSourceError } from "../types.js";
 
 const RAW_COOKIE = "csrftoken=csrf-abc; LEETCODE_SESSION=session-xyz; gr_user_id=1";
 const session = (() => {
@@ -13,7 +13,7 @@ const session = (() => {
 type Call = { url: string; init: RequestInit };
 
 /** A fetch stub that answers a queue of bodies and records what it was asked. */
-function stubFetch(responses: Array<{ status?: number; body: unknown; contentType?: string }>) {
+function stubFetch(responses: Array<{ status?: number; body: unknown; contentType?: string; headers?: Record<string, string> }>) {
   const calls: Call[] = [];
   const fetcher = (async (url: string | URL, init: RequestInit = {}) => {
     calls.push({ url: String(url), init });
@@ -22,7 +22,7 @@ function stubFetch(responses: Array<{ status?: number; body: unknown; contentTyp
     return {
       ok: (next.status ?? 200) < 400,
       status: next.status ?? 200,
-      headers: new Headers({ "content-type": next.contentType ?? "application/json" }),
+      headers: new Headers({ "content-type": next.contentType ?? "application/json", ...next.headers }),
       text: async () => text,
     } as unknown as Response;
   }) as unknown as typeof fetch;
@@ -36,6 +36,14 @@ describe("parseLeetCodeCookie", () => {
     expect(session.cookie).toContain("gr_user_id=1");
     expect(session.session).toBe("session-xyz");
     expect(session.csrfToken).toBe("csrf-abc");
+  });
+
+  it("sends the cookies with the User-Agent of the browser that earned them", () => {
+    const ua = "Mozilla/5.0 (Macintosh) Chrome/141.0.0.0 Safari/537.36";
+    const parsed = parseLeetCodeCookie(RAW_COOKIE, "global", ua);
+    if ("error" in parsed) throw new Error(parsed.error);
+    expect(leetCodeHeaders(parsed.session, "global")["user-agent"]).toBe(ua);
+    expect(leetCodeHeaders(session, "global")["user-agent"]).toContain("Chrome/");
   });
 
   it("says which of the two load-bearing cookies is missing", () => {
@@ -90,12 +98,23 @@ describe("LeetCodeClient — transport", () => {
     expect(calls[3]?.url).toBe("https://leetcode.com/submissions/detail/runcode_2/check/");
   });
 
+  /* Both responses below are what leetcode.com actually answered a run with:
+     the first for a LEETCODE_SESSION it does not accept, the second from
+     Cloudflare in front of it for a request it wanted to check. */
   it("reports a refused session as an auth failure and says so once", async () => {
-    const { fetcher } = stubFetch([{ status: 403, body: "<!DOCTYPE html><html>sign in</html>", contentType: "text/html" }]);
+    const { fetcher } = stubFetch([{ status: 403, body: { error: "User is not authenticated" } }]);
     const expired = vi.fn();
     const client = new LeetCodeClient("global", async () => session, fetcher, expired);
     await expect(client.problem("two-sum")).rejects.toBeInstanceOf(PracticeAuthError);
     expect(expired).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat Cloudflare's bot check as a signed-out session", async () => {
+    const { fetcher } = stubFetch([{ status: 403, body: "<!DOCTYPE html><html><head><title>Just a moment...</title>", contentType: "text/html", headers: { "cf-mitigated": "challenge" } }]);
+    const expired = vi.fn();
+    const client = new LeetCodeClient("global", async () => session, fetcher, expired);
+    await expect(client.run({ problem: { slug: "two-sum", externalId: "1" }, language: "python", code: "x" })).rejects.toBeInstanceOf(PracticeChallengeError);
+    expect(expired).not.toHaveBeenCalled();
   });
 
   it("recognises an HTML body from a JSON endpoint as a signed-out session", async () => {
