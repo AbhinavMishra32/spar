@@ -11,8 +11,8 @@ import type { ReactNode } from "react";
  * that might ever want to say something carrying a prop it mostly does not use.
  *
  * Deliberately small. A toast here is a receipt for something the learner just
- * did — it is never an error dialog, never a question, and never the only place
- * a fact appears. If dismissing it loses information, it was the wrong surface.
+ * did, or a failure of it — never a question, and never the only place a fact
+ * appears. If dismissing it loses information, it was the wrong surface.
  */
 export type Toast = {
   id: string;

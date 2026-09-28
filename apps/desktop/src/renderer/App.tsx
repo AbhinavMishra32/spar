@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle, X } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ChallengeCodePreview, ChallengeDetail, Language, ProblemSource, SessionDetail, SessionSummary, Track } from "@spar/domain";
 import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
@@ -39,6 +39,7 @@ import { useSidebarWidth } from "./hooks/use-sidebar-width";
 import { recordContextUsage } from "./hooks/use-context-usage";
 import { SparDots } from "@/components/common/SparDots";
 import { Toaster } from "@/components/common/Toaster";
+import { toast } from "@/hooks/use-toasts";
 import { Button } from "@/components/ui/button";
 
 const api: SparApi | undefined = window.spar;
@@ -524,6 +525,29 @@ export function App() {
   useEffect(() => registerShelfRoute(() => {
     shelfRouteRef.current?.();
   }), []);
+
+  /* Once the app is up, a failure is said in the same corner as everything else
+     the app says back. Before that there is nowhere else for it to go, so the
+     fatal and sign-in screens keep reading `error` themselves. A sign-in problem
+     that says to reconnect gets the way there. */
+  const hasAccount = Boolean(data?.account);
+  useEffect(() => {
+    if (!error || !hasAccount) return;
+    const reconnect = /reconnect .* in settings/i.test(error);
+    toast({
+      key: "app-error",
+      title: error,
+      tone: "danger",
+      glyph: <AlertCircle />,
+      action: reconnect ? { label: "Settings", onClick: () => {
+        setPage("settings");
+        setDetail(null);
+        setHistory((current) => visit(current, { page: "settings" }));
+      } } : undefined,
+      duration: 8_000,
+    });
+    setError(null);
+  }, [error, hasAccount]);
 
   if (error && !data) return <FatalError error={error} />;
   if (!data) return <BootShell />;
@@ -1060,15 +1084,6 @@ export function App() {
             />
           )}
 
-          {error && (
-            <div className="absolute right-3 top-11 z-20 flex w-[min(26rem,calc(100vw-2rem))] items-start gap-2 rounded-xl border border-destructive/30 bg-popover px-3 py-2.5 text-ui text-destructive shadow-[var(--app-shadow-overlay)]">
-              <AlertCircle className="mt-px size-3.5 shrink-0" />
-              <span className="min-w-0 flex-1">{error}</span>
-              <button className="shrink-0 text-muted-foreground hover:text-foreground" onClick={() => setError(null)} type="button">
-                <X className="size-3.5" />
-              </button>
-            </div>
-          )}
 
           <div className="min-h-0 flex-1">
 

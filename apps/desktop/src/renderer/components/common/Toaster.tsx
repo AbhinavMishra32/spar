@@ -120,7 +120,9 @@ function ToastRow({ reduced, toast }: { reduced: boolean; toast: Toast }) {
 function Body({ toast }: { toast: Toast }) {
   return (
     <>
-      <p className="truncate text-thread font-medium text-foreground">{toast.title}</p>
+      {/* A failure is the one thing whose whole sentence matters: cut to a line,
+          "reconnect LeetCode in Settings" is the part that goes missing. */}
+      <p className={cn("text-thread font-medium text-foreground", toast.tone === "danger" ? "line-clamp-3" : "truncate")}>{toast.title}</p>
       {toast.detail && <p className="mt-px truncate text-ui-sm text-muted-foreground">{toast.detail}</p>}
     </>
   );
