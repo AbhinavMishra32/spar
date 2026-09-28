@@ -38,9 +38,36 @@ export async function launchCodeforcesSessionBrowser(profileDir: string): Promis
   }
 }
 
+/** Launches an installed Chromium browser — Chrome, Edge, Brave or Chromium —
+ * on an app-owned profile and opens `url` in it. A real browser, not an embedded
+ * one: its own address bar, password manager, passkeys (Touch ID, iCloud
+ * Keychain, a phone over QR, a security key) and Google sign-in, none of which
+ * Electron's embedded Chromium provides. The profile is Spar's, never the
+ * learner's everyday one. */
+export async function launchSignInBrowser(profileDir: string, url: string): Promise<ChromiumBrowser> {
+  const { child, port } = await startChromium(profileDir);
+  const browser = new ChromiumBrowser(child, port);
+  try {
+    await browser.open(url);
+    return browser;
+  } catch (error) {
+    await browser.close();
+    throw error;
+  }
+}
+
+export async function hasChromiumBrowser(): Promise<boolean> {
+  return (await findChromiumBrowser()) !== null;
+}
+
 async function launch(profileDir: string): Promise<CodeforcesBrowser> {
+  const { child, port } = await startChromium(profileDir);
+  return new CodeforcesBrowser(child, port);
+}
+
+async function startChromium(profileDir: string): Promise<{ child: ChildProcess; port: number }> {
   const executable = await findChromiumBrowser();
-  if (!executable) throw new Error("Codeforces requires Google Chrome, Microsoft Edge, Brave, or Chromium to connect. Install one and try again.");
+  if (!executable) throw new Error("Signing in needs Google Chrome, Microsoft Edge, Brave, or Chromium. Install one and try again.");
   /* Chrome deliberately exposes navigator.webdriver when the magic value
      --remote-debugging-port=0 is used. Cloudflare then grants a clearance but
      rejects it on the redirect back to /enter. Reserve an ordinary ephemeral
@@ -57,22 +84,86 @@ async function launch(profileDir: string): Promise<CodeforcesBrowser> {
   ], { stdio: "ignore" });
   try {
     await waitForDevTools(port, child);
-    return new CodeforcesBrowser(child, port);
+    return { child, port };
   } catch (error) {
     child.kill();
     throw error;
   }
 }
 
-export class CodeforcesBrowser {
-  constructor(private readonly child: ChildProcess, private readonly port: number) {}
+/** A Chromium process on an app-owned profile, driven over its local DevTools
+ * endpoint. */
+export class ChromiumBrowser {
+  constructor(protected readonly child: ChildProcess, protected readonly port: number) {}
+  /** The process has gone. On macOS closing the last window leaves the browser
+   * running, so a sign-in also asks `hasPage`. */
   get closed(): boolean { return this.child.exitCode !== null || this.child.signalCode !== null; }
+
+  /** Whether the learner still has a tab open. */
+  async hasPage(): Promise<boolean> {
+    if (this.closed) return false;
+    const response = await fetch(`http://127.0.0.1:${this.port}/json/list`).catch(() => null);
+    if (!response?.ok) return false;
+    return (await response.json() as DevToolsTarget[]).some((entry) => entry.type === "page");
+  }
+
+  /** Cookies the browser would send to `url`, whichever tab the learner is in. */
+  async cookies(url: string): Promise<Array<{ name: string; value: string }>> {
+    const target = await this.pageTarget(() => true);
+    if (!target?.webSocketDebuggerUrl) return [];
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+    try {
+      const result = await client.command<{ cookies?: Array<{ name: string; value: string }> }>("Network.getCookies", { urls: [url] });
+      return result.cookies ?? [];
+    } finally { client.close(); }
+  }
+
+  async open(url: string): Promise<void> {
+    const target = await this.pageTarget(() => true);
+    if (!target?.webSocketDebuggerUrl) throw new Error("The browser did not open a page.");
+    const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+    try { await client.command("Page.navigate", { url }); }
+    finally { client.close(); }
+  }
+
+  async close(): Promise<void> {
+    if (!this.closed) {
+      /* Browser.close through a page is a clean shutdown, which flushes the
+         cookie store to disk; a kill can lose the session just signed in. */
+      const target = await this.pageTarget(() => true).catch(() => null);
+      if (target?.webSocketDebuggerUrl) {
+        const client = await CdpClient.connect(target.webSocketDebuggerUrl).catch(() => null);
+        await client?.command("Browser.close", {}).catch(() => undefined);
+        client?.close();
+        await this.exited(3_000);
+      }
+    }
+    if (!this.closed) this.child.kill();
+  }
+
+  private exited(ms: number): Promise<void> {
+    if (this.closed) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      this.child.once("exit", () => { clearTimeout(timer); resolve(); });
+    });
+  }
+
+  protected async pageTarget(accept: (url: string) => boolean): Promise<DevToolsTarget | null> {
+    const response = await fetch(`http://127.0.0.1:${this.port}/json/list`).catch(() => null);
+    if (!response?.ok) return null;
+    const targets = await response.json() as DevToolsTarget[];
+    return targets.find((entry) => entry.type === "page" && accept(entry.url)) ?? null;
+  }
+}
+
+export class CodeforcesBrowser extends ChromiumBrowser {
 
   /** Challenge cookies produced while webdriver was accidentally enabled can
    * never validate under the corrected browser identity. Clear only that state;
    * a still-valid Codeforces login remains available for an easy reconnect. */
   async openSignIn(): Promise<void> {
-    const target = await this.pageTarget(false);
+    const target = await this.pageTarget(() => true);
     if (!target?.webSocketDebuggerUrl) throw new Error("The Codeforces browser did not open a page.");
     const client = await CdpClient.connect(target.webSocketDebuggerUrl);
     try {
@@ -170,14 +261,8 @@ export class CodeforcesBrowser {
     } finally { client.close(); }
   }
 
-  async close(): Promise<void> {
-    const target = await this.target().catch(() => null);
-    if (target) await fetch(`http://127.0.0.1:${this.port}/json/close/${encodeURIComponent(target.id)}`).catch(() => undefined);
-    if (!this.closed) this.child.kill();
-  }
-
   private async navigate(url: string): Promise<void> {
-    const target = await this.pageTarget(false);
+    const target = await this.pageTarget(() => true);
     if (!target?.webSocketDebuggerUrl) throw new Error("The Codeforces browser did not open a page.");
     const client = await CdpClient.connect(target.webSocketDebuggerUrl);
     try {
@@ -193,14 +278,7 @@ export class CodeforcesBrowser {
   }
 
   private async target(): Promise<DevToolsTarget | null> {
-    return this.pageTarget(true);
-  }
-
-  private async pageTarget(codeforcesOnly: boolean): Promise<DevToolsTarget | null> {
-    const response = await fetch(`http://127.0.0.1:${this.port}/json/list`).catch(() => null);
-    if (!response?.ok) return null;
-    const targets = await response.json() as DevToolsTarget[];
-    return targets.find((entry) => entry.type === "page" && (!codeforcesOnly || isCodeforcesUrl(entry.url))) ?? null;
+    return this.pageTarget(isCodeforcesUrl);
   }
 }
 

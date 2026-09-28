@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { Check, Loader2, Trash2 } from "lucide-react";
 import type { ProviderId, ProviderInventory, ProviderOAuthEvent, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -121,6 +122,45 @@ export function ProviderConnectDialog({
     }
   };
 
+  /* A finished sign-in is the end of the dialog's job, so it says so and offers
+     the one thing left to do, rather than keeping a form whose buttons no longer
+     do anything. */
+  if (oauth?.status === "connected") {
+    return (
+      <Dialog onOpenChange={close} open>
+        <DialogContent className="sm:max-w-[26rem]">
+          <div className="flex flex-col items-center px-2 pb-1 pt-4 text-center">
+            <div className="relative">
+              <motion.span
+                animate={{ opacity: 1, scale: 1 }}
+                className="grid size-14 place-items-center rounded-2xl border border-border bg-[var(--color-background-elevated-secondary)] text-foreground"
+                initial={{ opacity: 0, scale: 0.85 }}
+                transition={{ type: "spring", stiffness: 380, damping: 26 }}
+              >
+                <ProviderGlyph className="size-7" provider={provider.id} />
+              </motion.span>
+              <motion.span
+                animate={{ opacity: 1, scale: 1 }}
+                className="absolute -bottom-1 -right-1 grid size-6 place-items-center rounded-full bg-foreground text-background ring-4 ring-popover"
+                initial={{ opacity: 0, scale: 0.4 }}
+                transition={{ type: "spring", stiffness: 520, damping: 22, delay: 0.18 }}
+              >
+                <Check className="size-3.5" strokeWidth={3} />
+              </motion.span>
+            </div>
+            <DialogTitle className="mt-5">{provider.name} is connected</DialogTitle>
+            <DialogDescription className="mt-1.5 max-w-[20rem]">
+              <SparWordmark className="text-foreground" /> can now use your subscription to reach {provider.name} models.
+            </DialogDescription>
+          </div>
+          <DialogFooter className="sm:justify-center">
+            <Button autoFocus className="w-full" onClick={() => close(false)}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
   return (
     <Dialog onOpenChange={close} open>
       <DialogContent className="sm:max-w-[30rem]">
@@ -144,8 +184,8 @@ export function ProviderConnectDialog({
             {oauth && (
               <div className="rounded-xl border border-border bg-[var(--color-background-elevated-secondary)] p-3 text-ui">
                 <p className="flex items-center gap-1.5 font-medium">
-                  {!["connected", "error", "cancelled"].includes(oauth.status) && <Loader2 className="size-3 animate-spin" />}
-                  {oauth.status === "connected" ? "Connected" : oauth.status === "error" ? "Sign-in failed" : "Waiting for sign-in"}
+                  {!["error", "cancelled"].includes(oauth.status) && <Loader2 className="size-3 animate-spin" />}
+                  {oauth.status === "error" ? "Sign-in failed" : "Waiting for sign-in"}
                 </p>
                 <p className="mt-1 text-muted-foreground">{oauth.message}</p>
               </div>
@@ -157,7 +197,6 @@ export function ProviderConnectDialog({
                 <Button disabled={busy || (!manualCode.trim() && !oauth.allowEmpty)} onClick={() => { if (api) void api.submitProviderOAuth(oauth.flowId, manualCode); }} size="sm">Continue</Button>
               </div>
             )}
-            {oauth?.status === "connected" && <p className="inline-flex items-center gap-1 text-ui text-success"><Check className="size-3.5" />Your subscription is ready for Spar.</p>}
           </div>
         ) : (
           <div className="space-y-3">

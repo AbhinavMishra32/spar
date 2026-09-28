@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { ChevronsUpDown, Sparkles } from "lucide-react";
+import { ChevronsUpDown } from "lucide-react";
 import { DEFAULT_PROBLEM_SOURCES, PROBLEM_SOURCES, type ProblemSource, type SessionSummary } from "@spar/domain";
 import { SourceGlyph } from "./SourceGlyph";
+import { SparDots } from "./SparDots";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuCheckItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
@@ -83,7 +84,7 @@ function toggleSource(value: ProblemSource[], source: ProblemSource): ProblemSou
 }
 
 function SourceMark({ source, className }: { source: ProblemSource; className: string }) {
-  return source === "spar" ? <Sparkles className={cn("text-muted-foreground", className)} /> : <SourceGlyph className={className} source={source} />;
+  return source === "spar" ? <SparDots className={cn("text-muted-foreground", className)} pattern="still" size={className.includes("size-4") ? 16 : 14} /> : <SourceGlyph className={className} source={source} />;
 }
 
 /** One sentence on what the current choice means for the agent. */

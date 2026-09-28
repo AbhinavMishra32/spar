@@ -41,12 +41,12 @@ export function LeetCodeGlyph(props: GlyphProps) {
   );
 }
 
-export function CodeforcesGlyph(props: GlyphProps) {
+export function CodeforcesGlyph({ mono = false, ...props }: GlyphProps & { mono?: boolean }) {
   return (
     <Mark {...props}>
-      <path d="M4.5 7.5C5.328 7.5 6 8.172 6 9v10.5c0 .828-.672 1.5-1.5 1.5h-3C.673 21 0 20.328 0 19.5V9c0-.828.673-1.5 1.5-1.5h3z" fill="#1f8acb" />
-      <path d="M13.5 3c.828 0 1.5.672 1.5 1.5v15c0 .828-.672 1.5-1.5 1.5h-3c-.827 0-1.5-.672-1.5-1.5v-15c0-.828.673-1.5 1.5-1.5h3z" fill="#ffd32a" />
-      <path d="M22.5 10.5c.828 0 1.5.672 1.5 1.5v7.5c0 .828-.672 1.5-1.5 1.5h-3c-.828 0-1.5-.672-1.5-1.5V12c0-.828.672-1.5 1.5-1.5h3z" fill="#f44336" />
+      <path d="M4.5 7.5C5.328 7.5 6 8.172 6 9v10.5c0 .828-.672 1.5-1.5 1.5h-3C.673 21 0 20.328 0 19.5V9c0-.828.673-1.5 1.5-1.5h3z" fill={mono ? undefined : "#1f8acb"} />
+      <path d="M13.5 3c.828 0 1.5.672 1.5 1.5v15c0 .828-.672 1.5-1.5 1.5h-3c-.827 0-1.5-.672-1.5-1.5v-15c0-.828.673-1.5 1.5-1.5h3z" fill={mono ? undefined : "#ffd32a"} />
+      <path d="M22.5 10.5c.828 0 1.5.672 1.5 1.5v7.5c0 .828-.672 1.5-1.5 1.5h-3c-.828 0-1.5-.672-1.5-1.5V12c0-.828.672-1.5 1.5-1.5h3z" fill={mono ? undefined : "#f44336"} />
     </Mark>
   );
 }
@@ -67,6 +67,10 @@ export function CodeChefGlyph(props: GlyphProps) {
   );
 }
 
-export function SourceGlyph({ className, source }: { className?: string; source: "leetcode" | "codeforces" }) {
-  return source === "leetcode" ? <LeetCodeGlyph className={className} /> : <CodeforcesGlyph className={className} />;
+/** `mono` draws the mark in the text colour instead of the brand's, for a
+ *  place that tints it — the solved mark is the success colour whoever judged. */
+export function SourceGlyph({ className, source, mono = false }: { className?: string | undefined; source: "leetcode" | "codeforces"; mono?: boolean }) {
+  return source === "leetcode"
+    ? <LeetCodeGlyph className={className} style={mono ? { color: "currentColor" } : undefined} />
+    : <CodeforcesGlyph className={className} mono={mono} />;
 }

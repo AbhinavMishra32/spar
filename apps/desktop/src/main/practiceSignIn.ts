@@ -2,7 +2,7 @@ import { rm } from "node:fs/promises";
 import path from "node:path";
 import { app, BrowserWindow, session as electronSession, type Session } from "electron";
 import { parseCodeforcesCookies, parseLeetCodeCookie, practiceSource, verifyLeetCodeSession, type CodeforcesSession, type LeetCodeSession, type PracticeRegion } from "@spar/practice";
-import { launchCodeforcesBrowser } from "./codeforcesBrowser.js";
+import { hasChromiumBrowser, launchCodeforcesBrowser, launchSignInBrowser, type ChromiumBrowser } from "./codeforcesBrowser.js";
 
 /**
  * Signing in to a practice source.
@@ -25,7 +25,14 @@ import { launchCodeforcesBrowser } from "./codeforcesBrowser.js";
  * error about a sign-in that visibly worked. The cookies are necessary and prove
  * nothing; `userStatus.isSignedIn` is the only completion test there is.
  *
- * The window is deliberately its own `persist:` partition rather than the app's
+ * The page opens in the learner's installed Chromium browser (Chrome, Edge,
+ * Brave) on a Spar-owned profile, not in an Electron window. Electron's embedded
+ * Chromium has no passkey UI on macOS — no Touch ID, no iCloud Keychain, no phone
+ * over QR — and Google refuses to sign in inside embedded browsers. A real
+ * browser has all of it, plus an address bar the learner can check. Only when no
+ * Chromium browser is installed does the flow fall back to an Electron window.
+ *
+ * That fallback window is deliberately its own `persist:` partition rather than the app's
  * default session. Two reasons, and both matter:
  *
  *   - Spar's own window must never share a cookie jar with a site it renders.
@@ -70,6 +77,7 @@ export async function signInToLeetCode(input: {
    *  while a window they may have sent behind the app waits for them. */
   onProgress?: (message: string) => void;
 }): Promise<PracticeSignInResult> {
+  if (await hasChromiumBrowser()) return signInToLeetCodeInBrowser(input);
   const { region, parent, signal, onProgress } = input;
   const source = practiceSource("leetcode");
   const partition = practiceSignInSession(region);
@@ -165,11 +173,69 @@ export async function signInToLeetCode(input: {
   });
 }
 
-/** Clears the partition, so disconnecting really disconnects rather than leaving
- *  a live session behind the next sign-in button. */
+/** The same sign-in in a real browser. The completion test is unchanged: the
+ *  cookies are read over DevTools and LeetCode is asked whether they are signed
+ *  in, each time they change. Closing the browser window is cancelling. */
+async function signInToLeetCodeInBrowser(input: { region: PracticeRegion; signal?: AbortSignal; onProgress?: (message: string) => void }): Promise<PracticeSignInResult> {
+  const { region, signal, onProgress } = input;
+  const source = practiceSource("leetcode");
+  onProgress?.(`Opening ${source.name} in your browser…`);
+  const launched = await launchSignInBrowser(leetCodeProfile(region), source.signInUrl[region])
+    .then((browser) => ({ browser })).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+  if ("error" in launched) return { status: "failed", message: launched.error };
+  const { browser } = launched;
+  const origin = region === "cn" ? "https://leetcode.cn/" : "https://leetcode.com/";
+
+  return new Promise<PracticeSignInResult>((resolve) => {
+    let settled = false;
+    let checking = false;
+    let checkedCookie = "";
+    const finish = (result: PracticeSignInResult) => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      void browser.close();
+      resolve(result);
+    };
+    const attempt = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        if (!(await browser.hasPage())) return finish({ status: "cancelled" });
+        const session = await readBrowserSession(browser, origin, region).catch(() => null);
+        if (!session || session.cookie === checkedCookie) return;
+        const identity = await verifyLeetCodeSession(session, region);
+        checkedCookie = session.cookie;
+        if (!identity) return;
+        onProgress?.(`Signed in to ${source.name} as ${identity.username}.`);
+        finish({ status: "connected", session, username: identity.username });
+      } catch {
+        /* A page mid-navigation refuses DevTools for a moment; the next poll asks again. */
+      } finally {
+        checking = false;
+      }
+    };
+    const poll = setInterval(() => { void attempt(); }, POLL_MS);
+    const timer = setTimeout(() => finish({ status: "failed", message: `The ${source.name} sign-in window timed out after ten minutes.` }), TIMEOUT_MS);
+    const abort = () => finish({ status: "cancelled" });
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) return abort();
+    onProgress?.(`Sign in to ${source.name} in the browser window…`);
+  });
+}
+
+function leetCodeProfile(region: PracticeRegion): string {
+  return path.join(app.getPath("userData"), region === "cn" ? "leetcode-cn-browser" : "leetcode-browser");
+}
+
+/** Clears both places a sign-in can live, so disconnecting really disconnects
+ *  rather than leaving a live session behind the next sign-in button. */
 export async function clearLeetCodeSignIn(region: PracticeRegion): Promise<void> {
   const partition = practiceSignInSession(region);
   await partition.clearStorageData({ storages: ["cookies", "localstorage", "indexdb", "serviceworkers", "cachestorage"] }).catch(() => undefined);
+  await rm(leetCodeProfile(region), { recursive: true, force: true }).catch(() => undefined);
 }
 
 const CODEFORCES_PARTITION = "persist:spar-codeforces";
@@ -198,7 +264,7 @@ export async function signInToCodeforces(input: { parent: BrowserWindow | null; 
     const finish = (result: CodeforcesSignInResult) => { if (settled) return; settled = true; clearInterval(poll); clearTimeout(timer); input.signal?.removeEventListener("abort", abort); void browser.close(); resolve(result); };
     const attempt = async () => {
       if (checking) return false;
-      if (browser.closed) { finish({ status: "cancelled" }); return false; }
+      if (!(await browser.hasPage())) { finish({ status: "cancelled" }); return false; }
       checking = true;
       try {
         const identity = await browser.identity().catch(() => null);
@@ -237,6 +303,13 @@ async function readSession(partition: Session, region: PracticeRegion): Promise<
   if (!cookies.length) return null;
   const header = cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
   const parsed = parseLeetCodeCookie(header, region);
+  return "error" in parsed ? null : parsed.session;
+}
+
+async function readBrowserSession(browser: ChromiumBrowser, origin: string, region: PracticeRegion): Promise<LeetCodeSession | null> {
+  const cookies = await browser.cookies(origin);
+  if (!cookies.length) return null;
+  const parsed = parseLeetCodeCookie(cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; "), region);
   return "error" in parsed ? null : parsed.session;
 }
 

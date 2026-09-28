@@ -7,6 +7,7 @@ import { relativeTime, shortTime } from "@/lib/format";
 import { Panel } from "../common/Page";
 import { approximateRating, sparRating, type ContestSite } from "@/lib/ratingScale";
 import { SourceGlyph } from "../common/SourceGlyph";
+import { usePracticeSources } from "@/hooks/use-practice-sources";
 
 /**
  * The rating, as the page's masthead.
@@ -153,17 +154,7 @@ const SITE_NAME: Record<ContestSite, string> = { leetcode: "LeetCode", codeforce
  * would be a worse answer than a general one.
  */
 function useContestSites(api: SparApi | undefined): ContestSite[] {
-  const [connected, setConnected] = useState<ContestSite[] | null>(null);
-
-  const read = useCallback(async () => {
-    if (!api) return;
-    const inventory = await api.practiceSources();
-    setConnected(inventory.filter((item) => item.state === "connected").map((item) => item.source));
-  }, [api]);
-
-  useEffect(() => { void read().catch(() => setConnected(null)); }, [read]);
-  useEffect(() => api?.onPracticeSourceEvent(() => { void read().catch(() => undefined); }), [api, read]);
-
+  const connected = usePracticeSources(api)?.filter((item) => item.state === "connected").map((item) => item.source);
   return connected?.length ? [...connected].sort(SITE_ORDER) : ["codeforces", "leetcode"];
 }
 
