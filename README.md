@@ -39,10 +39,30 @@ Grab the build for your machine from the
 `.dmg` for Mac (Apple silicon or Intel), an `.exe` for Windows, an `.AppImage` or
 `.deb` for Linux.
 
-**Builds are not code-signed yet**, so your OS will say so in its usual alarming
-way. On a Mac, right-click the app and choose *Open* the first time, or run
-`xattr -d com.apple.quarantine /Applications/Spar.app`. On Windows, choose *More
-info* → *Run anyway*.
+**The current builds are not signed with an Apple Developer ID or notarised by
+Apple**, so macOS may report that `Spar.app` is damaged, particularly on newer
+macOS versions. First copy `Spar.app` into `/Applications` and eject the disk
+image. Then right-click the installed app and choose *Open* the first time.
+
+If macOS still reports the warning, and you downloaded the app from Spar's
+[official GitHub releases](https://github.com/AbhinavMishra32/spar/releases), you
+can remove the quarantine attribute from the installed copy:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Spar.app
+```
+
+If the warning remains, remove the attribute recursively:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Spar.app
+```
+
+These commands are a local workaround for an unsigned build. Removing
+quarantine bypasses macOS's first-launch check for this application; it does not
+confirm that the app is signed, notarised, or safe. A future Developer ID-signed
+and notarised release should open through the normal macOS security flow without
+these commands. On Windows, choose *More info* → *Run anyway*.
 
 Two things are yours to bring. **A model:** Spar doesn't ship one or resell one —
 point it at something you already pay for or run yourself. **A backend:** Spar
