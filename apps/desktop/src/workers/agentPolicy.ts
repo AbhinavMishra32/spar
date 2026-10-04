@@ -58,21 +58,3 @@ const resultOf = (entry: { result: unknown } | undefined) => (entry?.result && t
 export function publishedChallenge(outcomes: Outcomes): boolean {
   return CHALLENGE_PUBLISHING_TOOLS.some((name) => (outcomes.get(name) ?? []).some((entry) => resultOf(entry).status === "playable"));
 }
-
-/**
- * Whether the turn is about to end owing the learner a next step.
- *
- * One case only: the learner just finished an attempt, nothing is open, and the
- * turn neither set a challenge nor taught a lesson. The coach gets one reminder
- * — it usually just read a rejection as news to report — and after that its
- * judgement stands. A review that sent the solution back reopens the challenge,
- * and a question the learner dismissed is an answer; neither owes anything.
- */
-export function owesChallenge(turnKind: AgentTurnKind, outcomes: Outcomes, hasActiveQuestion: boolean): boolean {
-  if (turnKind !== "attempt-complete" || hasActiveQuestion) return false;
-  if (publishedChallenge(outcomes)) return false;
-  if (resultOf(outcomes.get("review_solution")?.at(-1)).review === "rework") return false;
-  if (resultOf(outcomes.get("ask_user_question")?.at(-1)).status === "cancelled") return false;
-  if ((outcomes.get("teach_lesson") ?? []).some((entry) => resultOf(entry).status === "taught")) return false;
-  return true;
-}

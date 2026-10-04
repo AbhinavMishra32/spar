@@ -101,7 +101,7 @@ describe("coaching settings", () => {
       expect(store.challengeMixForSession(sessionId).suggestions).toEqual([{ id: "lang-stdlib", reason: "You hand-rolled a heap twice.", example: { before: "a hand-rolled heap", after: "heapq.heappush(h, x)" } }]);
       expect(result.skippedSuggestions).toBe("2 suggestions were already on, pending or turned down.");
       expect(turn(store, sessionId)).toContain("Lenses you suggested that the learner has not answered yet: Standard library");
-      expect(turn(store, sessionId)).toContain("turned these lens suggestions down; do not suggest them again: lang-types");
+      expect(turn(store, sessionId)).toContain("turned these lens suggestions down: lang-types");
 
       /* Accepting the lens settles the suggestion. */
       await tool(store, sessionId, { lenses: [{ id: "lang-stdlib", depth: "teach" }], note: "Added" });
@@ -123,7 +123,7 @@ describe("lenses across the whole Track", () => {
       let text = turn(store, sessionId);
       expect(text.indexOf("## Coaching settings")).toBeGreaterThan(text.indexOf("## Challenges on this Track"));
       expect(text.indexOf("## Coaching settings")).toBeLessThan(text.indexOf("## Available this turn"));
-      expect(text).toContain("They apply to every turn");
+      expect(text).toContain("rather than a checklist for every reply");
       expect(text).toContain("So far: nothing yet.");
       store.logLens(sessionId, "lang-idioms", "feedback", "for i in range(len(xs)) → enumerate(xs)");
       text = turn(store, sessionId);
@@ -131,17 +131,16 @@ describe("lenses across the whole Track", () => {
     } finally { store.close(); }
   });
 
-  it("refuse a Spar problem that carries no drill lens, before anything is built", async () => {
+  it("leave carrying a lens to the coach, and refuse only one the learner does not have", async () => {
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Trees");
       store.setSessionChallengeMix(sessionId, drill);
-      expect(String((await context(store, sessionId, { mode: "new" })).refused)).toContain("lang-deep");
+      expect((await context(store, sessionId, { mode: "new" })).refused).toBeUndefined();
       expect((await context(store, sessionId, { mode: "new", lens: { id: "nope", sideQuest: "something long enough" } })).refused).toContain("not one of the learner's lenses");
       const carried = await context(store, sessionId, { mode: "new", lens: { id: "lang-deep", sideQuest: "Use __slots__ on the node class and say why" } });
       expect(carried.refused).toBeUndefined();
       expect(carried.lens).toMatchObject({ label: "Deep JavaScript" });
-      expect((await context(store, sessionId, { mode: "new", skipLens: "A repair aimed at the leaf check" })).refused).toBeUndefined();
       expect((await context(store, sessionId, { mode: "revise" })).refused).toBeUndefined();
     } finally { store.close(); }
   });

@@ -116,18 +116,16 @@ describe("assign_practice_problem", () => {
     files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "",
   }));
 
-  it("does not set a problem priced outside the learner's window without a reason", async () => {
+  it("sets a problem priced outside the learner's window, and says where it sits", async () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub({ mount: hardMount() });
     try {
       const sessionId = targetedSession(store);
       const result = await assign(store, sessionId, service, workspaces);
-      expect(result.status).toBe("invalid");
-      expect((result.report as { checks: Array<{ name: string }> }).checks.map((check) => check.name)).toEqual(["learner level"]);
+      expect(result.status).toBe("playable");
+      expect((result.selectionNotes as Array<{ name: string; passed: boolean }>).find((check) => check.name === "learner level")?.passed).toBe(false);
       expect(result.window).toMatchObject({ minRating: expect.any(Number), maxRating: expect.any(Number) });
-      expect(String(result.note)).toContain("bridge");
-      expect(workspaces.replaceAll).not.toHaveBeenCalled();
-      expect(store.readSession(sessionId)?.question).toBeFalsy();
+      expect(workspaces.replaceAll).toHaveBeenCalled();
     } finally { store.close(); }
   });
 

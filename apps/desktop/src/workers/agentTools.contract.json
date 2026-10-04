@@ -1,6 +1,6 @@
 {
   "ask_user_question": {
-    "description": "Suspend the session for one focused learner answer. Offer 2-3 mutually exclusive choices. Each option is one self-contained line the learner can scan — no subtitle, no second sentence — so write the whole choice into the label. Always allow a custom answer.",
+    "description": "Suspend the session for one focused learner answer, as a few mutually exclusive choices. Each option is one self-contained line the learner can scan — no subtitle, no second sentence — so write the whole choice into the label. The learner can always type their own answer instead.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -73,7 +73,7 @@
     }
   },
   "assign_practice_problem": {
-    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. Use the learner's rating in the journey document to decide what level serves this step: a problem priced outside the window it gives is refused unless you pass levelReason. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
+    "description": "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. The journey gives the learner's rating and the window of provider ratings that fits them now; the result says where this problem sits against it. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -166,7 +166,7 @@
           "type": "string",
           "minLength": 10,
           "maxLength": 600,
-          "description": "Required only when the problem is priced outside the rating window the journey gives for this step: why a harder or easier problem is deliberate here (the learner asked for it, a first look at new ground, a confidence repeat). Without it, an out-of-window problem is not assigned and the reply says what fits."
+          "description": "When the problem is priced well outside the window the journey gives: why a harder or easier problem is right here. Kept with the choice."
         },
         "replaceReason": {
           "type": "string",
@@ -902,7 +902,7 @@
             "accepted",
             "rework"
           ],
-          "description": "`rework` reopens the challenge for the learner and ends your turn here — no ability update and no next challenge. Use it only when you can name the stated requirement it misses."
+          "description": "`rework` reopens the challenge for the learner, so it is for a stated requirement the solution misses."
         },
         "observedComplexity": {
           "type": "string",
@@ -951,7 +951,7 @@
             "additionalProperties": false
           },
           "maxItems": 3,
-          "description": "Their code read through the learner's lenses: for each lens it has something to say about, what it showed. Logged in the lens's history, so later turns know what was covered. Say these in your reply at each lens's depth."
+          "description": "Their code read through the learner's lenses: for each lens it has something to say about, what it showed. Logged in the lens's history, so later turns know what was covered."
         },
         "actionTitle": {
           "type": "string",
@@ -1145,13 +1145,13 @@
           "type": "string",
           "minLength": 10,
           "maxLength": 1500,
-          "description": "What is new relative to the learner's last challenge — the one step up. For revise, say what changes."
+          "description": "What is new for this learner relative to their recent work. For revise, say what changes."
         },
         "brief": {
           "type": "string",
           "minLength": 40,
           "maxLength": 4000,
-          "description": "The task for the builder: the contract (inputs, outputs, rules), the idea it exercises, anything the learner asked for, and the code-shape convention to keep (for example: LeetCode-style TreeNode with a typed class Solution method, as in their previous challenges). Plain prose; no code needed."
+          "description": "The problem for the builder: what the learner is given and what they must produce, the idea it should make them reach for, anything the learner asked for, and the code-shape convention to keep (for example: LeetCode-style TreeNode with a typed class Solution method, as in their previous challenges). Describe the problem, not the method, unless the method is itself the drill: the builder writes what you give it into the statement, and a named technique there takes away the part of the problem where they work out what to reach for. Plain prose; no code needed."
         },
         "language": {
           "type": "string",
@@ -1239,17 +1239,17 @@
         },
         "requiresComplexityAnalysis": {
           "type": "boolean",
-          "description": "Whether the learner states the time and space complexity of their solution after it passes. True for any algorithm or data-structure problem — trees, graphs, arrays, recursion, searching, DP — even when complexity is not the idea being taught: saying what their own code costs is part of solving one. False only for syntax, API use, debugging, UI, refactoring, repository mechanics and similar work where Big-O says nothing."
+          "description": "Whether the learner states the time and space complexity of their solution after it passes. Usually true for algorithm and data-structure problems, since saying what their own code costs is part of solving one; false where Big-O says nothing, such as syntax, API use, debugging, UI, refactoring or repository work."
         },
         "solutionRequirements": {
           "type": "array",
           "items": {
             "type": "string",
             "minLength": 4,
-            "maxLength": 400
+            "maxLength": 160
           },
           "maxItems": 4,
-          "description": "How the solution must be written when a different approach would defeat the exercise (\"recursive\", \"one pass\"). Shown to the learner and checked by review_solution. Omit when there is nothing to insist on."
+          "description": "How the solution must be written, when the method is itself what is being practised and the learner knows it (\"recursive\" in a recursion drill). The host prints these under the statement and review_solution holds the solution to them, so each one tells the learner the method. A limit on cost (\"O(k) extra space\") goes in the brief as a constraint instead, which leaves them to find the method."
         },
         "skills": {
           "type": "array",
@@ -1280,13 +1280,13 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 60,
-              "description": "A lens the Coaching settings list at drill, by its id."
+              "description": "One of the learner's lenses in Coaching settings, by its id."
             },
             "sideQuest": {
               "type": "string",
               "minLength": 10,
               "maxLength": 600,
-              "description": "What this problem makes them practise through that lens, built into the task — a requirement, part of the starter, or the shape of the data — not a footnote. The builder names it in one line of the statement."
+              "description": "What this problem makes them practise through that lens, built into the task — a requirement, part of the starter, or the shape of the data."
             }
           },
           "required": [
@@ -1294,13 +1294,7 @@
             "sideQuest"
           ],
           "additionalProperties": false,
-          "description": "Required when the Coaching settings list a lens at drill: the one this problem carries. Rotate between them; the journey shows which lens each challenge drilled. The host refuses a brief that leaves it out, unless skipLens says why."
-        },
-        "skipLens": {
-          "type": "string",
-          "minLength": 10,
-          "maxLength": 400,
-          "description": "Instead of lens, only when a side quest would get in the way of this problem — a repair aimed at a struggle, say. Never twice in a row: the host refuses a second skip."
+          "description": "The lens this problem drills, when it carries one. The journey shows which lens each challenge drilled."
         },
         "review": {
           "type": "object",
@@ -1569,7 +1563,7 @@
     }
   },
   "update_ability": {
-    "description": "Introduce an ability as uncertain when you start training it, or append an evidence-backed version to one. Give it the summary, concepts and practice drills that make it something the learner can see and train once the evidence supports it. Never grant from one pass or from a challenge they walked away from.",
+    "description": "Introduce an ability as uncertain when you start training it, or append an evidence-backed version to one. Give it the summary, concepts and practice drills that make it something the learner can see and train once the evidence supports it. The status is a claim to the learner about what they can do on their own, so it moves with the weight of the evidence: a pass they were walked to says less than one they found.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1776,7 +1770,7 @@
     }
   },
   "update_notebook": {
-    "description": "Change one of your notebooks, your primary memory of this learner: the one for this Track, or user.md, the one about the person that every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both; keep each under about 1,200 words and delete what is no longer true.",
+    "description": "Change one of your notebooks, your primary memory of this learner: the one for this Track, or user.md, the one about the person that every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -2274,7 +2268,7 @@
     }
   },
   "set_challenge_mix": {
-    "description": "Change this session's coaching settings, or suggest a lens. Change settings only when the learner asks in chat: when to write a Spar problem versus assigning a real LeetCode/Codeforces problem, and lenses — areas to go deeper on, each at a depth (mention: a line in feedback; teach: explain it when relevant; drill: Spar problems that force it). Send only what they asked for. Attach an example lifted from their own code whenever you have one — it is what the learner sees on the lens. suggest is the one part you may use on your own: when their code shows a pattern a lens would fix (range(len(xs)) loops, a hand-rolled heap), propose that lens with the reason in one line; it waits in the learner's settings menu until they accept or dismiss it. Never suggest one the journey lists as pending or turned down.",
+    "description": "Change this session's coaching settings, or suggest a lens. Change settings only when the learner asks in chat: when to write a Spar problem versus assigning a real LeetCode/Codeforces problem, and lenses — areas to go deeper on, each at a depth (mention: a line in feedback; teach: explain it when relevant; drill: Spar problems that force it). Send only what they asked for. Attach an example lifted from their own code whenever you have one — it is what the learner sees on the lens. suggest is the one part you may use on your own: when their code shows a pattern a lens would fix (range(len(xs)) loops, a hand-rolled heap), propose that lens with the reason in one line; it waits in the learner's settings menu until they accept or dismiss it. The journey lists the ones already pending or turned down.",
     "inputSchema": {
       "type": "object",
       "properties": {

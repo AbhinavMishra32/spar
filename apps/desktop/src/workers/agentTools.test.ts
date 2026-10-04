@@ -62,6 +62,14 @@ import contract from "./agentTools.contract.json" with { type: "json" };
  * shown above the problem. `reopen_challenge` sets a past challenge again. `set_challenge_mix` is new, and `set_challenge`, `review_solution` and `teach_lesson` gained a lens field each:
  * the learner's choice of when to use real problems and which side quests to
  * weave in, changed by the coach only when they ask in chat.
+ *
+ * The coach-v11 pass moved rules out of the tool descriptions and into the
+ * coach's judgement: `set_challenge` lost `skipLens` (a lens is no longer
+ * required), its brief asks for the problem rather than the method, and
+ * `solutionRequirements` caps at 160 characters to match the stored design;
+ * `assign_practice_problem` no longer refuses out-of-window problems; and
+ * `ask_user_question`, `review_solution`, `set_challenge_mix`, `update_ability`
+ * and `update_notebook` dropped rules the prompt already says once.
  */
 describe("the tool contract, against the pinned reference", () => {
   const frozen = contract as Record<string, { description: string; inputSchema: unknown }>;

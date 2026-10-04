@@ -68,7 +68,7 @@ export const DEPTH_COPY: Record<LensDepth, { label: string; detail: string }> = 
 const DEPTH_RULE: Record<LensDepth, string> = {
   mention: "when it comes up in their code, name it in one line of feedback — no more",
   teach: "when it is relevant, explain it properly: a short aside in your reply, or a teach_lesson when it deserves one",
-  drill: "teach it when relevant, and write Spar problems that force it — as a requirement or part of the starter, named in the brief and stretch, with one line telling the learner what the side quest is",
+  drill: "teach it when relevant, and write Spar problems that make them practise it — as a requirement, part of the starter or the shape of the data",
 };
 
 /**
@@ -127,7 +127,7 @@ export function challengeMixInstructions(mix: ChallengeMix, sources: string[], l
 
   const lenses = mix.lenses.flatMap((lens) => { const info = lensInfo(lens, language); return info ? [{ lens, info }] : []; });
   if (lenses.length) {
-    lines.push("", "Lenses — what the learner asked you to go deeper on, for this whole Track. They apply to every turn: your replies, your review of their code, your lessons and your problems, each at the depth they chose. Before you answer, look for where one fits this turn — a line of their code, their question, the next problem — and bring it in. Rotate between them; a lens that has gone quiet is the one to reach for next.");
+    lines.push("", "Lenses — what the learner asked you to go deeper on, for this whole Track, each at the depth they chose. They are part of how you coach rather than a checklist for every reply: bring one in where it fits — a line of their code, their question, the next problem. The history under each shows what you have done through it and which has gone quiet.");
     for (const { lens, info } of lenses) {
       /* Drill needs a Spar problem to carry it; with Spar off it is teaching. */
       const depth: LensDepth = lens.depth === "drill" && !spar ? "teach" : lens.depth;
@@ -135,13 +135,13 @@ export function challengeMixInstructions(mix: ChallengeMix, sources: string[], l
       const past = history[lens.id] ?? [];
       lines.push(past.length
         ? `  So far: ${past.map((entry) => `${entry.kind} ${since(entry.at, now)} — ${entry.note}`).join("; ")}`
-        : "  So far: nothing yet. Bring it in at the next chance.");
+        : "  So far: nothing yet.");
     }
-    lines.push("How the host keeps this history: a Spar problem names the drill lens it carries in set_challenge's lens (the host refuses one that names none while a lens is at drill); review_solution's lenses records what their code showed through each; teach_lesson's lens tags a lesson taught through one.");
+    lines.push("How the history is kept: set_challenge's lens names the lens a Spar problem drills; review_solution's lenses records what their code showed through each; teach_lesson's lens tags a lesson taught through one.");
   }
 
-  if (mix.suggestions.length) lines.push("", `Lenses you suggested that the learner has not answered yet: ${mix.suggestions.map((entry) => entry.label ?? lensInfo(entry, language)?.label ?? entry.id).join(", ")}. Do not suggest them again.`);
-  if (mix.dismissed.length) lines.push(`The learner turned these lens suggestions down; do not suggest them again: ${mix.dismissed.join(", ")}.`);
+  if (mix.suggestions.length) lines.push("", `Lenses you suggested that the learner has not answered yet: ${mix.suggestions.map((entry) => entry.label ?? lensInfo(entry, language)?.label ?? entry.id).join(", ")}. They are waiting in the learner's settings.`);
+  if (mix.dismissed.length) lines.push(`The learner turned these lens suggestions down: ${mix.dismissed.join(", ")}.`);
 
   const instructions = mix.instructions.trim();
   if (instructions) lines.push("", `The learner's custom instructions for you. They apply to every turn, and override your defaults where they conflict, but never the host's rules:\n"""\n${instructions}\n"""`);

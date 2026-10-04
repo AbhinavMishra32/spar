@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHALLENGE_PUBLISHING_TOOLS, coachTools, CORE_TOOLS, owesChallenge, publishedChallenge, SKILL_TOOL, SOURCE_TOOLS, VISUALIZER_TOOLS, WEB_TOOLS, type AgentTurnKind, type Outcomes } from "./agentPolicy.js";
+import { CHALLENGE_PUBLISHING_TOOLS, coachTools, CORE_TOOLS, publishedChallenge, SKILL_TOOL, SOURCE_TOOLS, VISUALIZER_TOOLS, WEB_TOOLS, type AgentTurnKind, type Outcomes } from "./agentPolicy.js";
 
 const kinds: AgentTurnKind[] = ["cold-start", "session-start", "attempt-complete", "learner-message"];
 const outcomes = (entries: Record<string, unknown[]>): Outcomes =>
@@ -56,39 +56,5 @@ describe("publishedChallenge", () => {
     }
     expect(publishedChallenge(outcomes({ teach_lesson: [{ status: "playable" }] }))).toBe(false);
     expect(publishedChallenge(outcomes({ set_challenge: [{ status: "invalid" }, { status: "playable" }] }))).toBe(true);
-  });
-});
-
-describe("owesChallenge", () => {
-  it("owes a challenge only after a completed attempt", () => {
-    for (const kind of kinds) expect(owesChallenge(kind, new Map(), false)).toBe(kind === "attempt-complete");
-  });
-
-  it("still owes after a rejected draft or an answered question", () => {
-    expect(owesChallenge("attempt-complete", outcomes({ set_challenge: [{ status: "invalid" }] }), false)).toBe(true);
-    expect(owesChallenge("attempt-complete", outcomes({ ask_user_question: [{ status: "answered", answer: "x" }] }), false)).toBe(true);
-  });
-
-  it("owes nothing while a question is still active", () => {
-    expect(owesChallenge("attempt-complete", new Map(), true)).toBe(false);
-  });
-
-  it("owes nothing once a challenge is published", () => {
-    expect(owesChallenge("attempt-complete", outcomes({ set_challenge: [{ status: "playable" }] }), false)).toBe(false);
-    expect(owesChallenge("attempt-complete", outcomes({ assign_practice_problem: [{ status: "playable" }] }), false)).toBe(false);
-  });
-
-  it("owes nothing after a review sent the solution back", () => {
-    expect(owesChallenge("attempt-complete", outcomes({ review_solution: [{ review: "rework" }] }), false)).toBe(false);
-    expect(owesChallenge("attempt-complete", outcomes({ review_solution: [{ review: "rework" }, { review: "accepted" }] }), false)).toBe(true);
-  });
-
-  it("owes nothing after the learner dismissed the latest question", () => {
-    expect(owesChallenge("attempt-complete", outcomes({ ask_user_question: [{ status: "cancelled" }] }), false)).toBe(false);
-  });
-
-  it("owes nothing after a lesson was taught", () => {
-    expect(owesChallenge("attempt-complete", outcomes({ teach_lesson: [{ status: "taught" }] }), false)).toBe(false);
-    expect(owesChallenge("attempt-complete", outcomes({ teach_lesson: [{ status: "invalid" }] }), false)).toBe(true);
   });
 });

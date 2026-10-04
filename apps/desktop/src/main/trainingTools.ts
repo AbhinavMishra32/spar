@@ -308,7 +308,7 @@ export async function executeTrainingTool(
        agent that says "that does not meet the requirement" and leaves the
        challenge closed has only complained. */
     const reopened = local.reopenAttempt(attemptId, reasons.join(" ") || "The solution did not meet the challenge's stated requirements.");
-    return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner. Tell them which requirement it misses and what to change — a nudge, not the solution. Do not update abilities or set a new challenge this turn." };
+    return { review: "rework", reopened: true, questionId: reopened.questionId, note: "The challenge is open again for the learner." };
   }
   if (name === "record_insight") return recordInsight(local, value, sessionId);
   if (name === "file_review") return fileReview(local, value, sessionId);
@@ -424,25 +424,14 @@ async function assignPracticeProblem(
     why: String(value.why ?? ""),
   });
 
-  /* The level check is the one comparison that runs before anything is set.
-     It used to come back only with the assignment, beside an instruction not to
-     act on it, so a problem priced far above a developing ability went straight
-     to the learner with the warning filed underneath. A problem outside the
-     window is often the right call, but the agent has to say so: that is what
-     `levelReason` is for. Without one, nothing is mounted into the workspace and
-     the agent can search the window, set a smaller bridge first, or come back
-     with the reason. */
+  /* The level check is information, not a gate. Refusing problems outside the
+     window, with a note telling the coach to set a bridge instead, is what
+     stacked Spar-written bridges in front of LeetCode easies the learner then
+     solved in minutes. The coach sees where the problem sits against the window
+     and decides; `levelReason`, when given, is kept with the choice. */
   const level = adaptiveChecks.find((check) => check.name === "learner level");
   const levelReason = String(value.levelReason ?? "").trim();
-  if (level && !level.passed && !levelReason) {
-    const window = trainingWindow(targetSnapshot);
-    return {
-      status: "invalid" as const,
-      report: { valid: false, checks: [level] },
-      window,
-      note: `Not assigned. Problems that fit this step are rated about ${window.minRating}–${window.maxRating}; search with minRating and maxRating set to that window. If this problem needs a mechanism they have not shown on their own yet, set a smaller bridge first (an easier real problem, or set_challenge) that isolates it, and come back to this one once it lands. If the stretch is deliberate (they asked for it, or it is a first look at new ground), assign it again with levelReason saying why.`,
-    };
-  }
+  const introductionReason = [String(value.why ?? "").trim(), levelReason].filter(Boolean).join(" ");
 
   /* Mounting went to the source, which takes as long as a network call takes. The
      challenge underneath can have changed in that time — the learner may have
@@ -464,8 +453,8 @@ async function assignPracticeProblem(
        its events and the new challenge keeps a pointer to what it superseded, so a
        later turn can see that they were moved off something rather than that they
        walked away from it. */
-    ? local.replaceQuestion(sessionId, design, report, replaceReason, concepts, source, String(value.why ?? "").trim())
-    : local.createQuestion(sessionId, design, report, { concepts, source, introductionReason: String(value.why ?? "").trim() });
+    ? local.replaceQuestion(sessionId, design, report, replaceReason, concepts, source, introductionReason)
+    : local.createQuestion(sessionId, design, report, { concepts, source, introductionReason });
   return {
     status: "playable",
     question,
@@ -473,12 +462,12 @@ async function assignPracticeProblem(
     source: { slug: source.slug, title: design.title, displayId: source.displayId, url: source.url, difficulty: source.difficulty },
     judge: source.judge,
     localCases: source.localCaseCount,
-    /* Settled, and said so: the notes below are advisory comparisons, and read
-       as a to-do list they sent a turn back into searching for a replacement
-       for the problem it had just set — then telling the learner it was a poor
-       step while it sat in front of them. */
-    assigned: "This problem is now the learner's challenge. The selection notes are for explaining the fit honestly — say what in it is new or a stretch — not a reason to search again, replace it, or call it a poor next step. Do not search for or read other problems this turn.",
+    /* Settled, and said so: read as a to-do list, the selection notes once sent
+       a turn back into searching for a replacement for the problem it had just
+       set. */
+    assigned: "This problem is now the learner's challenge. The selection notes are context for explaining the fit honestly, not open items.",
     selectionNotes: adaptiveChecks,
+    ...(level && !level.passed ? { window: trainingWindow(targetSnapshot) } : {}),
     ...followsLesson(local, concepts, local.trackIdForSession(sessionId)),
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),
@@ -717,7 +706,7 @@ function fileReview(local: LocalStore, value: Record<string, unknown>, sessionId
   const days = Math.max(1, Math.round((Date.parse(filed.card.dueAt) - Date.now()) / 86_400_000));
   return {
     status: "filed", cardId: card.id, rating: ratingName, nextReviewInDays: days, lapses: filed.card.lapses, siblingsCredited: filed.siblings,
-    note: `Filed. "${card.title}" comes back in about ${days} day${days === 1 ? "" : "s"}. Tell the learner what you saw in a sentence or two; if the weak spot is still there, ask whether they want to work on it now.`,
+    note: `Filed. "${card.title}" comes back in about ${days} day${days === 1 ? "" : "s"}. `,
   };
 }
 
@@ -727,7 +716,7 @@ function builderContext(local: LocalStore, sessionId: string, trackId: string | 
   const open = openChallenge(local, sessionId);
   const track = trackId ? local.listTracks().find((entry) => entry.id === trackId) ?? null : null;
   const language = languageSchema.catch("javascript").parse(track?.language ?? local.getProfile()?.language ?? "javascript");
-  const refused = lensRefusal(local, sessionId, trackId, value, language);
+  const refused = lensRefusal(local, sessionId, value, language);
   if (refused) return { refused };
   const chosen = value.lens && typeof value.lens === "object" ? lensInfo({ id: String((value.lens as { id?: unknown }).id ?? "") }, language) : null;
   let openDesign: Record<string, unknown> | null = null;
@@ -740,31 +729,17 @@ function builderContext(local: LocalStore, sessionId: string, trackId: string | 
   return { preferredLanguage: track?.language ?? local.getProfile()?.language ?? "javascript", open: openDesign, recentStarters: recent, lens: chosen ? { label: chosen.label, about: chosen.about } : null };
 }
 
-/**
- * Holds a Spar-written challenge to the learner's drill lenses: it names the
- * one it carries, or says why this one cannot — and never skips twice running.
- * A revise keeps its task and a review is aimed at a card, so neither is held.
- */
-function lensRefusal(local: LocalStore, sessionId: string, trackId: string | null, value: Record<string, unknown>, language: ReturnType<typeof languageSchema.parse>): string | null {
-  if (value.mode === "revise" || value.review) return null;
-  if (!local.problemSourcesForSession(sessionId).includes("spar")) return null;
-  const mix = local.challengeMixForSession(sessionId);
-  const drills = mix.lenses.filter((lens) => lens.depth === "drill");
-  if (!drills.length) return null;
-  const names = drills.map((lens) => `${lensInfo(lens, language)?.label ?? lens.id} (${lens.id})`).join(", ");
+/* A named lens must be one the learner has. Whether this problem carries one
+   at all is the coach's call: requiring it, and refusing a second skip in a
+   row, bent problems around a side quest the problem did not need. */
+function lensRefusal(local: LocalStore, sessionId: string, value: Record<string, unknown>, language: ReturnType<typeof languageSchema.parse>): string | null {
   const lens = value.lens && typeof value.lens === "object" ? value.lens as { id?: unknown } : null;
-  if (lens) {
-    const id = String(lens.id ?? "");
-    if (mix.lenses.some((entry) => entry.id === id)) return null;
-    return `"${id}" is not one of the learner's lenses. The ones at drill are: ${names}.`;
-  }
-  if (typeof value.skipLens !== "string" || !value.skipLens.trim()) {
-    return `The learner set ${names} to drill, so a Spar problem carries one of them as a side quest. Add lens with its id and the side quest built into the task — rotating by the lens history in Coaching settings — or skipLens with why this problem cannot.`;
-  }
-  const last = local.journey(trackId, 6).challenges.filter((entry) => entry.source === "spar").at(-1);
-  const lastCarried = last ? Boolean((local.readChallenge(last.id)?.design as { lens?: unknown } | undefined)?.lens) : true;
-  if (!lastCarried) return `The last Spar problem ("${last?.title}") carried no lens either. Two in a row is not what the learner asked for: this one carries one of ${names}.`;
-  return null;
+  if (!lens) return null;
+  const mix = local.challengeMixForSession(sessionId);
+  const id = String(lens.id ?? "");
+  if (mix.lenses.some((entry) => entry.id === id)) return null;
+  const names = mix.lenses.map((entry) => `${lensInfo(entry, language)?.label ?? entry.id} (${entry.id})`).join(", ");
+  return `"${id}" is not one of the learner's lenses.${names ? ` Theirs are: ${names}.` : " They have none set."}`;
 }
 
 function logLensNotes(local: LocalStore, sessionId: string, notes: unknown) {
@@ -894,7 +869,7 @@ function recordInsight(local: LocalStore, value: Record<string, unknown>, sessio
     ...(firstRating !== proposed ? { gradeCapped: "The breakthrough was assisted, so the first grade was capped at hard and the first review comes sooner." } : {}),
     related,
     note: created
-      ? `Filed. The first review is due in about ${days} day${days === 1 ? "" : "s"}. If you mention it, say so plainly — "I've filed the idea that cracked this for review in ${days} day${days === 1 ? "" : "s"}" — and do not restate the card.${related.length ? " Related cards on the same pattern are listed: if this insight contradicts or deepens one of them, say how in a sentence." : ""}`
+      ? `Filed. The first review is due in about ${days} day${days === 1 ? "" : "s"}.${related.length ? " Related cards on the same pattern are listed." : ""}`
       : "Refined the card this challenge already had. Its review schedule is unchanged.",
   };
 }

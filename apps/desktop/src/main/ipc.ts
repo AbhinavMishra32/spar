@@ -1305,13 +1305,13 @@ const MAX_SUBMIT_OUTPUT = 200_000;
 function lensNote(store: LocalStore, sessionId: string): string {
   const lenses = store.challengeMixForSession(sessionId).lenses;
   if (!lenses.length) return "";
-  return ` Read their code through the learner's lenses too (${lenses.map((lens) => `${lens.label ?? lens.id} at ${lens.depth}`).join(", ")}): put what it shows in review_solution's lenses and say it in your reply at each lens's depth.`;
+  return ` Read their code through the learner's lenses too (${lenses.map((lens) => `${lens.label ?? lens.id} at ${lens.depth}`).join(", ")}): put what it shows in review_solution's lenses, and bring into your reply what is worth their hearing.`;
 }
 
 function requirementsNote(design: { solutionRequirements?: string[] | undefined }): string {
   const requirements = design.solutionRequirements ?? [];
   if (!requirements.length) return " Review how they wrote it before you write anything down: read their code, say what approach and complexity it actually is, and accept it unless it defeats the point of the exercise.";
-  return ` This challenge required: ${requirements.map((entry) => `"${entry}"`).join("; ")}. Read their code and check it against exactly those before you write anything down. If it meets them, accept and carry on; if it does not, send it back naming the one it misses — passing the tests the wrong way is not practice for the thing this challenge was for.`;
+  return ` This challenge required: ${requirements.map((entry) => `"${entry}"`).join("; ")}. Check their code against those before you write anything down: passing the tests the wrong way is not practice for the thing this challenge was for.`;
 }
 
 function runOutput(stdout: string, stderr: string) {

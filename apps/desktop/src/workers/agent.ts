@@ -6,7 +6,7 @@ import { advanceTrainingConversation, conversationStarted, createTrainingAgent, 
 import { stableJson } from "./evidence.js";
 import { clampSteer, steeringSection } from "./steering.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
-import { coachTools, owesChallenge, VISUALIZER_TOOLS, type AgentTurnKind, type Outcomes } from "./agentPolicy.js";
+import { coachTools, VISUALIZER_TOOLS, type AgentTurnKind, type Outcomes } from "./agentPolicy.js";
 import { mergeQuestionChanges, parseRepairChanges, repairQuestionUntilValid } from "./challengeRepair.js";
 import { challengeDraft } from "./challengeDraft.js";
 import { checkBadge, describeChanges, stageLog, streamInto, type StageLog } from "./challengeStages.js";
@@ -379,9 +379,9 @@ function builderMessage(brief: SetChallengeInput, context: BuilderContext): stri
     `It trains: ${brief.aim.ability}. The gap it probes: ${brief.aim.gap}`,
     `What is new relative to the learner's last challenge: ${brief.stretch}`,
     `Concepts: ${brief.concepts.map((tag) => tag.slug).join(", ")}.`,
-    brief.solutionRequirements?.length ? `The solution must be written this way (the host adds these to the statement): ${brief.solutionRequirements.join("; ")}.` : "",
+    brief.solutionRequirements?.length ? `The solution must be written this way: ${brief.solutionRequirements.join("; ")}. The host prints these under the statement, so leave them out of the statement itself; the reference and tests still follow them.` : "",
     `Task:\n${brief.brief}`,
-    brief.lens ? `Side quest — the learner asked to drill "${context.lens?.label ?? brief.lens.id}"${context.lens?.about ? ` (${context.lens.about})` : ""}. Build this into the task itself, so the solution cannot avoid it: ${brief.lens.sideQuest}\nName it in the statement in one line starting "Side quest:", after the rules and before the examples.` : "",
+    brief.lens ? `Side quest — the learner asked to drill "${context.lens?.label ?? brief.lens.id}"${context.lens?.about ? ` (${context.lens.about})` : ""}. Build this into the task itself: ${brief.lens.sideQuest}\nThe learner chose this lens, so let the statement name it in a line starting "Side quest:".` : "",
   ];
   if (brief.mode !== "new" && context.open) {
     sections.push(brief.mode === "revise"
@@ -432,15 +432,15 @@ async function setChallenge(
   emit({ type: "tool", tool: "set_challenge", phase: "start", callId: id, detail: "Writing the challenge", ...titled, input: toolPayload("set_challenge", brief) });
   let candidate: Record<string, unknown> = { mode: brief.mode };
   try {
-    const builderContext = await requestHostTool(randomUUID(), runId, sessionId, "challenge_builder_context", { mode: brief.mode, lens: brief.lens, skipLens: brief.skipLens, review: brief.review }) as BuilderContext;
-    /* Checked before a builder is paid for: a brief that ignores the learner's
-       drill lenses is refused with what to change, like any failed check. */
+    const builderContext = await requestHostTool(randomUUID(), runId, sessionId, "challenge_builder_context", { mode: brief.mode, lens: brief.lens, review: brief.review }) as BuilderContext;
+    /* Checked before a builder is paid for: a lens the learner does not have
+       is refused with what to change, like any failed check. */
     if (builderContext.refused) {
       const value = { status: "invalid", report: { valid: false, checks: [{ name: "lenses", passed: false, detail: builderContext.refused }] } };
-      stages.note("outcome", "failed", "Not written", "The brief left out a drill lens");
+      stages.note("outcome", "failed", "Not written", "The brief named an unknown lens");
       emit({ type: "telemetry", kind: "tool", name: "set_challenge", phase: "end", callId: id, ok: false, input: telemetryValue(brief), output: telemetryValue(value) });
       emit({ type: "tool", tool: "set_challenge", phase: "end", callId: id, ok: false, detail: builderContext.refused, ...titled, ...staged(), input: toolPayload("set_challenge", brief), output: toolPayload("set_challenge", value) });
-      return { full: value, forModel: { ...value, note: "Nothing was built. Add lens (or skipLens) to the brief and call set_challenge again." } };
+      return { full: value, forModel: { ...value, note: "Nothing was built." } };
     }
     /* Skills the brief names are the builder's to follow, not the coach's: the
        figure spec, say, is about what goes in the statement. */
@@ -561,7 +561,7 @@ function challengeForModel(brief: SetChallengeInput, candidate: Record<string, u
     ...(revisions.length ? { privateRevisions: revisions.map((revision) => revision.line) } : {}),
     nextStep: failures.some((failure) => failure.startsWith("session lifecycle:"))
       ? "The session's open challenge does not allow this mode. Check the journey's open challenge and choose mode new, revise or replace accordingly."
-      : "Not published. Adjust the brief — settle any ambiguity in the task, or simplify it while keeping the idea — and call set_challenge again. Do not tell the learner a build failed.",
+      : "Not published. Adjust the brief — settle any ambiguity in the task, or simplify it while keeping the idea — and call set_challenge again.",
   };
 }
 
@@ -589,15 +589,8 @@ function workDigest(outcomes: Outcomes): string {
   return lines.length ? `\n\n# Work already done this turn (the conversation was compacted to fit)\n${lines.join("\n")}\nContinue from here; do not repeat these calls.` : "";
 }
 
-function owedNudge(outcomes: Outcomes): string {
-  const last = outcomes.get("set_challenge")?.at(-1)?.result;
-  const failures = last && !isPlayableQuestion(last) ? failedChecks(last) : [];
-  return `The learner just finished their challenge and nothing is set for them next. ${failures.length ? `Your last set_challenge was not published: ${failures.join(" | ")} ` : ""}Set their next challenge — or teach the lesson they need first — before you reply. Do not tell them a build failed.`;
-}
-
 async function runTurn(request: Request, stopped: AbortSignal) {
   const payload = request.payload;
-  const hasActiveQuestion = Boolean(payload.activeQuestion);
   const skills = (payload.skills ?? []).filter((skill) => skill && typeof skill.name === "string" && typeof skill.description === "string");
   const allowed = coachTools({ webSearch: payload.webSearch === true, practiceSource: payload.practiceSource === true, sparAuthoring: payload.sparAuthoring !== false, skills: skills.length > 0 });
   const outcomes: Outcomes = new Map();
@@ -624,7 +617,6 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       throw new Error(`This exact ${name} call already returned twice this turn. Use its result, or call it with different arguments.`);
     }
     callCounts.set(signature, (callCounts.get(signature) ?? 0) + 1);
-    if (name === "ask_user_question" && outcomes.get(name)?.length) throw new Error("You already asked the learner a question this turn. Use their answer, or ask in your reply.");
     if (name === "set_challenge" && (outcomes.get(name)?.length ?? 0) >= CHALLENGE_BUILD_LIMIT) throw new Error("That is three challenge builds this turn. Reply to the learner now; you can set it on the next turn.");
     const pausedWatch = watch;
     pausedWatch?.pause();
@@ -651,7 +643,6 @@ async function runTurn(request: Request, stopped: AbortSignal) {
   let finishReason = "stop";
   let contextPeak = 0;
   const contextWindow = piModelFor(payload.provider).contextWindow;
-  let nudged = false;
   let spillRetried = false;
   let figureRetried = false;
   let overflowRetries = 0;
@@ -764,15 +755,6 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         dropLastReply();
         pending = `Your reply was not shown: its figures would not draw. ${brokenFigures.join(" ")} Send the reply again with the figure fixed (load the challenge-figures skill if you have not), or without it.`;
         parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: "figure-refused" } });
-        continue;
-      }
-      /* The one reminder. A finished attempt left with nothing next is the case
-         the learner notices; past one nudge the coach's judgement stands. */
-      if (!nudged && owesChallenge(payload.turnKind, outcomes, hasActiveQuestion) && (allowed.has("set_challenge") || allowed.has("assign_practice_problem"))) {
-        nudged = true;
-        dropLastReply();
-        pending = owedNudge(outcomes);
-        parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: "challenge-owed" } });
         continue;
       }
       /* The learner wrote while this reply was being generated: it answers what
