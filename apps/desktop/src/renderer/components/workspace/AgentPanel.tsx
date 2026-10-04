@@ -17,9 +17,13 @@ import type { ConceptContext } from "../concepts/ConceptChip";
 import { ComplexityCheckpoint, type ComplexityCheckpointState } from "./ComplexityCheckpoint";
 import type { ChallengeTrail } from "./ChallengeStepper";
 import { ChallengeComposerContext } from "../agent/ChallengeCardMeta";
+import type { SparApi } from "../../../shared/api";
+import { SolvedRing, SolvedView, useSolvedAtSource } from "./SolvedAtSource";
 
-type View = "review" | "problem" | "chat";
-const ORDER: View[] = ["problem", "review", "chat"];
+/* `solved` is opened from the ring beside the switch rather than from the
+   switch, once a LeetCode problem has an accepted submission. */
+type View = "review" | "problem" | "chat" | "solved";
+const ORDER: View[] = ["problem", "review", "chat", "solved"];
 /* Which tab each session was left on, so leaving for Home and coming back does
    not drop the learner onto the statement when they were mid-conversation. */
 const lastView = new Map<string, View>();
@@ -31,6 +35,8 @@ const lastView = new Map<string, View>();
  * question is always one click away from the statement.
  */
 export function AgentPanel({
+  api,
+  submissionVersion = 0,
   answering,
   concepts,
   detail,
@@ -55,6 +61,9 @@ export function AgentPanel({
   brief,
   banner,
 }: {
+  api?: SparApi | undefined;
+  /** Bumped after each submission, so the solved ring re-reads LeetCode. */
+  submissionVersion?: number;
   /** Shown above the problem: in a review session, which card it is for and
    *  the coach's word on what to get right this time. */
   banner?: React.ReactNode;
@@ -93,11 +102,16 @@ export function AgentPanel({
     const kept = lastView.get(sessionId);
     return kept && (kept !== "review" || brief) ? kept : "problem";
   });
-  const views = brief ? ORDER : ORDER.filter((name) => name !== "review");
+  const { solved, reload: reloadSolved } = useSolvedAtSource(api, question.source?.source === "leetcode" ? question.id : null, submissionVersion);
+  const views = ORDER.filter((name) => (name !== "review" || brief) && (name !== "solved" || solved));
   const setView = useCallback((next: View) => {
     lastView.set(sessionId, next);
     setViewState(next);
   }, [sessionId]);
+  /* A kept "solved" view waits for the ring to load rather than falling back
+     for good, so leaving and coming back keeps the learner where they were. */
+  const shown: View = view === "solved" && !solved ? "problem" : view;
+  const beforeSolved = useRef<View>("problem");
   const [focusRequest, setFocusRequest] = useState(0);
   const [challengeContext, setChallengeContext] = useState<ChallengeTrail["stops"][number] | null>(null);
   const actionableTrail = useMemo(() => trail ? {
@@ -124,9 +138,9 @@ export function AgentPanel({
 
   // The incoming view enters from the side it sits on in the switch, so the
   // motion agrees with the thumb instead of fighting it.
-  const previous = useRef<View>(view);
-  const direction = ORDER.indexOf(view) >= ORDER.indexOf(previous.current) ? 1 : -1;
-  previous.current = view;
+  const previous = useRef<View>(shown);
+  const direction = ORDER.indexOf(shown) >= ORDER.indexOf(previous.current) ? 1 : -1;
+  previous.current = shown;
 
   // How far off resting size each view sits at the ends of the swap. Signed by
   // direction so going forward brings the arriving view down onto the surface
@@ -170,8 +184,20 @@ export function AgentPanel({
                 ) : undefined,
             },
           ]}
-          value={view}
+          value={shown}
         />
+        {solved && (
+          <SolvedRing
+            active={shown === "solved"}
+            fresh={submissionVersion > 0}
+            onClick={() => {
+              if (shown === "solved") return setView(beforeSolved.current);
+              beforeSolved.current = shown;
+              setView("solved");
+            }}
+            solved={solved}
+          />
+        )}
       </div>
 
       {/* Both views are absolutely stacked so they cross-dissolve rather than
@@ -194,7 +220,7 @@ export function AgentPanel({
           pose it should arrive from. */}
       <div className="relative min-h-0 flex-1">
         {views.map((name) => {
-          const active = name === view;
+          const active = name === shown;
           return (
             <motion.div
               key={name}
@@ -226,7 +252,9 @@ export function AgentPanel({
               inert={!active}
               initial={false}
             >
-              {name === "review" ? brief : name === "problem" ? (
+              {name === "solved" ? (
+                solved && <SolvedView api={api} challengeId={question.id} onRetry={reloadSolved} solved={solved} />
+              ) : name === "review" ? brief : name === "problem" ? (
                 banner ? (
                   <div className="flex min-h-0 flex-1 flex-col">
                     {banner}

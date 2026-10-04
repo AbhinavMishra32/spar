@@ -31,7 +31,10 @@ export function ViewSwitch<T extends string>({
   value: T;
 }) {
   const list = useRef<HTMLDivElement>(null);
-  const index = Math.max(0, options.findIndex((option) => option.value === value));
+  const found = options.findIndex((option) => option.value === value);
+  /* A value outside the options is a view opened from beside the switch (the
+     solved ring): nothing here is selected, and the thumb steps out of the way. */
+  const index = Math.max(0, found);
 
   const keydown = (event: React.KeyboardEvent) => {
     const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
@@ -57,10 +60,12 @@ export function ViewSwitch<T extends string>({
     >
       <span
         aria-hidden
-        className="pointer-events-none absolute inset-y-0.5 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-background shadow-[0_1px_2px_oklch(0%_0_0/8%)] transition-[left] duration-[260ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]"
+        className="pointer-events-none absolute inset-y-0.5 rounded-[var(--radius-md)] border border-[var(--border-strong)] bg-background shadow-[0_1px_2px_oklch(0%_0_0/8%)] transition-[left,opacity,scale] duration-[260ms] ease-[cubic-bezier(0.32,0.72,0,1)] motion-reduce:transition-none dark:bg-[color-mix(in_oklab,var(--foreground)_14%,transparent)]"
         style={{
           left: `calc(0.125rem + ${index} * ((100% - 0.25rem) / ${options.length}))`,
           width: `calc((100% - 0.25rem) / ${options.length})`,
+          opacity: found < 0 ? 0 : 1,
+          scale: found < 0 ? "0.92" : "1",
         }}
       />
       {options.map(({ value: option, label, icon: Icon, badge }) => {
@@ -77,7 +82,7 @@ export function ViewSwitch<T extends string>({
             onClick={() => !selected && onChange(option)}
             role="tab"
             // Only the selected tab is in the tab order; arrows move within.
-            tabIndex={selected ? 0 : -1}
+            tabIndex={selected || (found < 0 && option === options[0]!.value) ? 0 : -1}
             type="button"
           >
             {Icon && <Icon className="size-3.5" />}

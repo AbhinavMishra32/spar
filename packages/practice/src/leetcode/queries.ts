@@ -235,3 +235,94 @@ query userProgressQuestionList($filters: UserProgressQuestionListInput) {
     }
   }
 }`;
+
+/* ---- After an accepted submission --------------------------------------- */
+
+/** Where one submission sits among everyone else's in the same language: the
+ *  histogram LeetCode draws under an accepted verdict. Both distributions come
+ *  back as JSON strings, `{ lang, distribution: [[bucket, percent], …] }`, and
+ *  can be null for a few seconds after the verdict while LeetCode computes them. */
+export const SUBMISSION_STATS_QUERY = `
+query submissionDetails($submissionId: Int!) {
+  submissionDetails(submissionId: $submissionId) {
+    runtime
+    runtimeDisplay
+    runtimePercentile
+    runtimeDistribution
+    memory
+    memoryDisplay
+    memoryPercentile
+    memoryDistribution
+    statusCode
+    timestamp
+    totalCorrect
+    totalTestcases
+    lang { name verboseName }
+    question { questionId titleSlug }
+  }
+}`;
+
+/** Someone else's accepted code from one runtime bucket — what LeetCode shows
+ *  when you click a bar. `skip` pages through the submissions in that bucket. */
+export const CODE_WITH_RUNTIME_QUERY = `
+query codeWithRuntime($questionId: Int!, $lang: String!, $runtime: Int!, $skip: Int!) {
+  codeWithRuntime(questionId: $questionId, lang: $lang, runtime: $runtime, skip: $skip) {
+    code
+    hasPrevious
+    hasNext
+  }
+}`;
+
+export const CODE_WITH_MEMORY_QUERY = `
+query codeWithMemory($questionId: Int!, $lang: String!, $memory: Int!, $skip: Int!) {
+  codeWithMemory(questionId: $questionId, lang: $lang, memory: $memory, skip: $skip) {
+    code
+    hasPrevious
+    hasNext
+  }
+}`;
+
+/** The Solutions tab: write-ups other people posted, with who wrote them. Global
+ *  only — leetcode.cn runs a different community schema. */
+export const SOLUTION_ARTICLES_QUERY = `
+query ugcArticleSolutionArticles($questionSlug: String!, $orderBy: ArticleOrderByEnum, $tagSlugs: [String!], $skip: Int, $first: Int) {
+  ugcArticleSolutionArticles(questionSlug: $questionSlug, orderBy: $orderBy, tagSlugs: $tagSlugs, skip: $skip, first: $first) {
+    totalNum
+    pageInfo { hasNextPage }
+    edges {
+      node {
+        uuid
+        title
+        slug
+        summary
+        createdAt
+        hitCount
+        isLeetcode
+        topicId
+        author { realName userAvatar userSlug userName certificationLevel activeBadge { icon displayName } }
+        reactions { count reactionType }
+        tags { name slug tagType }
+        topic { id topLevelCommentCount }
+      }
+    }
+  }
+}`;
+
+export const SOLUTION_ARTICLE_QUERY = `
+query ugcArticleSolutionArticle($topicId: ID) {
+  ugcArticleSolutionArticle(topicId: $topicId) {
+    uuid
+    title
+    slug
+    summary
+    content
+    createdAt
+    hitCount
+    isLeetcode
+    topicId
+    author { realName userAvatar userSlug userName certificationLevel activeBadge { icon displayName } }
+    reactions { count reactionType }
+    tags { name slug tagType }
+    topic { id topLevelCommentCount }
+  }
+}`;

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { canonicalWorkspacePath } from "./workspacePath.js";
 import type { InputSpec as VisualizerSpec, Trace as VisualizerTrace } from "@spar/visualizer";
 import type { AgentActivityStep } from "@spar/domain";
+import type { PracticeSampleCode, PracticeSolution, PracticeSolutionSummary, PracticeSubmissionStats } from "@spar/practice";
 export type { VisualizerSpec, VisualizerTrace };
 import type { SubmissionRecord, SubmissionRow } from "./submissions.js";
 import { attemptEventSchema, challengeMixSchema, problemSourcesSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal, type ReviewActivityEntry } from "@spar/domain";
@@ -43,6 +44,8 @@ export const ipc = {
   sourceInventory: "source:inventory", sourceConnect: "source:connect", sourceDisconnect: "source:disconnect",
   sourceRegion: "source:region", sourceJudge: "source:judge", sourceSearch: "source:search",
   sourceProblem: "source:problem", sourceStart: "source:start", sourceRun: "source:run", sourceLanguage: "source:language", sourceLanguages: "source:languages",
+  /* What LeetCode shows after an accepted submission. See `SolvedAtSource`. */
+  sourceSolved: "source:solved", sourceSample: "source:sample", sourceSolutions: "source:solutions", sourceSolution: "source:solution",
   skillsList: "skills:list", skillsRead: "skills:read", skillsSave: "skills:save", skillsRemove: "skills:remove", skillsEnabled: "skills:enabled", skillsReveal: "skills:reveal", skillsImport: "skills:import", skillsCustomize: "skills:customize",
   visualizerAnalyze: "visualizer:analyze", visualizerTrace: "visualizer:trace", visualizerProblem: "visualizer:problem", visualizerView: "visualizer:view", messageActivity: "messages:activity", messageRate: "messages:rate",
   lessonRead: "lesson:read",
@@ -125,6 +128,9 @@ export const complexityVerdictSchema = z.object({
   timeMatches: z.boolean(),
   spaceMatches: z.boolean(),
   why: z.string().optional(),
+  /** Absent on reviews recorded before the checkpoint returned a breakdown. */
+  where: z.string().optional(),
+  steps: z.array(z.object({ part: z.enum(["time", "space"]), what: z.string(), cost: z.string() })).optional(),
 });
 export type ComplexityVerdict = z.infer<typeof complexityVerdictSchema>;
 export type SubmissionResult = { outcome: "passed" | "failed"; exitCode: number; durationMs: number; output: string; summary: string; requiresComplexity: boolean };
@@ -391,6 +397,44 @@ export type PracticeSearchResult = {
   failed: Array<{ source: z.infer<typeof sourceIdSchema>; message: string }>;
 };
 /** A judged run at the source, as the result panel reads it. */
+/* Addressed by challenge, not session, so a past challenge in a session reads
+   the same panel as the one open now. */
+export const sourceSolvedInput = z.object({ challengeId: z.string().uuid() });
+export const sourceSampleInput = z.object({
+  challengeId: z.string().uuid(),
+  language: z.string().trim().min(1).max(40),
+  metric: z.enum(["runtime", "memory"]),
+  value: z.number().finite().nonnegative(),
+  skip: z.number().int().nonnegative().max(10_000),
+});
+export const sourceSolutionsInput = z.object({
+  challengeId: z.string().uuid(),
+  order: z.enum(["hot", "votes", "recent"]),
+  /** LeetCode's language tag slug (`python3`); omitted for every language. */
+  language: z.string().trim().min(1).max(40).optional(),
+  skip: z.number().int().nonnegative().max(10_000),
+  first: z.number().int().min(1).max(30),
+});
+export const sourceSolutionInput = z.object({ challengeId: z.string().uuid(), topicId: z.string().trim().regex(/^\d{1,12}$/) });
+
+/**
+ * A LeetCode challenge's accepted submission, and how it compares. Spar's own
+ * record is read first; failing that, the learner's history at LeetCode, so a
+ * problem solved on the site counts too. Null while it has not been solved. `stats` is
+ * null with `error` set when the submission is known but LeetCode could not be
+ * read — the solve still happened, and the panel says why the chart is missing.
+ */
+export type SolvedAtSource = {
+  submissionId: string;
+  url: string;
+  /** LeetCode's tag slug for the learner's language, for filtering solutions. */
+  languageTag: string;
+  stats: PracticeSubmissionStats | null;
+  error?: string;
+};
+export type SourceSolutionPage = { total: number; hasMore: boolean; solutions: PracticeSolutionSummary[] };
+export type { PracticeSampleCode, PracticeSolution, PracticeSolutionSummary, PracticeSubmissionStats };
+
 export type SourceRunReport = {
   outcome: "passed" | "failed" | "errored";
   status: string;
@@ -801,6 +845,13 @@ export interface SparApi {
   /** The languages a sourced problem publishes starters for. For challenges
    *  mounted before the list was stored on the challenge. */
   sourceLanguages(input: z.infer<typeof sourceSlugInput>): Promise<Language[]>;
+  /** A LeetCode challenge's accepted submission and where it ranks. */
+  solvedAtSource(input: z.infer<typeof sourceSolvedInput>): Promise<SolvedAtSource | null>;
+  /** Someone else's accepted code from one bar of the histogram. */
+  sourceSampleCode(input: z.infer<typeof sourceSampleInput>): Promise<PracticeSampleCode | null>;
+  /** The problem's community Solutions board, a page at a time. */
+  sourceSolutions(input: z.infer<typeof sourceSolutionsInput>): Promise<SourceSolutionPage>;
+  sourceSolution(input: z.infer<typeof sourceSolutionInput>): Promise<PracticeSolution | null>;
   listSkills(): Promise<SkillSummary[]>;
   readSkill(name: string): Promise<(SkillSummary & { body: string }) | null>;
   saveSkill(draft: SkillDraft): Promise<SkillSummary>;

@@ -42,6 +42,7 @@ import { ChallengeRatingBadge } from "../workspace/ChallengeCalibration";
 import { PaneHandle } from "../workspace/PaneHandle";
 import { ResultPanel, type ResultTab, type RunOutcome, type RunSuite } from "../workspace/ResultPanel";
 import { ChallengeSubmissions } from "./ChallengeSubmissions";
+import { SolvedRing, SolvedView, useSolvedAtSource } from "../workspace/SolvedAtSource";
 import { SparDots } from "@/components/common/SparDots";
 
 /**
@@ -121,6 +122,12 @@ function Brief({
 }) {
   const { summary } = detail;
   const scroller = useRef<HTMLDivElement>(null);
+  /* A past LeetCode challenge that was solved shows the same ring as the live
+     one. Held back while it is being solved again as a review: other people's
+     code is the answer. */
+  const { solved, reload: reloadSolved } = useSolvedAtSource(api, !reviewing && detail.source?.source === "leetcode" ? summary.id : null, reviewVersion);
+  const [showSolved, setShowSolved] = useState(false);
+  const solvedOpen = showSolved && Boolean(solved);
   const [insight, setInsight] = useState<ReviewCardDetail | null>(null);
   useEffect(() => {
     if (!api || typeof api.reviewForChallenge !== "function") return;
@@ -151,8 +158,14 @@ function Brief({
           learnerRating={learnerRating}
           source={detail.source}
         />
+        {solved && <SolvedRing active={solvedOpen} onClick={() => setShowSolved((value) => !value)} solved={solved} />}
       </div>
-      <div className="app-scroll min-h-0 flex-1 overflow-y-auto" ref={scroller}>
+      {solved && solvedOpen && (
+        <SolvedView api={api} challengeId={summary.id} className="flex-1" onRetry={reloadSolved} solved={solved} />
+      )}
+      {/* Hidden rather than unmounted while the solved view is up, so closing it
+          returns to the same scroll position in the brief. */}
+      <div className={cn("app-scroll min-h-0 flex-1 overflow-y-auto", solvedOpen && "hidden")} ref={scroller}>
       {/* The same column `ProblemView` sets, to the pixel. This page had
           px-8/pt-8/pb-16 over a 62rem measure against that view's px-5/pt-5/pb-10
           over 46rem — a third more gutter, a bottom margin half again as deep, and

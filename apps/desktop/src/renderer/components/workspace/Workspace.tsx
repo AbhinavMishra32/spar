@@ -119,6 +119,9 @@ export function Workspace({
   const [sending, setSending] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<Array<{id:string;body:string;createdAt:number}>>([]);
   const [outcome, setOutcome] = useState<RunOutcome>(null);
+  /* Counts submissions made in this sitting; the solved ring re-reads LeetCode
+     when it moves. */
+  const [submissionVersion, setSubmissionVersion] = useState(0);
   const [resultTab, setResultTab] = useState<ResultTab>("testcase");
   const [draft, setDraft] = useState("");
   const [treeOpen, setTreeOpen] = useState(false);
@@ -385,6 +388,7 @@ export function Workspace({
       terminalRef.current=`${terminalRef.current}${result.output}${result.output.endsWith("\n")?"":"\n"}${result.summary}\n`;
       setTerminal(terminalRef.current);
       setOutcome({ kind: result.outcome, summary: result.summary });
+      if (result.outcome === "passed") setSubmissionVersion((value) => value + 1);
       if(result.outcome==="passed"&&result.requiresComplexity){
         setPendingComplexity({phase:"answering",time:"",space:"",review:""});
       }
@@ -701,6 +705,8 @@ export function Workspace({
       <PanelGroup autoSaveId="spar-challenge-pane" className="min-h-0 flex-1" direction="horizontal">
         <Panel defaultSize={44} minSize={32} order={1}>
           <AgentPanel
+            api={api}
+            submissionVersion={submissionVersion}
             brief={reviewSession ? <ReviewBrief api={api} refreshKey={`${question.id}:${question.attemptCompletedAt ?? ""}:${detail.messages.length}`} sessionId={detail.summary.id} /> : undefined}
             banner={reviewSession ? <ReviewBanner api={api} refreshKey={`${question.id}:${question.revision}`} sessionId={detail.summary.id} /> : undefined}
             answering={sending}

@@ -10,7 +10,7 @@ import { z } from "zod";
 import { ESTABLISHED_DEVIATION, challengeRequiresComplexityCheckpoint, languageSchema, lessonInputSchema, savedProblemSchema, sessionCheckpointSchema, sessionSuggestionSchema, type AgentActivityStep, type ChallengeDetail, type LearnerProfile, type SessionSuggestion } from "@spar/domain";
 import { LEARNER_NOTEBOOK, reviewAnswerInput, reviewCommitInput, reviewResolveInput, reviewSettingsInput, reviewStartInput, reviewSuspendInput, reviewTargetsInput, type ReviewSettings } from "../shared/api.js";
 import { REVIEW_TARGET_MODE_KEY, ReviewService, reviewTargetMode } from "./reviewSession.js";
-import { attemptAppendInput, reviewSessionStartInput, type ReviewSessionState, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionMixInput, sessionSourcesInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceLanguageInput, sourceSlugInput, skillDraftInput, skillEnabledInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
+import { attemptAppendInput, reviewSessionStartInput, type ReviewSessionState, authRequestInput, challengeIdInput, challengeWriteInput, complexityAcknowledgeInput, complexityReviewInput, complexityVerdictSchema, createSessionInput, createTrackInput, ipc, practiceInput, profileInput, providerSettingsInput, rateMessageInput, reasoningEffortSchema, runInput, sessionFlagInput, sessionRenameInput, sessionMixInput, sessionSourcesInput, sessionStatusInput, sourceConnectionInput, sourceJudgeInput, sourceRegionInput, sourceRunInput, sourceSearchInput, sourceLanguageInput, sourceSlugInput, sourceSampleInput, sourceSolutionInput, sourceSolutionsInput, sourceSolvedInput, type SolvedAtSource, skillDraftInput, skillEnabledInput, sourceStartInput, themePreferenceSchema, visualizerAnalyzeInput, visualizerTraceInput, workspacePathInput, workspaceStateInput, workspaceWriteInput, type ComplexityVerdict, type ProviderId, type SourceRunReport, type SubmissionResult } from "../shared/api.js";
 import type { PracticeVerdict } from "@spar/practice";
 import { runLimits } from "@spar/training";
 import { runEvidence } from "../shared/testReport.js";
@@ -573,6 +573,54 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
     return { total: found.total, failed: found.failed, problems: found.problems.map((problem) => ({ source: problem.source, sourceName: problem.source === "leetcode" ? "LeetCode" : "Codeforces", slug: problem.slug, displayId: problem.displayId, title: problem.title, difficulty: problem.difficulty, sourceRating: problem.sourceRating ?? null, paidOnly: problem.paidOnly, acceptanceRate: problem.acceptanceRate, concepts: problem.concepts, status: problem.status })) };
   });
   ipcMain.handle(ipc.sourceProblem, async (_event, value) => { const input = sourceSlugInput.parse(value); return (await deps.practice.problem(input.source, input.slug)).problem; });
+  /* ---- What LeetCode shows after an accepted submission -------------------
+     Addressed by challenge, and the challenge's source is read from the store,
+     so the renderer can only ask about a problem Spar mounted. None of it
+     reaches the agent: the learner sees other people's code after solving; the
+     coach never hands it to them before. */
+  const leetCodeSource = (challengeId: string) => {
+    const source = deps.store.challengeRecord(challengeId)?.source;
+    if (source?.source !== "leetcode") throw new Error("This challenge did not come from LeetCode.");
+    return source;
+  };
+  ipcMain.handle(ipc.sourceSolved, async (_event, value): Promise<SolvedAtSource | null> => {
+    const input = sourceSolvedInput.parse(value);
+    const source = deps.store.challengeRecord(input.challengeId)?.source;
+    if (source?.source !== "leetcode") return null;
+    /* Spar's own record first: the newest accepted LeetCode submission, whose id
+       is the last path segment of the URL recorded when it was judged. */
+    const accepted = [...deps.store.submissionsForQuestion(input.challengeId)].reverse()
+      .find((submission) => submission.judge === "leetcode" && submission.outcome === "passed" && submission.url);
+    let submissionId = accepted?.url ? /\/submissions\/detail\/(\d+)/.exec(accepted.url)?.[1] : undefined;
+    let url = accepted?.url ?? "";
+    /* Solved on the site, or passed against Spar's local cases: ask LeetCode for
+       the learner's own accepted submission. A failed read is the same as none,
+       since the panel has nothing to stand on without a submission. */
+    if (!submissionId) {
+      const remote = await deps.practice.acceptedSubmission(source).catch(() => null);
+      if (!remote) return null;
+      submissionId = remote.id;
+      url = `${source.region === "cn" ? "https://leetcode.cn" : "https://leetcode.com"}/submissions/detail/${remote.id}/`;
+    }
+    try {
+      const stats = await deps.practice.submissionStats(source, submissionId);
+      return { submissionId, url, languageTag: stats?.language ?? "", stats };
+    } catch (error) {
+      return { submissionId, url, languageTag: "", stats: null, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+  ipcMain.handle(ipc.sourceSample, async (_event, value) => {
+    const input = sourceSampleInput.parse(value);
+    return deps.practice.sampleCode(leetCodeSource(input.challengeId), { language: input.language, metric: input.metric, value: input.value, skip: input.skip });
+  });
+  ipcMain.handle(ipc.sourceSolutions, async (_event, value) => {
+    const input = sourceSolutionsInput.parse(value);
+    return deps.practice.solutions(leetCodeSource(input.challengeId), { order: input.order, skip: input.skip, first: input.first, ...(input.language ? { language: input.language } : {}) });
+  });
+  ipcMain.handle(ipc.sourceSolution, async (_event, value) => {
+    const input = sourceSolutionInput.parse(value);
+    return deps.practice.solution(leetCodeSource(input.challengeId), input.topicId);
+  });
   ipcMain.handle(ipc.sourceLanguages, async (_event, value) => { const input = sourceSlugInput.parse(value); return [...new Set((await deps.practice.problem(input.source, input.slug)).problem.languages.map((entry) => entry.language))]; });
   ipcMain.handle(ipc.skillsList, () => deps.skills.list());
   ipcMain.handle(ipc.skillsRead, (_event, value) => deps.skills.read(z.string().parse(value)));

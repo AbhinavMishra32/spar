@@ -460,6 +460,55 @@ export class PracticeService {
     }));
   }
 
+  /* ---- After an accepted submission --------------------------------------- */
+
+  /**
+   * What LeetCode shows under an accepted verdict: the runtime and memory
+   * histograms, a sample of other people's code from any bar, and the problem's
+   * Solutions board. Read-only, and none of it reaches the agent — this is for
+   * the learner to look at once they have solved it themselves.
+   */
+  async submissionStats(source: ChallengeSource, submissionId: string) {
+    return this.withRefresh(source.source, source.region, async () => {
+      const gateway = this.gatewayFor(source.source, source.region);
+      if (!gateway.submissionStats) throw new Error("This source does not publish how submissions compare.");
+      return gateway.submissionStats(submissionId);
+    });
+  }
+
+  /** The learner's newest accepted submission at a problem, read from their
+   *  history at the source — for a problem they solved there rather than here. */
+  async acceptedSubmission(source: ChallengeSource) {
+    return this.withRefresh(source.source, source.region, async () => {
+      const found = await this.gatewayFor(source.source, source.region).submissions(source.slug, 20);
+      return found.find((submission) => submission.accepted) ?? null;
+    });
+  }
+
+  async sampleCode(source: ChallengeSource, input: { language: string; metric: "runtime" | "memory"; value: number; skip: number }) {
+    return this.withRefresh(source.source, source.region, async () => {
+      const gateway = this.gatewayFor(source.source, source.region);
+      if (!gateway.sampleCode) throw new Error("This source does not share other people's code.");
+      return gateway.sampleCode({ questionId: source.externalId, ...input });
+    });
+  }
+
+  async solutions(source: ChallengeSource, input: { order: "hot" | "votes" | "recent"; language?: string; skip: number; first: number }) {
+    return this.withRefresh(source.source, source.region, async () => {
+      const gateway = this.gatewayFor(source.source, source.region);
+      if (!gateway.solutions) throw new Error("This source has no solutions board.");
+      return gateway.solutions({ slug: source.slug, ...input });
+    });
+  }
+
+  async solution(source: ChallengeSource, topicId: string) {
+    return this.withRefresh(source.source, source.region, async () => {
+      const gateway = this.gatewayFor(source.source, source.region);
+      if (!gateway.solution) throw new Error("This source has no solutions board.");
+      return gateway.solution({ slug: source.slug, topicId });
+    });
+  }
+
   /* ---- The agent's connection -------------------------------------------- */
 
   /**

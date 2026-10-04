@@ -40,6 +40,15 @@
         "cd /Users/abhinavmishra/solin/spar-landing/apps/web && exec node_modules/.bin/next dev -p 4319"
       ],
       "port": 4319
+    },
+    {
+      "name": "opaline-docs",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/abhinavmishra/solin/opaline-ui/apps/docs && exec ../../node_modules/.bin/next dev --port 3011"
+      ],
+      "port": 3011
     }
   ]
 }

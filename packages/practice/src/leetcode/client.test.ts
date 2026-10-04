@@ -247,3 +247,55 @@ const problemSummaryNode = {
   status: null,
   topicTags: [{ slug: "array" }, { slug: "dynamic-programming" }],
 };
+
+describe("LeetCodeClient — after an accepted submission", () => {
+  it("reads both distributions out of their JSON strings, sorted by bucket", async () => {
+    const { fetcher, calls } = stubFetch([{ body: { data: { submissionDetails: {
+      runtime: 3, runtimeDisplay: "3 ms", runtimePercentile: 87.4,
+      runtimeDistribution: JSON.stringify({ lang: "python3", distribution: [["5", 20.5], ["3", 40.1], ["1", 9.2]] }),
+      memory: 17400000, memoryDisplay: "17.4 MB", memoryPercentile: null, memoryDistribution: null,
+      statusCode: 10, timestamp: 1_700_000_000, totalCorrect: 63, totalTestcases: 63,
+      lang: { name: "python3", verboseName: "Python3" }, question: { questionId: "1", titleSlug: "two-sum" },
+    } } } }]);
+    const client = new LeetCodeClient("global", async () => session, fetcher);
+    const stats = await client.submissionStats("123");
+    expect(JSON.parse(String(calls[0]!.init.body)).variables).toEqual({ submissionId: 123 });
+    expect(stats).toMatchObject({
+      submissionId: "123", questionId: "1", language: "python3", languageName: "Python3", accepted: true, passedCases: 63,
+      runtime: { display: "3 ms", value: 3, percentile: 87.4, distribution: [{ value: 1, percent: 9.2 }, { value: 3, percent: 40.1 }, { value: 5, percent: 20.5 }] },
+      memory: { display: "17.4 MB", percentile: null, distribution: [] },
+    });
+  });
+
+  it("maps a solutions page to authors, votes and language tags", async () => {
+    const { fetcher, calls } = stubFetch([{ body: { data: { ugcArticleSolutionArticles: {
+      totalNum: 3000, pageInfo: { hasNextPage: true },
+      edges: [{ node: {
+        title: "Hash map, one pass", slug: "hash-map-one-pass", summary: "Intuition\\nKeep what you have seen", createdAt: "2023-06-09T18:17:24Z",
+        hitCount: 2_438_380, isLeetcode: false, topicId: 3619262,
+        author: { realName: "Rahul Varma", userAvatar: "https://assets.leetcode.com/a.png", userName: "rahulvarma5297", activeBadge: { icon: "/static/b.png", displayName: "Annual Badge 2023" } },
+        reactions: [{ count: 12209, reactionType: "UPVOTE" }, { count: 15, reactionType: "THUMBS_DOWN" }],
+        tags: [{ name: "Hash Table", slug: "hash-table", tagType: "TOPIC" }, { name: "Python3", slug: "python3", tagType: null }],
+        topic: { id: 3619262, topLevelCommentCount: 292 },
+      } }],
+    } } } }]);
+    const client = new LeetCodeClient("global", async () => session, fetcher);
+    const page = await client.solutions({ slug: "two-sum", order: "votes", language: "python3", skip: 0, first: 12 });
+    expect(JSON.parse(String(calls[0]!.init.body)).variables).toMatchObject({ questionSlug: "two-sum", orderBy: "MOST_VOTES", tagSlugs: ["python3"] });
+    expect(page).toMatchObject({ total: 3000, hasMore: true });
+    expect(page.solutions[0]).toMatchObject({
+      topicId: "3619262", title: "Hash map, one pass", summary: "Intuition\nKeep what you have seen",
+      author: { name: "Rahul Varma", username: "rahulvarma5297", badge: { name: "Annual Badge 2023", iconUrl: "https://leetcode.com/static/b.png" } },
+      upvotes: 12209, views: 2_438_380, comments: 292, topics: ["Hash Table"], languages: ["Python3"],
+      url: "https://leetcode.com/problems/two-sum/solutions/3619262/hash-map-one-pass/",
+    });
+  });
+
+  it("unescapes an article body without breaking escapes inside its code", async () => {
+    const content = "# Intuition\\n<!-- template -->\\n```C++ []\\nprintf(\\\"\\\\n\\\");\\n```";
+    const { fetcher } = stubFetch([{ body: { data: { ugcArticleSolutionArticle: { topicId: 1, title: "t", slug: "t", content, author: { userName: "a" } } } } }]);
+    const client = new LeetCodeClient("global", async () => session, fetcher);
+    const solution = await client.solution({ slug: "two-sum", topicId: "1" });
+    expect(solution?.content).toBe('# Intuition\n\n```C++ []\nprintf("\\n");\n```');
+  });
+});

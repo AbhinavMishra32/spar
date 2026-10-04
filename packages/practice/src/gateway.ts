@@ -8,7 +8,8 @@ import type { CodeforcesSession } from "./codeforces/session.js";
 import { effectiveCapabilities, judgeDescription, practiceSource } from "./sources.js";
 import type {
   PracticeAccount, PracticeCase, PracticeConnectionState, PracticeProblem, PracticeProblemSummary,
-  PracticeRegion, PracticeSearchInput, PracticeSourceCapabilities, PracticeSourceId, PracticeSubmission,
+  PracticeRegion, PracticeSampleCode, PracticeSearchInput, PracticeSolution, PracticeSolutionOrder,
+  PracticeSolutionSummary, PracticeSourceCapabilities, PracticeSourceId, PracticeSubmission, PracticeSubmissionStats,
   PracticeVerdict,
 } from "./types.js";
 import { PracticeAuthError } from "./types.js";
@@ -56,6 +57,12 @@ export interface PracticeGateway {
   run(input: { slug: string; externalId: string; language: Language; code: string; dataInput?: string }): Promise<PracticeVerdict>;
   /** A real submission. Appears on the learner's account at the source. */
   submit(input: { slug: string; externalId: string; language: Language; code: string }): Promise<PracticeVerdict>;
+  /* What a source shows after an accepted submission. Optional: only LeetCode
+     publishes a runtime histogram and a solutions board. */
+  submissionStats?(id: string): Promise<PracticeSubmissionStats | null>;
+  sampleCode?(input: { questionId: string; language: string; metric: "runtime" | "memory"; value: number; skip: number }): Promise<PracticeSampleCode | null>;
+  solutions?(input: { slug: string; order: PracticeSolutionOrder; language?: string; skip: number; first: number }): Promise<{ total: number; hasMore: boolean; solutions: PracticeSolutionSummary[] }>;
+  solution?(input: { slug: string; topicId: string }): Promise<PracticeSolution | null>;
 }
 
 /** LeetCode, as a gateway. The session is read per call rather than held, so a
@@ -98,6 +105,10 @@ export class LeetCodeGateway implements PracticeGateway {
   progress(input: { status?: "ATTEMPTED" | "SOLVED"; limit?: number; offset?: number }) { return this.client.progress(input); }
   submissions(slug: string, limit?: number) { return this.client.submissions(slug, limit); }
   submissionDetail(id: string) { return this.client.submissionDetail(id); }
+  submissionStats(id: string) { return this.client.submissionStats(id); }
+  sampleCode(input: { questionId: string; language: string; metric: "runtime" | "memory"; value: number; skip: number }) { return this.client.sampleCode(input); }
+  solutions(input: { slug: string; order: PracticeSolutionOrder; language?: string; skip: number; first: number }) { return this.client.solutions(input); }
+  solution(input: { slug: string; topicId: string }) { return this.client.solution(input); }
 
   async problem(slug: string): Promise<PracticeProblemBundle> {
     return this.bundle(await this.client.problem(slug));

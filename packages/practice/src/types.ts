@@ -281,6 +281,61 @@ export const practiceVerdictSchema = z.object({
 });
 export type PracticeVerdict = z.infer<typeof practiceVerdictSchema>;
 
+/** One bucket of a distribution: the bucket's value as LeetCode keys it (ms for
+ *  runtime; LeetCode's own memory unit for memory) and the share of accepted
+ *  submissions in this language that landed there, in percent. */
+export type PracticeDistributionBucket = { value: number; percent: number };
+
+/** An accepted submission against everyone else's, as LeetCode draws it under
+ *  the verdict. The distributions are empty while LeetCode is still computing
+ *  them, which it does for a few seconds after the judge answers. */
+export type PracticeSubmissionStats = {
+  submissionId: string;
+  questionId: string;
+  /** LeetCode's language slug (`python3`), which is what the sample-code reads key on. */
+  language: string;
+  languageName: string;
+  accepted: boolean;
+  passedCases: number;
+  totalCases: number;
+  submittedAt: string;
+  runtime: { display: string; value: number | null; percentile: number | null; distribution: PracticeDistributionBucket[] };
+  memory: { display: string; value: number | null; percentile: number | null; distribution: PracticeDistributionBucket[] };
+};
+
+/** Someone else's accepted code from one bucket of a distribution. */
+export type PracticeSampleCode = { code: string; hasPrevious: boolean; hasNext: boolean };
+
+export type PracticeSolutionAuthor = {
+  name: string;
+  username: string;
+  avatarUrl: string;
+  badge: { name: string; iconUrl: string } | null;
+};
+
+/** A write-up from the problem's Solutions tab. */
+export type PracticeSolutionSummary = {
+  topicId: string;
+  title: string;
+  summary: string;
+  author: PracticeSolutionAuthor;
+  /** LeetCode's own editorial-style post rather than a learner's. */
+  official: boolean;
+  upvotes: number;
+  views: number;
+  comments: number;
+  createdAt: string;
+  /** Topic tags (Array, Hash Table). */
+  topics: string[];
+  /** Language tags as LeetCode names them (Python3, C++). */
+  languages: string[];
+  url: string;
+};
+
+export type PracticeSolution = PracticeSolutionSummary & { content: string };
+
+export type PracticeSolutionOrder = "hot" | "votes" | "recent";
+
 /** Every source's authenticated state, in the two words the UI needs. `expired`
  *  is separated from `disconnected` because they call for different sentences:
  *  one asks the learner to sign in, the other tells them their session lapsed. */

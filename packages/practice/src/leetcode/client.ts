@@ -3,10 +3,13 @@ import { sourceTagsForConcept } from "../concepts.js";
 import {
   PracticeAuthError, PracticeChallengeError, PracticeSourceError,
   type PracticeAccount, type PracticeProblem, type PracticeProblemSummary, type PracticeRegion,
-  type PracticeSearchInput, type PracticeSubmission, type PracticeVerdict,
+  type PracticeDistributionBucket, type PracticeSampleCode, type PracticeSearchInput, type PracticeSolution,
+  type PracticeSolutionOrder, type PracticeSolutionSummary, type PracticeSubmission, type PracticeSubmissionStats,
+  type PracticeVerdict,
 } from "../types.js";
 import { normalizeProblem, normalizeProblemSummary, SOURCE_LANGUAGE_SLUG } from "./normalize.js";
 import {
+  CODE_WITH_MEMORY_QUERY, CODE_WITH_RUNTIME_QUERY, SOLUTION_ARTICLE_QUERY, SOLUTION_ARTICLES_QUERY, SUBMISSION_STATS_QUERY,
   DAILY_QUESTION_QUERY, PROBLEM_QUERY, PROBLEM_QUERY_CN, PROGRESS_QUESTIONS_QUERY, RANDOM_QUESTION_QUERY,
   SEARCH_PROBLEMS_QUERY, SKILL_STATS_QUERY, SOLVED_COUNTS_QUERY, STREAK_QUERY, SUBMISSION_DETAIL_QUERY,
   SUBMISSION_LIST_QUERY, USER_STATUS_QUERY, USER_STATUS_QUERY_CN,
@@ -253,6 +256,126 @@ export class LeetCodeClient {
     };
   }
 
+  /**
+   * An accepted submission against everyone else's: the runtime and memory
+   * histograms LeetCode draws under the verdict, and where this one landed.
+   * The learner's own submission only — the same rule as `submissionDetail`.
+   */
+  async submissionStats(id: string): Promise<PracticeSubmissionStats | null> {
+    await this.requireSession("read how your submission compares");
+    const numeric = Number(id);
+    if (!Number.isFinite(numeric)) return null;
+    const data = await this.graphql(SUBMISSION_STATS_QUERY, { submissionId: numeric });
+    const detail = record(record(data).submissionDetails);
+    if (!Object.keys(detail).length) return null;
+    const lang = record(detail.lang);
+    return {
+      submissionId: id,
+      questionId: text(record(detail.question).questionId),
+      language: text(lang.name),
+      languageName: text(lang.verboseName) || text(lang.name),
+      accepted: Number(detail.statusCode ?? -1) === 10,
+      passedCases: Number(detail.totalCorrect ?? 0) || 0,
+      totalCases: Number(detail.totalTestcases ?? 0) || 0,
+      submittedAt: isoFromEpoch(detail.timestamp),
+      runtime: {
+        display: text(detail.runtimeDisplay),
+        value: finite(detail.runtime),
+        percentile: finite(detail.runtimePercentile),
+        distribution: parseDistribution(detail.runtimeDistribution),
+      },
+      memory: {
+        display: text(detail.memoryDisplay),
+        value: finite(detail.memory),
+        percentile: finite(detail.memoryPercentile),
+        distribution: parseDistribution(detail.memoryDistribution),
+      },
+    };
+  }
+
+  /** Another accepted solution from one bucket of the histogram — the code
+   *  LeetCode shows when a bar is clicked. Null when the bucket has none to show. */
+  async sampleCode(input: { questionId: string; language: string; metric: "runtime" | "memory"; value: number; skip: number }): Promise<PracticeSampleCode | null> {
+    await this.requireSession("read other accepted solutions");
+    const questionId = Number(input.questionId);
+    if (!Number.isFinite(questionId)) return null;
+    const runtime = input.metric === "runtime";
+    const data = await this.graphql(runtime ? CODE_WITH_RUNTIME_QUERY : CODE_WITH_MEMORY_QUERY, {
+      questionId,
+      lang: input.language,
+      skip: Math.max(0, Math.floor(input.skip)),
+      [input.metric]: Math.round(input.value),
+    });
+    const found = record(record(data)[runtime ? "codeWithRuntime" : "codeWithMemory"]);
+    const code = text(found.code);
+    if (!code) return null;
+    return { code, hasPrevious: found.hasPrevious === true, hasNext: found.hasNext === true };
+  }
+
+  /** The problem's Solutions tab, a page at a time. `language` is LeetCode's tag
+   *  slug (`python3`) and narrows the list to write-ups that include it. */
+  async solutions(input: { slug: string; order: PracticeSolutionOrder; language?: string; skip: number; first: number }): Promise<{ total: number; hasMore: boolean; solutions: PracticeSolutionSummary[] }> {
+    if (this.region === "cn") throw new PracticeSourceError("Community solutions are only available from leetcode.com for now.");
+    const data = await this.graphql(SOLUTION_ARTICLES_QUERY, {
+      questionSlug: input.slug,
+      orderBy: SOLUTION_ORDER[input.order],
+      tagSlugs: input.language ? [input.language] : [],
+      skip: input.skip,
+      first: Math.min(30, Math.max(1, input.first)),
+    });
+    const list = record(record(data).ugcArticleSolutionArticles);
+    const edges = Array.isArray(list.edges) ? list.edges : [];
+    return {
+      total: Number(list.totalNum ?? 0) || 0,
+      hasMore: record(list.pageInfo).hasNextPage === true,
+      solutions: edges.flatMap((edge) => {
+        const summary = this.solutionSummary(record(edge).node, input.slug);
+        return summary ? [summary] : [];
+      }),
+    };
+  }
+
+  /** One write-up in full. */
+  async solution(input: { slug: string; topicId: string }): Promise<PracticeSolution | null> {
+    if (this.region === "cn") throw new PracticeSourceError("Community solutions are only available from leetcode.com for now.");
+    const data = await this.graphql(SOLUTION_ARTICLE_QUERY, { topicId: input.topicId });
+    const node = record(record(data).ugcArticleSolutionArticle);
+    const summary = this.solutionSummary(node, input.slug);
+    if (!summary) return null;
+    return { ...summary, content: unescapeArticle(text(node.content)) };
+  }
+
+  private solutionSummary(node: unknown, slug: string): PracticeSolutionSummary | null {
+    const raw = record(node);
+    const topicId = text(raw.topicId) || text(record(raw.topic).id);
+    if (!topicId) return null;
+    const author = record(raw.author);
+    const badge = record(author.activeBadge);
+    const reactions = Array.isArray(raw.reactions) ? raw.reactions.map(record) : [];
+    const tags = Array.isArray(raw.tags) ? raw.tags.map(record) : [];
+    const username = text(author.userName) || text(author.userSlug);
+    const articleSlug = text(raw.slug);
+    return {
+      topicId,
+      title: text(raw.title),
+      summary: unescapeArticle(text(raw.summary)),
+      author: {
+        name: text(author.realName).trim() || username,
+        username,
+        avatarUrl: text(author.userAvatar),
+        badge: text(badge.displayName) ? { name: text(badge.displayName), iconUrl: absoluteAsset(text(badge.icon), this.origin) } : null,
+      },
+      official: raw.isLeetcode === true,
+      upvotes: reactions.filter((entry) => entry.reactionType === "UPVOTE").reduce((sum, entry) => sum + (Number(entry.count) || 0), 0),
+      views: Number(raw.hitCount ?? 0) || 0,
+      comments: Number(record(raw.topic).topLevelCommentCount ?? 0) || 0,
+      createdAt: text(raw.createdAt),
+      topics: tags.filter((tag) => tag.tagType === "TOPIC").map((tag) => text(tag.name)).filter(Boolean),
+      languages: tags.filter((tag) => tag.tagType !== "TOPIC").map((tag) => text(tag.name)).filter(Boolean),
+      url: `${this.origin}/problems/${slug}/solutions/${topicId}/${articleSlug}/`,
+    };
+  }
+
   /** Problems the learner has touched, by status. The one thing this source knows
    *  that Spar's own record cannot: what they tried elsewhere and abandoned. */
   async progress(input: { status?: "ATTEMPTED" | "SOLVED"; limit?: number; offset?: number }): Promise<Array<{ slug: string; title: string; difficulty: string; status: string; lastResult: string; lastSubmittedAt: string; topicTags: string[] }>> {
@@ -438,6 +561,52 @@ export class LeetCodeClient {
 }
 
 const DEFAULT_JUDGE_TIMEOUT_MS = 90_000;
+
+const SOLUTION_ORDER: Record<PracticeSolutionOrder, string> = { hot: "HOT", votes: "MOST_VOTES", recent: "MOST_RECENT" };
+
+/**
+ * A distribution as LeetCode sends it: a JSON string holding
+ * `{ lang, distribution: [["40", 12.3], …] }`. Read defensively — a missing or
+ * malformed one is an empty chart, never an error, because it is decoration on a
+ * verdict that already stands.
+ */
+function parseDistribution(value: unknown): PracticeDistributionBucket[] {
+  let parsed: unknown = value;
+  if (typeof value === "string") {
+    try { parsed = JSON.parse(value); } catch { return []; }
+  }
+  const rows = Array.isArray(parsed) ? parsed : record(parsed).distribution;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((row) => {
+    const pair = Array.isArray(row) ? row : [record(row).value ?? record(row).bucket, record(row).percent ?? record(row).percentage];
+    const bucket = Number(pair[0]);
+    const percent = Number(pair[1]);
+    return Number.isFinite(bucket) && Number.isFinite(percent) ? [{ value: bucket, percent }] : [];
+  }).sort((left, right) => left.value - right.value);
+}
+
+function finite(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+/** Article bodies arrive with their newlines escaped twice (`\\n`), and the
+ *  site's editor template leaves HTML comments in every one. */
+function unescapeArticle(body: string): string {
+  return body
+    /* One pass, so an escaped backslash is consumed before the letter after it
+       can be read as an escape: `"\\\\n"` in someone's C is a backslash and an n. */
+    .replace(/\\([\\nrt"])/g, (_match, escaped: string) => escaped === "n" ? "\n" : escaped === "t" ? "\t" : escaped === "r" ? "" : escaped)
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function absoluteAsset(url: string, origin: string): string {
+  if (!url) return "";
+  return url.startsWith("/") ? `${origin}${url}` : url;
+}
 
 /** LeetCode's own filter values for "what has the learner done with this". */
 const STATUS_FILTER: Record<string, string> = { todo: "NOT_STARTED", attempted: "TRIED", solved: "AC" };

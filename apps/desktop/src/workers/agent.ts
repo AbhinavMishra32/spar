@@ -178,6 +178,8 @@ const complexityVerdictSchema = z.object({
   timeMatches: z.boolean().describe("Whether the learner's time claim means the same thing as `time`."),
   spaceMatches: z.boolean().describe("Whether the learner's space claim means the same thing as `space`."),
   why: z.string().describe("One sentence naming the operation that decides the non-obvious bound. Never restates the bounds."),
+  where: z.string().optional().describe("What each variable in the bounds stands for, e.g. `n = len(score)`."),
+  steps: z.array(z.object({ part: z.enum(["time", "space"]), what: z.string().min(1), cost: z.string().min(1) })).max(8).optional().describe("The operations and storage that add up to the bounds, each with its own cost."),
 });
 
 export type ComplexityVerdict = z.infer<typeof complexityVerdictSchema>;
@@ -211,7 +213,13 @@ async function reviewComplexity(request: ComplexityReviewRequest) {
 
 Work in this order and no other: read the code, derive its true worst-case time bound, derive its true worst-case auxiliary space bound, and only then compare each with what the learner claimed. Treat worst-case auxiliary space as space unless the problem clearly asks for total input space. A claim matches only if it means the same thing as the bound you derived — O(n) and O(1) never match, and neither do O(n) and O(n log n).
 
-Reply with one JSON object and nothing else, with exactly these keys: "time" and "space" (your derived bounds, in big-O, defining any variable you use), "timeMatches" and "spaceMatches" (booleans, the comparison with the learner's claims), and "why" (2–4 concise sentences explaining the actual operations, their counts, and the storage that establish BOTH bounds. For a mismatch, explain what the learner overlooked using specific identifiers from the code. State assumptions explicitly: if hash collisions change a strict worst-case bound, distinguish that from the usual expected or amortized bound and explain how the repeated operations combine. Do not merely assert the corrected bound). Do not use tools, propose another challenge, or continue the training conversation.`;
+Reply with one JSON object and nothing else, with exactly these keys:
+- "time" and "space": your derived bounds as bare big-O, like "O(n log n)" — no prose, no variable definitions.
+- "where": what each variable means, tersely, like "n = len(score)".
+- "timeMatches" and "spaceMatches": booleans, the comparison with the learner's claims.
+- "steps": 2–5 entries of {"part": "time" | "space", "what": "...", "cost": "O(...)"} — the operations and storage that add up to the bounds, in code order. "what" is at most 8 words and names identifiers from the code in backticks, like "\`heapq.heappop\` n times". "cost" is that entry's total contribution in big-O. Include at least one entry for each part.
+- "why": one plain sentence, at most 25 words. For a mismatch, what the learner overlooked; otherwise the one assumption or insight that decides the bound (for example expected vs worst-case hashing). Never restate the bounds.
+Do not use tools, propose another challenge, or continue the training conversation.`;
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(new Error("Spar's complexity check took too long.")), SUGGEST_TIMEOUT_MS);
   try {
