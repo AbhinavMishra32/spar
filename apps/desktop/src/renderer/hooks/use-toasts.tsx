@@ -29,6 +29,8 @@ export type Toast = {
    *  receipt that makes the learner go and find it. */
   onClick?: (() => void) | undefined;
   tone?: "neutral" | "success" | "warning" | "danger";
+  /** 0–100 for work still running, drawn as a hairline along the bottom. */
+  progress?: number | undefined;
   /** Milliseconds on screen. A receipt with an action is given longer, because
    *  the action is the reason it is there and four seconds is not long enough to
    *  read a line and decide to press something. */
@@ -75,8 +77,18 @@ export function dismissToast(id: string) {
 export function toast(input: Omit<Toast, "id"> & { key?: string }): string {
   const { key, ...rest } = input;
   const id = key ?? `toast-${Math.random().toString(36).slice(2)}`;
-  dismissToast(id);
   const entry: Toast = { ...rest, id };
+  /* Already on screen: change it where it is. Removing and re-adding would play
+     the arrival again on every update, which for a download is every tick. */
+  if (toasts.some((item) => item.id === id)) {
+    const timer = timers.get(id);
+    if (timer) window.clearTimeout(timer);
+    timers.delete(id);
+    publish(toasts.map((item) => (item.id === id ? entry : item)));
+    const duration = entry.duration ?? (entry.action ? 7_000 : 4_000);
+    if (duration > 0) timers.set(id, window.setTimeout(() => dismissToast(id), duration));
+    return id;
+  }
   const next = [...toasts, entry];
   for (const dropped of next.slice(0, Math.max(0, next.length - MAX_VISIBLE))) {
     const timer = timers.get(dropped.id);

@@ -2,6 +2,7 @@ import { app, ipcMain, type BrowserWindow } from "electron";
 import updater from "electron-updater";
 import type { AppUpdater, UpdateInfo } from "electron-updater";
 import type { LocalStore } from "./store.js";
+import { MacSelfUpdater, type SelfInstaller } from "./macUpdate.js";
 import { ipc, type UpdateState } from "../shared/api.js";
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000;
@@ -64,6 +65,11 @@ export class UpdateService {
     private readonly engine: Updater = updater.autoUpdater,
     currentVersion = app.getVersion(),
     private readonly packaged = app.isPackaged,
+    /* macOS installs its own updates: Squirrel.Mac only accepts a build signed
+       with a Developer ID, which the open distribution does not have. Windows
+       (NSIS, no publisher pinned) and Linux (AppImage) update unsigned through
+       electron-updater as they are. See `macUpdate.ts`. */
+    private readonly selfInstaller: SelfInstaller | null = packaged && process.platform === "darwin" ? new MacSelfUpdater() : null,
   ) {
     this.state = {
       status: "idle",
@@ -97,6 +103,7 @@ export class UpdateService {
     this.engine.disableWebInstaller = true;
 
     this.supported = this.packaged && this.engine.isUpdaterActive();
+    void this.reportLastInstall();
     if (!this.supported) {
       this.patch({
         status: "unsupported",
@@ -125,12 +132,7 @@ export class UpdateService {
         message: null,
       });
     });
-    this.engine.on("update-downloaded", (info) => {
-      const notes = notesFrom(info) ?? (this.latestInfo ? notesFrom(this.latestInfo) : null) ?? "This release includes improvements and fixes across Spar.";
-      this.store.setSetting(PENDING_CHANGELOG, JSON.stringify({ version: info.version, notes } satisfies PendingChangelog));
-      this.patch({ status: "installing", version: info.version, notes, percent: 100, message: null });
-      void this.install();
-    });
+    this.engine.on("update-downloaded", (info) => this.downloaded(info));
     this.engine.on("error", (error) => {
       console.error("Update failed:", error);
       this.patch({ status: "error", message: this.publicError(error), percent: null, transferred: null, total: null, bytesPerSecond: null });
@@ -180,8 +182,35 @@ export class UpdateService {
     if (this.state.status !== "available" || !this.latestInfo) throw new Error("No update is ready to download.");
     if (this.downloading) return this.downloading;
     this.patch({ status: "downloading", percent: 0, transferred: 0, total: null, bytesPerSecond: null, message: null });
-    this.downloading = this.engine.downloadUpdate().then(() => undefined).finally(() => { this.downloading = null; });
+    const info = this.latestInfo;
+    this.downloading = (this.selfInstaller
+      ? this.selfInstaller.download(info, (progress) => this.patch({ status: "downloading", ...progress, percent: Math.max(0, Math.min(100, progress.percent)), message: null }))
+        .then(() => this.downloaded(info))
+        .catch((error: unknown) => {
+          this.patch({ status: "error", message: this.publicError(error), percent: null, transferred: null, total: null, bytesPerSecond: null });
+          throw error;
+        })
+      : this.engine.downloadUpdate().then(() => undefined)
+    ).finally(() => { this.downloading = null; });
     return this.downloading;
+  }
+
+  /** The download is on disk and checked: keep its notes for the first launch
+   *  of the new version, then install. Both update paths end here. */
+  private downloaded(info: UpdateInfo) {
+    const notes = notesFrom(info) ?? (this.latestInfo ? notesFrom(this.latestInfo) : null) ?? "This release includes improvements and fixes across Spar.";
+    this.store.setSetting(PENDING_CHANGELOG, JSON.stringify({ version: info.version, notes } satisfies PendingChangelog));
+    this.patch({ status: "installing", version: info.version, notes, percent: 100, message: null });
+    void this.install();
+  }
+
+  /** A self-installed update that failed is only discoverable on the next
+   *  launch, by the old version the swap put back. Say so instead of acting as
+   *  though nothing happened. */
+  private async reportLastInstall() {
+    const result = await this.selfInstaller?.takeResult().catch(() => null);
+    if (!result || result.ok || result.version === this.state.currentVersion) return;
+    this.patch({ status: "error", message: `Spar couldn’t install ${result.version}. ${result.reason ?? ""} Try the update again.`.replace(/\s+/g, " ").trim() });
   }
 
   private async install() {
@@ -189,12 +218,19 @@ export class UpdateService {
     this.installing = true;
     try {
       await this.prepareToInstall();
-      // `false` keeps the install UI visible where the platform has one;
-      // `true` launches Spar again after the native installer succeeds.
-      this.engine.quitAndInstall(false, true);
     } catch (error) {
       this.installing = false;
       this.patch({ status: "error", message: `The update is ready, but Spar could not save your work before restarting. ${this.publicError(error)}` });
+      return;
+    }
+    try {
+      if (this.selfInstaller) await this.selfInstaller.install();
+      // Silent on Windows, so the one-click installer runs without a wizard;
+      // `true` launches Spar again after the installer succeeds.
+      else this.engine.quitAndInstall(process.platform === "win32", true);
+    } catch (error) {
+      this.installing = false;
+      this.patch({ status: "error", message: this.publicError(error) });
     }
   }
 

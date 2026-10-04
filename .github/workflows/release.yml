@@ -144,7 +144,7 @@ jobs:
               export APPLE_TEAM_ID="$APPLE_TEAM_ID_INPUT"
             else
               export CSC_IDENTITY_AUTO_DISCOVERY=false
-              echo "::warning title=Unsigned macOS build::No Developer ID identity is configured. Users may need to approve the downloaded app manually and automatic install can be unavailable."
+              echo "::warning title=Unsigned macOS build::No Developer ID identity is configured. Users approve the first download manually; in-app updates still work, because Spar installs them itself (see apps/desktop/src/main/macUpdate.ts)."
             fi
           elif [ "${{ matrix.platform }}" = "windows" ]; then
             if [ -n "$WINDOWS_CERTIFICATE_BASE64" ] && [ -n "$WINDOWS_CERTIFICATE_PASSWORD" ]; then
@@ -152,7 +152,7 @@ jobs:
               export CSC_KEY_PASSWORD="$WINDOWS_CERTIFICATE_PASSWORD"
             else
               export CSC_IDENTITY_AUTO_DISCOVERY=false
-              echo "::warning title=Unsigned Windows build::No Authenticode identity is configured. SmartScreen can require manual approval and automatic install can be unavailable."
+              echo "::warning title=Unsigned Windows build::No Authenticode identity is configured. SmartScreen can ask on the first install; in-app updates still work, since no publisher is pinned for electron-updater to check."
             fi
           else
             export CSC_IDENTITY_AUTO_DISCOVERY=false

@@ -58,7 +58,7 @@ function ToastRow({ reduced, toast }: { reduced: boolean; toast: Toast }) {
         /* The transcript card's own surface and corner, so a receipt about a
            challenge is shaped like the challenge it is about. */
         "transcript-block shadow-[var(--app-shadow-overlay)] backdrop-blur-[10px]",
-        "pointer-events-auto flex w-[min(21rem,calc(100vw-2rem))] min-w-0 items-center gap-2.5 px-2.5 py-2",
+        "pointer-events-auto relative flex w-[min(21rem,calc(100vw-2rem))] min-w-0 items-center gap-2.5 overflow-hidden px-2.5 py-2",
         "group/toast",
       )}
       role="status"
@@ -113,6 +113,15 @@ function ToastRow({ reduced, toast }: { reduced: boolean; toast: Toast }) {
       >
         <X className="size-3.5" />
       </button>
+
+      {toast.progress !== undefined && (
+        <span aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-[var(--color-background-elevated-secondary)]">
+          <span
+            className="block h-full bg-foreground/60 transition-[width] duration-300 ease-out"
+            style={{ width: `${Math.max(0, Math.min(100, toast.progress))}%` }}
+          />
+        </span>
+      )}
     </motion.div>
   );
 }
@@ -123,7 +132,7 @@ function Body({ toast }: { toast: Toast }) {
       {/* A failure is the one thing whose whole sentence matters: cut to a line,
           "reconnect LeetCode in Settings" is the part that goes missing. */}
       <p className={cn("text-thread font-medium text-foreground", toast.tone === "danger" ? "line-clamp-3" : "truncate")}>{toast.title}</p>
-      {toast.detail && <p className="mt-px truncate text-ui-sm text-muted-foreground">{toast.detail}</p>}
+      {toast.detail && <p className={cn("mt-px text-ui-sm text-muted-foreground", toast.tone === "danger" ? "line-clamp-3" : "truncate")}>{toast.detail}</p>}
     </>
   );
 }
