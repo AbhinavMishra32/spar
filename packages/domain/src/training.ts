@@ -56,12 +56,17 @@ export const questionDesignSchema = z.object({
   referenceFiles: fileMapSchema,
   visibleTests: fileMapSchema,
   hiddenTests: fileMapSchema,
-  knownIncorrectFiles: z.array(fileMapSchema).min(1),
+  /**
+   * Plausible wrong implementations at the reference's path. Optional for
+   * JavaScript, TypeScript and Python, where the compiler checks the hidden
+   * tests against its own mutants of the reference instead; required for every
+   * other language, which the compiler enforces rather than this schema.
+   */
+  knownIncorrectFiles: z.array(fileMapSchema).default([]),
   /* The host picks the runner from `language` and overwrites this, and the two
-     lists below describe the candidate without deciding anything about it. A
-     model that leaves one out used to have the whole tool call bounced by schema
-     validation and re-send a full design, the most expensive way to supply an
-     empty list. Defaults make them what they are: optional. */
+     lists below describe the candidate without deciding anything about it.
+     Neither is asked of the builder any more; designs that carry them still
+     read. Defaults make them what they are: optional. */
   runCommand: z.string().default(""),
   accidentalDifficulty: z.array(z.string()).default([]),
   expectedFailureSignatures: z.array(z.string()).default([])

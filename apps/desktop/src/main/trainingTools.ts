@@ -729,10 +729,26 @@ function builderContext(local: LocalStore, sessionId: string, trackId: string | 
   if (open) {
     const record = local.readChallenge(open.id);
     const design = (record?.design ?? {}) as Record<string, unknown>;
-    openDesign = { title: open.title, statement: open.statement, language: open.language, kind: open.kind, difficulty: open.difficulty, starterFiles: design.starterFiles, referenceFiles: design.referenceFiles, visibleTests: design.visibleTests, solutionRequirements: design.solutionRequirements };
+    /* A revision rebuilds this problem, so it needs its reference and visible
+       cases. A replacement is a different problem: its conventions are in the
+       title, statement and starter, and its solution would only pull the new
+       one back towards it. */
+    openDesign = value.mode === "replace"
+      ? { title: open.title, statement: open.statement, language: open.language, kind: open.kind, difficulty: open.difficulty, starterFiles: design.starterFiles }
+      : { title: open.title, statement: open.statement, language: open.language, kind: open.kind, difficulty: open.difficulty, starterFiles: design.starterFiles, referenceFiles: design.referenceFiles, visibleTests: design.visibleTests, solutionRequirements: design.solutionRequirements };
   }
-  const recent = local.journey(trackId, 4).challenges.filter((entry) => entry.source === "spar" && entry.starter).slice(-3).map((entry) => ({ title: entry.title, language: entry.language, difficulty: entry.difficulty, starter: entry.starter }));
-  return { preferredLanguage: track?.language ?? local.getProfile()?.language ?? "javascript", open: openDesign, recentStarters: recent, lens: chosen ? { label: chosen.label, about: chosen.about } : null };
+  const journey = local.journey(trackId, 1_000).challenges;
+  const recent = journey.slice(-4).filter((entry) => entry.source === "spar" && entry.starter).slice(-3).map((entry) => ({ title: entry.title, language: entry.language, difficulty: entry.difficulty, starter: entry.starter }));
+  /* Every problem already on the Track, in a line each, so the builder does not
+     hand the learner one they already did. */
+  const earlier = journey.map((entry) => ({ title: entry.title, task: oneLine(entry.task) }));
+  return { open: openDesign, recentStarters: recent, earlier, lens: chosen ? { label: chosen.label, about: chosen.about } : null };
+}
+
+/** The first sentence or line of a task, clipped. */
+function oneLine(task: string): string {
+  const first = task.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0] ?? "";
+  return first.length > 160 ? `${first.slice(0, 159)}…` : first;
 }
 
 /* A named lens must be one the learner has. Whether this problem carries one

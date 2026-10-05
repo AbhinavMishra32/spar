@@ -488,15 +488,23 @@ describe("challenge_builder_context", () => {
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Practise arrays");
-      const call = () => executeTrainingTool("challenge_builder_context", {}, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<{ preferredLanguage: string; open: Record<string, unknown> | null; recentStarters: Array<{ title: string; starter: { path: string } }> }>;
-      expect(await call()).toMatchObject({ open: null, recentStarters: [] });
+      type Context = { open: Record<string, unknown> | null; recentStarters: Array<{ title: string; starter: { path: string } }>; earlier: Array<{ title: string; task: string }> };
+      const call = (input: Record<string, unknown> = {}) => executeTrainingTool("challenge_builder_context", input, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<Context>;
+      expect(await call()).toMatchObject({ open: null, recentStarters: [], earlier: [] });
 
       store.setTrainingTarget(sessionId, { ability: "Arrays", specificGap: "Traverse values", desiredEvidence: "Counts matching values", avoidTesting: [] });
-      store.createQuestion(sessionId, { ...design("Count values"), starterFiles: { "src/count.js": "export function count(values) {}" } }, { valid: true });
-      const context = await call();
-      expect(typeof context.preferredLanguage).toBe("string");
-      expect(context.open).toMatchObject({ title: "Count values", language: "javascript", starterFiles: { "src/count.js": "export function count(values) {}" } });
+      store.createQuestion(sessionId, { ...design("Count values"), starterFiles: { "src/count.js": "export function count(values) {}" }, referenceFiles: { "src/count.js": "export function count(values) { return values.length }" } }, { valid: true });
+      const context = await call({ mode: "revise" });
+      expect(context).not.toHaveProperty("preferredLanguage");
+      expect(context.open).toMatchObject({ title: "Count values", language: "javascript", starterFiles: { "src/count.js": "export function count(values) {}" }, referenceFiles: { "src/count.js": "export function count(values) { return values.length }" } });
       expect(context.recentStarters).toEqual([expect.objectContaining({ title: "Count values", starter: { path: "src/count.js", text: "export function count(values) {}" } })]);
+      expect(context.earlier).toEqual([{ title: "Count values", task: "Count values in a simple JavaScript array and return the resulting total." }]);
+
+      // A replacement is a different problem: it keeps the conventions, not the old answer.
+      const replacing = await call({ mode: "replace" });
+      expect(replacing.open).toMatchObject({ title: "Count values", statement: expect.any(String), starterFiles: { "src/count.js": "export function count(values) {}" } });
+      expect(replacing.open).not.toHaveProperty("referenceFiles");
+      expect(replacing.open).not.toHaveProperty("visibleTests");
     } finally {
       store.close();
     }

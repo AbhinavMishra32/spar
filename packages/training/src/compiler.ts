@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { questionDesignSchema, type QuestionDesign } from "@spar/domain";
 import { runLimits } from "./limits.js";
-import { materializeFiles, parseMaterialized, parseProbe, probeFiles, probeTarget, pythonMutants, settleMisconceptions } from "./pythonProbe.js";
+import { materializeFiles, parseMaterialized, parseProbe, probeFiles, probeTarget, pythonModuleName, pythonMutants, settleHostMutants, settleMisconceptions } from "./pythonProbe.js";
 
 export type ValidationRun = { exitCode: number; stdout: string; stderr: string; durationMs: number };
 export type ValidationRunner = (files: Record<string,string>, command: string, limits: { timeoutMs: number; memoryMb: number }) => Promise<ValidationRun>;
@@ -39,13 +39,18 @@ export type CompileProgress = {
 };
 export type CompileObserver = (event: CompileProgress) => void;
 
-/** Cases the reference must actually pass before a challenge is publishable.
- *  Not reachable by hand, which is the point — see the `case volume` check. */
-const MIN_EXECUTED_CASES = { function: 24, module: 12, repair: 8, extension: 8, repository: 8 } as const;
+/** Cases, visible and hidden together, the reference must actually pass before
+ *  a challenge is publishable — see the `case volume` check. */
+const MIN_EXECUTED_CASES = { function: 12, module: 12, repair: 8, extension: 8, repository: 8 } as const;
 /** Named, readable cases in the visible file: the contract the learner reads. */
 const MIN_VISIBLE_CASES = 4;
 /** Wall-clock the Python probe gives itself, inside the runner's own limit. */
 const PROBE_BUDGET_SECONDS = 7;
+/** Sandbox runs one compile may have in flight at once. */
+const RUN_CONCURRENCY = 4;
+/** Languages whose hidden tests the host can check with its own mutants of the
+ *  reference, so a design may leave `knownIncorrectFiles` out. */
+const HOST_MUTANT_LANGUAGES: ReadonlySet<QuestionDesign["language"]> = new Set(["javascript", "typescript", "python"]);
 
 /**
  * Who wrote the candidate, which is the one thing the case-volume bar depends
@@ -61,11 +66,15 @@ export type DesignOrigin = "authored" | "host";
 
 export async function compileQuestion(untrustedDesign: unknown, execute: ValidationRunner, origin: DesignOrigin = "authored", observe?: CompileObserver): Promise<{ design: QuestionDesign; report: ValidationReport }> {
   let design = normalizeDesign(normalizeFileDescriptors(questionDesignSchema.parse(untrustedDesign)));
-  const run = execute;
+  /* Every sandbox run of one compile goes through one gate. Each run writes its
+     own validation directory, so independent runs are safe side by side; the
+     limit keeps a compile from starting a dozen toolchains at once. */
+  const slot = concurrencyLimit(RUN_CONCURRENCY);
+  const run: ValidationRunner = (files, command, limits) => slot(() => execute(files, command, limits));
   let runs = 0;
   /* A reported run. The oracle materialisation below uses the bare runner: it
      is the compiler preparing the tests, not a verdict on the candidate. */
-  const observed = async (label: string, expect: "pass" | "fail", files: Record<string, string>, command: string, limits: { timeoutMs: number; memoryMb: number }, visible = false): Promise<ValidationRun> => {
+  const observed = (label: string, expect: "pass" | "fail", files: Record<string, string>, command: string, limits: { timeoutMs: number; memoryMb: number }, visible = false): Promise<ValidationRun> => slot(async () => {
     const id = `run-${runs++}`;
     observe?.({ id, label, expect, state: "running" });
     const result = await execute(files, command, limits);
@@ -78,7 +87,7 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
       durationMs: result.durationMs,
     });
     return result;
-  };
+  });
 
   // Shape is checked before anything is executed. A candidate whose tests can
   // never reach its implementation fails four sandbox runs and reports only
@@ -98,7 +107,28 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
     differentialDiagnostics = differential.diagnostics;
   }
   const checks: ValidationReport["checks"] = [...structural];
-  let reference = await observed("Reference solution against every test", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
+  // Whether each misconception replaces the implementation was already settled
+  // structurally, so this only measures behaviour. Its two runs are independent.
+  const misconception = async (index: number, incorrect: Record<string, string>, suffix = ""): Promise<ValidationReport["checks"]> => {
+    const which = design.knownIncorrectFiles.length > 1 ? ` ${index + 1}` : "";
+    const [visibleResult, hiddenResult] = await Promise.all([
+      observed(`Plausible wrong solution${which} passes the visible tests${suffix}`, "pass", { ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language)),
+      observed(`Hidden tests catch the wrong solution${which}${suffix}`, "fail", { ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language)),
+    ]);
+    return [
+      { name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : `${summarize(visibleResult)}${differentialDiagnostics[index] ? ` — ${differentialDiagnostics[index]}` : ""}` },
+      structuredResultCheck(`known incorrect ${index + 1} visible case results`, visibleResult, "passed"),
+      { name: `known incorrect ${index + 1} fails hidden`, passed: hiddenResult.exitCode !== 0, detail: hiddenResult.exitCode !== 0 ? "Targeted hidden tests rejected the misconception" : differentialDiagnostics[index] ?? uncaughtMisconception(hiddenResult) },
+      structuredResultCheck(`known incorrect ${index + 1} failure case results`, hiddenResult, "failed"),
+    ];
+  };
+  /* The reference, the visible-only run and every misconception pair do not
+     depend on one another, so they run together. The checks are still pushed
+     in the order they always were, and the runs start in that order too. */
+  const referenceRun = observed("Reference solution against every test", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
+  const firstMisconceptions = Promise.all(design.knownIncorrectFiles.map((incorrect, index) => misconception(index, incorrect)));
+  const visibleOnlyRun = observed("Visible tests against the reference", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, runLimits(design.language), true);
+  let [reference, visibleOnly, perMisconception] = await Promise.all([referenceRun, visibleOnlyRun, firstMisconceptions]);
   /* The most common first rejection of a Python candidate: hidden expected
      values worked out by hand, and wrong — `(5, [2, 2, 2, 1])` expected 2 when
      `[2, 2, 1]` sums to exactly 5. When the reference passes every visible case,
@@ -117,28 +147,15 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
         if (retried.exitCode === 0) {
           design = corrected;
           reference = retried;
-          checks.push({ name: "hidden expectations from the reference", passed: true, detail: `${materialized.rewrites} hand-written hidden expected value${materialized.rewrites === 1 ? "" : "s"} disagreed with the reference, which passes every visible case. The host replaced ${materialized.rewrites === 1 ? "it" : "them"} with the reference's answers. Compute expected values by running an oracle rather than by hand.` });
+          checks.push({ name: "hidden expectations from the reference", passed: true, detail: `${materialized.rewrites} hand-written hidden expected value${materialized.rewrites === 1 ? "" : "s"} disagreed with the reference, which passes every visible case. The host replaced ${materialized.rewrites === 1 ? "it" : "them"} with the reference's answers.` });
+          // The hidden tests changed, so the misconceptions are measured again against them.
+          perMisconception = await Promise.all(design.knownIncorrectFiles.map((incorrect, index) => misconception(index, incorrect)));
         }
       }
     }
   }
   checks.push({ name: "reference solution", passed: reference.exitCode === 0, detail: summarize(reference) });
   checks.push(structuredResultCheck("reference case results", reference, "passed"));
-  // Whether each misconception replaces the implementation was already settled
-  // structurally, so this loop only measures behaviour.
-  const misconception = async (index: number, incorrect: Record<string, string>, suffix = ""): Promise<ValidationReport["checks"]> => {
-    const which = design.knownIncorrectFiles.length > 1 ? ` ${index + 1}` : "";
-    const visibleResult = await observed(`Plausible wrong solution${which} passes the visible tests${suffix}`, "pass", { ...design.starterFiles, ...incorrect, ...design.visibleTests }, design.runCommand, runLimits(design.language));
-    const hiddenResult = await observed(`Hidden tests catch the wrong solution${which}${suffix}`, "fail", { ...design.starterFiles, ...incorrect, ...design.visibleTests, ...design.hiddenTests }, design.runCommand, runLimits(design.language));
-    return [
-      { name: `known incorrect ${index + 1} passes visible`, passed: visibleResult.exitCode === 0, detail: visibleResult.exitCode === 0 ? "Plausible misconception passes the learner-visible contract" : `${summarize(visibleResult)}${differentialDiagnostics[index] ? ` — ${differentialDiagnostics[index]}` : ""}` },
-      structuredResultCheck(`known incorrect ${index + 1} visible case results`, visibleResult, "passed"),
-      { name: `known incorrect ${index + 1} fails hidden`, passed: hiddenResult.exitCode !== 0, detail: hiddenResult.exitCode !== 0 ? "Targeted hidden tests rejected the misconception" : differentialDiagnostics[index] ?? uncaughtMisconception(hiddenResult) },
-      structuredResultCheck(`known incorrect ${index + 1} failure case results`, hiddenResult, "failed"),
-    ];
-  };
-  const perMisconception: ValidationReport["checks"][] = [];
-  for (const [index, incorrect] of design.knownIncorrectFiles.entries()) perMisconception.push(await misconception(index, incorrect));
   /* Python has no oracle rewriting or differential search of its own inside the
      tests, and it is where nearly every rejected candidate was. When a
      misconception check fails, settle it by execution: find the input the hidden
@@ -158,27 +175,52 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
         design = settled.design;
         checks.push(...settled.notes);
         for (const [index, detail] of settled.equivalent) differentialDiagnostics[index] = detail;
+        const rerun: Array<Promise<void>> = [];
         for (const index of failing) {
           const waived = settled.waived.get(index);
           if (waived) {
             perMisconception[index] = [{ name: `known incorrect ${index + 1} gate`, passed: true, detail: waived }];
             continue;
           }
-          if (settled.changed.has(index) || settled.equivalent.has(index)) {
-            perMisconception[index] = settled.equivalent.has(index)
-              ? [
-                  { name: `known incorrect ${index + 1} is a real misconception`, passed: false, detail: settled.equivalent.get(index)! },
-                  // The hidden-coverage advice would send the repair back to the tests.
-                  ...perMisconception[index]!.map((check) => check.name === `known incorrect ${index + 1} fails hidden` && !check.passed ? { ...check, detail: `No test can catch it — see "known incorrect ${index + 1} is a real misconception".` } : check),
-                ]
-              : await misconception(index, design.knownIncorrectFiles[index]!, " (host revision)");
+          if (settled.equivalent.has(index)) {
+            perMisconception[index] = [
+              { name: `known incorrect ${index + 1} is a real misconception`, passed: false, detail: settled.equivalent.get(index)! },
+              // The hidden-coverage advice would send the repair back to the tests.
+              ...perMisconception[index]!.map((check) => check.name === `known incorrect ${index + 1} fails hidden` && !check.passed ? { ...check, detail: `No test can catch it — see "known incorrect ${index + 1} is a real misconception".` } : check),
+            ];
+          } else if (settled.changed.has(index)) {
+            rerun.push(misconception(index, design.knownIncorrectFiles[index]!, " (host revision)").then((group) => { perMisconception[index] = group; }));
           }
         }
+        await Promise.all(rerun);
       }
     }
   }
   checks.push(...perMisconception.flat());
-  const visibleOnly = await observed("Visible tests against the reference", "pass", { ...design.starterFiles, ...design.referenceFiles, ...design.visibleTests }, design.runCommand, runLimits(design.language), true);
+  /* No authored wrong solution: the host makes its own. For JavaScript,
+     TypeScript and Python the reference is mutated one site at a time and the
+     hidden tests must reject those mutants, which is the question a
+     known-incorrect file answers — do the hidden tests tell a wrong solution
+     from a right one — asked of wrong solutions the model did not get to pick.
+     Preflight already rejected an empty list for every other language. Only
+     run against a passing reference, whose failure already rejects the design. */
+  if (!design.knownIncorrectFiles.length && reference.exitCode === 0) {
+    if (design.language === "python") {
+      const path = Object.keys(design.referenceFiles).find((file) => Object.hasOwn(design.starterFiles, file) && pythonModuleName(file));
+      const target = path ? { path, module: pythonModuleName(path)! } : null;
+      if (!target) {
+        checks.push({ name: "host mutant check", passed: false, detail: "No knownIncorrectFiles, and the host found no importable Python implementation shared by starterFiles and referenceFiles to mutate. Provide knownIncorrectFiles: one to three plausible wrong implementations at the reference's path." });
+      } else {
+        const mutants = pythonMutants(design.referenceFiles[target.path] ?? "");
+        const probeRun = await observed("Hidden tests against host-made wrong solutions", "pass", probeFiles(design, target, mutants, PROBE_BUDGET_SECONDS), design.runCommand, runLimits(design.language));
+        const settled = settleHostMutants(design, target, mutants, parseProbe(probeRun.stdout));
+        design = settled.design;
+        checks.push(...settled.checks);
+      }
+    } else {
+      checks.push(await hostMutantCheck(design, run, reference.durationMs, observe));
+    }
+  }
   checks.push({ name: "visible test agreement", passed: visibleOnly.exitCode === 0, detail: summarize(visibleOnly) });
   checks.push(structuredResultCheck("visible case results", visibleOnly, "passed"));
   /* Whether the hidden tests catch the misconception is measured above. The
@@ -186,20 +228,14 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
      never a reason to reject a candidate that demonstrably works. */
   checks.push({ name: "targeted hidden coverage", passed: Object.keys(design.hiddenTests).length > 0, detail: `${Object.keys(design.hiddenTests).length} hidden files${design.expectedFailureSignatures.length ? ` cover ${design.expectedFailureSignatures.length} expected signatures` : ""}` });
   /**
-   * How many cases actually ran.
+   * How many cases actually ran, visible and hidden together.
    *
    * Measured from the reference run's own verdicts rather than counted off the
    * test source, so it is the number of cases that executed and agreed, not the
    * number somebody claims to have written. Three hand-written cases is what a
    * challenge tends to arrive with, and three cases is not a grader: it is a
    * spot check that a wrong solution passes routinely and a right one fails on
-   * an edge nobody thought of. Real judges run hundreds, and they do not write
-   * hundreds by hand — they generate inputs and check them against a slow,
-   * obviously-correct oracle.
-   *
-   * The floor is deliberately reachable by exactly that and not by anything
-   * else: nobody types twenty-four cases, so meeting it means a loop over
-   * generated inputs, which is the thing worth requiring.
+   * an edge nobody thought of.
    */
   const volume = structuredVerdicts(`${reference.stdout}\n${reference.stderr}`);
   const requiredCases = MIN_EXECUTED_CASES[design.kind];
@@ -209,8 +245,8 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
     detail: volume.total >= requiredCases
       ? `${volume.total} cases executed against the reference`
       : design.kind === "function"
-        ? `Only ${volume.total} cases ran; at least ${requiredCases} are required. Add a generated sweep to hiddenTests: loop over inputs built from a seeded pseudo-random generator, compute the expected answer with a brute-force oracle written inside the test file, and emit one verdict line per case with the input in the case name. Keep the curated cases too — the sweep finds what you did not think of, the curated ones say what the problem means.`
-        : `Only ${volume.total} cases ran; at least ${requiredCases} are required for a ${design.kind} challenge. Add meaningful hidden scenarios that exercise the task's behavior, boundaries, and interactions, with one verdict per case.`,
+        ? `Only ${volume.total} cases ran across the visible and hidden tests; at least ${requiredCases} are required. Add hidden cases: targeted ones for the boundaries and the plausible mistakes, or a seeded sweep over generated inputs whose expected answers come from an oracle, with one verdict line per case and the input in the case name.`
+        : `Only ${volume.total} cases ran across the visible and hidden tests; at least ${requiredCases} are required for a ${design.kind} challenge. Add meaningful hidden scenarios that exercise the task's behavior, boundaries, and interactions, with one verdict per case.`,
   });
   /* Curated cases are a separate requirement from volume, and pointed the other
      way: a suite that is only a sweep tells the learner nothing about what the
@@ -221,7 +257,7 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
     passed: origin === "host" || curated.total >= MIN_VISIBLE_CASES,
     detail: curated.total >= MIN_VISIBLE_CASES
       ? `${curated.total} named visible cases state the contract`
-      : `Only ${curated.total} visible cases. Write at least ${MIN_VISIBLE_CASES} named by hand — the ordinary case, each boundary, and the one that separates the right idea from the plausible wrong one. A generated sweep does not belong in the visible file.`,
+      : `Only ${curated.total} visible cases. Write at least ${MIN_VISIBLE_CASES} named by hand: the ordinary case and each boundary. The case that separates the right idea from the plausible wrong one belongs in hiddenTests, and a generated sweep does not belong in the visible file.`,
   });
   checks.push({ name: "accidental difficulty budget", passed: design.accidentalDifficulty.length <= 3, detail: design.accidentalDifficulty.join(", ") || "No incidental complexity declared" });
   const contentHash = createHash("sha256").update(stableJson(design)).digest("hex");
@@ -236,6 +272,72 @@ export async function compileQuestion(untrustedDesign: unknown, execute: Validat
       validatedAt: new Date().toISOString(),
     },
   };
+}
+
+/** At most `limit` of the given tasks in flight at once, in arrival order. */
+function concurrencyLimit(limit: number): <T>(task: () => Promise<T>) => Promise<T> {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (active >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    active += 1;
+    try {
+      return await task();
+    } finally {
+      active -= 1;
+      waiting.shift()?.();
+    }
+  };
+}
+
+/** Host mutants tried per JavaScript or TypeScript compile without authored wrong solutions. */
+const MAX_HOST_MUTANTS = 12;
+
+/**
+ * The hidden-test gate for a JavaScript or TypeScript design that brought no
+ * known-incorrect files.
+ *
+ * Single-site mutations of the reference stand in for them. Each mutant runs
+ * against the hidden tests alone, and one the hidden tests let through runs
+ * against the visible ones too. A mutant neither file rejects may not change
+ * any answer at all, so it is not counted against the suite; what is required
+ * is that the tests reject some mutant, that the hidden tests on their own
+ * reject at least half of the ones the suite rejects, and that a rejection is
+ * reported as a failing case verdict rather than only an exit code.
+ */
+async function hostMutantCheck(design: QuestionDesign, run: ValidationRunner, referenceMs: number, observe?: CompileObserver): Promise<ValidationReport["checks"][number]> {
+  const name = "host mutant check";
+  const rules = LANGUAGE_RULES[design.language];
+  const path = Object.keys(design.referenceFiles).find((file) => Object.hasOwn(design.starterFiles, file) && rules.extensions.some((extension) => file.endsWith(extension)));
+  const source = path ? design.referenceFiles[path] ?? "" : "";
+  const mutants = path ? synthesizeTargetedMutants(source, true).slice(0, MAX_HOST_MUTANTS) : [];
+  if (!path || !mutants.length) {
+    return { name, passed: false, detail: "No knownIncorrectFiles, and the host could not make single-site mutations of the reference implementation to check the hidden tests with. Provide knownIncorrectFiles: one to three plausible wrong implementations at the reference's path." };
+  }
+  /* A mutant that never terminates (`i++` turned `i--`) would hold a slot for
+     the whole language limit. It is rejected either way, so it gets a few times
+     what the full reference run took, which still covers a cold toolchain. */
+  const limits = { ...runLimits(design.language), timeoutMs: Math.min(runLimits(design.language).timeoutMs, Math.max(3_000, referenceMs * 4)) };
+  const label = "Hidden tests against host-made wrong solutions";
+  observe?.({ id: "host-mutants", label, expect: "fail", state: "running" });
+  const started = Date.now();
+  const results = await Promise.all(mutants.map(async (mutant) => {
+    const files = { ...design.starterFiles, ...design.referenceFiles, [path]: mutant };
+    const hidden = await run({ ...files, ...design.hiddenTests }, design.runCommand, limits);
+    if (hidden.exitCode !== 0) return { killed: true, byHidden: true, reported: structuredVerdicts(`${hidden.stdout}\n${hidden.stderr}`).failed > 0 };
+    const visible = await run({ ...files, ...design.visibleTests }, design.runCommand, limits);
+    return { killed: visible.exitCode !== 0, byHidden: false, reported: false };
+  }));
+  const killable = results.filter((result) => result.killed).length;
+  const byHidden = results.filter((result) => result.byHidden).length;
+  const reported = results.some((result) => result.reported);
+  const passed = killable > 0 && byHidden * 2 >= killable && reported;
+  observe?.({ id: "host-mutants", label, expect: "fail", state: passed ? "passed" : "failed", cases: { total: mutants.length, passed: byHidden, failed: mutants.length - byHidden }, durationMs: Date.now() - started });
+  const tally = `Of ${mutants.length} single-site mutations of the reference, the tests rejected ${killable} and the hidden tests alone rejected ${byHidden}.`;
+  if (passed) return { name, passed, detail: `${tally} The hidden tests separate wrong solutions from the reference.` };
+  if (!killable) return { name, passed, detail: `${tally} No test rejects any mutation of the reference, so nothing shows the tests reach the implementation. Add hidden cases whose answers change when a comparison, bound or update in the reference changes, or provide knownIncorrectFiles.` };
+  if (byHidden * 2 < killable) return { name, passed, detail: `${tally} The hidden tests miss most of the mistakes the visible tests catch, so they barely grade the implementation. Add hidden cases that cover the boundaries and the ordinary path, not only one corner, or provide knownIncorrectFiles.` };
+  return { name, passed, detail: `${tally} The hidden tests failed without printing a failing case verdict. Catch each comparison, print \`not ok - case name\` with expected/actual values, continue the remaining cases, and exit non-zero after reporting them.` };
 }
 
 type VerdictKind = "passed" | "failed";
@@ -469,6 +571,10 @@ function preflight(design: QuestionDesign): ValidationReport["checks"] {
     fail("reference replaces starter implementation", `No reference path matches a starter path. Starter has (${starterPaths.join(", ")}) and reference has (${referencePaths.join(", ")}). Both maps must use the exact same implementation path so the reference replaces the file the learner edits.`);
   } else if (sharedPath.length) pass("reference replaces starter implementation", `Shares ${sharedPath.join(", ")}`);
 
+  if (!design.knownIncorrectFiles.length) {
+    if (HOST_MUTANT_LANGUAGES.has(design.language)) pass("known incorrect solutions", "None authored: the host checks the hidden tests against its own mutations of the reference");
+    else fail("known incorrect solutions present", `knownIncorrectFiles is empty. For ${design.language} provide one to three plausible wrong implementations at the reference's path; the host generates its own only for JavaScript, TypeScript and Python.`);
+  }
   // Checked here rather than after four sandbox runs: a misconception that
   // does not replace the implementation cannot be distinguished by any test.
   for (const [index, incorrect] of design.knownIncorrectFiles.entries()) {

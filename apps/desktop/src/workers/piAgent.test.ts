@@ -3,7 +3,7 @@ import { fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall } from "@ear
 import { registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { Context, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { NOOP_TELEMETRY_CONTEXT } from "@earendil-works/pi-telemetry";
-import { advanceTrainingConversation, createTrainingAgent, normalizePiAgentEvent, piAgentTools, piCompleteText, toolCallSpill, toolErrorText } from "./piAgent.js";
+import { advanceTrainingConversation, createTrainingAgent, droppedStream, normalizePiAgentEvent, piAgentTools, piCompleteText, retryDroppedStream, toolCallSpill, toolErrorText } from "./piAgent.js";
 import type { PiProviderInput } from "./piProvider.js";
 
 const provider: PiProviderInput = { provider: "spar-faux", model: "training-faux", api: "spar-faux", baseUrl: "http://localhost:0", apiKey: "test" };
@@ -35,6 +35,55 @@ describe("the training agent, on pi's runtime", () => {
       expect(answer).toBe("accepted");
       expect(usages).toHaveLength(1);
       expect(usages[0]).toHaveProperty("totalTokens");
+    } finally { faux.unregister(); }
+  });
+
+  it("retries a private completion once when its stream drops, and only once", async () => {
+    const { faux, requests, scripted } = harness();
+    try {
+      faux.setResponses([
+        scripted(fauxAssistantMessage("", { stopReason: "error", errorMessage: "terminated" })),
+        scripted(fauxAssistantMessage("built")),
+      ]);
+      const signal = new AbortController().signal;
+      const retried: unknown[] = [];
+      const streamed: string[] = [];
+      const answer = await retryDroppedStream(() => piCompleteText(provider, "Build", "Brief", signal, "Timed out", undefined, (delta) => streamed.push(delta)), signal, (error) => retried.push(error));
+      expect(answer).toBe("built");
+      expect(requests).toHaveLength(2);
+      expect(retried).toHaveLength(1);
+
+      faux.setResponses([
+        scripted(fauxAssistantMessage("", { stopReason: "error", errorMessage: "terminated" })),
+        scripted(fauxAssistantMessage("", { stopReason: "error", errorMessage: "terminated" })),
+        scripted(fauxAssistantMessage("never reached")),
+      ]);
+      await expect(retryDroppedStream(() => piCompleteText(provider, "Build", "Brief", signal, "Timed out"), signal)).rejects.toThrow("terminated");
+      expect(requests).toHaveLength(4);
+    } finally { faux.unregister(); }
+  });
+
+  it("does not retry a provider error that is not a dropped stream, or a stopped call", async () => {
+    let calls = 0;
+    await expect(retryDroppedStream(async () => { calls += 1; throw new Error("401 invalid api key"); }, new AbortController().signal)).rejects.toThrow("401");
+    expect(calls).toBe(1);
+    const stopped = new AbortController();
+    stopped.abort(new Error("Stopped by the learner."));
+    await expect(retryDroppedStream(async () => { calls += 1; throw new Error("terminated"); }, stopped.signal)).rejects.toThrow("terminated");
+    expect(calls).toBe(2);
+    expect(droppedStream(new Error("TypeError: fetch failed"))).toBe(true);
+    expect(droppedStream(new Error("socket hang up"))).toBe(true);
+    expect(droppedStream(new Error("400 context too long"))).toBe(false);
+  });
+
+  it("reports a learner's Stop as the Stop, not as the provider going silent", async () => {
+    const { faux, scripted } = harness();
+    try {
+      faux.setResponses([scripted(fauxAssistantMessage("late"))]);
+      const stop = new AbortController();
+      const idle = new AbortController();
+      stop.abort(new Error("Stopped by the learner."));
+      await expect(piCompleteText(provider, "Build", "Brief", AbortSignal.any([stop.signal, idle.signal]), "the provider went silent", undefined, () => undefined)).rejects.toThrow("Stopped by the learner.");
     } finally { faux.unregister(); }
   });
 

@@ -377,6 +377,52 @@ export function settleMisconceptions(design: QuestionDesign, target: { path: str
   return settlement;
 }
 
+const HOST_MUTANT_NAME = "spar_mutant_test.py";
+/** Generated cases added for mutants the authored tests let through. */
+const MAX_MUTANT_CASES = 6;
+
+/**
+ * The hidden-test gate for a Python design that brought no known-incorrect
+ * files, settled from one probe run over host mutants of the reference.
+ *
+ * A mutant counts when something shows it is wrong: a test rejects it, or the
+ * probe found an input where it disagrees with the reference. A wrong mutant
+ * both test files let through gets its counterexample added as a generated
+ * hidden case, the same move `settleMisconceptions` makes for an authored one.
+ * Then the bar is the one that waives an authored misconception: at least one
+ * wrong mutant, the hidden tests on their own rejecting at least half of them,
+ * and a rejection reported as a failing case verdict rather than only a crash.
+ */
+export function settleHostMutants(design: QuestionDesign, target: { path: string; module: string }, mutants: PythonMutant[], probe: ProbeResult | null): { design: QuestionDesign; checks: Array<{ name: string; passed: boolean; detail: string }> } {
+  const name = "host mutant check";
+  if (!probe || !probe.supported || !probe.referencePasses) {
+    return { design, checks: [{ name, passed: false, detail: "No knownIncorrectFiles, and the host's mutation probe could not run against this design, so nothing shows the hidden tests separate a wrong solution from the reference. Provide knownIncorrectFiles: one to three plausible wrong implementations at the reference's path." }] };
+  }
+  const killable = probe.mutants.filter((mutant) => mutant.loaded && (mutant.differs || !mutant.visible || !mutant.hidden));
+  const survivors = killable.filter((mutant) => mutant.visible && mutant.hidden);
+  const fixed = survivors.filter((mutant) => mutant.counterexample).slice(0, MAX_MUTANT_CASES);
+  const byHidden = killable.filter((mutant) => !mutant.hidden).length + fixed.length;
+  const reported = fixed.length > 0 || killable.some((mutant) => !mutant.hidden && mutant.reported);
+  const passed = killable.length > 0 && byHidden * 2 >= killable.length && reported;
+  let next = design;
+  const checks: Array<{ name: string; passed: boolean; detail: string }> = [];
+  if (fixed.length) {
+    const directory = Object.keys(design.hiddenTests)[0]?.split("/").slice(0, -1).join("/") ?? "";
+    next = { ...design, hiddenTests: { ...design.hiddenTests, [directory ? `${directory}/${HOST_MUTANT_NAME}` : HOST_MUTANT_NAME]: generatedHiddenTest(target.module, fixed.map((mutant) => mutant.counterexample!)) } };
+    checks.push({ name: "host mutant counterexamples", passed: true, detail: `${fixed.length} single-site mutation${fixed.length === 1 ? "" : "s"} of the reference passed every test while returning a wrong answer. The host added the input${fixed.length === 1 ? "" : "s"} where ${fixed.length === 1 ? "it disagrees" : "they disagree"} as generated hidden cases, with expected values from the reference.` });
+  }
+  const tally = `Of ${mutants.length} single-site mutations of the reference, ${killable.length} change an answer and the hidden tests reject ${byHidden} of them${fixed.length ? " (counting the generated cases)" : ""}.`;
+  const detail = passed
+    ? `${tally} The hidden tests separate wrong solutions from the reference.`
+    : !killable.length
+      ? `${tally} No mutation of the reference changes any answer the tests check, so nothing shows the tests reach the implementation. Add hidden cases whose answers change when a comparison, bound or update in the reference changes, or provide knownIncorrectFiles.`
+      : byHidden * 2 < killable.length
+        ? `${tally} The hidden tests miss most of the mistakes the visible tests catch, so they barely grade the implementation. Add hidden cases that cover the boundaries and the ordinary path, not only one corner, or provide knownIncorrectFiles.`
+        : `${tally} The hidden tests rejected them without printing a failing case verdict. Catch each comparison, print \`not ok - case name\` with expected/actual values, continue the remaining cases, and exit non-zero after reporting them.`;
+  checks.push({ name, passed, detail });
+  return { design: next, checks };
+}
+
 /** A hidden test file for the host's counterexamples, in the same one verdict
  *  line per case protocol as the author's. Its expected values come from the
  *  reference, so it cannot be wrong about the answer. */

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { piFinishReason, piModelFor, piUsage, type PiProviderInput } from "./piProvider.js";
-import { advanceTrainingConversation, conversationStarted, createTrainingAgent, normalizePiAgentEvent, piAgentTools, piCompleteText, toolCallSpill, toolErrorText, turnOverflowed } from "./piAgent.js";
+import { advanceTrainingConversation, conversationStarted, createTrainingAgent, normalizePiAgentEvent, piAgentTools, piCompleteText, retryDroppedStream, toolCallSpill, toolErrorText, turnOverflowed } from "./piAgent.js";
 import { stableJson } from "./evidence.js";
 import { clampSteer, steeringSection } from "./steering.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
@@ -17,7 +17,7 @@ import { telemetryValue } from "./telemetryPayload.js";
 import { parseReviewGrade, parseReviewPrompt, reviewGradeInstructions, reviewPromptInstructions, type ReviewGradeRequest, type ReviewPromptRequest } from "./reviewAgent.js";
 import { WorkerTelemetryContext } from "./piTelemetry.js";
 import { figureProblems } from "../shared/figure.js";
-import { BUILDER_PROMPT, COACH_PROMPT, REDRAFT_PROMPT, REPAIR_PROMPT, promptRefs } from "./prompts.js";
+import { BUILDER_PROMPT, COACH_PROMPT, REPAIR_PROMPT, promptRefs } from "./prompts.js";
 
 /**
  * The coach's worker.
@@ -44,17 +44,19 @@ const IDENTICAL_TOOL_CALL_LIMIT = 8;
  *  symptom. Refused with a reason rather than withdrawn from the table. */
 const REPEATED_CALL_LIMIT = 2;
 const LIVE_READS = new Set(["read_attempt", "read_submissions"]);
-/** set_challenge calls per turn. Each owns its own repairs; three lets the coach
- *  rethink the brief after a rejection without becoming an unbounded loop. */
+/** set_challenge calls per turn, counting builds that threw. Each owns its own
+ *  repairs; three lets the coach rethink the brief after a rejection without
+ *  becoming an unbounded loop. */
 const CHALLENGE_BUILD_LIMIT = 3;
-/** Repairs and reconsiderations inside set_challenge, shared across the turn. */
+/** Repairs inside set_challenge, shared across the turn. */
 const CHALLENGE_REPAIR_LIMIT = 8;
 const CHALLENGE_REPAIRS_PER_DRAFT = 2;
-const CHALLENGE_REDRAFT_LIMIT = 2;
 /** Compactions a turn may try before saying it does not fit the model. */
 const OVERFLOW_RETRY_LIMIT = 2;
+/** How much of a rejected candidate's statement the coach is shown. */
+const FAILED_STATEMENT_CHARS = 600;
 
-type PrivateChallengeBudget = { repairRemaining: number; redraftRemaining: number };
+type PrivateChallengeBudget = { repairRemaining: number };
 /** One host compile of a candidate design. */
 type Compile = (candidate: unknown, onRun?: (value: unknown) => void) => Promise<unknown>;
 
@@ -133,7 +135,7 @@ parentPort.on("message", (event) => {
   const message = event.data as Record<string, unknown>;
   if (message.kind === "request" && message.method === "abort") {
     const target = (message.payload as { requestId?: unknown } | null)?.requestId;
-    running.get(String(target))?.abort(new Error("stopped"));
+    running.get(String(target))?.abort(new Error("Stopped by the learner."));
     /* Answered immediately and unconditionally, including for a turn that has
        already finished: the caller is holding a promise on this id, and a stop
        that arrives a moment too late is a no-op, not a failure. */
@@ -364,9 +366,10 @@ type BuilderContext = {
   refused?: string;
   /** The drill lens, as the learner named it, for the builder's brief. */
   lens?: { label: string; about: string } | null;
-  preferredLanguage?: string;
   open?: Record<string, unknown> | null;
   recentStarters?: Array<{ title: string; language: string; difficulty: string; starter: { path: string; text: string } | null }>;
+  /** Every challenge already on the Track, oldest first, with its task in a line. */
+  earlier?: Array<{ title: string; task: string }>;
 };
 
 const PRICE: Record<string, number> = { foundation: 900, developing: 1200, proficient: 1500, advanced: 1800 };
@@ -396,6 +399,12 @@ function builderMessage(brief: SetChallengeInput, context: BuilderContext): stri
     for (const entry of starters) sections.push(`${entry.title} (${entry.language}, ${entry.difficulty}) — ${entry.starter!.path}:\n${entry.starter!.text}`);
   } else {
     sections.push("# Starters on this Track\nNone yet: this challenge sets the convention the Track will follow.");
+  }
+  /* A revision keeps its task on purpose; anything else is a new problem, and a
+     learner handed one they already did on this Track has been handed nothing. */
+  const earlier = brief.mode === "revise" ? [] : context.earlier ?? [];
+  if (earlier.length) {
+    sections.push(`# Problems the learner already did on this Track, oldest first\nWrite a different problem from each of these.\n${earlier.map((entry) => `- ${entry.title}${entry.task ? `: ${entry.task}` : ""}`).join("\n")}`);
   }
   sections.push("Reply with the JSON object only.");
   return sections.filter(Boolean).join("\n\n");
@@ -454,7 +463,7 @@ async function setChallenge(
     const draft = stages.begin("draft", "Writing", "the challenge", model);
     let json = "";
     let reported = { length: 0, at: 0 };
-    const streamed = streamInto(draft, "patch");
+    let streamed = streamInto(draft, "patch");
     let answer: string;
     try {
       answer = await completePrivateChallenge(runId, id, "challenge-builder", context.provider, system, builderMessage(brief, builderContext), context.signal, "Writing the challenge stopped: the provider went silent.", context.recordUsage, (delta) => {
@@ -467,26 +476,29 @@ async function setChallenge(
           reported = { length: json.length, at: now };
           emit({ type: "draft", draft: challengeDraft(id, json.slice(json.indexOf("{"))) });
         }
+      }, () => {
+        /* The first stream dropped; what it wrote is thrown away with it. */
+        json = "";
+        reported = { length: 0, at: 0 };
+        streamed = streamInto(draft, "patch");
+        draft?.update({ detail: "The provider's stream dropped; writing again" });
       });
     } catch (error) {
-      draft?.end("failed", { verb: "Writing failed", detail: error instanceof Error ? error.message : String(error) });
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      draft?.end("failed", { verb: "Writing failed", detail: message });
+      if (context.signal.aborted) throw error;
+      /* The provider failed, not the brief: nothing was written, so there is no
+         design to judge. Returned rather than thrown so the coach reads it as
+         what it is. */
+      const value = { status: "invalid", cause: "provider", error: message, report: { valid: false, checks: [] } };
+      stages.note("outcome", "failed", "Not written", "The model provider failed");
+      emit({ type: "telemetry", kind: "tool", name: "set_challenge", phase: "end", callId: id, ok: false, input: telemetryValue(brief), output: telemetryValue(value), error: message, level: "ERROR" });
+      emit({ type: "tool", tool: "set_challenge", phase: "end", callId: id, ok: false, detail: `Provider failed: ${message}`, ...titled, ...staged(), input: toolPayload("set_challenge", brief), output: toolPayload("set_challenge", value) });
+      return { full: value, forModel: { status: "invalid", cause: "provider", providerError: `The builder's model call to ${context.provider.provider} failed: ${message}`, note: "Nothing was built, so no part of the brief was checked." } };
     }
     const design = parseRepairChanges(answer);
-    candidate = {
-      ...(design ?? {}),
-      language: brief.language,
-      kind: brief.kind,
-      difficulty: brief.difficulty,
-      concepts: brief.concepts,
-      requiresComplexityAnalysis: brief.requiresComplexityAnalysis ?? (brief.kind === "function" || brief.kind === "module"),
-      ...(brief.solutionRequirements?.length ? { solutionRequirements: brief.solutionRequirements } : {}),
-      why: brief.why ?? "",
-      trainingTarget: { ability: brief.aim.ability, specificGap: brief.aim.gap ?? "", desiredEvidence: brief.aim.evidence ?? "", avoidTesting: [] },
-      ...(hostName === "replace_current_question" ? { reason: brief.reason ?? brief.stretch ?? "" } : {}),
-      ...(brief.review ? { review: brief.review } : {}),
-      ...(brief.lens ? { lens: brief.lens } : {}),
-    };
+    const owned = briefFields(brief, hostName);
+    candidate = mergeQuestionChanges(design ?? {}, {}, owned);
     const lines = summarizeToolInput("create_question", candidate).files?.reduce((total, file) => total + file.added, 0) ?? 0;
     if (design) draft?.end("done", { verb: "Written", detail: typeof candidate.title === "string" ? candidate.title : "challenge", badge: lines ? `+${lines}` : undefined });
     else draft?.end("failed", { verb: "Unreadable design", detail: "The builder did not return a JSON design" });
@@ -498,20 +510,9 @@ async function setChallenge(
     const revisions: Revision[] = [];
     const lifecycle = () => failedChecks(value).some((failure) => failure.startsWith("session lifecycle:"));
     if (design && !isPlayableQuestion(value) && !lifecycle() && context.budget.repairRemaining > 0) {
-      const repaired = await repairRejectedChallenge(runId, id, compile, candidate, value, context, progress, CHALLENGE_REPAIRS_PER_DRAFT, stages, revisions);
+      const repaired = await repairRejectedChallenge(runId, id, compile, candidate, value, context, progress, CHALLENGE_REPAIRS_PER_DRAFT, stages, revisions, owned);
       candidate = repaired.input as Record<string, unknown>;
       value = repaired.value;
-    }
-    if (design && !isPlayableQuestion(value) && !lifecycle() && context.budget.redraftRemaining > 0) {
-      context.budget.redraftRemaining -= 1;
-      const redrafted = await redraftRejectedChallenge(runId, id, compile, candidate, value, context, progress, stages, revisions);
-      candidate = redrafted.input as Record<string, unknown>;
-      value = redrafted.value;
-      if (!isPlayableQuestion(value) && context.budget.repairRemaining > 0) {
-        const repaired = await repairRejectedChallenge(runId, id, compile, candidate, value, context, progress, CHALLENGE_REPAIRS_PER_DRAFT, stages, revisions);
-        candidate = repaired.input as Record<string, unknown>;
-        value = repaired.value;
-      }
     }
     const playable = isPlayableQuestion(value);
     const title = typeof candidate.title === "string" ? candidate.title : "challenge";
@@ -531,13 +532,36 @@ async function setChallenge(
   }
 }
 
-/** The result the coach reads: what was published, in enough detail to talk
- *  about it — or every failed check, and what to do about them. */
+/**
+ * The fields the coach's brief decides, as the candidate carries them. The
+ * builder is told not to write them and a repair may not change them, so they
+ * are laid over the builder's design and re-applied after every repair patch.
+ * An undefined value is a field this brief leaves unset, and stays unset.
+ */
+function briefFields(brief: SetChallengeInput, hostName: "create_question" | "replace_current_question"): Record<string, unknown> {
+  return {
+    language: brief.language,
+    kind: brief.kind,
+    difficulty: brief.difficulty,
+    concepts: brief.concepts,
+    requiresComplexityAnalysis: brief.requiresComplexityAnalysis ?? (brief.kind === "function" || brief.kind === "module"),
+    solutionRequirements: brief.solutionRequirements?.length ? brief.solutionRequirements : undefined,
+    why: brief.why ?? "",
+    trainingTarget: { ability: brief.aim.ability, specificGap: brief.aim.gap ?? "", desiredEvidence: brief.aim.evidence ?? "", avoidTesting: [] },
+    reason: hostName === "replace_current_question" ? brief.reason ?? brief.stretch ?? "" : undefined,
+    review: brief.review,
+    lens: brief.lens,
+  };
+}
+
 /** Cut to a length, and said so where it was cut. */
 function clipped(text: string, limit: number): string {
   return text.length > limit ? `${text.slice(0, limit)}\n…(cut at ${limit} of ${text.length} characters)` : text;
 }
 
+/** The result the coach reads: what was published, in enough detail to talk
+ *  about it — or what was built and every check it failed. Facts only; what to
+ *  do next is the coach's call. */
 function challengeForModel(brief: SetChallengeInput, candidate: Record<string, unknown>, value: unknown, revisions: Revision[]): unknown {
   const record = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   if (isPlayableQuestion(value)) {
@@ -559,17 +583,18 @@ function challengeForModel(brief: SetChallengeInput, candidate: Record<string, u
          believe a link it asked for was made. */
       ...(record.review ? { review: record.review } : {}),
       ...(record.followsLessonNote ? { followsLessonNote: record.followsLessonNote } : {}),
-      note: "Published and open in the learner's editor. Tell them why this one and why now, and one concrete first step — without the solution.",
+      note: "Published and open in the learner's editor.",
     };
   }
   const failures = failedChecks(value);
+  const providerError = typeof record.repairProviderError === "string" ? record.repairProviderError : null;
   return {
     status: "invalid",
+    ...(typeof candidate.title === "string" ? { candidateTitle: candidate.title } : {}),
+    ...(typeof candidate.statement === "string" && candidate.statement ? { candidateStatement: clipped(candidate.statement, FAILED_STATEMENT_CHARS) } : {}),
     failedChecks: failures,
     ...(revisions.length ? { privateRevisions: revisions.map((revision) => revision.line) } : {}),
-    nextStep: failures.some((failure) => failure.startsWith("session lifecycle:"))
-      ? "The session's open challenge does not allow this mode. Check the journey's open challenge and choose mode new, revise or replace accordingly."
-      : "Not published. Adjust the brief — settle any ambiguity in the task, or simplify it while keeping the idea — and call set_challenge again.",
+    ...(providerError ? { providerError: `The repair model's call failed: ${providerError}` } : {}),
   };
 }
 
@@ -607,7 +632,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
   const callCounts = new Map<string, number>();
   const signatures: string[] = [];
   let loopDetected = "";
-  const budget: PrivateChallengeBudget = { repairRemaining: CHALLENGE_REPAIR_LIMIT, redraftRemaining: CHALLENGE_REDRAFT_LIMIT };
+  const budget: PrivateChallengeBudget = { repairRemaining: CHALLENGE_REPAIR_LIMIT };
   const usage: unknown[] = [];
   /* The current step's idle watchdog. Tool time is not provider time: while a
      host tool runs — a sandbox validating a candidate, a question waiting on the
@@ -632,7 +657,15 @@ async function runTurn(request: Request, stopped: AbortSignal) {
     pausedWatch?.pause();
     try {
       if (name === "set_challenge") {
-        const built = await setChallenge(request.id, payload.sessionId, input, { provider: payload.provider, signal: stopped, budget, recordUsage: (value) => usage.push(value) });
+        let built: Awaited<ReturnType<typeof setChallenge>>;
+        try {
+          built = await setChallenge(request.id, payload.sessionId, input, { provider: payload.provider, signal: stopped, budget, recordUsage: (value) => usage.push(value) });
+        } catch (error) {
+          /* A build that threw still spent a build: without this, a failure
+             that throws every time could be retried without limit. */
+          record(name, args, { status: "error", error: error instanceof Error ? error.message : String(error) });
+          throw error;
+        }
         record(name, args, built.full);
         return built.forModel;
       }
@@ -842,9 +875,13 @@ function compileRun(value: unknown): ToolStageRun | null {
   };
 }
 
-/** The reviewer and compiler-repair models are part of the same public tool
- * call. Record their actual prompts, answers, usage and duration as LLM runs
- * under that tool, instead of leaving only a final verdict in the trace. */
+/** The builder and repair models are part of the same public tool call. Record
+ * their actual prompts, answers, usage and duration as LLM runs under that
+ * tool, instead of leaving only a final verdict in the trace.
+ *
+ * A stream that drops mid-answer ("terminated", a reset socket) is retried once
+ * before the call fails; `onRetry` lets the caller discard what the dropped
+ * attempt had streamed. */
 async function completePrivateChallenge(
   runId: string,
   parentCallId: string,
@@ -856,27 +893,32 @@ async function completePrivateChallenge(
   timedOut: string,
   recordUsage: (usage: unknown) => void,
   onText?: (delta: string) => void,
+  onRetry?: () => void,
 ): Promise<string> {
-  const callId = randomUUID();
-  const started = Date.now();
-  let usage: unknown;
-  parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "start", model: provider.model, provider: provider.provider, input: telemetryValue({ system, message }) } });
-  /* Silence, not duration. A repair that thinks for four minutes and then
-     writes a good patch is the work going well; only a stream that has stopped
-     producing anything is abandoned. `signal` is the learner's Stop. */
-  const watchdog = idleWatchdog(PROVIDER_IDLE_TIMEOUT_MS, timedOut);
-  try {
-    /* Keyed by what the generation is, so every build shares the builder's
-       cached prefix and every repair the repair's. */
-    const answer = await piCompleteText({ ...provider, cacheKey: `spar-${name}` }, system, message, AbortSignal.any([signal, watchdog.signal]), timedOut, (value) => { usage = value; recordUsage(value); }, onText, watchdog.touch);
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "end", model: provider.model, provider: provider.provider, latencyMs: Date.now() - started, usage, output: telemetryValue({ text: answer }) } });
-    return answer;
-  } catch (error) {
-    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "end", model: provider.model, provider: provider.provider, latencyMs: Date.now() - started, usage, error: error instanceof Error ? error.message : String(error), level: "ERROR" } });
-    throw error;
-  } finally {
-    watchdog.dispose();
-  }
+  const attempt = async (retry: boolean): Promise<string> => {
+    const callId = randomUUID();
+    const started = Date.now();
+    let usage: unknown;
+    parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "start", model: provider.model, provider: provider.provider, ...(retry ? { attributes: { retryOfDroppedStream: true } } : {}), input: telemetryValue({ system, message }) } });
+    /* Silence, not duration. A repair that thinks for four minutes and then
+       writes a good patch is the work going well; only a stream that has stopped
+       producing anything is abandoned. `signal` is the learner's Stop. */
+    const watchdog = idleWatchdog(PROVIDER_IDLE_TIMEOUT_MS, timedOut);
+    try {
+      /* Keyed by what the generation is, so every build shares the builder's
+         cached prefix and every repair the repair's. */
+      const answer = await piCompleteText({ ...provider, cacheKey: `spar-${name}` }, system, message, AbortSignal.any([signal, watchdog.signal]), timedOut, (value) => { usage = value; recordUsage(value); }, onText, watchdog.touch);
+      parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "end", model: provider.model, provider: provider.provider, latencyMs: Date.now() - started, usage, output: telemetryValue({ text: answer }) } });
+      return answer;
+    } catch (error) {
+      parentPort.postMessage({ kind: "event", requestId: runId, event: { type: "telemetry", kind: "generation", name, callId, parentCallId, state: "end", model: provider.model, provider: provider.provider, latencyMs: Date.now() - started, usage, error: error instanceof Error ? error.message : String(error), level: "ERROR" } });
+      throw error;
+    } finally {
+      watchdog.dispose();
+    }
+  };
+  let retried = false;
+  return retryDroppedStream(() => attempt(retried), signal, () => { retried = true; onRetry?.(); });
 }
 
 /**
@@ -885,7 +927,8 @@ async function completePrivateChallenge(
  * The compiler owns the error and the rejected input is the closest thing to a
  * source tree, so both stay inside this tool call. The repair model returns only
  * changed top-level fields; file maps are merged by path so fixing one test does
- * not regenerate the statement, reference, starter, and every other test.
+ * not regenerate the statement, reference, starter, and every other test. The
+ * brief's own fields (`owned`) are put back after every patch.
  */
 async function repairRejectedChallenge(
   runId: string,
@@ -898,6 +941,7 @@ async function repairRejectedChallenge(
   maxAttempts = CHALLENGE_REPAIRS_PER_DRAFT,
   stages?: StageLog,
   revisions: Revision[] = [],
+  owned: Record<string, unknown> = {},
 ): Promise<{ input: unknown; value: unknown }> {
   let round = 0;
   let lastChange = "";
@@ -905,6 +949,7 @@ async function repairRejectedChallenge(
   const repaired = await repairQuestionUntilValid(initialInput, initialResult, {
     limit: Math.min(maxAttempts, repair.budget.repairRemaining),
     signal: repair.signal,
+    owned,
     failedChecks,
     playable: isPlayableQuestion,
     progress,
@@ -916,19 +961,24 @@ async function repairRejectedChallenge(
         provider: repair.provider.provider,
         badge: `${failures.length} ${failures.length === 1 ? "issue" : "issues"}`,
       });
+      let streamed = streamInto(stage, "patch");
       let answer: string;
       try {
         answer = await completePrivateChallenge(
-        runId,
-        parentCallId,
-        "challenge-compiler-repair-model",
-        repair.provider,
-        REPAIR_PROMPT.text,
-        `Compiler failures:\n${failures.map((failure, index) => `${index + 1}. ${failure}`).join("\n")}${revisionHistory(revisions)}${escalation(failures, revisions)}${responseFeedback ? `\n\nYour previous repair reply could not be applied: ${responseFeedback}. Return a smaller valid JSON object with actual changed fields.` : ""}\n\nRetained candidate:\n${stableJson(candidate)}`,
-        repair.signal,
-        "Challenge repair stopped: the provider went silent.",
-        repair.recordUsage,
-        streamInto(stage, "patch"),
+          runId,
+          parentCallId,
+          "challenge-compiler-repair-model",
+          repair.provider,
+          REPAIR_PROMPT.text,
+          `Compiler failures:\n${failures.map((failure, index) => `${index + 1}. ${failure}`).join("\n")}${revisionHistory(revisions)}${escalation(failures, revisions)}${responseFeedback ? `\n\nYour previous repair reply could not be applied: ${responseFeedback}. Return a smaller valid JSON object with actual changed fields.` : ""}\n\nRetained candidate:\n${stableJson(candidate)}`,
+          repair.signal,
+          "Challenge repair stopped: the provider went silent.",
+          repair.recordUsage,
+          (delta) => streamed?.(delta),
+          () => {
+            streamed = streamInto(stage, "patch");
+            stage?.update({ detail: "The provider's stream dropped; repairing again" });
+          },
         );
       } catch (error) {
         stage?.end("failed", { verb: "Repair failed", detail: error instanceof Error ? error.message : String(error) });
@@ -950,66 +1000,14 @@ async function repairRejectedChallenge(
   repair.budget.repairRemaining -= repaired.attempts;
   let value = repaired.value;
   if (value && typeof value === "object") {
-    value = { ...(value as Record<string, unknown>), repairAttempts: repaired.attempts, ...(repaired.repairError ? { repairError: repaired.repairError } : {}) };
+    value = {
+      ...(value as Record<string, unknown>),
+      repairAttempts: repaired.attempts,
+      ...(repaired.repairError ? { repairError: repaired.repairError } : {}),
+      ...(repaired.providerError ? { repairProviderError: repaired.providerError } : {}),
+    };
   }
   return { input: repaired.input, value };
-}
-
-/** One fresh reconsideration, still inside the original authoring call. The
- * model may repair the harness or choose a different task; the host only checks
- * its schema and executes the result. */
-async function redraftRejectedChallenge(
-  runId: string,
-  parentCallId: string,
-  compile: Compile,
-  initialInput: unknown,
-  initialResult: unknown,
-  repair: { provider: PiProviderInput; signal: AbortSignal; recordUsage(usage: unknown): void },
-  progress: (detail: string) => void,
-  stages?: StageLog,
-  revisions: Revision[] = [],
-): Promise<{ input: unknown; value: unknown }> {
-  const failures = failedChecks(initialResult);
-  if (!failures.length) return { input: initialInput, value: initialResult };
-  progress("Reconsidering the challenge from validation feedback");
-  const stage = stages?.begin("redraft", "Reconsidering", "the design from validation feedback", {
-    model: repair.provider.model,
-    provider: repair.provider.provider,
-    badge: `${failures.length} ${failures.length === 1 ? "issue" : "issues"}`,
-  });
-  try {
-    const answer = await completePrivateChallenge(
-      runId,
-      parentCallId,
-      "challenge-redraft",
-      repair.provider,
-      REDRAFT_PROMPT.text,
-      `Remaining compiler failures:\n${failures.map((failure, index) => `${index + 1}. ${failure}`).join("\n")}${revisionHistory(revisions)}${escalation(failures, revisions)}\n\nRetained candidate:\n${stableJson(initialInput)}`,
-      repair.signal,
-      "Challenge reconsideration stopped: the provider went silent.",
-      repair.recordUsage,
-      streamInto(stage, "patch"),
-    );
-    const changes = parseRepairChanges(answer);
-    if (!changes || !Object.keys(changes).length) {
-      stage?.end("failed", { verb: "Reconsideration unusable", detail: "No usable changes in the reply" });
-      return { input: initialInput, value: initialResult };
-    }
-    const revised = mergeQuestionChanges(initialInput as Record<string, unknown>, changes);
-    if (stableJson(revised) === stableJson(initialInput)) {
-      stage?.end("failed", { verb: "Reconsideration unusable", detail: "Left the challenge unchanged" });
-      return { input: initialInput, value: initialResult };
-    }
-    stage?.end("done", { verb: "Reconsidered", detail: describeChanges(changes) });
-    progress("Validating the reconsidered challenge");
-    const value = await validateStaged(stages, "the reconsidered challenge", (onRun) => compile(revised, onRun), "Revalidating");
-    revisions.push(revisionLine("Reconsideration", describeChanges(changes), failures, value));
-    return { input: revised, value };
-  } catch (error) {
-    stage?.end("failed", { verb: "Reconsideration failed", detail: error instanceof Error ? error.message : String(error) });
-    if (repair.signal.aborted) throw error;
-    return { input: initialInput, value: { ...(initialResult as Record<string, unknown>), redraftError: error instanceof Error ? error.message : String(error) } };
-  }
 }
 
 /** One private round, as the next round reads it: what changed, then what the

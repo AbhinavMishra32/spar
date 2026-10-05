@@ -195,21 +195,62 @@ export async function piCompleteText(input: PiProviderInput, systemPrompt: strin
      silence rather than for a deadline: every stream event, thinking included,
      is proof the provider is still working. A plain request otherwise. */
   let result: AssistantMessage;
-  if (onText || onActivity) {
-    const stream = streamSimple(piModelFor(input), context, options);
-    for await (const event of stream) {
-      onActivity?.();
-      if (event.type === "text_delta") onText?.(event.delta);
+  try {
+    if (onText || onActivity) {
+      const stream = streamSimple(piModelFor(input), context, options);
+      for await (const event of stream) {
+        onActivity?.();
+        if (event.type === "text_delta") onText?.(event.delta);
+      }
+      result = await stream.result();
+    } else {
+      result = await completeSimple(piModelFor(input), context, options);
     }
-    result = await stream.result();
-  } else {
-    result = await completeSimple(piModelFor(input), context, options);
+  } catch (error) {
+    if (signal.aborted) throw abortError(signal, timedOut);
+    throw error;
   }
   recordUsage?.(piUsage(result.usage));
   /* pi reports a failed or cancelled request in the message rather than by
-     throwing, so the caller's own timeout wording has to be raised here — the
-     learner is told the check took too long, not that a stream stopped. */
-  if (result.stopReason === "aborted") throw new Error(timedOut);
+     throwing, so the caller's wording has to be raised here. Which wording
+     depends on who aborted: the signal can merge the learner's Stop with an
+     idle watchdog, and a Stop must not be reported as the provider going quiet. */
+  if (result.stopReason === "aborted") throw abortError(signal, timedOut);
   if (result.stopReason === "error") throw new Error(result.errorMessage ?? "The model provider returned an unknown error.");
   return result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+}
+
+/** The reason the signal carries when it has one, else the caller's timeout
+ *  wording. `AbortSignal.any` keeps the reason of whichever source fired. */
+function abortError(signal: AbortSignal, timedOut: string): Error {
+  return signal.aborted && signal.reason instanceof Error ? signal.reason : new Error(timedOut);
+}
+
+/**
+ * A provider stream that dropped rather than failed: the connection closed or
+ * reset mid-answer. pi surfaces undici's "terminated" and the socket errors as
+ * the message text, so this is a match on that text.
+ */
+export function droppedStream(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\bterminated\b|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EPIPE|ENOTFOUND|EAI_AGAIN|UND_ERR|fetch failed|network (?:error|connection)|other side closed|premature close|stream (?:ended|closed|disconnected)|connection (?:reset|closed|lost|error)/i.test(message);
+}
+
+/**
+ * Run one private completion, and run it once more if its stream dropped.
+ *
+ * A dropped connection says nothing about the request, so a single retry is
+ * cheaper than failing a whole challenge build over it. Nothing is retried once
+ * the signal has fired — the learner's Stop and the idle watchdog both mean
+ * stop — and a second drop is reported as it is. `onRetry` lets the caller
+ * discard what the first attempt had streamed.
+ */
+export async function retryDroppedStream<T>(attempt: () => Promise<T>, signal: AbortSignal, onRetry?: (error: unknown) => void): Promise<T> {
+  try {
+    return await attempt();
+  } catch (error) {
+    if (signal.aborted || !droppedStream(error)) throw error;
+    onRetry?.(error);
+    return attempt();
+  }
 }

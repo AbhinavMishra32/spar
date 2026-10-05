@@ -60,6 +60,42 @@ describe("rejected challenge repair", () => {
     expect(result.input).toEqual({ title: "Keep the learner's target", referenceFiles: { "src/index.js": "fixed" } });
   });
 
+  it("puts the brief's own fields back after a repair patch changes them", () => {
+    const owned = { language: "python", kind: "function", difficulty: "developing", concepts: [{ slug: "two-pointers", role: "primary" }], trainingTarget: { ability: "Windows" }, solutionRequirements: undefined };
+    const repaired = mergeQuestionChanges(
+      { ...owned, title: "Old title", statement: "Old statement" },
+      { language: "javascript", kind: "module", difficulty: "foundation", concepts: [], trainingTarget: { ability: "Something else" }, solutionRequirements: ["one pass"], title: "New title" },
+      owned,
+    );
+    expect(repaired).toEqual({ language: "python", kind: "function", difficulty: "developing", concepts: owned.concepts, trainingTarget: owned.trainingTarget, title: "New title", statement: "Old statement" });
+    expect("solutionRequirements" in repaired).toBe(false);
+  });
+
+  it("re-applies the brief's fields inside the repair loop and names a failed repair call as a provider failure", async () => {
+    const validated: Array<Record<string, unknown>> = [];
+    let calls = 0;
+    const result = await repairQuestionUntilValid(
+      { kind: "function", referenceFiles: { "src/a.js": "old" } },
+      { status: "invalid" },
+      {
+        limit: 3,
+        signal: new AbortController().signal,
+        owned: { kind: "function" },
+        failedChecks: () => ["reference solution: failed"],
+        playable: () => false,
+        complete: async () => {
+          calls += 1;
+          if (calls === 1) return '{"kind":"repository","referenceFiles":{"src/a.js":"new"}}';
+          throw new Error("terminated");
+        },
+        validate: async (candidate) => { validated.push(candidate); return { status: "invalid" }; },
+        progress: () => undefined,
+      },
+    );
+    expect(validated[0]).toEqual({ kind: "function", referenceFiles: { "src/a.js": "new" } });
+    expect(result).toMatchObject({ attempts: 2, providerError: "terminated", repairError: "terminated" });
+  });
+
   it("does not retry a session lifecycle rejection", async () => {
     let called = false;
     const result = await repairQuestionUntilValid({}, { status: "invalid" }, {

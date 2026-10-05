@@ -206,3 +206,73 @@ it("repairs the mechanical faults that used to cost a whole model round", async 
   expect(compiled.expectedFailureSignatures).toEqual([]);
   expect(seen.length).toBe(0);
 });
+
+describe("without authored wrong solutions",()=>{
+  const {knownIncorrectFiles:_omitted,...bare}=actual;
+
+  it("checks JavaScript hidden tests against the host's own mutants of the reference",async()=>{
+    const compiled=await compileQuestion(bare,run,"host");
+    expect(compiled.report.valid,JSON.stringify(compiled.report.checks.filter((check)=>!check.passed))).toBe(true);
+    expect(compiled.design.knownIncorrectFiles).toEqual([]);
+    expect(compiled.report.checks.find((check)=>check.name==="host mutant check")?.passed).toBe(true);
+  },30_000);
+
+  it("rejects JavaScript hidden tests that cannot tell a wrong solution from the reference",async()=>{
+    const unreached={...bare,hiddenTests:{"tests/hidden.test.js":"import test from \"node:test\";test(\"always\",()=>{});"}};
+    const compiled=await compileQuestion(unreached,run,"host");
+    expect(compiled.report.valid).toBe(false);
+    expect(compiled.report.checks.find((check)=>check.name==="host mutant check")?.passed).toBe(false);
+  },30_000);
+
+  it("still requires them for languages without host mutants, before running anything",async()=>{
+    let runs=0;
+    const go={...design,language:"go",starterFiles:{"src/queue.go":"package queue"},referenceFiles:{"src/queue.go":"package queue"},visibleTests:{"src/visible_test.go":"package queue"},hiddenTests:{"src/hidden_test.go":"package queue"},knownIncorrectFiles:[]};
+    const {report}=await compileQuestion(go,async()=>{runs+=1;return{exitCode:0,stdout:"ok - case\n",stderr:"",durationMs:1};});
+    expect(report.valid).toBe(false);
+    expect(report.checks.find((check)=>check.name==="known incorrect solutions present")?.detail).toContain("only for JavaScript, TypeScript and Python");
+    expect(runs).toBe(0);
+  });
+});
+
+it("runs independent sandbox runs side by side, at most four at a time, without reordering the report",async()=>{
+  let active=0;
+  let peak=0;
+  const incorrect=[{"queue.ts":"incorrect 1"},{"queue.ts":"incorrect 2"},{"queue.ts":"incorrect 3"}];
+  const sequential=await compileQuestion({...design,knownIncorrectFiles:incorrect},async(files)=>{
+    const failed=String(files["queue.ts"]).startsWith("incorrect")&&"hidden.test.ts" in files;
+    return{exitCode:failed?1:0,stdout:failed?"not ok - drains\n":"ok - case\n",stderr:"",durationMs:1};
+  },"host");
+  const parallel=await compileQuestion({...design,knownIncorrectFiles:incorrect},async(files)=>{
+    active+=1;peak=Math.max(peak,active);
+    await new Promise((resolve)=>setTimeout(resolve,15));
+    active-=1;
+    const failed=String(files["queue.ts"]).startsWith("incorrect")&&"hidden.test.ts" in files;
+    return{exitCode:failed?1:0,stdout:failed?"not ok - drains\n":"ok - case\n",stderr:"",durationMs:1};
+  },"host");
+  expect(peak).toBe(4);
+  expect(parallel.report.checks.map((check)=>check.name)).toEqual(sequential.report.checks.map((check)=>check.name));
+  expect(parallel.report.valid).toBe(true);
+});
+
+it("asks a function for twelve cases across the visible and hidden tests",async()=>{
+  const fn={...design,kind:"function"};
+  const runner=(hiddenCount:number)=>async(files:Record<string,string>)=>{
+    const failed=files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files;
+    if(failed)return{exitCode:1,stdout:"not ok - drains\n",stderr:"",durationMs:1};
+    const visible=Array.from({length:4},(_,index)=>`ok - visible ${index}`).join("\n");
+    const hidden=Array.from({length:hiddenCount},(_,index)=>`ok - hidden ${index}`).join("\n");
+    return{exitCode:0,stdout:"hidden.test.ts" in files?`${visible}\n${hidden}\n`:`${visible}\n`,stderr:"",durationMs:1};
+  };
+  expect((await compileQuestion(fn,runner(8))).report.checks.find((check)=>check.name==="case volume")?.passed).toBe(true);
+  const short=(await compileQuestion(fn,runner(7))).report.checks.find((check)=>check.name==="case volume");
+  expect(short?.passed).toBe(false);
+  expect(short?.detail).toContain("at least 12");
+});
+
+it("puts the separating case in hiddenTests when the visible file is short",async()=>{
+  const {report}=await compileQuestion(design,async(files)=>{
+    const failed=files["queue.ts"]==="incorrect"&&"hidden.test.ts" in files;
+    return{exitCode:failed?1:0,stdout:failed?"not ok - drains\n":"ok - one\n",stderr:"",durationMs:1};
+  });
+  expect(report.checks.find((check)=>check.name==="curated visible cases")?.detail).toContain("belongs in hiddenTests");
+});

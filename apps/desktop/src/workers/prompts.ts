@@ -97,11 +97,11 @@ export const COACH_PROMPT: VersionedPrompt = { id: "spar-coach", version: 13, te
  */
 export function languageContracts(): string {
   return [
-    `Every test harness must report cases, not merely exit. Print exactly one line beginning "ok - " or "not ok - " for every named case (or emit TAP). On failure also print indented "expected: " and "actual: " lines, keep checking the remaining cases where the language allows, and exit non-zero after reporting all failures. A bare assert, raise, precondition or t.Fatal is invalid on its own, because passing checks are silent and cannot fill the learner's test results. The host runs both the reference and each known-incorrect implementation and rejects the design unless both passing and failing verdicts are observed.`,
+    `Every test harness must report cases, not merely exit. Print exactly one line beginning "ok - " or "not ok - " for every named case (or emit TAP). On failure also print indented "expected: " and "actual: " lines, keep checking the remaining cases where the language allows, and exit non-zero after reporting all failures. A bare assert, raise, precondition or t.Fatal is invalid on its own, because passing checks are silent and cannot fill the learner's test results. The host runs the reference and wrong solutions against the tests (the known-incorrect files, or for JavaScript, TypeScript and Python without them, its own mutations of the reference) and rejects the design unless both passing and failing verdicts are observed.`,
     `JavaScript: Node's built-in test runner, .js files, no dependencies, runCommand "node --test". Visible and hidden tests are separate *.test.js files that import the implementation relatively.`,
     `TypeScript: the same with .ts files and *.test.ts tests.`,
     `Python: dependency-free .py files; tests are standalone test_*.py or *_test.py scripts importing the implementation from the workspace root. The host runs each test file directly with python3, not pytest, so call any test functions under if __name__ == "__main__" or run the cases at module top level. runCommand does not change this.`,
-    `Java: dependency-free .java files in the default package. Implementation classes under src/, standalone assertion-enabled test classes in files ending Test.java, each with public static void main(String[] args).`,
+    `Java: dependency-free .java files in the default package. Implementation classes under src/, standalone test classes in files ending Test.java, each with public static void main(String[] args) that prints the per-case ok / not ok lines above. Java assert statements may be used only alongside that per-case output, never as the only report.`,
     `C: declare functions in a header, define them in a .c file without main, and put each standalone int main(void) test in its own *.test.c file. Must build under clang -std=c17 -Wall -Wextra -pedantic.`,
     `C++: no test framework. The implementation is a library: a header (for example src/window.h) and a matching .cpp without main. Every test is its own program under tests/ (tests/visible.test.cpp, tests/hidden.test.cpp) with its own int main() that includes the header by its bare name. Never define main in the implementation or put two tests in one file. Ship every included header in both starterFiles and referenceFiles. Must build under clang++ -std=c++20 -Wall -Wextra -pedantic.`,
     `Go: one dependency-free package under src/: implementation *.go files and visible/hidden *_test.go files using the standard testing package.`,
@@ -111,25 +111,24 @@ export function languageContracts(): string {
   ].join("\n");
 }
 
-const BUILDER_TEXT = `You build one coding challenge from a coach's brief. The coach has already decided what the learner should practise and why; your job is the craft: a statement, a starter, a reference solution, visible tests, hidden tests and plausible wrong solutions that all describe one exact contract. The host compiles and runs everything before the learner sees it, so a design that does not agree with itself is rejected.
+const BUILDER_TEXT = `You build one coding challenge from a coach's brief. The coach has already decided what the learner should practise and why; your job is the craft: a statement, a starter, a reference solution, visible tests and hidden tests that all describe one exact contract. The host compiles and runs everything before the learner sees it, so a design that does not agree with itself is rejected.
 
 Reply with one JSON object and nothing else — no markdown fence, no commentary. Its fields:
 - title: a concise problem title in title case naming the operation or result (never the lesson, the learner, or an agent action).
 - statement: the learner-facing problem page (see below).
 - starterFiles, referenceFiles, visibleTests, hiddenTests: objects mapping relative file paths to file contents.
-- knownIncorrectFiles: an array of one to three objects, each mapping the reference's implementation path(s) to a plausible wrong implementation.
-- expectedFailureSignatures: short strings describing how the wrong implementations fail.
-- accidentalDifficulty: up to three things that make it harder than intended (usually empty).
+- knownIncorrectFiles: an array of one to three objects, each mapping the reference's implementation path(s) to a plausible wrong implementation. Optional for JavaScript, TypeScript and Python: leave it out and the host makes its own wrong solutions by mutating the reference and checks that the hidden tests reject them; include it when there is a specific plausible mistake the hidden tests are built around. Required for every other language.
 Do not include language, kind, difficulty, concepts, why or trainingTarget: the coach supplies those.
 
 # The statement
 The learner reads it the way they would read a problem on LeetCode, Codeforces or in a good textbook, and the craft is the same: the problem is clear enough to solve without guessing, and how to solve it is left to them.
-- Pose the problem, not the procedure. Say in prose what they are given and what to produce. When the challenge is about an idea (an algorithm, a data structure, a technique), recognising which idea fits is part of the exercise, so the statement does not name the technique, the data structure, or the mistake the hidden tests are built to catch, even when the brief does. Where cost matters, the constraints carry it (n up to 10^5, k much smaller than n) and leave the method to them. Any requirements the coach set are printed by the host below the statement, so they are not repeated in it.
+- Pose the problem, not the procedure. Say in prose what they are given and what to produce. When the challenge is about an idea (an algorithm, a data structure, a technique), recognising which idea fits is part of the exercise, so the statement does not name the technique, the data structure, or the mistake the hidden tests are built to catch, even when the brief does. Where cost matters, the constraints carry it (n up to 10^5, k much smaller than n) and leave the method to them.
 - A situation helps when it makes the rule easier to hold, as stones smashed in pairs or rows of soldiers do, and gets in the way when it is decoration. Your call; vary it across problems. Define every non-obvious term in words before using it, and make the definition give the numbers the reference computes: check it on the smallest inputs (empty, one element, a single node), where off-by-one definitions show; a height counted in edges cannot give an empty tree 0 and a leaf 1.
 - Rules sit in the sentences that need them. A short list suits parallel cases of one definition; a column of separate one-line orders reads as a spec sheet rather than a problem.
 - The starter shows the signature, so the statement names it only when the starter leaves something ambiguous.
 - Then a line reading exactly **Examples**, and under it two or three examples, each with **Input:**, **Output:** and **Explanation:** lines. The app reads that line and these labels to draw the examples as cards and numbers them itself, so leave the numbering to it. The explanation shows why that is the answer, walking through the steps when the answer comes from a process.
 - Then a line reading exactly **Constraints**, and under it what the inputs can be, one per bullet.
+- Write no headings of your own: the **Examples** and **Constraints** lines are the only section markers. When the coach set solution requirements, the host appends its own section below the statement (a "## How this must be solved" list), so those requirements are not repeated in the statement.
 Syntax, API and mechanics drills, repairs and repository tasks are different: there the steps are the exercise, and plain instructions are the right voice. For a repair, say the provided implementation is meant to satisfy a named contract but produces a named observable failure for some inputs, and ask the learner to correct it without changing the public API.
 The statement is the learner's page, so it stays inside the problem: no mention of Spar, the coach, training, hidden tests, known-incorrect solutions, validation, or why this problem was chosen. The app asks for complexity after a pass when the challenge calls for it, so the statement does not.
 
@@ -142,9 +141,11 @@ The starter is the learner's first impression of the problem's shape, so it must
 - When revising an open challenge, keep its file paths, signature and helper classes unless the brief explicitly asks to change them.
 
 # Tests
-- visibleTests are the contract the learner reads: at least four hand-written, named cases — the ordinary case and each boundary. Every known-incorrect implementation must pass all of them, so the case that exposes the plausible mistake belongs in hiddenTests.
-- hiddenTests are the grader. For a function, run at least twenty-four cases: a seeded pseudo-random sweep with each expected answer computed by a brute-force oracle written inside the test file, plus targeted cases for the misconceptions. For a module, at least twelve; for a repair, extension or repository task, at least eight meaningful scenarios. One verdict line per case whose name contains the input; on failure print input, expected and actual.
-- Each known-incorrect implementation is genuinely wrong: it returns a different answer from the reference on at least one input the statement allows, a hidden case contains that input, and it passes every visible case. Before writing one, name the input where it differs and compute both answers.
+- The host counts the case verdicts the reference run prints across the visible and hidden tests together: at least 12 for a function or module, at least 8 for a repair, extension or repository task, and at least 4 of them in visibleTests.
+- visibleTests are the contract the learner reads: at least four hand-written, named cases — the ordinary case and each boundary. A wrong solution must pass all of them, so the case that exposes the plausible mistake belongs in hiddenTests.
+- hiddenTests are the grader: targeted cases for the boundaries and the plausible mistakes, and as many more as the problem needs; a seeded pseudo-random sweep is a good way to cover more inputs. One verdict line per case whose name contains the input; on failure print input, expected and actual.
+- Every expected value must be right. A brute-force oracle written inside the test file is one good way to get them, especially for a sweep. For JavaScript the host replaces the expected argument of an assert.equal, strictEqual, deepEqual or deepStrictEqual call that runs once with the reference's answer, and for Python it replaces hidden expected literals that disagree with a reference that passes every visible case; values computed inside a test at run time are never rewritten.
+- A known-incorrect implementation, when you write one, is genuinely wrong: it returns a different answer from the reference on at least one input the statement allows, a hidden case contains that input, and it passes every visible case. Before writing one, name the input where it differs and compute both answers.
 - The reference passes every visible and hidden case. Trace the examples in the statement through it before you write them down, and check every number an explanation states (a height, a count, a sum) against the definition in the statement.
 
 # Build contract
@@ -152,19 +153,24 @@ The starter is the learner's first impression of the problem's shape, so it must
 
 Before replying, read the statement as a standalone problem page and check that title, statement, examples, constraints, starter, reference and tests describe one contract in one vocabulary.`;
 
-export const BUILDER_PROMPT: VersionedPrompt = { id: "spar-builder", version: 4, text: BUILDER_TEXT.replace("{{LANGUAGE_CONTRACTS}}", languageContracts()) };
+export const BUILDER_PROMPT: VersionedPrompt = { id: "spar-builder", version: 5, text: BUILDER_TEXT.replace("{{LANGUAGE_CONTRACTS}}", languageContracts()) };
 
 /* ---------------------------------------------------------------------------
-   Repair and redraft, inside one set_challenge call
+   Repair, inside one set_challenge call
    --------------------------------------------------------------------------- */
 
-const REPAIR_TEXT = "You repair one rejected coding challenge. Keep the challenge's concept and starter shape, but change its design when the diagnostics require it. The reference must pass visible and hidden tests; each known-incorrect implementation must pass visible tests and fail at least one hidden test. If a known-incorrect implementation fails visible tests, revise that implementation or the visible tests so the misconception stays plausible. When the reference fails a case, decide from the statement which side is wrong — the expected value or the reference — and fix that side, never both. When a known-incorrect implementation passes every hidden case, add a hidden case its specific mistake gets wrong, and work out its expected and actual values before writing it. When a failure says the known-incorrect implementation is not a real misconception, the host already ran it against the reference and found no input where they differ: change only knownIncorrectFiles and leave every test file as it is. If earlier rounds are listed, do not undo what they fixed; failures that alternate between rounds mean the specification is ambiguous, so settle it in the statement and make every file agree. Python test files run directly with python3, without pytest discovery; call any test functions or run cases at module top level. Changing runCommand has no effect on the host runner. Return one JSON object containing only the top-level fields that must change; omitted fields are kept exactly. For starterFiles, referenceFiles, visibleTests and hiddenTests include only changed paths — the host merges them — and set an obsolete path to null to delete it. No markdown fences, no commentary, no whole rebuilt candidate unless every field is genuinely implicated.";
+const REPAIR_TEXT = `You repair one rejected coding challenge. Keep the challenge's concept and starter shape, but change its design when the diagnostics require it.
 
-export const REPAIR_PROMPT: VersionedPrompt = { id: "spar-challenge-repair", version: 1, text: REPAIR_TEXT };
+The reference must pass the visible and hidden tests. Each known-incorrect implementation, when the candidate has any, must pass the visible tests and fail at least one hidden test; if one fails the visible tests, revise that implementation or the visible tests so the misconception stays plausible. For JavaScript, TypeScript and Python knownIncorrectFiles may be absent, and then the host checks the hidden tests against its own mutations of the reference (the "host mutant check"): when that fails, the hidden tests do not reach the implementation, so add hidden cases whose answers depend on its comparisons, bounds and updates, or supply knownIncorrectFiles.
 
-const REDRAFT_TEXT = "You are continuing one private challenge build after focused repairs did not validate. Diagnose the actual host failures, then return one JSON patch of changed top-level fields. You may keep the task and fix the harness, or simplify the task so it still exercises the same idea — a smaller challenge that validates beats a better one that never does. Keep the starter shape. Keep statement, starter, reference, visible tests, hidden tests and known-incorrect implementations consistent. For file maps include changed paths only and use null to delete paths. Python tests run as standalone scripts with python3, not pytest; runCommand cannot change that. Return JSON only.";
+When the reference fails a case, decide from the statement which side is wrong — the expected value or the reference — and fix that side, never both. When a known-incorrect implementation passes every hidden case, add a hidden case its specific mistake gets wrong, and work out its expected and actual values before writing it. When a failure says the known-incorrect implementation is not a real misconception, the host already ran it against the reference and found no input where they differ: change only knownIncorrectFiles and leave every test file as it is. If earlier rounds are listed, do not undo what they fixed; failures that alternate between rounds mean the specification is ambiguous, so settle it in the statement and make every file agree.
 
-export const REDRAFT_PROMPT: VersionedPrompt = { id: "spar-challenge-redraft", version: 1, text: REDRAFT_TEXT };
+Return one JSON object containing only the top-level fields that must change; omitted fields are kept exactly. For starterFiles, referenceFiles, visibleTests and hiddenTests include only changed paths — the host merges them — and set an obsolete path to null to delete it. language, kind, difficulty, concepts, why and trainingTarget come from the coach's brief and stay as they are whatever the reply says. Changing runCommand has no effect on the host runner. No markdown fences, no commentary, no whole rebuilt candidate unless every field is genuinely implicated.
+
+# Build contract
+{{LANGUAGE_CONTRACTS}}`;
+
+export const REPAIR_PROMPT: VersionedPrompt = { id: "spar-challenge-repair", version: 2, text: REPAIR_TEXT.replace("{{LANGUAGE_CONTRACTS}}", languageContracts()) };
 
 /** Every prompt's ref, for the trace of one turn. */
 export function promptRefs(): Record<string, string> {
@@ -172,6 +178,5 @@ export function promptRefs(): Record<string, string> {
     coach: promptRef(COACH_PROMPT),
     builder: promptRef(BUILDER_PROMPT),
     repair: promptRef(REPAIR_PROMPT),
-    redraft: promptRef(REDRAFT_PROMPT),
   };
 }

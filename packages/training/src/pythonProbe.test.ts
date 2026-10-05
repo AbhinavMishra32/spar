@@ -154,6 +154,24 @@ describe.skipIf(!hasPython)("python misconception probe", () => {
   }, 60_000);
 });
 
+describe.skipIf(!hasPython)("python without authored wrong solutions", () => {
+  const { knownIncorrectFiles: _omitted, ...bare } = traced;
+
+  it("lets the host's mutants stand in for knownIncorrectFiles", async () => {
+    const { report } = await compileQuestion(bare, python);
+    const failed = report.checks.filter((check) => !check.passed);
+    expect(failed, JSON.stringify(failed)).toEqual([]);
+    expect(report.checks.find((check) => check.name === "host mutant check")?.detail).toContain("separate wrong solutions from the reference");
+  }, 60_000);
+
+  it("rejects hidden tests that never reach the implementation", async () => {
+    const unreached = `print("ok - always")\n`;
+    const { report } = await compileQuestion({ ...bare, hiddenTests: { "tests/hidden_test.py": unreached } }, python, "host");
+    expect(report.valid).toBe(false);
+    expect(report.checks.find((check) => check.name === "host mutant check")?.passed).toBe(false);
+  }, 60_000);
+});
+
 describe("python mutants", () => {
   it("mutates code, never strings or comments", () => {
     const mutants = pythonMutants(`def f(xs):\n    """while here is prose"""\n    total = 0  # while in a comment\n    i = 0\n    while i < len(xs):\n        total += xs[i]\n        i += 1\n    return max(total, 0) if "<=" else 0\n`);
