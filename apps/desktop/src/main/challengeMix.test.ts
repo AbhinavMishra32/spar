@@ -13,13 +13,39 @@ const tool = (store: LocalStore, sessionId: string, input: Record<string, unknow
   executeTrainingTool("set_challenge_mix", input, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Promise<Record<string, unknown>>;
 
 describe("coaching settings", () => {
-  it("say nothing to the coach at the defaults", () => {
-    expect(challengeMixInstructions(DEFAULT_CHALLENGE_MIX, ["spar", "leetcode", "codeforces"], "python")).toBe("");
+  it("say only the teaching mode at the defaults, which is standard", () => {
+    const text = challengeMixInstructions(DEFAULT_CHALLENGE_MIX, ["spar", "leetcode", "codeforces"], "python");
+    expect(text).toMatch(/^Teaching mode .*: standard\. /);
+    expect(text.split("\n")).toHaveLength(1);
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Trees");
       expect(store.readSession(sessionId)?.summary.challengeMix).toEqual(DEFAULT_CHALLENGE_MIX);
-      expect(turn(store, sessionId)).not.toContain("## Coaching settings");
+      expect(turn(store, sessionId)).toContain("standard problem path");
+    } finally { store.close(); }
+  });
+
+  it("switch teaching mode when the learner asks in chat, leaving the rest alone", async () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Heaps");
+      await tool(store, sessionId, { spar: "less" });
+      expect(await tool(store, sessionId, { teaching: "personalized", note: "Switched to personalized" })).toMatchObject({ status: "saved", settings: { teaching: "personalized", sparUse: "less" } });
+    } finally { store.close(); }
+  });
+
+  it("start a session on the teaching mode chosen for it, over the one the last session was on", () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId: first } = store.createSession("Heaps", undefined, undefined, "personalized");
+      expect(store.challengeMixForSession(first).teaching).toBe("personalized");
+      const trackId = store.trackIdForSession(first)!;
+      const { sessionId: inherited } = store.createSession("More heaps", trackId);
+      expect(store.challengeMixForSession(inherited).teaching).toBe("personalized");
+      const { sessionId: chosen } = store.createSession("Even more heaps", trackId, undefined, "standard");
+      expect(store.challengeMixForSession(chosen).teaching).toBe("standard");
+      expect(turn(store, chosen)).toContain("standard problem path");
+      expect(turn(store, inherited)).toContain("Follow their gaps rather than a standard list");
     } finally { store.close(); }
   });
 
@@ -45,8 +71,8 @@ describe("coaching settings", () => {
 
   it("leave the Spar rule out when the sources already decide", () => {
     const mix = { ...DEFAULT_CHALLENGE_MIX, sparUse: "more" as const };
-    expect(challengeMixInstructions(mix, ["leetcode"], "python")).toBe("");
-    expect(challengeMixInstructions(mix, ["spar"], "python")).toBe("");
+    expect(challengeMixInstructions(mix, ["leetcode"], "python")).not.toContain("When to write a Spar problem");
+    expect(challengeMixInstructions(mix, ["spar"], "python")).not.toContain("When to write a Spar problem");
     expect(sparChoice(["leetcode"], mix)).toBe("never");
     expect(sparChoice(["spar"], mix)).toBe("always");
     expect(sparChoice(["spar", "codeforces"], mix)).toBe("more");

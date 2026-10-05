@@ -1319,10 +1319,18 @@
     }
   },
   "set_challenge_mix": {
-    "description": "Change this session's coaching settings, or suggest a lens. The settings are the learner's: when to write a Spar problem versus assigning a real one, and lenses (areas to go deeper on, each at mention, teach or drill). A suggestion waits in the learner's settings menu until they accept or dismiss it, with an example from their own code when you give one. The journey lists suggestions already pending or turned down.",
+    "description": "Change this session's coaching settings, or suggest a lens. The settings are the learner's: the teaching mode, when to write a Spar problem versus assigning a real one, and lenses (areas to go deeper on, each at mention, teach or drill). A suggestion waits in the learner's settings menu until they accept or dismiss it, with an example from their own code when you give one. The journey lists suggestions already pending or turned down.",
     "inputSchema": {
       "type": "object",
       "properties": {
+        "teaching": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "personalized"
+          ],
+          "description": "standard: work through the topic's well-known problems in order, closing gaps on the way. personalized: follow their gaps, no fixed list."
+        },
         "spar": {
           "type": "string",
           "enum": [

@@ -5,7 +5,7 @@ import type { AgentActivityStep } from "@spar/domain";
 import type { PracticeSampleCode, PracticeSolution, PracticeSolutionSummary, PracticeSubmissionStats } from "@spar/practice";
 export type { VisualizerSpec, VisualizerTrace };
 import type { SubmissionRecord, SubmissionRow } from "./submissions.js";
-import { attemptEventSchema, challengeMixSchema, problemSourcesSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal, type ReviewActivityEntry } from "@spar/domain";
+import { attemptEventSchema, challengeMixSchema, problemSourcesSchema, teachingModeSchema, reviewTargetSchema, languageSchema, learnerProfileSchema, sessionCheckpointSchema, sessionSummarySchema, type AbilityDetail, type AbilityHistorySummary, type ChallengeCodePreview, type ChallengeDetail, type ChallengeHistorySummary, type ConceptDetail, type ConceptSummary, type Language, type LearnerProfile, type LearnerProgress, type SavedProblem, type SessionDetail, type SessionSuggestion, type TodayRecommendation, type Track, type FsrsRating, type ReviewCard, type ReviewCardDetail, type ReviewGradeResult, type ReviewLog, type ReviewOverview, type ReviewPending, type ReviewReveal, type ReviewActivityEntry } from "@spar/domain";
 
 export const ipc = {
   bootstrap: "app:bootstrap", sessionsCreate: "sessions:create", sessionsOpen: "sessions:open",
@@ -93,8 +93,8 @@ export type AuthRequest = z.infer<typeof authRequestInput>;
  *  confirmation code. */
 export type AuthResult = { status: "signed-in" } | { status: "code-sent"; purpose: AuthCodePurpose };
 
-export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000), trackId: z.string().uuid().optional(), problemSources: problemSourcesSchema.optional() });
-export const createTrackInput = z.object({ goal: z.string().trim().min(3).max(1000), title: z.string().trim().min(1).max(80).optional(), language: languageSchema.optional(), problemSources: problemSourcesSchema.optional() });
+export const createSessionInput = z.object({ goal: z.string().trim().min(3).max(1000), trackId: z.string().uuid().optional(), problemSources: problemSourcesSchema.optional(), teaching: teachingModeSchema.optional() });
+export const createTrackInput = z.object({ goal: z.string().trim().min(3).max(1000), title: z.string().trim().min(1).max(80).optional(), language: languageSchema.optional(), problemSources: problemSourcesSchema.optional(), teaching: teachingModeSchema.optional() });
 /* Sidebar housekeeping. Titles are capped where the generated one is capped, so a
    renamed session cannot outgrow the row it has to fit in. */
 export const sessionRenameInput = z.object({ sessionId: z.string().uuid(), title: z.string().trim().min(1).max(80) });

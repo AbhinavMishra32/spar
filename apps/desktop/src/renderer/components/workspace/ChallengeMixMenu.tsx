@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Plus, SlidersHorizontal, X } from "lucide-react";
 import { DEFAULT_CHALLENGE_MIX, challengeMixSchema, type ChallengeMix, type Language, type Lens, type LensDepth, type LensExample as LensExampleValue, type ProblemSource, type SessionSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
-import { DEPTH_COPY, SPAR_CHOICES, customLensId, isDefaultMix, lensCatalogue, lensInfo, sparChoice, type LensInfo, type SparChoice } from "../../../shared/challengeMix";
+import { DEPTH_COPY, SPAR_CHOICES, TEACHING_CHOICES, customLensId, isDefaultMix, lensCatalogue, lensInfo, sparChoice, type LensInfo, type SparChoice } from "../../../shared/challengeMix";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Segmented } from "@/components/ui/segmented";
@@ -18,7 +18,10 @@ import { usePracticeSources } from "@/hooks/use-practice-sources";
 /**
  * The session's coaching settings, from the challenge toolbar.
  *
- * Three things, each one question:
+ * Four things, each one question:
+ * - Teaching: standard (the topic's well-known problems, in order) or
+ *   personalized (wherever their gaps lead). It sits above the rest because it
+ *   decides the path; the others decide what each step is made of.
  * - Problems: when Spar writes one, as a single ladder from never to always,
  *   with the two real sources beside it. The ladder's ends are the sources
  *   themselves, so the two can never disagree.
@@ -142,6 +145,17 @@ export function ChallengeMixMenu({ api, session, language, onChanged, onConnect,
           </header>
 
           <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3.5 pb-3.5">
+            <Section title="Teaching">
+              <Segmented
+                ariaLabel="Teaching mode"
+                className="w-full"
+                onChange={(teaching) => { if (teaching !== mix.teaching) writeMix({ ...mix, teaching }); }}
+                options={TEACHING_CHOICES.map((entry) => ({ value: entry.value, label: entry.title }))}
+                value={mix.teaching}
+              />
+              <p className="mt-1.5 text-pretty text-ui-sm text-muted-foreground">{TEACHING_CHOICES.find((entry) => entry.value === mix.teaching)?.detail}</p>
+            </Section>
+
             <Section title="Problems">
               <div className="divide-y divide-border/70 overflow-hidden rounded-[var(--radius-lg)] border border-border/80">
                 <div className="px-3 py-2">

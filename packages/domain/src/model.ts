@@ -123,6 +123,16 @@ export const DEFAULT_PROBLEM_SOURCES: ProblemSource[] = [...PROBLEM_SOURCES];
  * does not offer them again. `instructions` is the learner's own addition to
  * the coach's instructions, in their words.
  */
+/**
+ * How the coach chooses the path through a topic, above where problems come from.
+ * `standard` walks the topic's well-known problems in order (for heaps: Kth
+ * Largest Element, Top K Frequent, K Closest Points, Merge K Sorted Lists …),
+ * still closing the gaps it sees on the way, so a session heads somewhere.
+ * `personalized` follows the learner's own gaps wherever they lead.
+ */
+export const TEACHING_MODES = ["standard", "personalized"] as const;
+export const teachingModeSchema = z.enum(TEACHING_MODES);
+export type TeachingMode = z.infer<typeof teachingModeSchema>;
 export const SPAR_USES = ["struggling", "less", "balanced", "more"] as const;
 export const sparUseSchema = z.enum(SPAR_USES);
 export type SparUse = z.infer<typeof sparUseSchema>;
@@ -140,6 +150,7 @@ export type Lens = z.infer<typeof lensSchema>;
 export const lensSuggestionSchema = z.object({ id: lensId, label: z.string().trim().min(1).optional(), reason: z.string().trim(), example: lensExampleSchema.optional() });
 export type LensSuggestion = z.infer<typeof lensSuggestionSchema>;
 export const challengeMixSchema = z.object({
+  teaching: teachingModeSchema.default("standard"),
   sparUse: sparUseSchema.default("balanced"),
   /** Unknown catalogue ids are kept and ignored, so a catalogue change never
    *  throws away a learner's choice. */

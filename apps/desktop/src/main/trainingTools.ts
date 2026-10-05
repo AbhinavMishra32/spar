@@ -1294,7 +1294,8 @@ function setChallengeMix(value: Record<string, unknown>, sessionId: string, loca
   const settled = new Set(lenses.map((lens) => lens.id));
   const suggestions = [...current.suggestions.filter((entry) => !settled.has(entry.id)), ...offered].slice(-6);
 
-  const next = challengeMixSchema.safeParse({ ...current, sparUse, lenses, suggestions });
+  const teaching = value.teaching === "standard" || value.teaching === "personalized" ? value.teaching : current.teaching;
+  const next = challengeMixSchema.safeParse({ ...current, teaching, sparUse, lenses, suggestions });
   if (!next.success) return { status: "invalid", note: next.error.issues.slice(0, 4).map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ") };
   const saved = local.setSessionChallengeMix(sessionId, next.data);
   const savedSources = local.setSessionProblemSources(sessionId, nextSources);

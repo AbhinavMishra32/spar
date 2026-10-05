@@ -1,4 +1,4 @@
-import { DEFAULT_CHALLENGE_MIX, type ChallengeMix, type Language, type Lens, type LensDepth, type ProblemSource, type SparUse } from "@spar/domain";
+import { DEFAULT_CHALLENGE_MIX, type ChallengeMix, type Language, type Lens, type LensDepth, type ProblemSource, type SparUse, type TeachingMode } from "@spar/domain";
 
 /**
  * The words both sides use for a session's coaching settings.
@@ -71,6 +71,17 @@ const DEPTH_RULE: Record<LensDepth, string> = {
   drill: "teach it when relevant, and write Spar problems that make them practise it — as a requirement, part of the starter or the shape of the data",
 };
 
+/** Standard or personalized: the path through a topic, above where the problems come from. */
+export const TEACHING_CHOICES: Array<{ value: TeachingMode; title: string; detail: string }> = [
+  { value: "standard", title: "Standard", detail: "Works through the topic's well-known problems in order, fixing what you're weak at on the way" },
+  { value: "personalized", title: "Personalized", detail: "Follows what you're lacking wherever it leads, no fixed list" },
+];
+
+const TEACHING_RULE: Record<TeachingMode, string> = {
+  standard: "standard. Take them through this topic's standard problem path: the well-known problems people learn it with, in the order that builds it up. Where they are on it is the first problem on that path they have not solved cleanly, which the challenges on this Track and their history on the provider show. What you see them lacking on the way still gets worked on, with a smaller problem, a lesson or a short exchange, aimed at getting them through the next standard problem, and they should know where they are on the path.",
+  personalized: "personalized. Follow their gaps rather than a standard list of problems: deepen what they lack and move up from what they show.",
+};
+
 /**
  * "When should Spar write the problem?", as one ladder from never to always.
  *
@@ -120,7 +131,7 @@ export type LensHistoryEntry = { kind: "challenge" | "lesson" | "feedback"; note
 export function challengeMixInstructions(mix: ChallengeMix, sources: string[], language: Language, history: Record<string, LensHistoryEntry[]> = {}, now = Date.now()): string {
   const spar = sources.includes("spar");
   const external = sources.some((source) => source !== "spar");
-  const lines: string[] = [];
+  const lines: string[] = [`Teaching mode (the learner chose this; change it only when they ask): ${TEACHING_RULE[mix.teaching]}`];
 
   const rule = spar && external ? SPAR_USE_RULE[mix.sparUse] : "";
   if (rule) lines.push(`When to write a Spar problem (the learner chose this; follow it unless they ask otherwise in chat): ${rule}`);

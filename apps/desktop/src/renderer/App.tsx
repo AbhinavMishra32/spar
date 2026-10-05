@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import type { ChallengeCodePreview, ChallengeDetail, Language, ProblemSource, SessionDetail, SessionSummary, Track } from "@spar/domain";
+import type { ChallengeCodePreview, ChallengeDetail, Language, ProblemSource, SessionDetail, SessionSummary, TeachingMode, Track } from "@spar/domain";
 import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
 import { cn } from "@/lib/utils";
 import { message } from "@/lib/format";
@@ -282,11 +282,11 @@ export function App() {
   /* Starting a session is reachable before the shell exists: the last step of
      onboarding opens the sparring session the learner picked, so this has to be
      declared above the early returns rather than beside the other page actions. */
-  const start = useCallback(async (goal: string, trackId?: string, problemSources?: ProblemSource[]) => {
+  const start = useCallback(async (goal: string, trackId?: string, problemSources?: ProblemSource[], teaching?: TeachingMode) => {
     if (!api) return;
     setError(null);
     try {
-      const result = await api.createSession({ goal, trackId, ...(problemSources ? { problemSources } : {}) });
+      const result = await api.createSession({ goal, trackId, ...(problemSources ? { problemSources } : {}), ...(teaching ? { teaching } : {}) });
       await refresh();
       await openSession(result.sessionId);
     } catch (cause) {
@@ -939,7 +939,7 @@ export function App() {
     } finally { setOpening(false); }
   };
 
-  const createTrack = async (input: { goal: string; title?: string; language?: Language; problemSources?: ProblemSource[] }) => {
+  const createTrack = async (input: { goal: string; title?: string; language?: Language; problemSources?: ProblemSource[]; teaching?: TeachingMode }) => {
     if (!api) return;
     setOpening(true); setError(null);
     try {
@@ -1088,7 +1088,7 @@ export function App() {
           <div className="min-h-0 flex-1">
 
             {page === "tracks" && <TracksPage onDelete={deleteTrack} busy={opening} data={data} onCreate={createTrack} onOpen={openTrack} />}
-            {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal, sources) => start(goal,data.activeTrack!.id,sources)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
+            {page === "track" && data.activeTrack && <TrackPage api={api} busy={opening} challenges={data.challenges.filter((challenge) => data.sessions.find((session) => session.id === challenge.sessionId)?.trackId === data.activeTrack?.id)} onCreate={(goal, sources, teaching) => start(goal,data.activeTrack!.id,sources,teaching)} onOpen={open} runs={runs} sessions={data.sessions.filter((session) => session.context !== "baseline" && session.trackId === data.activeTrack?.id)} track={data.activeTrack} />}
             {page === "problems" && (
               <ProblemsPage
                 abilities={data.abilities}

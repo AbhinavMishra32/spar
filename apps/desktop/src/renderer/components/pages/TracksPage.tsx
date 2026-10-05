@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowRight, CircleDot, Plus, Radar, ShieldCheck, Trash2 } from "lucide-react";
-import { DEFAULT_PROBLEM_SOURCES, LANGUAGES, type Language, type ProblemSource, type Track } from "@spar/domain";
+import { DEFAULT_PROBLEM_SOURCES, LANGUAGES, type Language, type ProblemSource, type TeachingMode, type Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -9,11 +9,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { LANGUAGE_LABEL, LanguageGlyph } from "../common/LanguageGlyph";
 import { ProblemSourcesMenu } from "../common/ProblemSources";
+import { TeachingModeMenu } from "../common/TeachingMode";
 
 export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
   data: BootstrapData;
   busy: boolean;
-  onCreate(input: { goal: string; title?: string; language?: Language; problemSources?: ProblemSource[] }): Promise<void>;
+  onCreate(input: { goal: string; title?: string; language?: Language; problemSources?: ProblemSource[]; teaching?: TeachingMode }): Promise<void>;
   onOpen(track: Track): Promise<void>;
   onDelete(track: Track): Promise<boolean>;
 }) {
@@ -28,11 +29,12 @@ export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
   /* For the Track's first session, the same choice the Track page offers for
      every session after it. */
   const [sources, setSources] = useState<ProblemSource[]>(DEFAULT_PROBLEM_SOURCES);
+  const [teaching, setTeaching] = useState<TeachingMode>("standard");
 
   const create = async () => {
     if (goal.trim().length < 3) return;
-    await onCreate({ goal: goal.trim(), ...(title.trim() ? { title: title.trim() } : {}), ...(language ? { language } : {}), problemSources: sources });
-    setGoal(""); setTitle(""); setSources(DEFAULT_PROBLEM_SOURCES); setOpen(false);
+    await onCreate({ goal: goal.trim(), ...(title.trim() ? { title: title.trim() } : {}), ...(language ? { language } : {}), problemSources: sources, teaching });
+    setGoal(""); setTitle(""); setSources(DEFAULT_PROBLEM_SOURCES); setTeaching("standard"); setOpen(false);
   };
 
   return <div className="app-scroll h-full overflow-y-auto">
@@ -65,6 +67,9 @@ export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
                       ))}
                     </SelectContent>
                   </Select>
+                </Row>
+                <Row label="Teaching">
+                  <TeachingModeMenu onChange={setTeaching} value={teaching} />
                 </Row>
                 <Row label="Challenges from">
                   <ProblemSourcesMenu onChange={setSources} value={sources} />
