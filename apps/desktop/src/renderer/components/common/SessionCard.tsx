@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, CircleAlert, Clock3, Sparkles, Target } from "lucide-react";
+import { IconArrowRight, IconClock, IconExclamationCircle, IconSparklesTwo, IconTargetArrow } from "central-icons";
 import { AnimatePresence, motion } from "motion/react";
 import { ThinkingOrb } from "thinking-orbs";
 import type { ChallengeCodePreview, SessionSummary } from "@spar/domain";
@@ -109,7 +109,7 @@ export function SessionCard({
             <ActivityLine activity={activity} />
           ) : (
             <p className="flex min-w-0 items-start gap-1.5 text-ui-sm text-muted-foreground">
-              <Target className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
+              <IconTargetArrow className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
               <span className="min-w-0 flex-1 truncate">
                 {session.currentFocus.join(" · ") || "Agent is investigating prior evidence"}
               </span>
@@ -121,7 +121,7 @@ export function SessionCard({
               is already on the line below — said in words, and correct at any
               number of challenges. */}
           <div className="mt-auto flex items-center gap-2 pt-1.5 text-ui-sm text-muted-foreground">
-            <Clock3 className="size-3" />
+            <IconClock className="size-3" />
             {/* While a turn runs, the clock reports the turn rather than the
                 session: the session's own total is minutes old and does not move,
                 and a stopped clock beside a live line is the card contradicting
@@ -144,7 +144,7 @@ export function SessionCard({
                 is said the moment it lands rather than at the end of the run. */}
             {activity?.published && (
               <span className="inline-flex items-center gap-1 text-[var(--success)]">
-                <Sparkles className="size-3" />
+                <IconSparklesTwo className="size-3" />
                 New challenge ready
               </span>
             )}
@@ -155,7 +155,7 @@ export function SessionCard({
               )}
             >
               {live ? "Watch" : session.status === "completed" ? "Review" : "Resume"}
-              <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
+              <IconArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" />
             </span>
           </div>
         </div>
@@ -171,7 +171,7 @@ function RunChip({ activity }: { activity: RunActivity }) {
   if (activity.state === "failed") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-1.5 py-0.5 text-ui-sm font-medium text-destructive">
-        <CircleAlert className="size-3" />
+        <IconExclamationCircle className="size-3" />
         Turn failed
       </span>
     );
@@ -198,7 +198,7 @@ function ActivityLine({ activity }: { activity: RunActivity }) {
           happening. This one is here to hold the gutter the focus line uses. */}
       <span className="mt-[0.45em] grid size-3 shrink-0 place-items-center">
         {failed ? (
-          <CircleAlert className="size-3 text-destructive/80" />
+          <IconExclamationCircle className="size-3 text-destructive/80" />
         ) : (
           <span className="size-1.5 rounded-full bg-foreground/70 animate-[agent-pulse_1.8s_ease-in-out_infinite] motion-reduce:animate-none" />
         )}

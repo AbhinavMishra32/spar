@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { MessageSquare, Repeat2, SquareCode } from "lucide-react";
+import { IconArrowsRepeat, IconBubble2, IconCode } from "central-icons";
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { ActiveQuestion, RatingPoint, SessionDetail } from "@spar/domain";
@@ -168,12 +168,12 @@ export function AgentPanel({
           className={cn("ml-1", brief ? "w-[17.5rem]" : "w-[12.5rem]")}
           onChange={setView}
           options={[
-            { value: "problem", label: "Problem", icon: SquareCode },
-            ...(brief ? [{ value: "review" as const, label: "Review", icon: Repeat2 }] : []),
+            { value: "problem", label: "Problem", icon: IconCode },
+            ...(brief ? [{ value: "review" as const, label: "Review", icon: IconArrowsRepeat }] : []),
             {
               value: "chat",
               label: "Chat",
-              icon: MessageSquare,
+              icon: IconBubble2,
               // A live pulse only while the agent is working somewhere you
               // cannot see it — on the Chat tab the transcript says so itself.
               badge:

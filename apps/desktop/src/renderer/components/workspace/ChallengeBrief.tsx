@@ -1,5 +1,5 @@
 import { useMemo, type ReactNode } from "react";
-import { TriangleAlert } from "lucide-react";
+import { IconExclamationTriangle } from "central-icons";
 import type { ChallengeSource, ConceptTag, Language, Question } from "@spar/domain";
 import { presentSourcedStatement } from "@/lib/sourcedStatement";
 import { ChallengeEmblem } from "./ChallengeEmblem";
@@ -123,7 +123,7 @@ export function ChallengeBrief({
 
       {brief.source?.localRunNote && (
         <div className="mt-4 flex items-start gap-2 rounded-[var(--radius-lg)] border border-[color-mix(in_oklab,var(--warning)_30%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_6%,transparent)] px-3 py-2 text-ui leading-[1.55] text-muted-foreground">
-          <TriangleAlert className="mt-[0.15em] size-3.5 shrink-0 text-[var(--warning)]" />
+          <IconExclamationTriangle className="mt-[0.15em] size-3.5 shrink-0 text-[var(--warning)]" />
           <p><span className="font-medium text-foreground">Local run unavailable. </span>{brief.source.localRunNote}</p>
         </div>
       )}

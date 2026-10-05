@@ -1,4 +1,4 @@
-import { CheckCircle2, CircleDashed, TimerReset } from "lucide-react";
+import { IconCheckCircle2, IconCircleDashed, IconClockAlert } from "central-icons";
 import { cn } from "@/lib/utils";
 import { BAND_LABEL, ORIGIN_LABEL, type ProblemBand, type ProblemItem, type ProblemOrigin, type ProblemStanding } from "@/lib/problems";
 import { SourceGlyph } from "../common/SourceGlyph";
@@ -25,13 +25,13 @@ const BAND_TONE: Record<ProblemBand, string> = {
 };
 
 const STANDING: Record<ProblemStanding, { icon: React.ComponentType<{ className?: string }>; tone: string; label: string }> = {
-  solved: { icon: CheckCircle2, tone: "text-[var(--success)]", label: "Solved" },
-  attempted: { icon: TimerReset, tone: "text-[var(--warning)]", label: "Attempted" },
+  solved: { icon: IconCheckCircle2, tone: "text-[var(--success)]", label: "Solved" },
+  attempted: { icon: IconClockAlert, tone: "text-[var(--warning)]", label: "Attempted" },
   /* Solid, like its two neighbours. At 50% this was a hairline circle on glass —
      the one standing that means "you have not been here yet" was the one you
      could not see, so a list of untouched problems read as a list with no marks
      in it at all. Rank is the tone, not the alpha. */
-  todo: { icon: CircleDashed, tone: "text-muted-foreground", label: "Not started" },
+  todo: { icon: IconCircleDashed, tone: "text-muted-foreground", label: "Not started" },
 };
 
 export function BandPill({ band, className }: { band: ProblemBand; className?: string }) {

@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
-import { Archive, ArchiveRestore, ArrowLeft, ArrowRight, BrainCircuit, Check, ChevronRight, CircleCheck, Command, EllipsisVertical, Eye, History, Library, Loader2, Pencil, Pin, PinOff, Plus, RotateCcw, Settings, SlidersHorizontal, Target, Trash2, Waypoints } from "lucide-react";
+import { IconArchive, IconArrowLeft, IconArrowLoopDownLeft, IconArrowRight, IconArrowRotateCounterClockwise, IconBooks, IconBrain1, IconCheckmark1, IconChevronRight, IconCircleCheck, IconCmd, IconDotGrid1x3Vertical, IconEyeOpen, IconHistory, IconHome, IconLoader, IconPencil, IconPlusMedium, IconSettingsGear1, IconSettingsSliderHor, IconTargetArrow, IconThumbtack, IconTrashCan } from "central-icons";
 import type { ChallengeHistorySummary, Language, ProblemSource, SessionSummary, Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -48,16 +48,16 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
   /* One row, because there is one page. What to do next and how the record
      stands were two destinations that each needed the other to make sense — see
      `HomePage`. */
-  { id: "home", label: "Home", icon: Waypoints },
+  { id: "home", label: "Home", icon: IconHome },
   /* Second, because it is the other half of the daily loop: what is due to come
      back comes before picking something new. Spaced review lives here too — a
      solved challenge and what it taught are one record, not two pages. */
-  { id: "history", label: "History", icon: History },
-  { id: "problems", label: "Problems", icon: Library },
+  { id: "history", label: "History", icon: IconHistory },
+  { id: "problems", label: "Problems", icon: IconBooks },
   /* Below Problems, which is the order of the work: you pick something to solve,
      then you go and look at how it runs. Putting it under the surface it is
      opened from also keeps it out of the first rows, where the daily loop lives. */
-  { id: "visualizer", label: "Visualize", icon: Eye },
+  { id: "visualizer", label: "Visualize", icon: IconEyeOpen },
 ];
 
 /* 30px tall on a 13px label, cornered at --radius-lg, inset 8px from the sidebar's
@@ -79,23 +79,11 @@ const NAV: Array<{ id: Page; label: string; icon: React.ComponentType<{ classNam
    against the desktop twice and arrives grey and soft however dark the token
    behind it was. That, not the transparency, was why the list read as washed out.
 
-   450, which is a real cut of the system face and not a synthesised one — worth
-   saying because `font-synthesis: none` is set globally, so a weight without a cut
-   would silently render as Regular. This used to be 400, and the note against
-   raising it was half right: it argued that medium would say, wrongly, that the
-   fixed rows outrank the session titles, and that a sidebar of semibold rows reads
-   as an app shouting its own navigation. Both still hold — of 400/450/500/600
-   rendered side by side, 600 is exactly that shout, and 500 collides with the
-   `font-medium` the session titles carry below.
-
-   450 is the step that does not. It is visibly heavier than the surrounding chrome
-   while still sitting under the session titles, so the ranking the old note was
-   protecting survives; it just no longer costs the rows their presence. The part of
-   that argument that was simply correct stays correct: the labels are solid
-   foreground, never an alpha fraction, because this sidebar is glass and alpha text
-   composites against the desktop twice and arrives grey however dark the token was. */
+   Regular weight. 450 was tried to give the rows more presence, and on glass it
+   read as a heavy, slightly wrong cut of the face rather than as emphasis. Rows
+   rank by fill and colour instead. */
 export const ROW =
-  "flex h-[1.875rem] w-full items-center gap-2 rounded-lg px-2.5 text-source font-[450] text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+  "flex h-[1.875rem] w-full items-center gap-2 rounded-lg px-2.5 text-source font-normal text-foreground outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
 /** Nav and row glyphs. Set against the label rather than chosen for its own sake:
  *  a source list wants the icon a little larger than the cap height it sits
@@ -297,7 +285,7 @@ export function Sidebar({
               onClick={() => (nav.canBack ? nav.onBack() : onPage("home"))}
               type="button"
             >
-              <ArrowLeft className={cn(ROW_ICON, ROW_ICON_TONE)} />
+              <IconArrowLeft className={cn(ROW_ICON, ROW_ICON_TONE)} />
               <span className="flex-1 text-left">Back to app</span>
             </button>
           </div>
@@ -311,7 +299,7 @@ export function Sidebar({
           onClick={onNewSession}
           type="button"
         >
-          <Plus className={cn(ROW_ICON, ROW_ICON_TONE)} />
+          <IconPlusMedium className={cn(ROW_ICON, ROW_ICON_TONE)} />
           <span className="flex-1 text-left">Start a session</span>
           <kbd className="font-sans text-source-sm text-muted-foreground">⌘N</kbd>
         </button>
@@ -320,7 +308,7 @@ export function Sidebar({
           onClick={onCommandPalette}
           type="button"
         >
-          <Command className={cn(ROW_ICON, ROW_ICON_TONE)} />
+          <IconCmd className={cn(ROW_ICON, ROW_ICON_TONE)} />
           <span className="flex-1 text-left">Search</span>
           <kbd className="font-sans text-source-sm text-muted-foreground">⌘K</kbd>
         </button>
@@ -372,7 +360,7 @@ export function Sidebar({
                   title="Start a Track"
                   type="button"
                 >
-                  <Plus className="size-3.5" />
+                  <IconPlusMedium className="size-3.5" />
                 </button>
               }
             >
@@ -427,7 +415,7 @@ export function Sidebar({
               onClick={() => setShowArchived((value) => !value)}
               type="button"
             >
-              <ChevronRight className={cn("size-3.5 transition-transform", showArchived && "rotate-90")} />
+              <IconChevronRight className={cn("size-3.5 transition-transform", showArchived && "rotate-90")} />
               Archived
               <span className="tabular-nums font-normal text-muted-foreground">{shelved.length}</span>
             </button>
@@ -459,7 +447,7 @@ export function Sidebar({
           </span>
           <span className="min-w-0 flex-1 truncate text-left">{account.displayName}</span>
           <span className={cn("size-1.5 shrink-0 rounded-full", SYNC[syncState].tone)} />
-          <Settings className={cn(ROW_ICON, ROW_ICON_TONE)} />
+          <IconSettingsGear1 className={cn(ROW_ICON, ROW_ICON_TONE)} />
         </button>
       </div>
 
@@ -614,8 +602,8 @@ function TrackGroup({
      icon. Deleting is the only other thing there is today, so the menu repeats
      "Open" as well — a menu whose sole item is destructive is a trapdoor. */
   const items: Array<{ key: string; label: string; icon: React.ComponentType<{ className?: string }>; run(): void; destructive?: boolean }> = [
-    { key: "o", label: "Open Track", icon: ArrowRight, run: onOpen },
-    { key: "d", label: "Delete…", icon: Trash2, run: onDelete, destructive: true },
+    { key: "o", label: "Open Track", icon: IconArrowRight, run: onOpen },
+    { key: "d", label: "Delete…", icon: IconTrashCan, run: onDelete, destructive: true },
   ];
 
   return (
@@ -639,7 +627,7 @@ function TrackGroup({
               folder, the Track target — claimed the Track was a kind of thing it
               is not. A source list names its groups and leaves icons to items. */}
           <span className="grid size-5 shrink-0 place-items-center text-muted-foreground">
-            <ChevronRight className={cn("size-3.5 transition-transform duration-200 ease-out", open && "rotate-90")} />
+            <IconChevronRight className={cn("size-3.5 transition-transform duration-200 ease-out", open && "rotate-90")} />
           </span>
           {/* Same treatment the session titles get, and for the same reason: the
               controls take their room from the title only while they are showing,
@@ -670,7 +658,7 @@ function TrackGroup({
                 onClick={onOpen}
                 type="button"
               >
-                <ArrowRight className={CONTROL_ICON} />
+                <IconArrowRight className={CONTROL_ICON} />
               </button>
             </TooltipTrigger>
             <TooltipContent>Open Track</TooltipContent>
@@ -690,7 +678,7 @@ function TrackGroup({
                     className={cn(ICON_BUTTON, menu && "text-foreground")}
                     type="button"
                   >
-                    <EllipsisVertical className={CONTROL_ICON} />
+                    <IconDotGrid1x3Vertical className={CONTROL_ICON} />
                   </button>
                 </DropdownMenuTrigger>
               </TooltipTrigger>
@@ -778,16 +766,16 @@ function SessionRow({
   const canFinish = !session.activeQuestion;
 
   const items: Array<{ key: string; label: string; icon: React.ComponentType<{ className?: string }>; run(): void; destructive?: boolean }> = [
-    { key: "r", label: "Rename", icon: Pencil, run: onRenameStart },
+    { key: "r", label: "Rename", icon: IconPencil, run: onRenameStart },
     ...(archived
       ? []
-      : [{ key: "p", label: session.pinnedAt ? "Unpin" : "Pin to top", icon: session.pinnedAt ? PinOff : Pin, run: () => actions.setPinned(session, !session.pinnedAt) }]),
+      : [{ key: "p", label: session.pinnedAt ? "Unpin" : "Pin to top", icon: session.pinnedAt ? IconThumbtack : IconThumbtack, run: () => actions.setPinned(session, !session.pinnedAt) }]),
     ...(canFinish
-      ? [{ key: "f", label: finished ? "Mark as in progress" : "Mark as finished", icon: finished ? RotateCcw : CircleCheck, run: () => actions.setFinished(session, !finished) }]
+      ? [{ key: "f", label: finished ? "Mark as in progress" : "Mark as finished", icon: finished ? IconArrowRotateCounterClockwise : IconCircleCheck, run: () => actions.setFinished(session, !finished) }]
       : []),
-    { key: "s", label: "Problem sources…", icon: SlidersHorizontal, run: onRequestSources },
-    { key: "a", label: archived ? "Restore" : "Archive", icon: archived ? ArchiveRestore : Archive, run: () => actions.setArchived(session, !archived) },
-    { key: "d", label: "Delete…", icon: Trash2, run: onRequestDelete, destructive: true },
+    { key: "s", label: "Problem sources…", icon: IconSettingsSliderHor, run: onRequestSources },
+    { key: "a", label: archived ? "Restore" : "Archive", icon: archived ? IconArrowLoopDownLeft : IconArchive, run: () => actions.setArchived(session, !archived) },
+    { key: "d", label: "Delete…", icon: IconTrashCan, run: onRequestDelete, destructive: true },
   ];
 
   /* Pin and file, the two that are one click on the row rather than two through a
@@ -795,8 +783,8 @@ function SessionRow({
      renaming and deleting are not — and three icons is already the most a row
      this narrow can show without becoming a toolbar. */
   const quick = [
-    ...(archived ? [] : [{ label: session.pinnedAt ? "Unpin" : "Pin to top", icon: session.pinnedAt ? PinOff : Pin, run: () => actions.setPinned(session, !session.pinnedAt) }]),
-    { label: archived ? "Restore" : "Archive", icon: archived ? ArchiveRestore : Archive, run: () => actions.setArchived(session, !archived) },
+    ...(archived ? [] : [{ label: session.pinnedAt ? "Unpin" : "Pin to top", icon: session.pinnedAt ? IconThumbtack : IconThumbtack, run: () => actions.setPinned(session, !session.pinnedAt) }]),
+    { label: archived ? "Restore" : "Archive", icon: archived ? IconArrowLoopDownLeft : IconArchive, run: () => actions.setArchived(session, !archived) },
   ];
 
   if (renaming) return <RenameRow onCancel={onRenameEnd} onCommit={(title) => { actions.rename(session, title); onRenameEnd(); }} session={session} />;
@@ -828,7 +816,7 @@ function SessionRow({
               ROW,
               /* Solid ink at regular weight: a title is the one thing in the list
                  you actually read word by word, so it gets the full value and
-                 leaves being-chrome to the medium rows above it. Archived is still
+                 leaves being-chrome to the rows above it. Archived is still
                  dimmed, because filed-away is a state of the session rather than a
                  rank in the list — but not so far down that reading it is work. */
               "text-foreground",
@@ -879,7 +867,7 @@ function SessionRow({
             </span>
             <RowTitle>{label}</RowTitle>
             {working && (
-              <Loader2
+              <IconLoader
                 aria-label="Agent working"
                 className="ml-auto size-3.5 shrink-0 animate-spin text-muted-foreground transition-opacity motion-reduce:animate-none group-hover/session:opacity-0 group-focus-within/session:opacity-0"
                 role="status"
@@ -926,7 +914,7 @@ function SessionRow({
                       className={cn(ICON_BUTTON, open && "text-foreground")}
                       type="button"
                     >
-                      <EllipsisVertical className={CONTROL_ICON} />
+                      <IconDotGrid1x3Vertical className={CONTROL_ICON} />
                     </button>
                   </DropdownMenuTrigger>
                 </TooltipTrigger>
@@ -1082,7 +1070,7 @@ function SessionPeek({ session }: { session: SessionSummary }) {
                       single left edge down the list. */}
                   <span className="grid size-3 shrink-0 place-items-center">
                     {live ? (
-                      <Target className="size-3 text-foreground/70" />
+                      <IconTargetArrow className="size-3 text-foreground/70" />
                     ) : (
                       <span
                         className={cn(
@@ -1209,7 +1197,7 @@ export function StatusDot({ status }: { status: SessionSummary["status"] }) {
   return (
     <span className="grid size-3.5 shrink-0 place-items-center">
       {status === "completed" ? (
-        <Check className="size-3 text-[var(--success)]" />
+        <IconCheckmark1 className="size-3 text-[var(--success)]" />
       ) : (
         <span className={cn("size-1.5 rounded-full", tone)} />
       )}

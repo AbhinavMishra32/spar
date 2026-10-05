@@ -1,4 +1,4 @@
-import { ArrowUpRight, Loader2 } from "lucide-react";
+import { IconArrowUpRight, IconLoader } from "central-icons";
 import { cn } from "@/lib/utils";
 import { shortTime } from "@/lib/format";
 import { savedSnapshot, type ProblemItem } from "@/lib/problems";
@@ -136,7 +136,7 @@ export function ProblemTile({
         <span className="min-w-0 flex-1 truncate text-right text-ui-sm text-muted-foreground">
           {pending ? (
             <span className="inline-flex items-center justify-end gap-1 font-medium text-foreground">
-              <Loader2 className="size-3 animate-spin" />
+              <IconLoader className="size-3 animate-spin" />
               Opening…
             </span>
           ) : (
@@ -146,7 +146,7 @@ export function ProblemTile({
               </span>
               <span className="hidden items-center justify-end gap-1 font-medium text-foreground group-hover:inline-flex">
                 {item.kind === "challenge" ? "Open" : "Start solving"}
-                <ArrowUpRight className="size-3 transition-transform duration-300 group-hover:translate-x-px group-hover:-translate-y-px motion-reduce:transition-none" />
+                <IconArrowUpRight className="size-3 transition-transform duration-300 group-hover:translate-x-px group-hover:-translate-y-px motion-reduce:transition-none" />
               </span>
             </>
           )}

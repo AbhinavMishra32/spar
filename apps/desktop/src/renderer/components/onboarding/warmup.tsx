@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowLeftRight, Bug, Check, SquareTerminal, X, type LucideIcon } from "lucide-react";
+import { IconArrowLeftRight, IconBug, IconCheckmark1, IconConsoleSimple, IconCrossMedium } from "central-icons";
+import type { CentralIcon } from "@/lib/icons";
 import type { Language } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { LANGUAGE_LABEL, LanguageGlyph } from "../common/LanguageGlyph";
@@ -20,10 +21,10 @@ export type RoundId = "predict" | "bug" | "sorted";
 export const ROUNDS: RoundId[] = ["predict", "bug", "sorted"];
 export type Answer = { round: RoundId; pick: number; right: boolean; ms: number };
 
-export const ROUND: Record<RoundId, { name: string; title: string; caption: string; Icon: LucideIcon }> = {
-  predict: { name: "Predict", title: "What does this print?", caption: "", Icon: SquareTerminal },
-  bug: { name: "Spot the bug", title: "Which line is wrong?", caption: "It says [3, 4] has a pair that sums to 6. It doesn't.", Icon: Bug },
-  sorted: { name: "What if", title: "What if it's sorted?", caption: "Find two that sum to 10. What's the fastest way?", Icon: ArrowLeftRight },
+export const ROUND: Record<RoundId, { name: string; title: string; caption: string; Icon: CentralIcon }> = {
+  predict: { name: "Predict", title: "What does this print?", caption: "", Icon: IconConsoleSimple },
+  bug: { name: "Spot the bug", title: "Which line is wrong?", caption: "It says [3, 4] has a pair that sums to 6. It doesn't.", Icon: IconBug },
+  sorted: { name: "What if", title: "What if it's sorted?", caption: "Find two that sum to 10. What's the fastest way?", Icon: IconArrowLeftRight },
 };
 
 /** Which option is right, per round. For the bug round it is the line. */
@@ -203,7 +204,7 @@ function Verdict({ right }: { right: boolean }) {
       initial={{ scale: 0, opacity: 0 }}
       transition={POP}
     >
-      {right ? <Check className="size-2.5" strokeWidth={3} /> : <X className="size-2.5" strokeWidth={3} />}
+      {right ? <IconCheckmark1 className="size-2.5" /> : <IconCrossMedium className="size-2.5" />}
     </motion.span>
   );
 }

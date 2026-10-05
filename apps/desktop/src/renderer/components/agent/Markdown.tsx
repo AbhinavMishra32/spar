@@ -2,7 +2,7 @@ import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState }
 import { useCodeTheme } from "@/hooks/use-code-theme";
 import { highlight, type Span } from "@/lib/highlight";
 import { plainMath } from "@/lib/tex";
-import { Check, Code2, Copy } from "lucide-react";
+import { IconCheckmark1, IconCode, IconSquareBehindSquare1 } from "central-icons";
 import { cn } from "@/lib/utils";
 import { LanguageGlyph, languageOf } from "../common/LanguageGlyph";
 import { parseReference, Reference, REFERENCE_KINDS, useMarkdownLinks } from "./MarkdownLinks";
@@ -268,11 +268,11 @@ function CodeBlock({ language, body }: { language: string; body: string }) {
     <div className="code-block">
       <div className="code-block-header">
         <span className="code-block-language" title={language || "Plain text"}>
-          {marked ? <LanguageGlyph className="size-3.5" language={marked} /> : <Code2 className="size-3.5" role="img" aria-label={language || "Plain text"} />}
+          {marked ? <LanguageGlyph className="size-3.5" language={marked} /> : <IconCode className="size-3.5" role="img" aria-label={language || "Plain text"} />}
         </span>
         <div className="code-block-actions">
           <button aria-label={copied ? "Copied" : "Copy code"} title={copyError ? "Copy failed — try again" : copied ? "Copied" : "Copy code"} onClick={() => void copy()} type="button">
-            {copied ? <Check aria-hidden className="size-3.5" /> : <Copy aria-hidden className="size-3.5" />}
+            {copied ? <IconCheckmark1 aria-hidden className="size-3.5" /> : <IconSquareBehindSquare1 aria-hidden className="size-3.5" />}
           </button>
         </div>
       </div>
@@ -294,7 +294,7 @@ export function FileCodeBlock({ path, body, language, live = false, className }:
     <div className={cn("code-block !my-1", className)}>
       <div className="code-block-header !h-7 !py-1">
         <span className="code-block-language flex items-center gap-1.5">
-          {marked ? <LanguageGlyph className="size-3.5 shrink-0" language={marked} /> : <Code2 className="size-3.5 shrink-0" aria-hidden />}
+          {marked ? <LanguageGlyph className="size-3.5 shrink-0" language={marked} /> : <IconCode className="size-3.5 shrink-0" aria-hidden />}
           <span className="truncate text-thread-tool">{path}</span>
         </span>
         <span className={cn("shrink-0 pr-1 text-thread-tool tabular-nums", live && "thinking-shimmer")}>{live ? "writing" : `${lines} lines`}</span>

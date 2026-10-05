@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { Tabs } from "radix-ui";
 import { motion, useReducedMotion } from "motion/react";
-import { ExternalLink } from "lucide-react";
+import { IconSquareArrowTopRight } from "central-icons";
 import type { StoredLesson } from "../../../shared/api";
 import { ArtifactCard, ArtifactCardRow } from "./ArtifactCard";
 import { Markdown } from "./Markdown";
@@ -63,7 +63,7 @@ function References({ lesson }: { lesson: StoredLesson }) {
                 <button className="group/ref min-w-0 text-left" onClick={open} type="button">
                   <span className="inline-flex items-baseline gap-1 font-medium text-foreground underline decoration-dotted underline-offset-[3px] group-hover/ref:text-[var(--brand)]">
                     {reference.label}
-                    {reference.kind === "url" && <ExternalLink className="size-3 self-center" />}
+                    {reference.kind === "url" && <IconSquareArrowTopRight className="size-3 self-center" />}
                   </span>
                   <span className="block text-thread leading-[1.5] text-muted-foreground">{reference.note}</span>
                 </button>

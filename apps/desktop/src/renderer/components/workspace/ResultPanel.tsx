@@ -1,14 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AlertTriangle,
-  Check,
-  ChevronDown,
-  CircleSlash,
-  MinusCircle,
-  Terminal,
-  Trash2,
-  X,
-} from "lucide-react";
+import { IconCheckmark1, IconChevronBottom, IconCircleBanSign, IconCircleMinus, IconConsole, IconCrossMedium, IconExclamationTriangle, IconTrashCan } from "central-icons";
 import type { ActiveQuestion, SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { fileName } from "@/lib/format";
@@ -54,9 +45,9 @@ function Count({ children }: { children: React.ReactNode }) {
 }
 
 function StatusMark({ status, className }: { status: CaseStatus; className?: string }) {
-  if (status === "passed") return <Check className={cn("size-3 text-[var(--success)]", className)} />;
-  if (status === "failed") return <X className={cn("size-3 text-destructive", className)} />;
-  return <MinusCircle className={cn("size-3 text-muted-foreground/60", className)} />;
+  if (status === "passed") return <IconCheckmark1 className={cn("size-3 text-[var(--success)]", className)} />;
+  if (status === "failed") return <IconCrossMedium className={cn("size-3 text-destructive", className)} />;
+  return <IconCircleMinus className={cn("size-3 text-muted-foreground/60", className)} />;
 }
 
 /**
@@ -508,7 +499,7 @@ export function ResultPanel({
               title="Clear"
               type="button"
             >
-              <Trash2 className="size-3.5" />
+              <IconTrashCan className="size-3.5" />
             </button>
           )}
           <button
@@ -517,7 +508,7 @@ export function ResultPanel({
             title="Hide panel"
             type="button"
           >
-            <ChevronDown className="size-3.5" />
+            <IconChevronBottom className="size-3.5" />
           </button>
         </div>
       </div>
@@ -537,7 +528,7 @@ export function ResultPanel({
           </div>
         ) : question.visibleTestFiles.length === 0 ? (
           <div className="flex flex-1 items-center gap-2 px-3 py-3 text-ui text-muted-foreground">
-            <CircleSlash className="size-3.5 shrink-0" />
+            <IconCircleBanSign className="size-3.5 shrink-0" />
             This challenge exposes no visible cases — submitting runs the hidden suite.
           </div>
         ) : (
@@ -556,7 +547,7 @@ export function ResultPanel({
         <div className="flex min-h-0 flex-1 flex-col">
           {!running && !terminal ? (
             <div className="flex flex-1 items-center gap-2 px-3 py-3 text-ui text-muted-foreground/70">
-              <Terminal className="size-3.5 shrink-0" />
+              <IconConsole className="size-3.5 shrink-0" />
               Run the visible cases, or submit to also run the hidden suite.
             </div>
           ) : (
@@ -678,7 +669,7 @@ export function ResultPanel({
                   <CaseRail cases={declared.cases} activeId={activeDeclared.id} onSelect={setSelectedDeclared} />
                   <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-3">
                     <p className="mb-2 flex items-start gap-1.5 text-ui-sm leading-[1.55] text-muted-foreground/80">
-                      <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+                      <IconExclamationTriangle className="mt-0.5 size-3 shrink-0" />
                       {ungradedReason(terminal, true)}
                     </p>
                     <DeclaredDetail item={activeDeclared} source={question.source ?? null} />
@@ -689,7 +680,7 @@ export function ResultPanel({
                 // No cases anywhere: nothing was graded and nothing is known to draw.
                 <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-3 py-2">
                   <p className="mb-1.5 flex items-center gap-1.5 text-ui-sm text-muted-foreground/70">
-                    <AlertTriangle className="size-3" />
+                    <IconExclamationTriangle className="size-3" />
                     {ungradedReason(terminal, false)}
                   </p>
                   <pre className="whitespace-pre-wrap break-words font-mono text-ui-sm leading-[1.65] text-foreground/85">
@@ -1057,7 +1048,7 @@ function RawOutput({
         onClick={onToggle}
         type="button"
       >
-        <ChevronDown className={cn("size-3 transition-transform", !open && "-rotate-90")} />
+        <IconChevronBottom className={cn("size-3 transition-transform", !open && "-rotate-90")} />
         Raw output
       </button>
       {open && (

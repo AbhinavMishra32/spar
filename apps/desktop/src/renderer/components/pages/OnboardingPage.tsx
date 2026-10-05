@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, MotionConfig, motion } from "motion/react";
-import { ArrowLeft, ArrowRight, Pencil } from "lucide-react";
+import { IconArrowLeft, IconArrowRight, IconPencil } from "central-icons";
 import { PROBLEM_SOURCES, type Language, type LearnerProfile, type ProblemSource } from "@spar/domain";
 import { LEARNER_NOTEBOOK, type SparApi, type ThemePreference } from "../../../shared/api";
 import { message } from "@/lib/format";
@@ -658,7 +658,7 @@ export function OnboardingPage({
                       transition={SPRING}
                       type="button"
                     >
-                      <ArrowLeft className="size-3.5" /> Back
+                      <IconArrowLeft className="size-3.5" /> Back
                     </motion.button>
                   )}
                 </AnimatePresence>
@@ -666,7 +666,7 @@ export function OnboardingPage({
               <ActionButton disabled={disabled} label={actionLabel} onClick={primary} ref={action}>
                 {writing && <SparDots pattern="wave" size={14} />}
                 {actionLabel}
-                {!busy && !writing && !departing && <ArrowRight className="size-4" />}
+                {!busy && !writing && !departing && <IconArrowRight className="size-4" />}
               </ActionButton>
               <div className="justify-self-end pr-2 text-ui tabular-nums text-muted-foreground/60">
                 {round ? (
@@ -755,7 +755,7 @@ function Intro({ name, displayName, onName, onSubmit, onLanded }: { name: string
             value={name}
           />
           <span>.</span>
-          <Pencil aria-hidden className="pointer-events-none absolute -right-5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-70 group-focus-within:opacity-0" />
+          <IconPencil aria-hidden className="pointer-events-none absolute -right-5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-70 group-focus-within:opacity-0" />
         </motion.label>
       </h1>
       <CoachLine className="mt-2" delay={1.95} text="I'm your coach. Give me two minutes, then we train." />

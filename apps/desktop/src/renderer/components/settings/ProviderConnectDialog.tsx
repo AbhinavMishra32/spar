@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Check, Loader2, Trash2 } from "lucide-react";
+import { IconCheckmark1, IconLoader, IconTrashCan } from "central-icons";
 import type { ProviderId, ProviderInventory, ProviderOAuthEvent, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -145,7 +145,7 @@ export function ProviderConnectDialog({
                 initial={{ opacity: 0, scale: 0.4 }}
                 transition={{ type: "spring", stiffness: 520, damping: 22, delay: 0.18 }}
               >
-                <Check className="size-3.5" strokeWidth={3} />
+                <IconCheckmark1 className="size-3.5" />
               </motion.span>
             </div>
             <DialogTitle className="mt-5">{provider.name} is connected</DialogTitle>
@@ -184,7 +184,7 @@ export function ProviderConnectDialog({
             {oauth && (
               <div className="rounded-xl border border-border bg-[var(--color-background-elevated-secondary)] p-3 text-ui">
                 <p className="flex items-center gap-1.5 font-medium">
-                  {!["error", "cancelled"].includes(oauth.status) && <Loader2 className="size-3 animate-spin" />}
+                  {!["error", "cancelled"].includes(oauth.status) && <IconLoader className="size-3 animate-spin" />}
                   {oauth.status === "error" ? "Sign-in failed" : "Waiting for sign-in"}
                 </p>
                 <p className="mt-1 text-muted-foreground">{oauth.message}</p>
@@ -214,12 +214,12 @@ export function ProviderConnectDialog({
 
         {error && <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-ui text-destructive">{error}</p>}
         <DialogFooter className="justify-between sm:justify-between">
-          <div>{allowDisconnect && provider.state === "connected" && <Button disabled={busy} onClick={() => void disconnect()} variant="destructive"><Trash2 />Disconnect</Button>}</div>
+          <div>{allowDisconnect && provider.state === "connected" && <Button disabled={busy} onClick={() => void disconnect()} variant="destructive"><IconTrashCan />Disconnect</Button>}</div>
           <div className="flex gap-2">
             <Button onClick={() => close(false)} variant="secondary">Cancel</Button>
             {provider.kind === "subscription"
-              ? <Button disabled={busy || (!!oauth && !["error", "cancelled"].includes(oauth.status))} onClick={() => void startOAuth()}>{busy && <Loader2 className="animate-spin" />}Connect</Button>
-              : <Button disabled={busy || !modelId.trim() || !baseUrl.trim() || (provider.kind === "api-key" && provider.state !== "connected" && !secret.trim())} onClick={() => void save()}>{busy && <Loader2 className="animate-spin" />}{provider.state === "connected" ? "Update" : "Connect"}</Button>}
+              ? <Button disabled={busy || (!!oauth && !["error", "cancelled"].includes(oauth.status))} onClick={() => void startOAuth()}>{busy && <IconLoader className="animate-spin" />}Connect</Button>
+              : <Button disabled={busy || !modelId.trim() || !baseUrl.trim() || (provider.kind === "api-key" && provider.state !== "connected" && !secret.trim())} onClick={() => void save()}>{busy && <IconLoader className="animate-spin" />}{provider.state === "connected" ? "Update" : "Connect"}</Button>}
           </div>
         </DialogFooter>
       </DialogContent>

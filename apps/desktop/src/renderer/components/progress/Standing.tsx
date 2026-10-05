@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Eye, MoveDown, MoveRight, MoveUp, Target } from "lucide-react";
+import { IconArrowDown, IconArrowRight, IconArrowUp, IconChevronBottom, IconChevronRight, IconEyeOpen, IconTargetArrow } from "central-icons";
 import type { LearnerAbilityState, LearnerPattern, LearnerProgress, SparNotice } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/format";
@@ -169,7 +169,7 @@ function Belief({ ability, measure, onOpen, patterns, tone }: {
         <Trend trend={ability.trend} />
         <Meter className="w-14 shrink-0" tone={tone} value={ability[measure]} />
         <span className="w-8 shrink-0 text-right tabular-nums text-ui-sm text-muted-foreground">{Math.round(ability[measure] * 100)}%</span>
-        <ChevronRight className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+        <IconChevronRight className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </span>
       {patterns.slice(0, 1).map((pattern) => <PatternLine key={pattern.id} pattern={pattern} />)}
     </button>
@@ -186,8 +186,8 @@ function PatternLine({ pattern }: { pattern: LearnerPattern }) {
       title={`${PATTERN_STAGE[pattern.status]} · seen ${pattern.evidenceCount}×${pattern.description ? ` — ${pattern.description}` : ""}`}
     >
       {pattern.status === "pattern"
-        ? <Target className="size-3 shrink-0 text-[var(--warning)]" />
-        : <Eye className="size-3 shrink-0 text-muted-foreground" />}
+        ? <IconTargetArrow className="size-3 shrink-0 text-[var(--warning)]" />
+        : <IconEyeOpen className="size-3 shrink-0 text-muted-foreground" />}
       <span className="min-w-0 truncate">{pattern.title}</span>
     </span>
   );
@@ -209,7 +209,7 @@ function Notice({ notice }: { notice: SparNotice }) {
       >
         <span className="min-w-0 flex-1 truncate text-ui text-foreground">{notice.title}</span>
         <span className="shrink-0 text-ui-sm text-muted-foreground">{relativeTime(notice.createdAt)}</span>
-        {notice.body.trim() && <ChevronDown className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />}
+        {notice.body.trim() && <IconChevronBottom className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />}
       </button>
       {open && <p className="px-1.5 pb-2 pt-0.5 text-ui leading-[1.55] text-muted-foreground">{notice.body}</p>}
     </div>
@@ -220,9 +220,9 @@ function Notice({ notice }: { notice: SparNotice }) {
  *  beside it in a column this narrow; "stable" gets nothing at all, because a
  *  glyph for "no change" is just noise on every row that has not moved. */
 function Trend({ trend }: { trend: LearnerAbilityState["trend"] }) {
-  if (trend === "improving") return <MoveUp className="size-3 shrink-0 text-[var(--success)]" />;
-  if (trend === "declining") return <MoveDown className="size-3 shrink-0 text-destructive" />;
-  if (trend === "stable") return <MoveRight className="size-3 shrink-0 text-muted-foreground" />;
+  if (trend === "improving") return <IconArrowUp className="size-3 shrink-0 text-[var(--success)]" />;
+  if (trend === "declining") return <IconArrowDown className="size-3 shrink-0 text-destructive" />;
+  if (trend === "stable") return <IconArrowRight className="size-3 shrink-0 text-muted-foreground" />;
   return null;
 }
 

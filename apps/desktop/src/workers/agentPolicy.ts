@@ -47,6 +47,24 @@ export function coachTools(context: { webSearch?: boolean; practiceSource?: bool
   ]);
 }
 
+/**
+ * Every tool the coach is declared, the same in every turn of every session.
+ * What this turn allows is `coachTools`; the declaration is fixed because a
+ * conversation is continued across turns, and a tool list that changed with
+ * the web key or a provider sign-in would break the provider's cache of
+ * everything after it. A call to one this turn does not allow says why.
+ */
+export const DECLARED_TOOLS = coachTools({ webSearch: true, practiceSource: true, sparAuthoring: true, skills: true });
+
+/** Why a declared tool is not available this turn, in words the coach can pass on. */
+export function unavailableTool(name: string): string {
+  if (WEB_TOOLS.includes(name)) return `${name} is not available right now: there is no web search key, or the learner turned web search off.`;
+  if (SOURCE_TOOLS.includes(name)) return `${name} is not available right now: no practice provider is connected for this session.`;
+  if (name === "set_challenge" || name === "edit_challenge") return `${name} is not available in this session: the learner set it to real problems only, so Spar does not write challenges here.`;
+  if (name === SKILL_TOOL) return "load_skill is not available: no skills are enabled.";
+  return `${name} is not available right now.`;
+}
+
 /** The tools that can put a playable challenge in front of the learner. */
 export const CHALLENGE_PUBLISHING_TOOLS = ["set_challenge", "assign_practice_problem", "reopen_challenge"];
 

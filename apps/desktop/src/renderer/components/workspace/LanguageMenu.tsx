@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { IconCheckmark1, IconLoader } from "central-icons";
 import { LANGUAGES, type ChallengeSource, type Language } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -65,7 +65,7 @@ export function LanguageMenu({
         </div>
         {loading && (
           <p className="flex items-center gap-1.5 px-2 pb-1.5 text-ui-sm text-muted-foreground">
-            <Loader2 className="size-3 animate-spin" />
+            <IconLoader className="size-3 animate-spin" />
             Asking {sourceName} which languages it has…
           </p>
         )}
@@ -81,7 +81,7 @@ export function LanguageMenu({
                 <LanguageGlyph className="size-3.5 shrink-0" language={option} />
                 <span className="min-w-0 flex-1 truncate">{LANGUAGE_LABEL[option]}</span>
                 {current ? (
-                  <Check className="size-3 shrink-0 text-muted-foreground" />
+                  <IconCheckmark1 className="size-3 shrink-0 text-muted-foreground" />
                 ) : remoteOnly(option) && source ? (
                   <SourceGlyph className="size-3 shrink-0 opacity-60" source={source.source} />
                 ) : null}

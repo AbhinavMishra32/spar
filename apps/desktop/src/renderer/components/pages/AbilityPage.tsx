@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight } from "lucide-react";
+import { IconArrowLeft, IconChevronBottom, IconChevronRight } from "central-icons";
 import type { AbilityDetail as AbilityDetailData, AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -122,7 +122,7 @@ export function AbilityDetail({
         onClick={onBack}
         type="button"
       >
-        <ArrowLeft className="size-3.5" />
+        <IconArrowLeft className="size-3.5" />
         Progress
       </button>
 
@@ -205,7 +205,7 @@ export function AbilityDetail({
                   onClick={() => onPractise({ abilityId: ability.id, drill })}
                   type="button"
                 >
-                  <ChevronRight className="mt-[0.2rem] size-3.5 shrink-0 text-muted-foreground/45 transition-colors group-hover:text-foreground" />
+                  <IconChevronRight className="mt-[0.2rem] size-3.5 shrink-0 text-muted-foreground/45 transition-colors group-hover:text-foreground" />
                   <span className="min-w-0 flex-1 text-ui leading-[1.6] text-foreground/85">{drill}</span>
                 </button>
               ))}
@@ -286,7 +286,7 @@ export function AbilityDetail({
             type="button"
           >
             Spar's working notes
-            <ChevronDown className={cn("size-3 transition-transform", notes && "rotate-180")} />
+            <IconChevronBottom className={cn("size-3 transition-transform", notes && "rotate-180")} />
           </button>
 
           {notes && (

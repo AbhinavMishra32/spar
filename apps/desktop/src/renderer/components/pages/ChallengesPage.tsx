@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Clock, CheckCircle2, ChevronRight, CornerDownRight, Flag, History, Pause, Play, Repeat2, Search, XCircle } from "lucide-react";
+import { IconArrowCornerDownRight, IconArrowRight, IconArrowsRepeat, IconCheckCircle2, IconChevronRight, IconCircleX, IconClock, IconFlag1, IconHistory, IconMagnifyingGlass, IconPause, IconPlay } from "central-icons";
 import type { ChallengeCodePreview, ChallengeHistorySummary, ConceptSummary, ReviewCard, ReviewOverview, ReviewScheduleEntry, ReviewTarget } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -43,7 +43,7 @@ function OutcomeChip({ outcome }: { outcome: ChallengeHistorySummary["lastOutcom
   if (outcome === "passed") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-[var(--success)]/12 px-1.5 py-0.5 text-ui-sm font-medium text-[var(--success)]">
-        <CheckCircle2 className="size-3" />
+        <IconCheckCircle2 className="size-3" />
         Passed
       </span>
     );
@@ -51,7 +51,7 @@ function OutcomeChip({ outcome }: { outcome: ChallengeHistorySummary["lastOutcom
   if (outcome === "failed") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-destructive/12 px-1.5 py-0.5 text-ui-sm font-medium text-destructive">
-        <XCircle className="size-3" />
+        <IconCircleX className="size-3" />
         Failed
       </span>
     );
@@ -59,7 +59,7 @@ function OutcomeChip({ outcome }: { outcome: ChallengeHistorySummary["lastOutcom
   if (outcome === "abandoned") {
     return (
       <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-ui-sm font-medium text-muted-foreground">
-        <Flag className="size-3" />
+        <IconFlag1 className="size-3" />
         Gave up
       </span>
     );
@@ -77,7 +77,7 @@ function ReviewLine({ entry, notesOpen, onReview, onNotes }: { entry: ReviewSche
   const tone = entry.suspended ? "later" : dueTone(entry.dueAt);
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-ui-sm text-muted-foreground">
-      <Clock className="size-3 shrink-0 text-muted-foreground/60" />
+      <IconClock className="size-3 shrink-0 text-muted-foreground/60" />
       <span className={cn("rounded px-1.5 py-px font-medium", TONE_CLASS[tone])}>
         {entry.suspended ? "Review paused" : due ? dueLabel(entry.dueAt) : `Review ${dueLabel(entry.dueAt).toLowerCase()}`}
       </span>
@@ -100,7 +100,7 @@ function ReviewLine({ entry, notesOpen, onReview, onNotes }: { entry: ReviewSche
           onClick={onNotes}
           type="button"
         >
-          <ChevronRight className={cn("size-3 transition-transform duration-200", notesOpen && "rotate-90")} />
+          <IconChevronRight className={cn("size-3 transition-transform duration-200", notesOpen && "rotate-90")} />
           What you learned
         </button>
         {!entry.suspended && (
@@ -216,14 +216,14 @@ function ChallengeCard({
               its own line rather than being folded into the metadata run-on. */}
           {item.replacesQuestionTitle && (
             <p className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted-foreground">
-              <CornerDownRight className="size-3 shrink-0 text-muted-foreground/50" />
+              <IconArrowCornerDownRight className="size-3 shrink-0 text-muted-foreground/50" />
               Replaced
               <span className="min-w-0 truncate font-medium text-foreground">{item.replacesQuestionTitle}</span>
             </p>
           )}
           {item.replacedByQuestionTitle && (
             <p className="flex min-w-0 items-center gap-1.5 text-ui-sm text-muted-foreground">
-              <ArrowRight className="size-3 shrink-0 text-muted-foreground/50" />
+              <IconArrowRight className="size-3 shrink-0 text-muted-foreground/50" />
               Became
               <span className="min-w-0 truncate font-medium text-foreground">{item.replacedByQuestionTitle}</span>
             </p>
@@ -235,7 +235,7 @@ function ChallengeCard({
               "transition-colors duration-200 group-hover:text-foreground/70",
             )}
           >
-            <Play className="size-3" />
+            <IconPlay className="size-3" />
             Practise this again
           </span>
         </div>
@@ -247,7 +247,7 @@ function ChallengeCard({
           <CardNotes card={card} onTargets={(targets) => onTargets(card, targets)} />
           <div className="mt-3 flex justify-end">
             <button className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" onClick={() => onSuspend(card)} type="button">
-              {card.suspended ? <Play className="size-3" /> : <Pause className="size-3" />}
+              {card.suspended ? <IconPlay className="size-3" /> : <IconPause className="size-3" />}
               {card.suspended ? "Resume reviews" : "Pause reviews"}
             </button>
           </div>
@@ -411,8 +411,8 @@ export function ChallengesPage({
             className="w-[15rem]"
             onChange={setTab}
             options={[
-              { value: "review", label: due.length ? `Review · ${due.length}` : "Review", icon: Repeat2 },
-              { value: "challenges", label: "Challenges", icon: History },
+              { value: "review", label: due.length ? `Review · ${due.length}` : "Review", icon: IconArrowsRepeat },
+              { value: "challenges", label: "Challenges", icon: IconHistory },
             ]}
             value={tab}
           />
@@ -456,7 +456,7 @@ export function ChallengesPage({
             ))}
           </div>
           <div className="relative ml-auto w-60">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <IconMagnifyingGlass className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               className="h-7 w-full rounded-lg border border-border bg-card pl-7 pr-2 text-ui outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-[var(--border-strong)]"
               onChange={(event) => setQuery(event.target.value)}
@@ -493,7 +493,7 @@ export function ChallengesPage({
                   ? "Clear the filters to see the rest of your challenge history."
                   : "A challenge appears here as soon as Spar compiles and validates it."
               }
-              icon={History}
+              icon={IconHistory}
               title={challenges.length ? "Nothing matches this filter" : "No challenges yet"}
             />
           )}

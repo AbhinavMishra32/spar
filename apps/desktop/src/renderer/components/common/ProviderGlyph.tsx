@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactElement } from "react";
-import { Plug } from "lucide-react";
+import { IconPlugin1 } from "central-icons";
 import type { ProviderId } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { PROVIDER_BRAND_COLOR } from "@/lib/brand";
@@ -217,5 +217,5 @@ export function hasProviderGlyph(provider: string): provider is ProviderId {
 export function ProviderGlyph({ className, provider }: { className?: string; provider: ProviderId }) {
   const Glyph = GLYPHS[provider];
   const color = PROVIDER_BRAND_COLOR[provider];
-  return Glyph ? <Glyph className={className} style={color ? { color } : undefined} /> : <Plug className={cn("size-full", className)} />;
+  return Glyph ? <Glyph className={className} style={color ? { color } : undefined} /> : <IconPlugin1 className={cn("size-full", className)} />;
 }

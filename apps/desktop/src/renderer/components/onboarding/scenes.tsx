@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { ArrowRight, Blocks, BookOpen, Briefcase, Check, Compass, Languages, Link2, Mountain, PenLine, Timer, Trophy, type LucideIcon } from "lucide-react";
+import { IconArrowRight, IconBlocks, IconBook, IconChainLink1, IconCheckmark1, IconCompassRound, IconPencilLine, IconStopwatch, IconSuitcase, IconTranslate, IconTrophy, IconWeight } from "central-icons";
+import type { CentralIcon } from "@/lib/icons";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type Language, type LearnerProfile, type ProblemSource } from "@spar/domain";
 import type { PracticeSourceAccount, ThemePreference } from "../../../shared/api";
 import { Meter, MeterKey, type MeterBand } from "@/components/ui/meter";
@@ -23,7 +24,7 @@ export function DrawnCheck({ className }: { className?: string }) {
 }
 
 /** The small square an option's icon sits in: quiet until it is the answer. */
-function IconTile({ Icon, on }: { Icon: LucideIcon; on: boolean }) {
+function IconTile({ Icon, on }: { Icon: CentralIcon; on: boolean }) {
   return (
     <motion.span
       animate={{ rotate: on ? [0, -12, 8, 0] : 0, scale: on ? 1.08 : 1 }}
@@ -41,13 +42,13 @@ export type GoalId = "interviews" | "work" | "contests" | "language" | "fundamen
 
 /** What someone is training for. Each is a different first Track, and each gets
  *  a line back from the coach saying what that will mean. */
-export const GOALS: Array<{ id: GoalId; label: string; hint: string; Icon: LucideIcon; reply: string }> = [
-  { id: "interviews", label: "Interviews", hint: "Coding rounds, on the clock", Icon: Timer, reply: "Then we'll practise on the clock, out loud." },
-  { id: "work", label: "My day job", hint: "The code I ship", Icon: Briefcase, reply: "Then we'll work on code that looks like yours." },
-  { id: "contests", label: "Contests", hint: "Harder problems, faster", Icon: Trophy, reply: "Then we'll turn patterns into speed." },
-  { id: "language", label: "A new language", hint: "Fluent, not just familiar", Icon: Languages, reply: "Then you'll learn to think in it, not translate into it." },
-  { id: "fundamentals", label: "The fundamentals", hint: "Data structures, properly", Icon: Blocks, reply: "Then we'll go deep on what everything else rests on." },
-  { id: "own", label: "Something else", hint: "In my own words", Icon: PenLine, reply: "" },
+export const GOALS: Array<{ id: GoalId; label: string; hint: string; Icon: CentralIcon; reply: string }> = [
+  { id: "interviews", label: "Interviews", hint: "Coding rounds, on the clock", Icon: IconStopwatch, reply: "Then we'll practise on the clock, out loud." },
+  { id: "work", label: "My day job", hint: "The code I ship", Icon: IconSuitcase, reply: "Then we'll work on code that looks like yours." },
+  { id: "contests", label: "Contests", hint: "Harder problems, faster", Icon: IconTrophy, reply: "Then we'll turn patterns into speed." },
+  { id: "language", label: "A new language", hint: "Fluent, not just familiar", Icon: IconTranslate, reply: "Then you'll learn to think in it, not translate into it." },
+  { id: "fundamentals", label: "The fundamentals", hint: "Data structures, properly", Icon: IconBlocks, reply: "Then we'll go deep on what everything else rests on." },
+  { id: "own", label: "Something else", hint: "In my own words", Icon: IconPencilLine, reply: "" },
 ];
 
 /** The kinds of reasoning each goal leans on, filed as the profile's focus so
@@ -124,7 +125,7 @@ export function GoalPick({ value, own, onPick, onOwn, onSubmit }: { value: GoalI
         {value === "own" && (
           <motion.div animate={{ height: "auto", opacity: 1 }} className="overflow-hidden" exit={{ height: 0, opacity: 0 }} initial={{ height: 0, opacity: 0 }} transition={SPRING}>
             <label className={cn(SURFACE, "mt-2 flex h-11 items-center gap-2.5 rounded-xl px-3.5 transition-shadow focus-within:shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--foreground)_30%,transparent)]")}>
-              <PenLine className="size-3.5 shrink-0 text-muted-foreground" />
+              <IconPencilLine className="size-3.5 shrink-0 text-muted-foreground" />
               <input
                 aria-label="What you want to get better at"
                 className="min-w-0 flex-1 bg-transparent text-content text-foreground outline-none placeholder:text-muted-foreground/55"
@@ -239,10 +240,10 @@ export function ExperiencePick({ value, onPick }: { value: LearnerProfile["exper
 
 export type CoachStyle = "struggle" | "nudge" | "teach";
 
-export const STYLES: Array<{ value: CoachStyle; label: string; hint: string; Icon: LucideIcon; note: string }> = [
-  { value: "struggle", label: "Let me struggle", hint: "Hints only when I ask", Icon: Mountain, note: "Wants room to struggle: hold hints back until they ask." },
-  { value: "nudge", label: "Nudge me", hint: "Step in when I drift", Icon: Compass, note: "Wants a nudge when they drift off track, not a wait for them to ask." },
-  { value: "teach", label: "Teach first", hint: "The idea, then the try", Icon: BookOpen, note: "Learns best from the idea first, then an attempt of their own." },
+export const STYLES: Array<{ value: CoachStyle; label: string; hint: string; Icon: CentralIcon; note: string }> = [
+  { value: "struggle", label: "Let me struggle", hint: "Hints only when I ask", Icon: IconWeight, note: "Wants room to struggle: hold hints back until they ask." },
+  { value: "nudge", label: "Nudge me", hint: "Step in when I drift", Icon: IconCompassRound, note: "Wants a nudge when they drift off track, not a wait for them to ask." },
+  { value: "teach", label: "Teach first", hint: "The idea, then the try", Icon: IconBook, note: "Learns best from the idea first, then an attempt of their own." },
 ];
 
 export function StylePick({ value, onPick }: { value: CoachStyle | null; onPick(value: CoachStyle): void }) {
@@ -292,7 +293,7 @@ export function ProviderList({ connected, offered, loaded, runnable, onConnect }
           transition={POP}
         >
           {runnable
-            ? <><Check className="size-3.5" strokeWidth={2.5} /> I have a model to run on</>
+            ? <><IconCheckmark1 className="size-3.5" /> I have a model to run on</>
             : "Your own subscription or API key. Nothing goes through us."}
         </motion.p>
       </AnimatePresence>
@@ -326,7 +327,7 @@ export function ProviderList({ connected, offered, loaded, runnable, onConnect }
             ) : (
               <span className="relative flex items-center gap-2.5">
                 {index - connected.length < 9 && <Key>{index - connected.length + 1}</Key>}
-                <ArrowRight className="size-3.5 text-muted-foreground/60 transition-transform duration-200 group-hover:translate-x-1 group-hover:text-foreground" />
+                <IconArrowRight className="size-3.5 text-muted-foreground/60 transition-transform duration-200 group-hover:translate-x-1 group-hover:text-foreground" />
               </span>
             )}
           </motion.button>
@@ -455,7 +456,7 @@ export function SourcePick({ value, onToggle, accounts, busy, onConnect, onDisco
                         onClick={() => onConnect(external)}
                         type="button"
                       >
-                        {connecting ? <SparDots pattern="wave" size={14} /> : <Link2 className="size-3.5" />}
+                        {connecting ? <SparDots pattern="wave" size={14} /> : <IconChainLink1 className="size-3.5" />}
                         <span className="flex-1">{connecting ? "Finish signing in in the other window" : "Connect your account"}</span>
                         {!connecting && <span className="text-ui-sm text-muted-foreground/60 transition-colors group-hover/connect:text-muted-foreground">So I skip what you've solved</span>}
                       </button>

@@ -8,7 +8,7 @@ import { useControlledState } from "@/hooks/use-controlled-state"
 import { cn } from "@/lib/utils"
 import { modalContentVariants, modalOverlayVariants } from "@/components/ui/overlay-motion"
 import { Button } from "@/components/ui/button"
-import { XIcon } from "lucide-react"
+import { IconCrossMedium } from "central-icons";
 
 /* Radix tears a closed dialog out of the tree immediately, so the scrim and the
    sheet would both vanish on the same frame. Mirroring the open state here lets
@@ -133,7 +133,7 @@ function DialogContent({
                 className="absolute top-3.5 right-3.5 size-6 rounded-full text-muted-foreground hover:text-foreground [&_svg]:size-3.5"
                 size="icon-sm"
               >
-                <XIcon
+                <IconCrossMedium
                 />
                 <span className="sr-only">Close</span>
               </Button>

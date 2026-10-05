@@ -1,4 +1,4 @@
-import { ArrowUpRight, Loader2 } from "lucide-react";
+import { IconArrowUpRight, IconLoader } from "central-icons";
 import { cn } from "@/lib/utils";
 import { savedSnapshot, type ProblemItem } from "@/lib/problems";
 import { SaveProblem } from "../common/SaveProblem";
@@ -99,14 +99,14 @@ export function ProblemRow({
         <span className="hidden w-[8rem] shrink-0 truncate text-right text-ui-sm tabular-nums text-muted-foreground sm:block">
           {pending ? (
             <span className="inline-flex items-center justify-end gap-1 font-medium text-foreground">
-              <Loader2 className="size-3 animate-spin" />
+              <IconLoader className="size-3 animate-spin" />
               Opening…
             </span>
           ) : (
             <>
               <span className="group-hover:hidden">{note}</span>
               <span className="hidden items-center justify-end gap-1 font-medium text-foreground group-hover:inline-flex">
-                <ArrowUpRight className="size-3" />
+                <IconArrowUpRight className="size-3" />
                 {item.kind === "challenge" ? "Open" : "Start solving"}
               </span>
             </>

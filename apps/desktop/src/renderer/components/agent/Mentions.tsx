@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, CornerDownLeft, FileCheck2, Puzzle, Shapes } from "lucide-react";
+import { IconArrowCornerDownLeft, IconChevronRight, IconPageCheck, IconPuzzle, IconShapesPlusXSquareCircle } from "central-icons";
 import type { Language } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { LanguageGlyph } from "../common/LanguageGlyph";
@@ -284,7 +284,7 @@ export function MentionPicker({ onClose, onPick, query, source }: {
         section: "Browse",
         label: "Challenges",
         detail: query ? `${challenges.length} match` : "Any problem you have been given.",
-        glyph: <Puzzle className="size-3.5 text-muted-foreground" />,
+        glyph: <IconPuzzle className="size-3.5 text-muted-foreground" />,
         into: { at: "challenges" },
       });
       if (source.sessionId) {
@@ -292,7 +292,7 @@ export function MentionPicker({ onClose, onPick, query, source }: {
           key: "submissions",
           label: "Submissions",
           detail: "Every attempt you have sent off.",
-          glyph: <FileCheck2 className="size-3.5 text-muted-foreground" />,
+          glyph: <IconPageCheck className="size-3.5 text-muted-foreground" />,
           into: { at: "submissions" },
         });
       }
@@ -302,7 +302,7 @@ export function MentionPicker({ onClose, onPick, query, source }: {
           key: "concepts",
           label: "Concepts",
           detail: query ? `${concepts.length} match` : "Ideas that have come up so far.",
-          glyph: <Shapes className="size-3.5 text-muted-foreground" />,
+          glyph: <IconShapesPlusXSquareCircle className="size-3.5 text-muted-foreground" />,
           into: { at: "concepts" },
         });
       }
@@ -327,7 +327,7 @@ export function MentionPicker({ onClose, onPick, query, source }: {
           key: concept.slug,
           label: concept.title,
           detail: concept.detail,
-          glyph: <Shapes className="size-3.5 text-muted-foreground" />,
+          glyph: <IconShapesPlusXSquareCircle className="size-3.5 text-muted-foreground" />,
           pick: mentionToken("concept", concept.slug, concept.title),
         }))
         .filter((row) => matches(row, query))
@@ -424,7 +424,7 @@ export function MentionPicker({ onClose, onPick, query, source }: {
               </span>
               {row.extra}
               {row.into && (
-                <ChevronRight
+                <IconChevronRight
                   aria-hidden
                   className={cn("size-3.5 shrink-0", index === active ? "text-muted-foreground/60" : "text-muted-foreground/25")}
                 />
@@ -454,7 +454,7 @@ function Crumbs({ level, onGo }: { level: Level; onGo(level: Level): void }) {
     <div className="flex min-w-0 items-center gap-1.5 px-2.5 pb-1.5 pt-0.5 text-thread text-muted-foreground/60">
       {trail.map((step, index) => (
         <span className="flex min-w-0 items-center gap-1.5" key={index}>
-          {index > 0 && <ChevronRight aria-hidden className="size-3 shrink-0 text-muted-foreground/40" />}
+          {index > 0 && <IconChevronRight aria-hidden className="size-3 shrink-0 text-muted-foreground/40" />}
           {step.level
             ? (
               <button

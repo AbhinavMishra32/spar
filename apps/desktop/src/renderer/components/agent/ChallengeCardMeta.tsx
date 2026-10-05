@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Bookmark, Clock3, Ellipsis, ExternalLink, MessageCircle, Play, Puzzle } from "lucide-react";
+import { IconBookmark, IconBubble3, IconClock, IconDotGrid1x3Horizontal, IconPlay, IconPuzzle, IconSquareArrowTopRight } from "central-icons";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useProblemSaved } from "@/hooks/use-saved-problems";
 import { saveWithReceipt } from "../common/SaveProblem";
@@ -56,7 +56,7 @@ export function ChallengeCardMeta({ stop }: { stop: ChallengeStop }) {
   const runs = stop.testRunCount ?? 0;
   return (
     <span className="mt-0.5 flex min-w-0 items-center gap-1.5 overflow-hidden text-thread-tool text-muted-foreground">
-      <span className="inline-flex shrink-0 items-center gap-1 tabular-nums"><Clock3 className="size-3" />{Math.floor(seconds / 60)}m {seconds % 60}s</span>
+      <span className="inline-flex shrink-0 items-center gap-1 tabular-nums"><IconClock className="size-3" />{Math.floor(seconds / 60)}m {seconds % 60}s</span>
       <span className="inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-md bg-secondary/60 px-1.5 py-px">
         {/* Nothing run yet is an empty track, not a red one: the bar's ground
             means "failed", and a challenge with no runs has failed nothing. */}
@@ -72,7 +72,7 @@ export function ChallengeCardMeta({ stop }: { stop: ChallengeStop }) {
         <span>passed</span>
         {failed > 0 && <><span className="text-muted-foreground/50">·</span><span className="font-medium tabular-nums text-destructive">{failed}</span><span>failed</span></>}
       </span>
-      <span className="inline-flex shrink-0 items-center gap-1 tabular-nums"><Play className="size-3" />{runs} runs</span>
+      <span className="inline-flex shrink-0 items-center gap-1 tabular-nums"><IconPlay className="size-3" />{runs} runs</span>
       {stop.assistance === "assisted" && <span className="shrink-0">Coach helped</span>}
     </span>
   );
@@ -113,7 +113,7 @@ export function ChallengeComposerContext({ onRemove, stop }: { onRemove(): void;
       <ReferenceTag
         glyph={stop.language
           ? <LanguageGlyph className="size-3.5" language={stop.language} />
-          : <Puzzle className="size-3.5" />}
+          : <IconPuzzle className="size-3.5" />}
         label={stop.title}
         lead={`#${stop.ordinal}`}
         note={facts.length > 0 ? facts.join(" · ") : "not started"}
@@ -132,7 +132,7 @@ export function ChallengeCardMenu({ includeSave = true, stop, trail }: { include
   return (
     <DropdownMenu>
       <DropdownMenuTrigger aria-label={`Actions for ${stop.title}`} className="grid size-6 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground outline-none transition-[color,background-color,opacity] duration-150 hover:bg-[var(--color-background-elevated-secondary)] hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring data-[state=open]:bg-[var(--color-background-elevated-secondary)] data-[state=open]:text-foreground">
-        <Ellipsis className="size-3.5" />
+        <IconDotGrid1x3Horizontal className="size-3.5" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" onCloseAutoFocus={(event) => {
         if (afterClose.current) {
@@ -143,13 +143,13 @@ export function ChallengeCardMenu({ includeSave = true, stop, trail }: { include
         }
       }} onKeyDown={(event) => event.stopPropagation()}>
         <DropdownMenuGroup>
-          <DropdownMenuItem disabled={!trail.onOpenQuestion} onSelect={() => { afterClose.current = () => trail.onOpenQuestion?.(stop); }}><ExternalLink />Open question</DropdownMenuItem>
-          <DropdownMenuItem disabled={!trail.onOpenSession} onSelect={() => { afterClose.current = () => trail.onOpenSession?.(stop); }}><Play />Open in session</DropdownMenuItem>
+          <DropdownMenuItem disabled={!trail.onOpenQuestion} onSelect={() => { afterClose.current = () => trail.onOpenQuestion?.(stop); }}><IconSquareArrowTopRight />Open question</DropdownMenuItem>
+          <DropdownMenuItem disabled={!trail.onOpenSession} onSelect={() => { afterClose.current = () => trail.onOpenSession?.(stop); }}><IconPlay />Open in session</DropdownMenuItem>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          {includeSave && <DropdownMenuItem onSelect={() => saveWithReceipt({ problemKey: `spar:${stop.id}`, title: stop.title, saved })}><Bookmark className={saved ? "fill-current" : undefined} />{saved ? "Remove from saved" : "Save challenge"}</DropdownMenuItem>}
-          <DropdownMenuItem disabled={!trail.onAsk} onSelect={() => { afterClose.current = () => trail.onAsk?.(stop); }}><MessageCircle />Ask about this challenge</DropdownMenuItem>
+          {includeSave && <DropdownMenuItem onSelect={() => saveWithReceipt({ problemKey: `spar:${stop.id}`, title: stop.title, saved })}><IconBookmark className={saved ? "fill-current" : undefined} />{saved ? "Remove from saved" : "Save challenge"}</DropdownMenuItem>}
+          <DropdownMenuItem disabled={!trail.onAsk} onSelect={() => { afterClose.current = () => trail.onAsk?.(stop); }}><IconBubble3 />Ask about this challenge</DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>

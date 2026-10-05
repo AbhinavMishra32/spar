@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { FileCode2, FileText, FlaskConical, FolderOpen, Lock } from "lucide-react";
+import { IconFileBend, IconFileText, IconFolderOpen, IconLab, IconLock } from "central-icons";
 import type { ActiveQuestion } from "@spar/domain";
 import { cn } from "@/lib/utils";
 
@@ -7,9 +7,9 @@ type Entry = ActiveQuestion["files"][number];
 type Group = { directory: string; files: Entry[] };
 
 function iconFor(path: string) {
-  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(path) || path.includes("/test")) return FlaskConical;
-  if (path.endsWith(".md") || path.endsWith(".txt")) return FileText;
-  return FileCode2;
+  if (/\.(test|spec)\.[cm]?[jt]sx?$/.test(path) || path.includes("/test")) return IconLab;
+  if (path.endsWith(".md") || path.endsWith(".txt")) return IconFileText;
+  return IconFileBend;
 }
 
 function directoryOf(path: string): string {
@@ -53,7 +53,7 @@ export function FileTree({
       {groups.map((group) => (
         <div key={group.directory || "/"}>
           <div className="flex h-6 items-center gap-1.5 px-1.5 text-ui text-muted-foreground">
-            <FolderOpen className="size-3.5 shrink-0" />
+            <IconFolderOpen className="size-3.5 shrink-0" />
             <span className="min-w-0 truncate">{group.directory || "challenge"}</span>
           </div>
           <div className="space-y-px">
@@ -75,7 +75,7 @@ export function FileTree({
                 >
                   <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{baseName(file.path)}</span>
-                  {file.readOnly && <Lock className="size-3 shrink-0 text-muted-foreground/60" />}
+                  {file.readOnly && <IconLock className="size-3 shrink-0 text-muted-foreground/60" />}
                 </button>
               );
             })}

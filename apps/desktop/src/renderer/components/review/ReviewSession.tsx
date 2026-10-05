@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
-import { ArrowRight, Check, ChevronDown, Keyboard, Layers, Lightbulb, Loader2, Repeat2, X } from "lucide-react";
+import { IconArrowRight, IconArrowsRepeat, IconCheckmark1, IconChevronBottom, IconCrossMedium, IconKeyboard, IconLayersTwo, IconLightBulb, IconLoader } from "central-icons";
 import { REVIEW_TARGETS, REVIEW_TARGET_LABEL, type FsrsRating, type ReviewCard, type ReviewGradeResult, type ReviewIntervalPreview, type ReviewOverview, type ReviewPending, type ReviewTarget } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -244,7 +244,7 @@ export function ReviewSession({
             {finished ? `${done} done` : `${index + 1} of ${cards.length}`}
           </span>
           <DialogPrimitive.Close aria-label="Stop reviewing" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
-            <X className="size-3.5" />
+            <IconCrossMedium className="size-3.5" />
           </DialogPrimitive.Close>
         </header>
 
@@ -267,7 +267,7 @@ export function ReviewSession({
 
               {cue && (
                 <p className="mt-4 flex items-start gap-2 text-ui text-muted-foreground">
-                  <Lightbulb className="mt-0.5 size-3.5 shrink-0 text-[var(--warning)]" />
+                  <IconLightBulb className="mt-0.5 size-3.5 shrink-0 text-[var(--warning)]" />
                   {cue}
                 </p>
               )}
@@ -302,7 +302,7 @@ export function ReviewSession({
             ) : pending.format === "resolve" ? (
               <div className="flex items-center gap-2">
                 <Button onClick={() => card && onOpenChallenge(card.questionId, { cardId: card.id, promptId: pending.id }, cardsRef.current.slice(index + 1).map((next) => next.id))}>
-                  <Repeat2 className="size-3.5" /> Open a blank copy
+                  <IconArrowsRepeat className="size-3.5" /> Open a blank copy
                 </Button>
                 <Button onClick={() => card && void ask(card, pending.target, true)} variant="ghost">Ask something shorter</Button>
               </div>
@@ -310,19 +310,19 @@ export function ReviewSession({
               <div className="flex items-center gap-1">
                 {!cue && pending.cue && (
                   <Button onClick={() => void api?.revealReviewCue(pending.id).then((value) => setCue(value ?? null))} size="sm" variant="ghost">
-                    <Lightbulb className="size-3.5" /> Hint
+                    <IconLightBulb className="size-3.5" /> Hint
                   </Button>
                 )}
                 {typing ? (
                   <Button disabled={step.kind === "checking"} onClick={() => setTyping(false)} size="sm" variant="ghost">Don't type</Button>
                 ) : (
                   <Button onClick={() => setTyping(true)} size="sm" title="Type an answer and have it checked" variant="ghost">
-                    <Keyboard className="size-3.5" /> Type it
+                    <IconKeyboard className="size-3.5" /> Type it
                   </Button>
                 )}
                 {typing ? (
                   <Button className="ml-auto" disabled={step.kind === "checking" || !typed.trim()} onClick={() => void check()}>
-                    {step.kind === "checking" ? <><Loader2 className="size-3.5 animate-spin" /> Checking…</> : <>Check <kbd className="font-sans text-[10px] opacity-60">⌘↵</kbd></>}
+                    {step.kind === "checking" ? <><IconLoader className="size-3.5 animate-spin" /> Checking…</> : <>Check <kbd className="font-sans text-[10px] opacity-60">⌘↵</kbd></>}
                   </Button>
                 ) : (
                   <Button className="ml-auto min-w-40" onClick={() => void flip()}>
@@ -362,20 +362,20 @@ function Choose({ card, onPractice, onCard }: { card: ReviewCard; onPractice(): 
           onClick={onPractice}
           type="button"
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-foreground"><Repeat2 className="size-4" /></span>
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-background text-foreground"><IconArrowsRepeat className="size-4" /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-ui font-medium">Solve it again</span>
             <span className="block text-ui-sm text-muted-foreground">Graded by how it goes: first check inside 15 minutes is Easy, three or more is Hard.</span>
           </span>
           <kbd className="shrink-0 font-sans text-[10px] text-muted-foreground">↵</kbd>
-          <ArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+          <IconArrowRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
         </button>
         <button
           className="group flex items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition-colors hover:bg-accent/60"
           onClick={onCard}
           type="button"
         >
-          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] text-muted-foreground"><Layers className="size-4" /></span>
+          <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--color-background-elevated-secondary)] text-muted-foreground"><IconLayersTwo className="size-4" /></span>
           <span className="min-w-0 flex-1">
             <span className="block text-ui font-medium">Answer the card instead</span>
             <span className="block text-ui-sm text-muted-foreground">One short question about the problem, the pattern or what made it click.</span>
@@ -394,13 +394,13 @@ function TargetMenu({ current, marked, disabled, onPick }: { current: ReviewTarg
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md bg-[var(--color-background-elevated-secondary)] px-2 text-ui-sm text-foreground/80 transition-colors hover:text-foreground disabled:opacity-50" type="button">
           {current ? REVIEW_TARGET_LABEL[current] : "Choosing…"}
-          <ChevronDown className="size-3 text-muted-foreground" />
+          <IconChevronBottom className="size-3 text-muted-foreground" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
         {REVIEW_TARGETS.map((target) => (
           <DropdownMenuItem className="flex items-start gap-2 py-1.5" key={target} onSelect={() => target !== current && onPick(target)}>
-            <Check className={cn("mt-0.5 size-3.5 shrink-0", target === current ? "opacity-100" : "opacity-0")} />
+            <IconCheckmark1 className={cn("mt-0.5 size-3.5 shrink-0", target === current ? "opacity-100" : "opacity-0")} />
             <span className="min-w-0">
               <span className="block text-ui">{REVIEW_TARGET_LABEL[target]}{marked.includes(target) ? "" : <span className="text-muted-foreground"> · not on this card</span>}</span>
               <span className="block text-ui-sm text-muted-foreground">{TARGET_HINT[target]}</span>
@@ -453,7 +453,7 @@ function Grades({ intervals, checked, filing, onGrade }: { intervals: ReviewInte
             type="button"
           >
             <span className={cn("flex items-center gap-1 text-ui font-medium", RATING_TONE[rating])}>
-              {filing === rating && <Loader2 className="size-3 animate-spin" />}
+              {filing === rating && <IconLoader className="size-3 animate-spin" />}
               {name}
             </span>
             <span className="text-ui-sm tabular-nums text-muted-foreground">
@@ -469,7 +469,7 @@ function Grades({ intervals, checked, filing, onGrade }: { intervals: ReviewInte
 function Finished({ count }: { count: number }) {
   return (
     <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-center">
-      <span className="grid size-9 place-items-center rounded-full bg-[var(--success)]/12 text-[var(--success)]"><Check className="size-4" /></span>
+      <span className="grid size-9 place-items-center rounded-full bg-[var(--success)]/12 text-[var(--success)]"><IconCheckmark1 className="size-4" /></span>
       <p className="text-content font-medium">{count ? `${count} card${count === 1 ? "" : "s"} reviewed` : "Nothing reviewed"}</p>
       <p className="text-ui text-muted-foreground">Each one comes back just before you'd forget it.</p>
       <DialogPrimitive.Close asChild>

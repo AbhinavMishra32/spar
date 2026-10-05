@@ -6,7 +6,9 @@ import { advanceTrainingConversation, conversationStarted, createTrainingAgent, 
 import { stableJson } from "./evidence.js";
 import { clampSteer, steeringSection } from "./steering.js";
 import { captureCodexRateLimits } from "./codexRateLimits.js";
-import { coachTools, VISUALIZER_TOOLS, type AgentTurnKind, type Outcomes } from "./agentPolicy.js";
+import { coachTools, DECLARED_TOOLS, unavailableTool, VISUALIZER_TOOLS, type AgentTurnKind, type Outcomes } from "./agentPolicy.js";
+import { compactConversation, compactionThreshold, conversationTokens, savedConversation } from "./coachConversation.js";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { mergeQuestionChanges, parseRepairChanges, repairQuestionUntilValid } from "./challengeRepair.js";
 import { challengeDraft } from "./challengeDraft.js";
 import { checkBadge, describeChanges, stageLog, streamInto, type StageLog } from "./challengeStages.js";
@@ -99,7 +101,7 @@ function idleWatchdog(ms: number, message: string) {
     dispose() { paused += 1; clearTimeout(timer); },
   };
 }
-type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { lesson?: { result?: unknown } }; webSearch?: boolean; practiceSource?: boolean; sparAuthoring?: boolean; problemSources?: string[]; skills?: { name: string; description: string }[]; provider: PiProviderInput } };
+type Request = { kind: "request"; id: string; payload: { sessionId: string; message: string; context: string; record?: string; conversation?: unknown[] | null; turnKind: AgentTurnKind; activeQuestion?: { id: string; attemptId: string } | null; resumeState?: { lesson?: { result?: unknown } }; webSearch?: boolean; practiceSource?: boolean; sparAuthoring?: boolean; problemSources?: string[]; skills?: { name: string; description: string }[]; provider: PiProviderInput } };
 
 const parentPort = process.parentPort;
 if (!parentPort) throw new Error("Spar must run inside an Electron utility process");
@@ -639,6 +641,9 @@ async function runTurn(request: Request, stopped: AbortSignal) {
   let watch: { pause(): void; resume(): void } | null = null;
 
   const invoke = async (name: string, input: unknown): Promise<unknown> => {
+    /* Every tool is declared on every turn, so the conversation's tool list
+       never changes; one this turn does not allow answers with why. */
+    if (!allowed.has(name)) return { status: "unavailable", note: unavailableTool(name) };
     const { arguments: args } = splitActionTitle(input);
     const signature = `${name}:${stableJson(args)}`;
     signatures.push(signature);
@@ -674,21 +679,41 @@ async function runTurn(request: Request, stopped: AbortSignal) {
     } finally { pausedWatch?.resume(); }
   };
 
-  const agent = createTrainingAgent({ ...payload.provider, cacheKey: `spar-coach:${payload.sessionId}` }, COACH_PROMPT.text, new WorkerTelemetryContext(request.id));
-  agent.state.tools = piAgentTools((name) => allowed.has(name), invoke);
+  /* The session's conversation, continued: what the coach said, read, reasoned
+     and called in earlier turns is still in front of it, and the request up to
+     this turn's opening is the one the provider cached last time. */
+  const restored = Array.isArray(payload.conversation) ? payload.conversation as AgentMessage[] : [];
+  const tools = piAgentTools((name) => DECLARED_TOOLS.has(name), invoke);
+  const agent = createTrainingAgent({ ...payload.provider, cacheKey: `spar-coach:${payload.sessionId}` }, COACH_PROMPT.text, new WorkerTelemetryContext(request.id), { messages: restored, tools });
+  const contextWindow = piModelFor(payload.provider).contextWindow;
+  const conversationOut = () => savedConversation(agent.state.messages);
+  /* Too long to continue as it is: the older part becomes a summary and the
+     record goes back in whole, since what the coach knew of it from the
+     summarised turns is gone with them. */
+  let opening = `${payload.context}\n\n# Now\n${payload.message}`;
+  if (restored.length && conversationTokens(agent.state.messages) > compactionThreshold(contextWindow)) {
+    const compacted = await compactConversation(agent.state.messages, payload.provider, stopped);
+    if (compacted) {
+      agent.state.messages = compacted.messages;
+      opening = `${payload.record ?? payload.context}\n\n# Now\n${payload.message}`;
+      parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: `conversation-compacted:${compacted.tokensBefore}` } });
+    }
+  }
+  let opened = false;
+  /* Where this turn's part of the conversation starts. Telemetry records from
+     here on: the rest was recorded by the turns that wrote it. */
+  let turnStart = agent.state.messages.length;
   parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "event", name: "prompts", callId: randomUUID(), attributes: { ...promptRefs(), tools: [...allowed].sort() } } });
 
-  const opening = `${payload.context}\n\n# Now\n${payload.message}`;
   let compacted = "";
   let pending: string | undefined;
   let finalText = "";
   let finishReason = "stop";
   let contextPeak = 0;
-  const contextWindow = piModelFor(payload.provider).contextWindow;
   let spillRetried = false;
   let figureRetried = false;
   let overflowRetries = 0;
-  const finish = (text: string, reason: string, steps: number) => parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text, usage: sumUsage(usage), finishReason: reason, phaseSteps: steps, prompts: promptRefs() } });
+  const finish = (text: string, reason: string, steps: number) => parentPort.postMessage({ kind: "result", id: request.id, ok: true, value: { text, usage: sumUsage(usage), finishReason: reason, phaseSteps: steps, prompts: promptRefs(), conversation: conversationOut() } });
   const dropLastReply = () => { if (agent.state.messages.at(-1)?.role === "assistant") agent.state.messages.pop(); };
 
   try {
@@ -703,7 +728,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       let message = pending;
       pending = undefined;
       let prompt = `${opening}${compacted}`;
-      if (!conversationStarted(agent) && message) { prompt = `${prompt}\n\n${message}`; message = undefined; }
+      if (!opened && message) { prompt = `${prompt}\n\n${message}`; message = undefined; }
 
       const generationId = randomUUID();
       const startedAt = Date.now();
@@ -716,7 +741,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       let text = "";
       let streamError = "";
       let lastMessage: AssistantMessage | null = null;
-      parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "generation", name: `coach-step-${step}`, phase: step, callId: generationId, state: "start", model: payload.provider.model, provider: payload.provider.provider, input: telemetryValue({ system: agent.state.systemPrompt, messages: agent.state.messages, ...(conversationStarted(agent) ? (message ? { prompt: message } : {}) : { prompt }) }) } });
+      parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "telemetry", kind: "generation", name: `coach-step-${step}`, phase: step, callId: generationId, state: "start", model: payload.provider.model, provider: payload.provider.provider, input: telemetryValue({ system: agent.state.systemPrompt, earlierMessages: turnStart, messages: agent.state.messages.slice(turnStart), ...(opened ? (message ? { prompt: message } : {}) : { prompt }) }) } });
       const unsubscribe = agent.subscribe((event) => {
         idle.touch();
         if (event.type === "message_update") {
@@ -752,7 +777,8 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         }
       });
       try {
-        await advanceTrainingConversation(agent, prompt, message);
+        await advanceTrainingConversation(agent, prompt, message, opened);
+        opened = true;
       } finally {
         watch = null;
         unsubscribe();
@@ -760,15 +786,28 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         idle.dispose();
       }
       if (loopDetected) throw new Error(loopDetected);
-      /* Compaction: the conversation is rebuilt from the journey plus a digest of
-         what this turn already did. Durable results are in the store either way. */
+      /* Compaction mid-turn: the older part of the conversation becomes a
+         summary, the recent part (this turn's calls among it) stays, and the
+         record goes back in whole. If the summary cannot be written, the turn
+         starts over from the record and a digest of what it already did.
+         Durable results are in the store either way. */
       if (!stopped.aborted && turnOverflowed(lastMessage, payload.provider)) {
         if (overflowRetries >= OVERFLOW_RETRY_LIMIT) throw new Error(`This turn does not fit in ${payload.provider.model}'s context window, even after compacting it. Try a model with a larger window.`);
         overflowRetries += 1;
-        agent.state.messages = agent.state.messages.filter((entry) => (entry.role as string) === "system");
-        compacted = workDigest(outcomes);
+        dropLastReply();
+        const summarised = await compactConversation(agent.state.messages, payload.provider, stopped);
+        if (summarised) {
+          agent.state.messages = summarised.messages;
+          turnStart = 0;
+          pending = [`${payload.record ?? payload.context}\n\n# Now\nThe conversation was compacted to fit; carry on with this turn. It began with: ${payload.message}`, message].filter(Boolean).join("\n\n");
+        } else {
+          agent.state.messages = agent.state.messages.filter((entry) => (entry.role as string) === "system");
+          opening = `${payload.record ?? payload.context}\n\n# Now\n${payload.message}`;
+          compacted = workDigest(outcomes);
+          opened = false;
+          pending = message;
+        }
         callCounts.clear();
-        pending = message;
         parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: `context-overflow:compacted:${overflowRetries}` } });
         continue;
       }
@@ -812,7 +851,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
       return;
     }
     throw new Error(`Spar stopped after ${AGENT_MAX_STEPS} model requests in one turn.`);
-  } catch (error) { parentPort.postMessage({ kind: "result", id: request.id, ok: false, error: error instanceof Error ? error.message : String(error) }); }
+  } catch (error) { parentPort.postMessage({ kind: "result", id: request.id, ok: false, error: error instanceof Error ? error.message : String(error), value: { conversation: conversationOut() } }); }
 }
 
 function sumUsage(values: unknown[]) {

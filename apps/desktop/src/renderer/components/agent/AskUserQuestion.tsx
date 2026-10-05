@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, ArrowUp, Check, Loader2, Pencil } from "lucide-react";
+import { IconArrowRight, IconArrowUp, IconCheckmark1, IconLoader, IconPencil } from "central-icons";
 import type { AskUserQuestionRequest } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Inline } from "./Markdown";
@@ -157,7 +157,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
             <div className={cn("flex items-start gap-2.5 rounded-[var(--radius-item)] px-1.5 py-1", !sole && "bg-accent/40")}>
               {!sole && (
                 <span aria-hidden className="grid h-[1.55em] w-5 shrink-0 place-items-center text-thread text-foreground/70">
-                  <Pencil className="size-3.5" />
+                  <IconPencil className="size-3.5" />
                 </span>
               )}
               <textarea
@@ -193,7 +193,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
               type="button"
             >
               <span aria-hidden className="grid size-5 shrink-0 place-items-center">
-                <Pencil className="size-3.5" />
+                <IconPencil className="size-3.5" />
               </span>
               Or type your own answer…
             </button>
@@ -238,7 +238,7 @@ export function AskUserQuestion({ request, busy, onSubmit }: { request: AskUserQ
           title={last ? "Send answer" : "Next question"}
           type="button"
         >
-          {busy ? <Loader2 className="size-3.5 animate-spin" /> : last ? <ArrowUp className="size-3.5" /> : <ArrowRight className="size-3.5" />}
+          {busy ? <IconLoader className="size-3.5 animate-spin" /> : last ? <IconArrowUp className="size-3.5" /> : <IconArrowRight className="size-3.5" />}
         </button>
       </div>
     </div>
@@ -264,7 +264,7 @@ function Keycap({ multiple, selected, children }: { multiple: boolean; selected:
             : "bg-foreground/[0.06] text-muted-foreground group-hover/option:text-foreground",
       )}
     >
-      {selected && multiple ? <Check className="size-3" strokeWidth={3} /> : children}
+      {selected && multiple ? <IconCheckmark1 className="size-3" /> : children}
     </kbd>
   );
 }

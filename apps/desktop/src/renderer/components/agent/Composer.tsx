@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowUp, ChevronDown, Loader2, Paperclip, Plus, Square, Unplug } from "lucide-react";
+import { IconArrowUp, IconChevronBottom, IconLoader, IconPaperclip1, IconPlugin1, IconPlusMedium, IconStop } from "central-icons";
 import { cn } from "@/lib/utils";
 import { useProviders } from "../../hooks/use-providers";
 import { MentionPicker, type Mention, mentionRange, mentionSpans, useMentionSource } from "./Mentions";
@@ -178,7 +178,7 @@ export function Composer({
             the input, not a passing alert, and it stays until it is fixed. */}
         {!ready && (
           <div className="flex items-center gap-2 border-b border-[var(--border-surface-strong)] px-3 py-2 text-thread">
-            <Unplug className="size-3.5 shrink-0 text-warning" />
+            <IconPlugin1 className="size-3.5 shrink-0 text-warning" />
             <span className="min-w-0 flex-1 leading-[1.5] text-muted-foreground">
               <span className="font-medium text-foreground/90">No model provider connected.</span>{" "}
               Spar has nothing to answer with until you connect one.
@@ -204,7 +204,7 @@ export function Composer({
             title="Attach context"
             type="button"
           >
-            <Plus className="size-3.5" />
+            <IconPlusMedium className="size-3.5" />
           </button>
         )}
         {/* The field and its shadow, in that order on screen and the reverse in
@@ -280,7 +280,7 @@ export function Composer({
             title="Stop"
             type="button"
           >
-            <Square className="size-2.5 fill-current" />
+            <IconStop className="size-2.5 fill-current" />
           </button>
         ) : (
           <button
@@ -312,7 +312,7 @@ export function Composer({
                 key={busy && !steerable ? "busy" : `idle-${sent}`}
                 transition={reduced ? { duration: 0 } : { type: "spring", visualDuration: 0.34, bounce: 0.24 }}
               >
-                {busy && !steerable ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUp className="size-3.5" />}
+                {busy && !steerable ? <IconLoader className="size-3.5 animate-spin" /> : <IconArrowUp className="size-3.5" />}
               </motion.span>
             </AnimatePresence>
           </button>
@@ -355,9 +355,9 @@ export function ComposerPill({
     >
       {Icon && <Icon className="size-3.5" />}
       <span className="truncate">{children}</span>
-      {chevron && <ChevronDown className="size-3.5 opacity-50" />}
+      {chevron && <IconChevronBottom className="size-3.5 opacity-50" />}
     </Tag>
   );
 }
 
-export { Paperclip };
+export { IconPaperclip1 };

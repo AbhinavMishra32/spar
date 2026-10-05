@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Flag, Sparkles } from "lucide-react";
+import { IconFlag1, IconSparklesTwo } from "central-icons";
 import type { SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { message } from "@/lib/format";
@@ -91,7 +91,7 @@ export function ChatView({
             onClick={() => void nextChallenge()}
             type="button"
           >
-            <Sparkles className="size-3" />
+            <IconSparklesTwo className="size-3" />
             New challenge
           </button>
         }
@@ -108,7 +108,7 @@ export function ChatView({
           <div className="rounded-xl border border-border bg-card px-3 py-2.5 shadow-[var(--app-shadow-card)]">
             <div className="flex items-center gap-2">
               <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--color-background-elevated-secondary)] text-muted-foreground">
-                <Flag className="size-3" />
+                <IconFlag1 className="size-3" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/80">BETWEEN CHALLENGES</span>
@@ -132,7 +132,7 @@ export function ChatView({
         empty={
           <div className="flex flex-col items-center px-6 text-center">
             <span className="mb-3 grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground">
-              <Sparkles className="size-4" />
+              <IconSparklesTwo className="size-4" />
             </span>
             <p className="text-content font-medium">No challenge running</p>
             <p className="mt-1 max-w-[28rem] text-ui leading-[1.6] text-muted-foreground">

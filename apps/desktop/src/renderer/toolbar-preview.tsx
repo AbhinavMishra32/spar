@@ -5,7 +5,7 @@ import { ChallengeActions } from "./components/workspace/ChallengeActions";
 import { TooltipProvider } from "./components/ui/tooltip";
 import { Button } from "./components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./components/ui/dialog";
-import { Languages } from "lucide-react";
+import { IconTranslate } from "central-icons";
 import { TracksPage } from "./components/pages/TracksPage";
 import type { BootstrapData } from "../shared/api";
 import { Markdown } from "./components/agent/Markdown";
@@ -65,7 +65,7 @@ function Preview() {
             </DialogHeader>
             <DialogFooter>
               <Button variant="secondary">Keep Python</Button>
-              <Button><Languages data-icon="inline-start" />Switch</Button>
+              <Button><IconTranslate data-icon="inline-start" />Switch</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

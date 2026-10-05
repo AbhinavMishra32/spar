@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Waypoints } from "lucide-react";
+import { IconHome } from "central-icons";
 import type { AbilityHistorySummary, ConceptSummary, LearnerProgress } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { CONCEPT_KIND_SHORT, CONCEPT_KIND_VAR, standingOf } from "@/lib/concepts";
@@ -74,7 +74,7 @@ export function ConceptMap({
     return (
       <EmptyState
         description="Spar files every problem it sets under the concepts it is about. Solve something and this fills in."
-        icon={Waypoints}
+        icon={IconHome}
         title="Nothing mapped yet"
       />
     );

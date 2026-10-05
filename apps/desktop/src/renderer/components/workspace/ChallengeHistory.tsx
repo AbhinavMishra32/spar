@@ -1,14 +1,5 @@
-import {
-  Check,
-  CircleDot,
-  FileCode2,
-  Flag,
-  Gavel,
-  Play,
-  Send,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+import { IconCheckmark1, IconCircleRecord, IconCrossMedium, IconFileBend, IconFlag1, IconLaw, IconPaperPlane, IconPlay } from "central-icons";
+import type { CentralIcon } from "@/lib/icons";
 import type { ChallengeTimelineEntry } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { shortTime } from "@/lib/format";
@@ -31,19 +22,19 @@ import { useScrollFade } from "@/hooks/use-scroll-fade";
 
 /** What each event type looks like. Unrecognised types — older builds wrote
  *  their own — fall back to the neutral dot the whole list used to use. */
-const GLYPH: Record<string, LucideIcon> = {
-  attempt_started: Flag,
-  file_changed: FileCode2,
-  command_executed: Play,
-  test_run: CircleDot,
-  submission_created: Send,
-  submission_evaluated: Gavel,
-  attempt_completed: Flag,
+const GLYPH: Record<string, CentralIcon> = {
+  attempt_started: IconFlag1,
+  file_changed: IconFileBend,
+  command_executed: IconPlay,
+  test_run: IconCircleRecord,
+  submission_created: IconPaperPlane,
+  submission_evaluated: IconLaw,
+  attempt_completed: IconFlag1,
 };
 
-function glyphFor(entry: ChallengeTimelineEntry): LucideIcon {
-  if (entry.type === "test_run") return entry.tone === "good" ? Check : X;
-  return GLYPH[entry.type] ?? CircleDot;
+function glyphFor(entry: ChallengeTimelineEntry): CentralIcon {
+  if (entry.type === "test_run") return entry.tone === "good" ? IconCheckmark1 : IconCrossMedium;
+  return GLYPH[entry.type] ?? IconCircleRecord;
 }
 
 const TONE: Record<ChallengeTimelineEntry["tone"], string> = {

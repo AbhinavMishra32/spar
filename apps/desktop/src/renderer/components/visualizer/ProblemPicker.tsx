@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ExternalLink, Library, Loader2, Lock, Search, X } from "lucide-react";
+import { IconBooks, IconCrossMedium, IconLoader, IconLock, IconMagnifyingGlass, IconSquareArrowTopRight } from "central-icons";
 import type { SparApi, VisualizerProblem } from "../../../shared/api";
 import { cn } from "@/lib/utils";
 import { useProblemSearch } from "../../hooks/use-problem-search";
@@ -58,18 +58,18 @@ export function ProblemPicker({
         </DialogHeader>
 
         <div className="relative">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <IconMagnifyingGlass className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input autoFocus className="pl-8" onChange={(event) => setQuery(event.target.value)} placeholder="Search your connected sources…" value={query} />
         </div>
 
         <div className="app-scroll -mx-1 max-h-[22rem] min-h-[8rem] overflow-y-auto px-1">
           {search.loading && !search.hits.length && (
-            <p className="flex items-center gap-2 py-8 text-center text-ui text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />Searching…</p>
+            <p className="flex items-center gap-2 py-8 text-center text-ui text-muted-foreground"><IconLoader className="size-3.5 animate-spin" />Searching…</p>
           )}
 
           {!search.loading && !search.hits.length && (
             <div className="py-8 text-center">
-              <Library className="mx-auto size-5 text-muted-foreground" />
+              <IconBooks className="mx-auto size-5 text-muted-foreground" />
               <p className="mt-2 text-ui text-muted-foreground">
                 {search.error ?? (query ? "Nothing matched." : "Connect LeetCode in Settings to browse problems here.")}
               </p>
@@ -98,8 +98,8 @@ export function ProblemPicker({
                   <span className="w-10 shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground">{hit.displayId}</span>
                   <span className="min-w-0 flex-1 truncate text-ui">{hit.title}</span>
                   <span className="shrink-0 text-ui-sm text-muted-foreground">{BAND[hit.difficulty]}</span>
-                  {locked && <Lock className="size-3 shrink-0 text-muted-foreground" />}
-                  {opening === key && <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />}
+                  {locked && <IconLock className="size-3 shrink-0 text-muted-foreground" />}
+                  {opening === key && <IconLoader className="size-3.5 shrink-0 animate-spin text-muted-foreground" />}
                 </button>
               );
             })}
@@ -144,10 +144,10 @@ export function ProblemBanner({
         <span className="min-w-0 flex-1 truncate text-content font-medium">{problem.title}</span>
         <span className="shrink-0 text-ui-sm text-muted-foreground">{BAND[problem.difficulty]}</span>
         <Button className="text-muted-foreground" onClick={() => onOpenExternal(problem.url)} size="icon-xs" title="Open at the source" variant="ghost">
-          <ExternalLink />
+          <IconSquareArrowTopRight />
         </Button>
         <Button className="text-muted-foreground" onClick={onClear} size="icon-xs" title="Close this problem" variant="ghost">
-          <X />
+          <IconCrossMedium />
         </Button>
       </div>
 

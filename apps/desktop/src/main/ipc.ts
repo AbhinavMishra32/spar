@@ -238,7 +238,12 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
       /* Assembled by `agentTurnPayload`, which is also what the eval calls, so
          the prompt the product sends and the prompt a measurement is taken
          against cannot be two different prompts. */
-      const payload=agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,skills:deps.skills.catalog()});
+      /* The session's conversation is continued when it was started under this
+         prompt, this app build and this model; otherwise the turn starts a new
+         one from the record. A model switch starts over on purpose: replayed
+         into another model, the old one's reasoning reads as things it said. */
+      const conversationRef=(provider:{provider:string;model:string})=>[JSON.stringify(promptRefs()),deps.appVersion,provider.provider,provider.model].join("|");
+      const payload=agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,skills:deps.skills.catalog(),conversation:deps.store.readConversation(sessionId),promptRef:conversationRef(providers[0]!)});
       /* A run is claimed by its session for as long as it is in flight, in two
          places: `activeAgentRuns` guards against a second turn, and
          `agentRunSessions` is what lets the main process stamp a session id onto
@@ -254,7 +259,11 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
       const release=(runId:string)=>{activeAgentRuns.delete(sessionId);deps.agentRunSessions.delete(runId);};
       const beginTelemetry=(runId:string,index:number)=>deps.telemetry.start({runId,sessionId,provider:providers[index]!.provider,model:providers[index]!.model,reasoningEffort:providers[index]!.reasoningEffort,turnKind,input:{message,visibleMessage,role,context:payload.context,activeQuestion:payload.activeQuestion??null},prompts:promptRefs(),appVersion:deps.appVersion});
       const first=deps.agent.request("turn",{...payload,provider:providers[0]});claim(first.id);beginTelemetry(first.id,0);
-      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number):Promise<void>=>{try{const value=await request.promise as {text?:string;usage?:unknown;finishReason?:string;phaseSteps?:number};
+      /* What the coach was shown is saved with what it then did, so the next
+         turn continues the conversation and says only what changed since. */
+      const keepConversation=(messages:unknown,index:number,sent:typeof payload)=>{if(Array.isArray(messages)&&messages.length)deps.store.saveConversation(sessionId,{promptRef:conversationRef(providers[index]!),messages,sections:sent.sections});};
+      const attempt=async(request:ReturnType<UtilityClient["request"]>,index:number,sent:typeof payload=payload):Promise<void>=>{try{const value=await request.promise as {text?:string;usage?:unknown;finishReason?:string;phaseSteps?:number;conversation?:unknown};
+        keepConversation(value.conversation,index,sent);
         /* The turn's own steps go into storage with the reply they produced. The
            live run is dropped the instant this `done` reaches the renderer, and
            without this the transcript would keep only the last sentence of a
@@ -266,7 +275,10 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
         if(value.text?.trim()||activity.length)deps.store.addMessage(sessionId,"agent",value.text?.trim()??"",activity,Date.now()-startedAt);
         if(turnKind==="learner-message"&&value.text?.trim())noteConversation(sessionId,"agent",value.text.trim());
         deps.telemetry.finish(request.id,value);
-        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);deps.telemetry.finish(request.id,{},error);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retry=deps.agent.request("turn",{...agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,resumeSince:new Date(startedAt).toISOString(),skills:deps.skills.catalog()}),provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);beginTelemetry(retry.id,index+1);return attempt(retry,index+1);}deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
+        deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"done"});release(request.id);}catch(error){deps.agentQuestions.cancel(sessionId);forgetAgentActivity(request.id);deps.telemetry.finish(request.id,{},error);const next=providers[index+1];if(next){deps.store.addMessage(sessionId,"system",`Provider ${providers[index]?.provider??"unknown"} failed; retrying this turn with ${next.provider}.`);const retried=agentTurnPayload({store:deps.store,sessionId,message,turnKind,webSearch,practiceSource:practiceConnected,practiceSummary,accountId:account.id,resumeSince:new Date(startedAt).toISOString(),skills:deps.skills.catalog(),conversation:deps.store.readConversation(sessionId),promptRef:conversationRef(next)});const retry=deps.agent.request("turn",{...retried,provider:next});deps.agentRunSessions.delete(request.id);claim(retry.id);beginTelemetry(retry.id,index+1);return attempt(retry,index+1,retried);}
+          /* The last provider failed too: what it got through is kept, so the
+             learner's message and the work before the failure are not lost. */
+          keepConversation((error as {value?:{conversation?:unknown}}).value?.conversation,index,sent);deps.window()?.webContents.send("agent:event",{runId:request.id,sessionId,type:"error",text:error instanceof Error?error.message:String(error)});release(request.id);}};
       void attempt(first,0);return{runId:first.id};
     })();
     startingAgentRuns.set(sessionId,launch);

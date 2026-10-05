@@ -1,4 +1,4 @@
-import { ArrowRight, Check, Loader2, X } from "lucide-react";
+import { IconArrowRight, IconCheckmark1, IconCrossMedium, IconLoader } from "central-icons";
 import { Fragment } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Button } from "@/components/ui/button";
@@ -85,7 +85,7 @@ function MiniGraph({value,label,claim,matched}: {value:string;label:string;claim
  *  bound on the solid one, so the legend and the result are the same thing. */
 function BoundResult({claim,reviewed,matched}:{claim:string;reviewed:string;matched:boolean}){
   const bound=splitBound(reviewed).bound;
-  if(matched)return <div className="mt-1.5 flex items-center gap-1.5 border-t border-[var(--glass-hairline)] pt-1.5 text-ui-sm text-[var(--success)]"><Check className="size-3 shrink-0"/><span className="font-mono"><Inline text={bound}/></span><span className="ml-auto text-muted-foreground">matches</span></div>;
+  if(matched)return <div className="mt-1.5 flex items-center gap-1.5 border-t border-[var(--glass-hairline)] pt-1.5 text-ui-sm text-[var(--success)]"><IconCheckmark1 className="size-3 shrink-0"/><span className="font-mono"><Inline text={bound}/></span><span className="ml-auto text-muted-foreground">matches</span></div>;
   return <div className="mt-1.5 space-y-0.5 border-t border-[var(--glass-hairline)] pt-1.5 text-ui-sm">
     <div className="flex items-center gap-1.5 text-destructive"><span className="w-3 shrink-0 border-t border-dashed border-current"/><span className="font-mono line-through decoration-destructive/60">{claim}</span><span className="ml-auto text-muted-foreground">yours</span></div>
     <div className="flex items-center gap-1.5 text-[var(--success)]"><span className="w-3 shrink-0 border-t-2 border-current"/><span className="font-mono"><Inline text={bound}/></span><span className="ml-auto text-muted-foreground">actual</span></div>
@@ -140,15 +140,15 @@ function VerdictBadge({verdict}:{verdict:ComplexityVerdict}){
   const both=verdict.timeMatches&&verdict.spaceMatches;
   const neither=!verdict.timeMatches&&!verdict.spaceMatches;
   const text=both?"Both bounds correct":neither?"Both bounds need another look":verdict.timeMatches?"Space needs another look":"Time needs another look";
-  return <motion.span animate={{opacity:1,scale:1}} className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-ui-sm font-medium",both?"bg-[var(--success)]/12 text-[var(--success)]":"bg-destructive/10 text-destructive")} initial={{opacity:0,scale:.92}}>{both?<Check className="size-3"/>:<X className="size-3"/>}{text}</motion.span>;
+  return <motion.span animate={{opacity:1,scale:1}} className={cn("inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-ui-sm font-medium",both?"bg-[var(--success)]/12 text-[var(--success)]":"bg-destructive/10 text-destructive")} initial={{opacity:0,scale:.92}}>{both?<IconCheckmark1 className="size-3"/>:<IconCrossMedium className="size-3"/>}{text}</motion.span>;
 }
 
 /** A field's label, and what the review made of it. */
 function Field({label,matched}:{label:string;matched?:boolean|undefined}){
   return <span className="flex items-baseline gap-1.5">
     <span className="font-medium text-foreground">{label}</span>
-    {matched===true&&<Check className="size-3 shrink-0 self-center text-[var(--success)]"/>}
-    {matched===false&&<X className="size-3 shrink-0 self-center text-destructive"/>}
+    {matched===true&&<IconCheckmark1 className="size-3 shrink-0 self-center text-[var(--success)]"/>}
+    {matched===false&&<IconCrossMedium className="size-3 shrink-0 self-center text-destructive"/>}
   </span>;
 }
 
@@ -181,7 +181,7 @@ export function ComplexityCheckpoint({state,onChange,onReview,onAcknowledge}: {s
         {state.phase==="reviewing"&&<motion.div animate={{height:"auto",opacity:1}} className="overflow-hidden" exit={{opacity:0}} initial={{height:0,opacity:0}} key="reviewing"><ReviewingSkeleton/></motion.div>}
         {reviewed&&<motion.div animate={{opacity:1,y:0}} initial={{opacity:0,y:4}} key="reviewed" transition={{duration:.25}}><Breakdown fallback={state.review} verdict={matched}/></motion.div>}
       </AnimatePresence>
-      <div className="flex items-center justify-between gap-3"><p className="text-ui-sm text-muted-foreground">Chat unlocks after you acknowledge the review.</p>{state.phase==="answering"?<Button disabled={!canReview} onClick={onReview} size="sm">Check my answer<ArrowRight/></Button>:reviewed?<Button disabled={state.phase==="acknowledging"} onClick={onAcknowledge} size="sm">{state.phase==="acknowledging"?<Loader2 className="animate-spin"/>:<Check/>}Noted, continue</Button>:null}</div>
+      <div className="flex items-center justify-between gap-3"><p className="text-ui-sm text-muted-foreground">Chat unlocks after you acknowledge the review.</p>{state.phase==="answering"?<Button disabled={!canReview} onClick={onReview} size="sm">Check my answer<IconArrowRight/></Button>:reviewed?<Button disabled={state.phase==="acknowledging"} onClick={onAcknowledge} size="sm">{state.phase==="acknowledging"?<IconLoader className="animate-spin"/>:<IconCheckmark1/>}Noted, continue</Button>:null}</div>
     </div>
   </motion.section>;
 }

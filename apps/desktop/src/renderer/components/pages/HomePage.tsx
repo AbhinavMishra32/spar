@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import { CornerDownLeft, Sparkles } from "lucide-react";
+import { IconArrowCornerDownLeft, IconSparklesTwo } from "central-icons";
 import type { AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary, SessionSummary } from "@spar/domain";
 import type { BootstrapData, SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -119,7 +119,7 @@ export function HomePage({
             way — it belongs in the session, not on the front door. */}
         {checking && (
           <p className="mt-5 flex items-center gap-2 text-content text-muted-foreground">
-            <Sparkles aria-hidden="true" className="size-3.5 shrink-0" />
+            <IconSparklesTwo aria-hidden="true" className="size-3.5 shrink-0" />
             <span className="min-w-0 truncate">
               Checking{" "}
               {recommendation?.abilityId
@@ -132,7 +132,7 @@ export function HomePage({
         <div className="mt-8 flex items-center gap-2">
           <Button disabled={primary.disabled} onClick={primary.run} size="lg">
             {primary.label}
-            <kbd className="ml-1 inline-flex items-center rounded border border-current/25 px-1 py-px opacity-70"><CornerDownLeft className="size-2.5" /></kbd>
+            <kbd className="ml-1 inline-flex items-center rounded border border-current/25 px-1 py-px opacity-70"><IconArrowCornerDownLeft className="size-2.5" /></kbd>
           </Button>
         </div>
 

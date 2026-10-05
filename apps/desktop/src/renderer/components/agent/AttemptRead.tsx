@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { Check, Eye, EyeOff, Minus, X } from "lucide-react";
+import { IconCheckmark1, IconCrossMedium, IconEyeOpen, IconEyeSlash, IconMinusMedium } from "central-icons";
 
 import { languageForPath } from "@spar/domain";
 import { cn } from "@/lib/utils";
@@ -184,8 +184,8 @@ function CaseRow({ item }: { item: ReadCase }) {
         <Tooltip>
           <TooltipTrigger className="shrink-0 cursor-default" tabIndex={-1} type="button">
             {item.hidden
-              ? <EyeOff className="size-3 text-muted-foreground/45" />
-              : <Eye className="size-3 text-muted-foreground/30" />}
+              ? <IconEyeSlash className="size-3 text-muted-foreground/45" />
+              : <IconEyeOpen className="size-3 text-muted-foreground/30" />}
           </TooltipTrigger>
           <TooltipContent>{item.hidden ? "Hidden — only runs on a submission" : "Visible while they worked"}</TooltipContent>
         </Tooltip>
@@ -213,14 +213,14 @@ function Mark({ mark }: { mark: CaseMark }) {
   if (mark === "passed") {
     return (
       <span className="grid size-3.5 place-items-center rounded-[3px] bg-[var(--success)]/15">
-        <Check className="size-2.5 text-[var(--success)]" />
+        <IconCheckmark1 className="size-2.5 text-[var(--success)]" />
       </span>
     );
   }
   if (mark === "failed") {
     return (
       <span className="grid size-3.5 place-items-center rounded-[3px] bg-destructive/15">
-        <X className="size-2.5 text-destructive" />
+        <IconCrossMedium className="size-2.5 text-destructive" />
       </span>
     );
   }
@@ -233,7 +233,7 @@ function Mark({ mark }: { mark: CaseMark }) {
   }
   return (
     <span className="grid size-3.5 place-items-center" title="Skipped">
-      <Minus className="size-2.5 text-muted-foreground/50" />
+      <IconMinusMedium className="size-2.5 text-muted-foreground/50" />
     </span>
   );
 }
@@ -365,7 +365,7 @@ function LogRow({ line }: { line: ReadLogLine }) {
         <div className="mt-0.5 min-w-0 space-y-px">
           {failed.slice(0, 6).map((item) => (
             <div className="flex min-w-0 items-baseline gap-1.5" key={item.name}>
-              <X className="size-2.5 shrink-0 translate-y-0.5 text-destructive" />
+              <IconCrossMedium className="size-2.5 shrink-0 translate-y-0.5 text-destructive" />
               <span className="min-w-0 shrink truncate text-foreground/75">{item.name}</span>
               {item.note && <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground/60" title={item.note}>{item.note}</span>}
             </div>

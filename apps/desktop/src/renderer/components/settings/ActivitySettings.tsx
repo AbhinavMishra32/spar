@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
-import { ChevronDown } from "lucide-react";
+import { IconChevronBottom } from "central-icons";
 import type { ActivityReport, ActivitySolve, SparApi } from "../../../shared/api";
 import { DropdownMenu, DropdownMenuCheckItem, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { SparDots } from "@/components/common/SparDots";
@@ -387,7 +387,7 @@ function RangePicker({ onChange, range, years }: { onChange(range: Range): void;
       <DropdownMenuTrigger asChild>
         <button className="inline-flex min-w-0 items-center gap-0.5 rounded-[var(--radius-md)] px-1 py-0.5 outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring" type="button">
           <span className="truncate">{label}</span>
-          <ChevronDown className="size-3.5 shrink-0 opacity-70" />
+          <IconChevronBottom className="size-3.5 shrink-0 opacity-70" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-36">

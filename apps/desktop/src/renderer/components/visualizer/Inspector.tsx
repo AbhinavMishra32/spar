@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Braces, ChevronRight, Layers, ListTree, Terminal, X } from "lucide-react";
+import { IconBrackets2, IconChevronRight, IconCodeTree, IconConsole, IconCrossMedium, IconLayersTwo } from "central-icons";
 import type { Language } from "@spar/domain";
 import { formatIn, isRef, sameValue, type HeapObject, type Snapshot, type Trace } from "@spar/visualizer";
 import { cn } from "@/lib/utils";
@@ -26,10 +26,10 @@ import { Button } from "@/components/ui/button";
 type Tab = "variables" | "stack" | "console" | "heap";
 
 const TABS: Array<{ id: Tab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
-  { id: "variables", label: "Variables", icon: Braces },
-  { id: "stack", label: "Call stack", icon: ListTree },
-  { id: "console", label: "Console", icon: Terminal },
-  { id: "heap", label: "Heap", icon: Layers },
+  { id: "variables", label: "Variables", icon: IconBrackets2 },
+  { id: "stack", label: "Call stack", icon: IconCodeTree },
+  { id: "console", label: "Console", icon: IconConsole },
+  { id: "heap", label: "Heap", icon: IconLayersTwo },
 ];
 
 export function Inspector({
@@ -115,7 +115,7 @@ export function Inspector({
                   <span className="font-mono text-ui font-medium">{name}</span>
                   {isRef(value) ? (
                     <span className="flex items-center gap-1 font-mono text-ui text-muted-foreground">
-                      <ChevronRight className="size-3" />
+                      <IconChevronRight className="size-3" />
                       {target ? `${target.type}` : "object"}
                       <span className="text-ui-sm">@{value.ref}</span>
                     </span>
@@ -189,7 +189,7 @@ export function Inspector({
             <span className="font-mono text-ui font-medium">{frame.heap[selected]?.type}</span>
             <span className="font-mono text-ui-sm text-muted-foreground">@{selected}</span>
             <Button className="ml-auto text-muted-foreground" onClick={() => onSelect(null)} size="icon-xs" variant="ghost">
-              <X />
+              <IconCrossMedium />
             </Button>
           </div>
           <pre className="app-scroll mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap font-mono text-ui-sm text-muted-foreground">

@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { ArrowDownToLine, ChevronDown, ChevronUp } from "lucide-react";
+import { IconArrowInbox, IconChevronBottom, IconChevronTop } from "central-icons";
 import { AnimatePresence, motion } from "motion/react";
 import type { ChallengeCodePreview, Language } from "@spar/domain";
 import { cn } from "@/lib/utils";
@@ -60,7 +60,7 @@ export type ChallengeTrail = {
    number between them rolls the same way. Sideways chevrons said "previous page",
    which is a different gesture and set the wrong expectation for the motion. */
 function Step({ label, onGo, stop }: { label: string; onGo(stop: ChallengeStop): void; stop: ChallengeStop | undefined }) {
-  const Glyph = label === "Previous" ? ChevronUp : ChevronDown;
+  const Glyph = label === "Previous" ? IconChevronTop : IconChevronBottom;
   return (
     <button
       /* Solid foreground, and a 24px target rather than 20px. These were
@@ -212,7 +212,7 @@ export function ChallengeStepper({ className, currentId, trail }: {
                   : `Back to the session — ${home.title} and the conversation about it`}
                 type="button"
               >
-                <ArrowDownToLine className="size-3.5" />
+                <IconArrowInbox className="size-3.5" />
                 {live ? "Back to current" : "Back to latest"}
               </button>
             )}

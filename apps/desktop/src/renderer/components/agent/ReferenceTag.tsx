@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { X } from "lucide-react";
+import { IconCrossMedium } from "central-icons";
 import { cn } from "@/lib/utils";
 
 /**
@@ -121,7 +121,7 @@ export const ReferenceTag = forwardRef<HTMLSpanElement, {
           onClick={onRemove}
           type="button"
         >
-          <X className="size-3" />
+          <IconCrossMedium className="size-3" />
         </button>
       )}
     </span>

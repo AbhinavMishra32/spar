@@ -1,7 +1,7 @@
 import * as React from "react"
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui"
 import { AnimatePresence, motion } from "motion/react"
-import { Check, ChevronRight } from "lucide-react"
+import { IconCheckmark1, IconChevronRight } from "central-icons";
 
 import { useControlledState } from "@/hooks/use-controlled-state"
 import { useScrollFade } from "@/hooks/use-scroll-fade"
@@ -360,7 +360,7 @@ function DropdownMenuCheckItem({
             initial={{ opacity: 0, scale: 0.6 }}
             transition={{ type: "spring", stiffness: 700, damping: 30, mass: 0.5 }}
           >
-            <Check className="size-3.5" />
+            <IconCheckmark1 className="size-3.5" />
           </motion.span>
         )}
       </AnimatePresence>
@@ -421,7 +421,7 @@ function DropdownMenuSubTrigger({
       {...props}
     >
       {children}
-      <ChevronRight className="ml-auto size-3.5 opacity-45" />
+      <IconChevronRight className="ml-auto size-3.5 opacity-45" />
     </DropdownMenuPrimitive.SubTrigger>
   )
 }

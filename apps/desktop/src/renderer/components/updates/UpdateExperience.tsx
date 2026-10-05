@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowDownToLine, TriangleAlert } from "lucide-react";
+import { IconArrowInbox, IconExclamationTriangle } from "central-icons";
 import type { SparApi, UpdateState } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -64,7 +64,7 @@ export function UpdateExperience({ api }: { api: SparApi }) {
   const update = async () => {
     setNotesOpen(false);
     try { await api.downloadUpdate(); }
-    catch (cause) { toast({ key: KEY, title: "Update didn’t download", detail: message(cause), tone: "danger", glyph: <TriangleAlert />, duration: 0 }); }
+    catch (cause) { toast({ key: KEY, title: "Update didn’t download", detail: message(cause), tone: "danger", glyph: <IconExclamationTriangle />, duration: 0 }); }
   };
 
   useEffect(() => {
@@ -79,7 +79,7 @@ export function UpdateExperience({ api }: { api: SparApi }) {
           key: KEY,
           title: `Spar ${version} is available`,
           detail: "Spar restarts to install it",
-          glyph: <ArrowDownToLine />,
+          glyph: <IconArrowInbox />,
           action: { label: "Update", onClick: () => void update() },
           onClick: () => setNotesOpen(true),
           duration: 0,
@@ -99,7 +99,7 @@ export function UpdateExperience({ api }: { api: SparApi }) {
           title: "Update didn’t install",
           detail: state.message ?? undefined,
           tone: "danger",
-          glyph: <TriangleAlert />,
+          glyph: <IconExclamationTriangle />,
           action: { label: "Retry", onClick: () => void api.checkForUpdate() },
           duration: 0,
         });

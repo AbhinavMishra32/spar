@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, Pause, Play, SkipBack, SkipForward, Sparkles } from "lucide-react";
+import { IconArrowLeft, IconArrowRight, IconPause, IconPlay, IconRewind, IconSkip, IconSparklesTwo } from "central-icons";
 import type { Language } from "@spar/domain";
 import { formatIn, type LineNote, type Snapshot } from "@spar/visualizer";
 import { cn } from "@/lib/utils";
@@ -32,7 +32,7 @@ export function StepNarration({
   const changes = changedFields(language, frame, previous);
   return (
     <div className="flex items-start gap-2.5 border-t border-border px-4 py-3">
-      <Sparkles className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+      <IconSparklesTwo className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0 flex-1">
         {frame?.condition && (
           <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -112,10 +112,10 @@ export function Transport({
     <div className="flex items-center gap-3 border-t border-border px-4 py-2.5">
       <div className="flex items-center gap-0.5">
         <Button disabled={disabled} onClick={() => onIndex(0)} size="icon-sm" title="First step" variant="ghost">
-          <SkipBack />
+          <IconRewind />
         </Button>
         <Button disabled={disabled || index === 0} onClick={() => onStep(-1)} size="icon-sm" title="Previous step (←)" variant="ghost">
-          <ArrowLeft />
+          <IconArrowLeft />
         </Button>
         <Button
           disabled={disabled}
@@ -124,13 +124,13 @@ export function Transport({
           title={playing ? "Pause (space)" : "Play (space)"}
           variant="secondary"
         >
-          {playing ? <Pause /> : <Play />}
+          {playing ? <IconPause /> : <IconPlay />}
         </Button>
         <Button disabled={disabled || index >= count - 1} onClick={() => onStep(1)} size="icon-sm" title="Next step (→)" variant="ghost">
-          <ArrowRight />
+          <IconArrowRight />
         </Button>
         <Button disabled={disabled} onClick={() => onIndex(count - 1)} size="icon-sm" title="Last step" variant="ghost">
-          <SkipForward />
+          <IconSkip />
         </Button>
       </div>
 

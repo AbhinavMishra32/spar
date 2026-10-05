@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle } from "lucide-react";
+import { IconExclamationCircle } from "central-icons";
 import { AnimatePresence, motion } from "motion/react";
 import type { ChallengeCodePreview, ChallengeDetail, Language, ProblemSource, SessionDetail, SessionSummary, TeachingMode, Track } from "@spar/domain";
 import type { AgentStreamEvent, BootstrapData, SparApi, ThemePreference } from "../shared/api";
@@ -538,7 +538,7 @@ export function App() {
       key: "app-error",
       title: error,
       tone: "danger",
-      glyph: <AlertCircle />,
+      glyph: <IconExclamationCircle />,
       action: reconnect ? { label: "Settings", onClick: () => {
         setPage("settings");
         setDetail(null);
@@ -1444,7 +1444,7 @@ function FatalError({ error }: { error: string }) {
     <div className="app-drag app-pane grid h-full place-items-center px-8">
       <div className="max-w-[32rem] rounded-xl border border-destructive/30 bg-card p-4 shadow-[var(--app-shadow-card)]">
         <p className="flex items-center gap-2 text-content font-semibold text-destructive">
-          <AlertCircle className="size-4" />
+          <IconExclamationCircle className="size-4" />
           Spar could not start
         </p>
         <p className="mt-1.5 text-ui leading-[1.65] text-muted-foreground">{error}</p>

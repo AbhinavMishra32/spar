@@ -1,5 +1,5 @@
 import { Component, useState, type ErrorInfo, type ReactNode } from "react";
-import { Copy, RotateCcw } from "lucide-react";
+import { IconArrowRotateCounterClockwise, IconSquareBehindSquare1 } from "central-icons";
 
 /**
  * What the window shows when the app throws while rendering.
@@ -73,7 +73,7 @@ function CrashScreen({ error, componentStack }: { error: Error; componentStack: 
             onClick={() => location.reload()}
             type="button"
           >
-            <RotateCcw className="size-3.5" />
+            <IconArrowRotateCounterClockwise className="size-3.5" />
             Reload Spar
           </button>
           <button
@@ -81,7 +81,7 @@ function CrashScreen({ error, componentStack }: { error: Error; componentStack: 
             onClick={copy}
             type="button"
           >
-            <Copy className="size-3.5" />
+            <IconSquareBehindSquare1 className="size-3.5" />
             {copied ? "Copied" : "Copy report"}
           </button>
         </div>

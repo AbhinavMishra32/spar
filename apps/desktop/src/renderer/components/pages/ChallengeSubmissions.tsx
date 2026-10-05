@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { IconChevronRight } from "central-icons";
 import { cn } from "@/lib/utils";
 import { CaseDots, FailingCase, SubmissionLine } from "../agent/SubmissionCard";
 import { CodePeek } from "../common/CodePeek";
@@ -104,7 +104,7 @@ function Submission({ api, onToggle, open, row, scrollIntoView }: {
         type="button"
       >
         <SubmissionLine className="flex-1" submission={row} />
-        <ChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground/60 transition-transform", open && "rotate-90")} />
+        <IconChevronRight className={cn("size-3.5 shrink-0 text-muted-foreground/60 transition-transform", open && "rotate-90")} />
       </button>
 
       {/* The grid stays out on the row, folded or not. It is the part that is

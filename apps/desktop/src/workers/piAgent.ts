@@ -1,4 +1,4 @@
-import { Agent, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core";
+import { Agent, type AgentMessage, type AgentTool, type AgentToolResult } from "@earendil-works/pi-agent-core";
 import { completeSimple, streamSimple } from "@earendil-works/pi-ai/compat";
 import type { AssistantMessage, AssistantMessageEvent, Message, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
@@ -52,11 +52,15 @@ export function piAgentTools(
  * pin for the ChatGPT subscription route, the same reasoning directive, the same
  * headers. The system prompt and the tool list are set once for the turn.
  */
-export function createTrainingAgent(input: PiProviderInput, systemPrompt: string, telemetryContext?: TelemetryContext): Agent {
+/** A conversation to continue: its messages without pi's system message, and
+ *  the tools, declared with the prompt as they were when it started. */
+export type RestoredConversation = { messages: AgentMessage[]; tools: AgentTool[] };
+
+export function createTrainingAgent(input: PiProviderInput, systemPrompt: string, telemetryContext?: TelemetryContext, restored?: RestoredConversation): Agent {
   const transport = piTransportForApi(input.api);
   const reasoningSummary = piReasoningSummaryForApi(input.api);
   return new Agent({
-    initialState: { systemPrompt, model: piModelFor(input), tools: [], messages: [] },
+    initialState: { systemPrompt, model: piModelFor(input), tools: restored?.tools ?? [], messages: restored?.messages ?? [] },
     convertToLlm: (messages) => messages as Message[],
     streamFn: (model, context, options) => streamSimple(model, context, {
       ...options,
@@ -85,11 +89,13 @@ export function conversationStarted(agent: Agent): boolean {
   return agent.state.messages.some((message) => (message.role as string) !== "system");
 }
 
-/** Advance the conversation one model request. The first request carries the
- *  journey and the turn's event; a later one carries a message only when there
- *  is something new to say (learner steering, a correction). */
-export async function advanceTrainingConversation(agent: Agent, initialPrompt: string, message?: string): Promise<void> {
-  if (!conversationStarted(agent)) await agent.prompt(initialPrompt);
+/** Advance the conversation one model request. A turn's first request carries
+ *  its opening (the journey, or what changed since the last turn, and the
+ *  event); a later one carries a message only when there is something new to
+ *  say (learner steering, a correction). `opened` is whether this turn has sent
+ *  its opening yet: a continued conversation has started long before. */
+export async function advanceTrainingConversation(agent: Agent, initialPrompt: string, message?: string, opened = conversationStarted(agent)): Promise<void> {
+  if (!opened) await agent.prompt(initialPrompt);
   else if (message) await agent.prompt(message);
   else await agent.continue();
 }

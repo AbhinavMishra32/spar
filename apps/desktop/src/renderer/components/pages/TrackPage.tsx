@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { IconPlusMedium } from "central-icons";
 import { DEFAULT_PROBLEM_SOURCES, type ChallengeHistorySummary, type ProblemSource, type SessionSummary, type TeachingMode, type Track } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import type { AgentRun } from "../agent/agentRun";
@@ -39,7 +39,7 @@ export function TrackPage({ api, track, sessions, challenges, runs, busy, onCrea
   };
 
   const newSession = <Dialog onOpenChange={setOpen} open={open}>
-    <DialogTrigger asChild><Button><Plus data-icon="inline-start" />New Session</Button></DialogTrigger>
+    <DialogTrigger asChild><Button><IconPlusMedium data-icon="inline-start" />New Session</Button></DialogTrigger>
     <DialogContent>
       <DialogHeader>
         <DialogTitle>New session</DialogTitle>

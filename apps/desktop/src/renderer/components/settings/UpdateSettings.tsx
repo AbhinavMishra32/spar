@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Download, Loader2, RefreshCw } from "lucide-react";
+import { IconArrowInbox, IconArrowRotateRightLeft, IconCheckmark1, IconLoader } from "central-icons";
 import type { SparApi, UpdateState } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { message } from "@/lib/format";
@@ -55,16 +55,16 @@ export function UpdateSettings({ api }: { api: SparApi | undefined }) {
   return (
     <SettingsRow className="gap-4">
       <div className="grid size-9 shrink-0 place-items-center rounded-lg bg-accent text-foreground">
-        {busy ? <Loader2 className="size-4 animate-spin" /> : state?.status === "current" ? <Check className="size-4 text-success" /> : <RefreshCw className="size-4" />}
+        {busy ? <IconLoader className="size-4 animate-spin" /> : state?.status === "current" ? <IconCheckmark1 className="size-4 text-success" /> : <IconArrowRotateRightLeft className="size-4" />}
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-content font-medium">{state ? STATUS[state.status] : "Automatic updates"}</p>
         <p className="mt-0.5 text-ui leading-relaxed text-muted-foreground">{failure || detail}</p>
       </div>
       {state?.status === "available" ? (
-        <Button disabled={!api} onClick={download} size="sm"><Download />Update</Button>
+        <Button disabled={!api} onClick={download} size="sm"><IconArrowInbox />Update</Button>
       ) : (
-        <Button disabled={!api || busy || state?.status === "unsupported"} onClick={check} size="sm" variant="secondary"><RefreshCw />Check now</Button>
+        <Button disabled={!api || busy || state?.status === "unsupported"} onClick={check} size="sm" variant="secondary"><IconArrowRotateRightLeft />Check now</Button>
       )}
     </SettingsRow>
   );

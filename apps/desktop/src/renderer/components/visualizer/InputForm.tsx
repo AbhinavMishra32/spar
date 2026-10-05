@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Blocks, Braces, Check, ChevronDown, Circle, CircleSlash, GitCommitVertical, Grid3x3, Hash, ListOrdered, Minus, Parentheses, Plus, Quote, ToggleLeft, TriangleAlert, Type, Waypoints, X } from "lucide-react";
+import { IconArrowRight, IconBlocks, IconBrackets1, IconBrackets2, IconCheckmark1, IconChevronBottom, IconCircle, IconCircleBanSign, IconCommits, IconCrossMedium, IconExclamationTriangle, IconHashtag, IconHome, IconMinusMedium, IconNumberedList, IconOpenQuote1, IconPlusMedium, IconTable, IconTextSelect, IconToggle } from "central-icons";
 import type { EntryPoint, InputField, InputFieldKind, InputValue, ListContainer } from "@spar/visualizer";
 import { emptyValue } from "@spar/visualizer";
 import { cn } from "@/lib/utils";
@@ -33,9 +33,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  */
 
 const KIND_ICON: Record<InputFieldKind["kind"], React.ComponentType<{ className?: string }>> = {
-  int: Hash, float: Hash, string: Quote, bool: ToggleLeft,
-  list: ListOrdered, linked: Waypoints, tree: GitCommitVertical,
-  tuple: Parentheses, dict: Braces, record: Blocks, choice: ChevronDown, raw: Type,
+  int: IconHashtag, float: IconHashtag, string: IconOpenQuote1, bool: IconToggle,
+  list: IconNumberedList, linked: IconHome, tree: IconCommits,
+  tuple: IconBrackets1, dict: IconBrackets2, record: IconBlocks, choice: IconChevronBottom, raw: IconTextSelect,
 };
 
 const KIND_LABEL: Record<InputFieldKind["kind"], string> = {
@@ -102,7 +102,7 @@ export function InputForm({
   if (entry.unsupported) {
     return (
       <div className="flex items-start gap-2 rounded-xl border border-dashed border-border px-3.5 py-3 text-ui text-muted-foreground">
-        <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
+        <IconExclamationTriangle className="mt-0.5 size-3.5 shrink-0 text-warning" />
         <span>{entry.unsupported}</span>
       </div>
     );
@@ -163,7 +163,7 @@ function ParamRow({ field, value, onChange, onRetype }: { field: InputField; val
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button className="text-muted-foreground" size="icon-xs" variant="ghost">
-                <ChevronDown />
+                <IconChevronBottom />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -173,7 +173,7 @@ function ParamRow({ field, value, onChange, onRetype }: { field: InputField; val
                   onSelect={() => onRetype({ ...field, type: kind, declared: field.declared })}
                 >
                   {switchLabel(kind)}
-                  {kind.kind === field.type.kind && <Check className="ml-auto size-3.5" />}
+                  {kind.kind === field.type.kind && <IconCheckmark1 className="ml-auto size-3.5" />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -317,12 +317,12 @@ function DictEditor({ field, value, onChange }: { field: Extract<InputFieldKind,
           <div className="min-w-0">
             <FieldControl field={field.key} onChange={(next) => write(pairs.map((item, at) => (at === index ? [next, item[1] ?? null] : item)))} value={pair[0] ?? emptyValue(field.key)} />
           </div>
-          <ArrowRight aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+          <IconArrowRight aria-hidden className="size-3 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <FieldControl field={field.value} onChange={(next) => write(pairs.map((item, at) => (at === index ? [item[0] ?? null, next] : item)))} value={pair[1] ?? emptyValue(field.value)} />
           </div>
           <Button className="shrink-0 text-muted-foreground" onClick={() => write(pairs.filter((_, at) => at !== index))} size="icon-xs" title="Remove this entry" variant="ghost">
-            <X />
+            <IconCrossMedium />
           </Button>
         </div>
       ))}
@@ -332,7 +332,7 @@ function DictEditor({ field, value, onChange }: { field: Extract<InputFieldKind,
         size="xs"
         variant="ghost"
       >
-        <Plus data-icon="inline-start" />
+        <IconPlusMedium data-icon="inline-start" />
         {pairs.length ? "Entry" : "Add an entry"}
       </Button>
     </div>
@@ -400,7 +400,7 @@ function SequenceEditor({ element, value, onChange, chain = false, container = "
         title={chain ? "Append a node" : "Append an item"}
         variant="ghost"
       >
-        <Plus />
+        <IconPlusMedium />
       </Button>
       {value.length === 0 && <span className="text-ui-sm text-muted-foreground">{chain ? "empty — this is None" : "empty list"}</span>}
     </div>
@@ -429,7 +429,7 @@ function TreeEditor({ element, value, onChange }: { element: InputField; value: 
                 title="This child is absent. Click to give it a value."
                 type="button"
               >
-                <CircleSlash className="size-3" />
+                <IconCircleBanSign className="size-3" />
               </button>
             ) : (
               <Cell
@@ -451,7 +451,7 @@ function TreeEditor({ element, value, onChange }: { element: InputField; value: 
           </div>
         ))}
         <Button className="text-muted-foreground" onClick={() => onChange([...value, value.length ? null : 0])} size="icon-xs" title="Append a slot" variant="ghost">
-          <Plus />
+          <IconPlusMedium />
         </Button>
       </div>
       <p className="mt-1.5 text-ui-sm text-muted-foreground">
@@ -477,7 +477,7 @@ function GridEditor({ field, value, onChange }: { field: InputField; value: Inpu
             value={Array.isArray(row) ? row : []}
           />
           <Button className="text-muted-foreground" onClick={() => onChange(value.filter((_, at) => at !== rowIndex))} size="icon-xs" title="Remove row" variant="ghost">
-            <Minus />
+            <IconMinusMedium />
           </Button>
         </div>
       ))}
@@ -487,7 +487,7 @@ function GridEditor({ field, value, onChange }: { field: InputField; value: Inpu
           size="xs"
           variant="ghost"
         >
-          <Grid3x3 data-icon="inline-start" />
+          <IconTable data-icon="inline-start" />
           Add row
         </Button>
         {value.length > 0 && <span className="text-ui-sm text-muted-foreground">{value.length} × {width}</span>}
@@ -538,7 +538,7 @@ function Cell({ value, numeric, onChange, onRemove, onPaste, onNull }: {
           title="Remove"
           type="button"
         >
-          <Circle className="size-2" />
+          <IconCircle className="size-2" />
         </button>
       )}
     </span>

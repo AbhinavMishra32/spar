@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CheckCircle2, ChevronRight, Info, XCircle } from "lucide-react";
+import { IconCheckCircle2, IconChevronRight, IconCircleInfo, IconCircleX } from "central-icons";
 import { cn } from "@/lib/utils";
 import { SourceGlyph } from "../common/SourceGlyph";
 import { SparDots } from "../common/SparDots";
@@ -28,7 +28,7 @@ export function SystemEvent({ body }: { body: string }) {
     const passed = submission[2]?.toLowerCase() === "passed";
     return (
       <Row
-        icon={passed ? CheckCircle2 : XCircle}
+        icon={passed ? IconCheckCircle2 : IconCircleX}
         tone={passed ? "success" : "destructive"}
         title={passed ? "Submission accepted" : "Submission rejected"}
         meta={`exit ${submission[3]} · attempt ${submission[1]?.slice(0, 8)}`}
@@ -36,10 +36,10 @@ export function SystemEvent({ body }: { body: string }) {
     );
   }
 
-  if (RESUME.test(body)) return <Row icon={Info} title="Resumed this planning session" />;
+  if (RESUME.test(body)) return <Row icon={IconCircleInfo} title="Resumed this planning session" />;
 
   const goal = NEW_GOAL.exec(body);
-  if (goal) return <Row icon={Info} title="Session started" meta={goal[1]} />;
+  if (goal) return <Row icon={IconCircleInfo} title="Session started" meta={goal[1]} />;
 
   return <Collapsible body={body} />;
 }
@@ -164,7 +164,7 @@ function Collapsible({ body }: { body: string }) {
   const hasUsefulTitle = Boolean(sentence && sentence.length <= 140);
   const title = hasUsefulTitle ? sentence!.replace(/[.!?]$/, "") : "System update";
   const detail = hasUsefulTitle ? clean.slice(sentence!.length).trim() : clean;
-  if (!detail) return <Row icon={Info} title={title} />;
+  if (!detail) return <Row icon={IconCircleInfo} title={title} />;
 
   return (
     <div className="min-w-0">
@@ -175,13 +175,13 @@ function Collapsible({ body }: { body: string }) {
         type="button"
       >
         <span aria-hidden className="grid size-6 shrink-0 place-items-center">
-          <Info className="size-3.5 text-muted-foreground/85" />
+          <IconCircleInfo className="size-3.5 text-muted-foreground/85" />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-foreground/85">{title}</span>
           <span className="mt-0.5 block truncate text-thread-tool text-muted-foreground">{detail}</span>
         </span>
-        <ChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <IconChevronRight className={cn("size-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
       </button>
       {open && (
         <p className="ml-7 mt-1 min-w-0 whitespace-pre-wrap break-words border-l border-border/70 py-1 pl-3 text-thread leading-[1.6] text-muted-foreground/85">

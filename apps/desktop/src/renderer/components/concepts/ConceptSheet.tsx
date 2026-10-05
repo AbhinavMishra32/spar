@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, ChevronDown, ChevronRight, Dumbbell, Sparkles } from "lucide-react";
+import { IconArrowUpRight, IconChevronBottom, IconChevronRight, IconDumbell, IconSparklesTwo } from "central-icons";
 import type { ConceptDetail, ConceptEvidence, ConceptSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -69,7 +69,7 @@ export function ConceptSheet({
                 {CONCEPT_KIND_SHORT[concept.kind]}
                 {concept.parentTitle && (
                   <>
-                    <ChevronRight className="size-3 text-muted-foreground/50" />
+                    <IconChevronRight className="size-3 text-muted-foreground/50" />
                     <span className="truncate">{concept.parentTitle}</span>
                   </>
                 )}
@@ -117,7 +117,7 @@ export function ConceptSheet({
                 The first challenge is aimed at whatever your evidence here says is still uncertain.
               </p>
               <Button className="shrink-0" onClick={() => onPractise(concept.slug)}>
-                <Dumbbell />
+                <IconDumbell />
                 Practise this
               </Button>
             </footer>
@@ -206,7 +206,7 @@ function Abilities({ abilities }: { abilities: ConceptDetail["abilities"] }) {
           const status = ABILITY_STATUS[ability.status];
           return (
             <li className="flex items-start gap-2.5 px-3 py-2.5" key={ability.id}>
-              <Sparkles className="mt-[3px] size-3.5 shrink-0 text-muted-foreground/60" />
+              <IconSparklesTwo className="mt-[3px] size-3.5 shrink-0 text-muted-foreground/60" />
               <span className="min-w-0 flex-1 text-ui leading-[1.45] text-foreground/90">{ability.title.replace(/\.$/, "")}</span>
               {status && <span className={cn("mt-px shrink-0 rounded-full px-2 py-px text-[0.6875rem] font-medium leading-4", status.className)}>{status.label}</span>}
             </li>
@@ -220,7 +220,7 @@ function Abilities({ abilities }: { abilities: ConceptDetail["abilities"] }) {
           type="button"
         >
           {expanded ? "Show fewer" : `Show ${abilities.length - shown.length} more`}
-          <ChevronDown className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
+          <IconChevronBottom className={cn("size-3.5 transition-transform", expanded && "rotate-180")} />
         </button>
       ) : null}
     </div>
@@ -286,7 +286,7 @@ function Challenges({ challenges, onOpenSession }: { challenges: ConceptEvidence
               </span>
             </span>
             <span className="shrink-0 tabular-nums text-ui-sm text-muted-foreground/70 transition-opacity group-hover:opacity-0">{shortTime(challenge.occurredAt)}</span>
-            <ArrowUpRight className="-ml-7 size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+            <IconArrowUpRight className="-ml-7 size-3.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
         );
       })}

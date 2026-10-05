@@ -1,5 +1,5 @@
 import { memo, useMemo, useState } from "react";
-import { ArrowRight, FlaskConical } from "lucide-react";
+import { IconArrowRight, IconLab } from "central-icons";
 import type { ActiveQuestion, RatingPoint } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { useTranscriptFade } from "@/hooks/use-transcript-fade";
@@ -71,7 +71,7 @@ export const ProblemView = memo(function ProblemView({
         {declared.cases.length > 0 && active && (
           <section className="mt-5">
             <p className="mb-2 flex items-center gap-1.5 text-content-sm font-medium tracking-[0.06em] text-muted-foreground/80">
-              <FlaskConical className="size-3" />
+              <IconLab className="size-3" />
               SAMPLE CASES
               {/* Whose cases these are. A sourced problem's samples are published
                   with it and are not the whole suite — the hidden ones stay at the
@@ -114,7 +114,7 @@ export const ProblemView = memo(function ProblemView({
                     <div className="flex min-w-0 flex-col gap-1 px-3 py-2" key={index}>
                       <code className="min-w-0 break-words font-mono text-content-sm text-foreground/85">{assertion.call}</code>
                       <span className="flex min-w-0 items-start gap-1.5">
-                        <ArrowRight className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
+                        <IconArrowRight className="mt-[0.15em] size-3 shrink-0 text-muted-foreground/60" />
                         <code className="min-w-0 break-words font-mono text-content-sm text-[var(--success)]">
                           {assertion.expected}
                         </code>

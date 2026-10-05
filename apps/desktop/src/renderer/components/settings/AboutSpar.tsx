@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { IconCheckmark1, IconSquareBehindSquare1 } from "central-icons";
 import { motion, useReducedMotion } from "motion/react";
 import { SparWordmark } from "../common/SparWordmark";
 
@@ -75,9 +75,9 @@ function Commit({ commit, branch }: { commit: string; branch: string | null }) {
       type="button"
     >
       {copied ? (
-        <Check className="size-3 shrink-0 text-success" />
+        <IconCheckmark1 className="size-3 shrink-0 text-success" />
       ) : (
-        <Copy className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-55" />
+        <IconSquareBehindSquare1 className="size-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-55" />
       )}
       <span>{commit.slice(0, 7)}</span>
       {branch && (

@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { IconWaiting } from "./threadIcons";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowDown, Check, Copy, Pencil, ThumbsDown, ThumbsUp } from "lucide-react";
-import { ThinkingOrb } from "thinking-orbs";
+import { IconArrowDown, IconCheckmark1, IconPencil, IconSquareBehindSquare1, IconThumbsDown, IconThumbsUp } from "central-icons";
 import type { AgentActivityStep, SessionDetail } from "@spar/domain";
 import type { ToolStage } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -314,8 +314,7 @@ function WaitingLine({ parts }: { parts: RunPart[] }) {
   return (
     <div className="-mx-1 flex items-center gap-1.5 py-0.5">
       <span className={cn(ROW_GLYPH, "relative")}>
-        <span className="absolute inset-0 rounded-full bg-[var(--accent)]/10 blur-sm" />
-        <ThinkingOrb aria-label="Working" size={20} state={opening ? "connecting" : "working"} style={{ width: 16, height: 16 }} />
+        <IconWaiting aria-label="Working" className="size-4 animate-spin text-[var(--transcript-step-mark)] [animation-duration:1.4s] motion-reduce:animate-none" />
       </span>
       <span className="thinking-shimmer min-w-0 truncate text-thread font-medium">
         {opening ? "Connecting to the model" : "Working"}
@@ -468,7 +467,7 @@ function ResponseFooter({ body, createdAt, latest = false, messageId, rating = n
           }).catch(() => setFailed(true));
         }}
       >
-        {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+        {copied ? <IconCheckmark1 aria-hidden /> : <IconSquareBehindSquare1 aria-hidden />}
       </MessageAction>
 
       {/* One thumb, then the two verdicts by name. A pair of bare thumbs asks
@@ -481,7 +480,7 @@ function ResponseFooter({ body, createdAt, latest = false, messageId, rating = n
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>
               <MessageActionButton active={verdict !== null} aria-label="Rate this response">
-                {verdict === "bad" ? <ThumbsDown aria-hidden /> : <ThumbsUp aria-hidden />}
+                {verdict === "bad" ? <IconThumbsDown aria-hidden /> : <IconThumbsUp aria-hidden />}
               </MessageActionButton>
             </DropdownMenuTrigger>
           </TooltipTrigger>
@@ -489,7 +488,7 @@ function ResponseFooter({ body, createdAt, latest = false, messageId, rating = n
         </Tooltip>
         <DropdownMenuContent align="start" className="min-w-[10rem]">
           {(["good", "bad"] as const).map((value) => {
-            const Icon = value === "good" ? ThumbsUp : ThumbsDown;
+            const Icon = value === "good" ? IconThumbsUp : IconThumbsDown;
             const on = verdict === value;
             return (
               <DropdownMenuItem
@@ -739,7 +738,7 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
             }).catch(() => undefined);
           }}
         >
-          {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+          {copied ? <IconCheckmark1 aria-hidden /> : <IconSquareBehindSquare1 aria-hidden />}
         </MessageAction>
         {editable && onEdit && (
           <MessageAction
@@ -749,7 +748,7 @@ function LearnerMessage({ body, createdAt, editable, queued = false, sending = f
               setEditing(true);
             }}
           >
-            <Pencil aria-hidden />
+            <IconPencil aria-hidden />
           </MessageAction>
         )}
       </div>
@@ -1037,7 +1036,7 @@ export const AgentThread = memo(function AgentThread({
           title="Jump to latest"
           type="button"
         >
-          <ArrowDown className="size-3.5" />
+          <IconArrowDown className="size-3.5" />
         </button>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { IconChevronBottom } from "central-icons";
 import type { LearnerProgress, RatingPoint } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -69,7 +69,7 @@ export function RatingHero({ api, eyebrow, footer, progress }: { api?: SparApi |
         <div className="min-w-0">
           <span className="flex items-center gap-1 text-ui text-muted-foreground transition-colors group-hover:text-foreground">
             Spar Rating
-            <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
+            <IconChevronBottom className={cn("size-3 transition-transform", open && "rotate-180")} />
           </span>
 
           <span className="mt-0.5 flex items-baseline gap-2.5">

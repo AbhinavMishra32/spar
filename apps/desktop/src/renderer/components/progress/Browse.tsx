@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ArrowUpRight, ChevronRight, Layers3, Sparkles, Target } from "lucide-react";
+import { IconArrowUpRight, IconChevronRight, IconLayersThree, IconSparklesTwo, IconTargetArrow } from "central-icons";
 import type { AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { relativeTime, shortTime } from "@/lib/format";
@@ -26,7 +26,7 @@ export function AbilitiesView({ challenges, earned, forming, onOpen, onOpenConce
 }) {
   if (!earned.length && !forming.length) {
     return (
-      <EmptyState description="Spar grants one once your submissions back it up." icon={Sparkles} title="No abilities yet" />
+      <EmptyState description="Spar grants one once your submissions back it up." icon={IconSparklesTwo} title="No abilities yet" />
     );
   }
 
@@ -60,10 +60,10 @@ export function AbilitiesView({ challenges, earned, forming, onOpen, onOpenConce
                 onClick={() => onOpen(ability.id)}
                 type="button"
               >
-                <Target className="size-3.5 shrink-0 text-muted-foreground/60" />
+                <IconTargetArrow className="size-3.5 shrink-0 text-muted-foreground/60" />
                 <span className="min-w-0 flex-1 truncate text-ui text-foreground/85">{ability.title}</span>
                 <span className="shrink-0 text-ui-sm text-muted-foreground/65">{shortTime(ability.updatedAt)}</span>
-                <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70" />
+                <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70" />
               </button>
             ))}
           </div>
@@ -113,7 +113,7 @@ function AbilityCard({ ability, challenges, onOpen, onOpenConcept, summaries }: 
           <h3 className="truncate text-content font-semibold tracking-[-0.01em]">{ability.title}</h3>
           <p className={cn("text-ui-sm font-medium", status.text)}>{status.label}</p>
         </div>
-        <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70" />
+        <IconArrowUpRight className="size-3.5 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70" />
       </div>
 
       <p className="pointer-events-none relative z-10 mt-2 line-clamp-2 text-ui leading-[1.6] text-muted-foreground">
@@ -163,7 +163,7 @@ export function ConceptsView({ challenges, concepts, onOpenConcept, summaries }:
 
   if (!concepts.length) {
     return (
-      <EmptyState description="Challenges are tagged with what they test. Tags collect here as you submit." icon={Layers3} title="No concepts yet" />
+      <EmptyState description="Challenges are tagged with what they test. Tags collect here as you submit." icon={IconLayersThree} title="No concepts yet" />
     );
   }
 

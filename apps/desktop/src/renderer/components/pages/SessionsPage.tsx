@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { LayoutGrid, Search } from "lucide-react";
+import { IconLayoutGrid1, IconMagnifyingGlass } from "central-icons";
 import type { ChallengeHistorySummary, SessionSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import type { AgentRun } from "../agent/agentRun";
@@ -80,7 +80,7 @@ export function SessionsPage({
             ))}
           </div>
           <div className="relative ml-auto w-56">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <IconMagnifyingGlass className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               className="h-7 w-full rounded-lg border border-border bg-card pl-7 pr-2 text-ui outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-[var(--border-strong)]"
               onChange={(event) => setQuery(event.target.value)}
@@ -108,7 +108,7 @@ export function SessionsPage({
             </div>
           ) : (
             <EmptyState
-              icon={LayoutGrid}
+              icon={IconLayoutGrid1}
               title={sessions.length ? "Nothing matches this filter" : "No sessions yet"}
               description={
                 sessions.length

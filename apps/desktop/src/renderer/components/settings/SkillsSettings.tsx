@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, Copy, Ellipsis, FolderOpen, FolderInput, Pencil, Plus, Trash2 } from "lucide-react";
+import { IconChevronRight, IconDotGrid1x3Horizontal, IconFolderAddLeft, IconFolderOpen, IconPencil, IconPlusMedium, IconSquareBehindSquare1, IconTrashCan } from "central-icons";
 import type { SkillSummary, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -110,7 +110,7 @@ export function SkillsSettings({ api, onDetail }: { api: SparApi | undefined; on
               </div>
               <p className="truncate text-ui text-muted-foreground">{skill.description}</p>
             </div>
-            <ChevronRight className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
+            <IconChevronRight className="size-4 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-muted-foreground" />
           </SettingsRowButton>
         ))}
         <DropdownMenu>
@@ -118,21 +118,21 @@ export function SkillsSettings({ api, onDetail }: { api: SparApi | undefined; on
             className="flex min-h-[3.25rem] w-full items-center gap-3 bg-[var(--surface-secondary)] p-2.5 text-content text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
             disabled={!api}
           >
-            <span className="grid size-6 shrink-0 place-items-center"><Plus className="size-[1.15rem]" /></span>
+            <span className="grid size-6 shrink-0 place-items-center"><IconPlusMedium className="size-[1.15rem]" /></span>
             Add a skill
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="min-w-[15rem]">
             <DropdownMenuItem onSelect={() => setEditing({ name: "", description: "", body: "" })}>
-              <Pencil aria-hidden />
+              <IconPencil aria-hidden />
               Write a new skill
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void importFolder()}>
-              <FolderInput aria-hidden />
+              <IconFolderAddLeft aria-hidden />
               Import a folder…
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => void api?.revealSkills()}>
-              <FolderOpen aria-hidden />
+              <IconFolderOpen aria-hidden />
               Open skills folder
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -214,7 +214,7 @@ function SkillPage({ api, skill, onBack, onChanged, onEdit, onOpen }: {
       <div className="mb-6 flex h-8 items-center justify-between gap-3">
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1 text-ui">
           <button className="rounded-md px-1.5 py-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" onClick={onBack} type="button">Agent</button>
-          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
+          <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground/60" />
           <span className="flex min-w-0 items-center gap-1.5 px-1">
             <SkillAvatar small />
             <span className="max-w-60 truncate font-medium">{title}</span>
@@ -239,36 +239,36 @@ function SkillPage({ api, skill, onBack, onChanged, onEdit, onOpen }: {
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button aria-label="Skill actions" disabled={busy} size="icon-sm" variant="ghost"><Ellipsis /></Button>
+              <Button aria-label="Skill actions" disabled={busy} size="icon-sm" variant="ghost"><IconDotGrid1x3Horizontal /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
               {skill.source === "built-in" && !skill.overridden && (
                 <DropdownMenuItem onSelect={() => void act(async () => { const copy = await api.customizeSkill(skill.name); await onChanged(); onOpen(copy.name, "user"); })}>
-                  <Copy aria-hidden />
+                  <IconSquareBehindSquare1 aria-hidden />
                   Copy to customize
                 </DropdownMenuItem>
               )}
               {skill.overridden && (
                 <DropdownMenuItem onSelect={() => onOpen(skill.name, "user")}>
-                  <Pencil aria-hidden />
+                  <IconPencil aria-hidden />
                   Open your copy
                 </DropdownMenuItem>
               )}
               {skill.source === "user" && detail && (
                 <DropdownMenuItem onSelect={() => onEdit({ name: skill.name, description: skill.description, body: detail.body, previous: skill.name })}>
-                  <Pencil aria-hidden />
+                  <IconPencil aria-hidden />
                   Edit
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onSelect={() => void api.revealSkills(skill.source === "user" || !skill.overridden ? skill.name : undefined)}>
-                <FolderOpen aria-hidden />
+                <IconFolderOpen aria-hidden />
                 Show in Finder
               </DropdownMenuItem>
               {skill.source === "user" && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setConfirming(true)} variant="destructive">
-                    <Trash2 aria-hidden />
+                    <IconTrashCan aria-hidden />
                     Delete
                   </DropdownMenuItem>
                 </>

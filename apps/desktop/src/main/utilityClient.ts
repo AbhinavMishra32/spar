@@ -44,7 +44,9 @@ export class UtilityClient {
     }
     if (message.kind === "result") {
       const item = this.pending.get(String(message.id)); if (!item) return; this.pending.delete(String(message.id));
-      if (message.ok) item.resolve(message.value); else item.reject(new Error(String(message.error)));
+      /* A failure can still carry a value (a coach turn's conversation so far), so
+         the caller can keep what the worker finished before it failed. */
+      if (message.ok) item.resolve(message.value); else item.reject(Object.assign(new Error(String(message.error)), message.value === undefined ? {} : { value: message.value }));
     }
   }
 }

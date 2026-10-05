@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Clock3, CornerDownRight, Folder, Search as SearchMark } from "lucide-react";
+import { IconArrowCornerDownRight, IconClock, IconFolder1, IconMagnifyingGlass } from "central-icons";
 
 import { Tabs } from "radix-ui";
 
@@ -278,7 +278,7 @@ function FileView({ body, path, wrote = false }: { body: string; path: string; w
         {marked ? (
           <LanguageGlyph className="size-3.5 shrink-0" language={marked} />
         ) : (
-          <CornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
+          <IconArrowCornerDownRight className="size-3.5 shrink-0 text-muted-foreground" />
         )}
         <button
           className="min-w-0 truncate font-mono text-[length:inherit] text-foreground/85 transition-colors hover:text-foreground hover:underline"
@@ -319,7 +319,7 @@ function Listing({ entries, where }: { entries: Entry[]; where: string }) {
                 type="button"
               >
                 {directory ? (
-                  <Folder className="size-3.5 shrink-0 text-[var(--brand)]/85" />
+                  <IconFolder1 className="size-3.5 shrink-0 text-[var(--brand)]/85" />
                 ) : marked ? (
                   <LanguageGlyph className="size-3.5 shrink-0" language={marked} />
                 ) : (
@@ -394,7 +394,7 @@ function WebSearch({ query, result }: { query: string; result: unknown }) {
     <div className="min-w-0">
       <div className="flex min-w-0 items-center gap-2 px-2.5 pt-2.5 pb-1.5">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-[var(--accent)] px-2.5 py-1">
-          <SearchMark className="size-3.5 shrink-0 text-muted-foreground/85 [&_*]:[stroke-width:1.8]" />
+          <IconMagnifyingGlass className="size-3.5 shrink-0 text-muted-foreground/85 [&_*]:[stroke-width:1.8]" />
           <span className="min-w-0 truncate text-[length:inherit] text-foreground/90">{query}</span>
         </span>
         {rows.length > 0 && (
@@ -820,7 +820,7 @@ function Attempt({ result }: { result: Record<string, unknown> }) {
         <>
           {files.length > 0 && <div className="mx-2.5 border-t border-border/60" />}
           <div className="flex items-center gap-1.5 px-2.5 pt-2.5 pb-1.5 text-muted-foreground">
-            <Clock3 aria-hidden className="size-3.5" />
+            <IconClock aria-hidden className="size-3.5" />
             <span className="font-medium">Activity</span>
             <span className="ml-auto tabular-nums">{events.length} {events.length === 1 ? "event" : "events"}</span>
           </div>

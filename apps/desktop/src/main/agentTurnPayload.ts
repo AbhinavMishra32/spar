@@ -1,6 +1,6 @@
 import { itemRating, solveProbability, type Rating } from "@spar/domain";
 import type { ProblemSource } from "@spar/domain";
-import type { LocalStore, JourneyChallenge } from "./store.js";
+import type { LocalStore, JourneyChallenge, StoredConversation } from "./store.js";
 import { LEARNER_NOTEBOOK, type CoachNotebookVersion } from "../shared/api.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 import { sessionSourcesSection, skillsSection } from "../workers/sessionContext.js";
@@ -35,6 +35,10 @@ export type TurnPayloadInput = {
   resumeSince?: string;
   /** Enabled skills, name and description only. */
   skills?: { name: string; description: string }[];
+  /** The coach's conversation so far in this session, when there is one to continue. */
+  conversation?: StoredConversation | null;
+  /** The prompt and tools this turn runs under; a conversation started under others is not continued. */
+  promptRef?: string;
 };
 
 export type TurnPayload = {
@@ -50,7 +54,16 @@ export type TurnPayload = {
   activeQuestion: { id: string; attemptId: string } | null;
   /** Work a failed provider already finished this turn, so a retry does not redo it. */
   resumeState: Record<string, unknown>;
+  /** What this turn opens with: the whole journey when a conversation starts,
+   *  otherwise an update carrying only the parts that changed. */
   context: string;
+  /** The conversation to continue, or null to start one from `context`. */
+  conversation: unknown[] | null;
+  /** The whole journey, without this session's messages (the conversation has
+   *  them): what the worker puts back after it compacts the conversation. */
+  record: string;
+  /** The journey as this turn shows it, saved with the conversation for the next diff. */
+  sections: JourneySection[];
 };
 
 export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
@@ -58,6 +71,11 @@ export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
   const session = store.readSession(sessionId);
   if (!session) throw new Error("Session not found");
   const lesson = input.resumeSince ? store.lessonPublishedSince(sessionId, input.resumeSince) : null;
+  const stored = input.conversation && input.conversation.promptRef === input.promptRef && input.conversation.messages.length ? input.conversation : null;
+  const sections = journeySections(input, { conversation: false });
+  /* A new conversation has never seen this session's messages, so it gets them
+     with the record; a continued one already has them as its own history. */
+  const context = stored ? journeyUpdate(stored.sections, sections) : journeyDocument(input, journeySections(input));
   return {
     sessionId,
     message: input.message,
@@ -69,12 +87,51 @@ export function agentTurnPayload(input: TurnPayloadInput): TurnPayload {
     skills: input.skills ?? [],
     activeQuestion: openQuestion(session) ? { id: session.question!.id, attemptId: session.question!.attemptId } : null,
     resumeState: lesson ? { lesson: { result: lesson } } : {},
-    context: journeyDocument(input),
+    context,
+    conversation: stored ? stored.messages : null,
+    record: journeyDocument(input, sections),
+    sections,
   };
 }
 
-/** The learner's journey, as the coach reads it at the start of a turn. */
-export function journeyDocument(input: TurnPayloadInput): string {
+/** The learner's journey, whole: the record a conversation starts from. */
+export function journeyDocument(input: TurnPayloadInput, sections = journeySections(input)): string {
+  return [journeyHeader(), ...sections.map((section) => section.text)].join("\n\n");
+}
+
+/** What time it is, as the coach is told: on the record, and on every update. */
+export function journeyHeader(now = new Date()): string {
+  return `# Journey\nNow: ${stamp(now.toISOString())} (the learner's local time).`;
+}
+
+/**
+ * What changed in the journey since the coach last saw it: each section that
+ * is new or different, whole, and the ones that are gone. The conversation
+ * keeps everything earlier, so a section shown here replaces the one before.
+ */
+export function journeyUpdate(before: JourneySection[], after: JourneySection[], now = new Date()): string {
+  const previous = new Map(before.map((section) => [section.key, section.text]));
+  const changed = after.filter((section) => previous.get(section.key) !== section.text);
+  const kept = new Set(after.map((section) => section.key));
+  const gone = before.filter((section) => !kept.has(section.key)).map((section) => section.text.split("\n")[0]!.replace(/^#+\s*/, ""));
+  const header = `# Update\nNow: ${stamp(now.toISOString())} (the learner's local time).`;
+  if (!changed.length && !gone.length) return `${header}\nNothing in the journey changed since your last turn.`;
+  return [
+    `${header}\nThese parts of the journey changed since your last turn. Each replaces the version you saw before; everything else is as it was.`,
+    ...changed.map((section) => section.text),
+    gone.length ? `No longer in the journey: ${gone.join("; ")}.` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+/** One part of the journey, named so a later turn can tell which parts changed. */
+export type JourneySection = { key: string; text: string };
+
+/**
+ * The journey as named sections. Times in them are absolute, not "5 minutes
+ * ago": a section changes when its facts do, not because the clock moved, so
+ * an update can carry only the sections that actually changed.
+ */
+export function journeySections(input: TurnPayloadInput, options: { conversation?: boolean } = {}): JourneySection[] {
   const { store, sessionId } = input;
   const session = store.readSession(sessionId)!;
   const trackId = session.summary.trackId ?? null;
@@ -84,25 +141,24 @@ export function journeyDocument(input: TurnPayloadInput): string {
   const rating = store.currentRating();
   const ability = target ? store.readAbilityDetail(String(target.ability_id)) : null;
   const language = track?.language ?? profile?.language ?? "javascript";
-  const sections: string[] = [];
-
-  sections.push(`# Journey\nNow: ${new Date().toLocaleString("en-US", { weekday: "long", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} (the learner's local time).`);
+  const sections: JourneySection[] = [];
+  const add = (key: string, text: string) => { if (text.trim()) sections.push({ key, text }); };
 
   /* First, because they are the coach's own running account of this learner:
      everything below is the record, and this is what the record means. The
      user.md is about the person and every Track reads it; the Track
      notebook is about their progress here. */
-  const written = (notebook: CoachNotebookVersion) => `v${notebook.version}, ${notebook.author === "learner" ? "last edited by the learner" : "last written by you"} ${ago(notebook.createdAt)}`;
+  const written = (notebook: CoachNotebookVersion) => `v${notebook.version}, ${notebook.author === "learner" ? "last edited by the learner" : "last written by you"} ${stamp(notebook.createdAt)}`;
   const learnerNotebook = store.readNotebook(LEARNER_NOTEBOOK);
-  sections.push(learnerNotebook
+  add("user-notebook", learnerNotebook
     ? `## user.md — who they are, on every Track; read this first (${written(learnerNotebook)})\n${learnerNotebook.markdown}`
     : "## user.md — who they are, on every Track; read this first\n_Empty so far. update_notebook with notebook \"user\" writes it: who they are, what they are working towards, how they like to be taught._");
   const notebook = store.readNotebook(trackId);
-  sections.push(notebook
+  add("track-notebook", notebook
     ? `## Track notebook (${written(notebook)})\n${notebook.markdown}`
     : "## Track notebook\n_Empty so far._");
 
-  sections.push([
+  add("learner", [
     "## Learner",
     profile ? `- ${[profile.name, profile.experience ? `${profile.experience} programmer` : "", profile.focus ? `focus: ${profile.focus}` : ""].filter(Boolean).join(" · ")}` : "- No profile yet.",
     profile?.weakness ? `- Says they struggle with: ${profile.weakness}` : "",
@@ -111,7 +167,7 @@ export function journeyDocument(input: TurnPayloadInput): string {
   ].filter(Boolean).join("\n"));
 
   const sources = sessionSourcesSection(session.summary.problemSources, input.practiceSource);
-  sections.push([
+  add("track", [
     track ? `## Track: ${track.title}\nGoal: ${track.goal}` : "## Track\nThis session is not inside a Track.",
     `Session goal: ${session.summary.originalGoal}`,
     sources ? `Problem sources: ${sources}` : "",
@@ -124,7 +180,7 @@ export function journeyDocument(input: TurnPayloadInput): string {
      already set twice, because the first two were out of sight. */
   const journey = store.journey(trackId, 1_000);
   if (!journey.challenges.length) {
-    sections.push("## Challenges on this Track\nNone yet. This is the start of their journey here.");
+    add("challenges", "## Challenges on this Track\nNone yet. This is the start of their journey here.");
   } else {
     const all = journey.challenges;
     const detailed = 14;
@@ -134,71 +190,71 @@ export function journeyDocument(input: TurnPayloadInput): string {
     all.forEach((challenge, index) => lines.push(index < earlier
       ? challengeLine(challenge, index + 1)
       : challengeEntry(challenge, index + 1, index >= all.length - 3, challenge.id === openId)));
-    sections.push(lines.join("\n\n"));
+    add("challenges", lines.join("\n\n"));
   }
 
   const question = session.question;
   if (question && !question.attemptCompletedAt) {
-    sections.push([
+    add("open-challenge", [
       `## Open challenge: ${question.title}`,
-      `Challenge id ${question.id}, attempt id ${question.attemptId}. Started ${ago(question.attemptStartedAt)}. The learner is working on it now.`,
+      `Challenge id ${question.id}, attempt id ${question.attemptId}. Started ${stamp(question.attemptStartedAt)}. The learner is working on it now.`,
     ].join("\n"));
   } else if (question) {
-    sections.push(`## Open challenge\nNone. The last one ("${question.title}") is finished and the learner is waiting for what comes next.`);
+    add("open-challenge", `## Open challenge\nNone. The last one ("${question.title}") is finished and the learner is waiting for what comes next.`);
   } else {
-    sections.push("## Open challenge\nNone yet.");
+    add("open-challenge", "## Open challenge\nNone yet.");
   }
 
   if (target) {
-    sections.push([`## Current training target`, `- Ability: ${String(target.ability_title)} (${ability?.ability.status ?? "uncertain"})`, target.specific_gap ? `- Gap: ${String(target.specific_gap)}` : "", target.desired_evidence ? `- Evidence sought: ${String(target.desired_evidence)}` : "", `- Set ${ago(String(target.created_at))}. A new aim replaces it.`].filter(Boolean).join("\n"));
+    add("target", [`## Current training target`, `- Ability: ${String(target.ability_title)} (${ability?.ability.status ?? "uncertain"})`, target.specific_gap ? `- Gap: ${String(target.specific_gap)}` : "", target.desired_evidence ? `- Evidence sought: ${String(target.desired_evidence)}` : "", `- Set ${stamp(String(target.created_at))}. A new aim replaces it.`].filter(Boolean).join("\n"));
   }
 
   const abilities = store.listAbilities(trackId);
   if (abilities.length) {
-    sections.push(["## Abilities", ...abilities.map((entry) => `- ${entry.title} — ${entry.status}, v${entry.version}, ${entry.evidenceCount} evidence (id ${entry.id})${entry.summary ? `: ${entry.summary}` : ""}`)].join("\n"));
+    add("abilities", ["## Abilities", ...abilities.map((entry) => `- ${entry.title} — ${entry.status}, v${entry.version}, ${entry.evidenceCount} evidence (id ${entry.id})${entry.summary ? `: ${entry.summary}` : ""}`)].join("\n"));
   }
 
   const patterns = store.listPatterns(trackId).filter((pattern) => pattern.status !== "resolved");
-  if (patterns.length) sections.push(["## Open patterns (your hypotheses about how they go wrong)", ...patterns.map((pattern) => `- [${pattern.status}] ${pattern.title}: ${pattern.description}`)].join("\n"));
+  if (patterns.length) add("patterns", ["## Open patterns (your hypotheses about how they go wrong)", ...patterns.map((pattern) => `- [${pattern.status}] ${pattern.title}: ${pattern.description}`)].join("\n"));
 
   const lessons = store.recentLessons(Number.MAX_SAFE_INTEGER, trackId);
-  if (lessons.length) sections.push(["## Lessons you have taught", ...lessons.map((entry) => `- [[lesson:${entry.id}|${entry.title}]] — ${entry.summary} (${ago(entry.taughtAt)})`)].join("\n"));
+  if (lessons.length) add("lessons", ["## Lessons you have taught", ...lessons.map((entry) => `- [[lesson:${entry.id}|${entry.title}]] — ${entry.summary} (${stamp(entry.taughtAt)})`)].join("\n"));
 
   /* Reviews live in review sessions only. A training session is about the
      next step, and a due card in its journey is how reviews used to leak into
      one the learner never asked to spend on review. */
-  if (session.summary.context === "review") sections.push(reviewSessionSection(store, sessionId));
+  if (session.summary.context === "review") add("review-session", reviewSessionSection(store, sessionId));
 
   const intake = store.freshIntakeAnswer(sessionId);
-  if (intake) sections.push(`## The learner's answer to your question\nYou asked: ${intake.question}\nThey answered: ${intake.answer}`);
+  if (intake) add("intake", `## The learner's answer to your question\nYou asked: ${intake.question}\nThey answered: ${intake.answer}`);
 
   /* The whole session, the recent part word for word. Older messages keep their
      first sentence so the arc of the session stays in view without the journey
      growing with every message ever sent; what mattered from them is what the
      notebook is for. */
   const conversation = session.messages.filter((message) => message.body.trim());
-  if (conversation.length) {
+  if (options.conversation !== false && conversation.length) {
     const speaker = (message: (typeof conversation)[number]) => message.role === "learner" ? "Learner" : message.role === "agent" ? "You" : "Spar";
     const older = conversation.slice(0, Math.max(0, conversation.length - RECENT_MESSAGES));
     const recent = conversation.slice(older.length);
-    sections.push([
+    add("conversation", [
       "## This session so far",
-      ...(older.length ? [`Earlier, first sentence of each:\n${older.map((message) => `- ${speaker(message)} (${ago(message.createdAt)}): ${firstSentence(message.body)}`).join("\n")}`, "Then, in full:"] : []),
-      ...recent.map((message) => `**${speaker(message)}** (${ago(message.createdAt)}): ${message.body.trim()}`),
+      ...(older.length ? [`Earlier, first sentence of each:\n${older.map((message) => `- ${speaker(message)} (${stamp(message.createdAt)}): ${firstSentence(message.body)}`).join("\n")}`, "Then, in full:"] : []),
+      ...recent.map((message) => `**${speaker(message)}** (${stamp(message.createdAt)}): ${message.body.trim()}`),
     ].join("\n\n"));
   }
 
   const skills = skillsSection(input.skills ?? []);
-  if (skills) sections.push(`## Skills\n${skills}`);
+  if (skills) add("skills", `## Skills\n${skills}`);
   /* The learner's standing instructions, set from the workspace's settings
      menu or by set_challenge_mix. Last before the turn's facts on purpose: in
      the middle of a long journey they read as background and were skimmed; here
      they are the frame the turn is answered in. Absent at the defaults. */
   const mix = challengeMixInstructions(session.summary.challengeMix, session.summary.problemSources, language, store.lensLog(sessionId));
-  if (mix) sections.push(`## Coaching settings (the learner's, for every turn)\n${mix}`);
-  sections.push(`## Available this turn\n- Web search: ${input.webSearch ? "yes" : "no"}\n- Provider problems: ${input.practiceSource ? "yes" : "no"}\n- Spar-written challenges: ${session.summary.problemSources.includes("spar") ? "yes" : "no"}`);
+  if (mix) add("settings", `## Coaching settings (the learner's, for every turn)\n${mix}`);
+  add("available", `## Available this turn\n- Web search: ${input.webSearch ? "yes" : "no"}\n- Provider problems: ${input.practiceSource ? "yes" : "no"}\n- Spar-written challenges: ${session.summary.problemSources.includes("spar") ? "yes" : "no"}`);
 
-  return sections.join("\n\n");
+  return sections;
 }
 
 function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarter: boolean, open = false): string {
@@ -211,7 +267,7 @@ function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarte
     challenge.testRuns ? `${challenge.testRuns} run${challenge.testRuns === 1 ? "" : "s"}` : "",
     challenge.totalCases ? `${challenge.passedCases ?? 0}/${challenge.totalCases} cases on the last run` : "",
     challenge.outcome ? (challenge.assistance === "assisted" ? "the coach helped during it" : challenge.assistance === "independent" ? "no help from the coach during it" : "") : "",
-    ago(challenge.createdAt),
+    stamp(challenge.createdAt),
   ].filter(Boolean).join(" · ");
   const lines = [
     `### ${ordinal}. ${challenge.title} — ${outcome}`,
@@ -288,7 +344,7 @@ function reviewSessionSection(store: LocalStore, sessionId: string): string {
       card.pitfalls.length ? `Slips on the solve: ${card.pitfalls.map((pitfall) => `${pitfall.mistake} → ${pitfall.fix}`).join("; ")}` : "",
       card.remember ? `What they said they want to remember: ${card.remember}` : "",
       card.coachNote ? `Your note on this card: ${card.coachNote}` : "",
-      past.length ? `Reviews, newest first:\n${past.map((log) => `- ${ago(log.reviewedAt)} · ${log.source}${log.format && log.source === "recall" ? ` (${log.format})` : ""} · ${RATING_WORD[log.rating]}${log.feedback ? ` · ${log.feedback.replace(/\s+/g, " ")}` : ""}${log.held?.length ? ` · held: ${log.held.join("; ")}` : ""}${log.missed?.length ? ` · missed: ${log.missed.join("; ")}` : ""}${log.submissionId ? ` · submission ${log.submissionId}` : log.attemptId ? ` · attempt ${log.attemptId}` : ""}`).join("\n")}` : "",
+      past.length ? `Reviews, newest first:\n${past.map((log) => `- ${stamp(log.reviewedAt)} · ${log.source}${log.format && log.source === "recall" ? ` (${log.format})` : ""} · ${RATING_WORD[log.rating]}${log.feedback ? ` · ${log.feedback.replace(/\s+/g, " ")}` : ""}${log.held?.length ? ` · held: ${log.held.join("; ")}` : ""}${log.missed?.length ? ` · missed: ${log.missed.join("; ")}` : ""}${log.submissionId ? ` · submission ${log.submissionId}` : log.attemptId ? ` · attempt ${log.attemptId}` : ""}`).join("\n")}` : "",
       submissions.length ? `Submissions on the original challenge: ${submissions.length}, the last ${submissions.at(-1)!.outcome} (${submissions.at(-1)!.passedCases}/${submissions.at(-1)!.totalCases}), id ${submissions.at(-1)!.id}.` : "",
       links.length ? `Challenges set for this card: ${links.map((link) => `"${link.challengeTitle}" (${link.purpose === "deeper" ? "going deeper" : "review"}, ${link.challengeId}, ${link.outcome}${link.purpose === "review" ? link.reviewed ? ", judged" : ", not judged" : ""})`).join("; ")}` : "",
     ].filter(Boolean).join("\n"));
@@ -314,6 +370,13 @@ export function ago(iso: string | null | undefined, now = Date.now()): string {
   const days = Math.round(hours / 24);
   if (days < 14) return days === 1 ? "yesterday" : `${days} days ago`;
   return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** A moment as the coach reads it: a date and a time, the same on every turn. */
+export function stamp(iso: string | null | undefined): string {
+  const at = iso ? Date.parse(iso) : Number.NaN;
+  if (!Number.isFinite(at)) return "at an unknown time";
+  return new Date(at).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 /** Whether the learner still has a challenge in front of them. */

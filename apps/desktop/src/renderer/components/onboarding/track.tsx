@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { Pencil } from "lucide-react";
+import { IconPencil } from "central-icons";
 import type { Language, ProblemSource } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { LANGUAGE_LABEL, LanguageGlyph } from "../common/LanguageGlyph";
@@ -94,7 +94,7 @@ export function TrackCard({ title, goal, language, sources, style, first, onTitl
             spellCheck={false}
             value={title}
           />
-          <Pencil className="pointer-events-none absolute right-1 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70 group-focus-within:text-muted-foreground/70" />
+          <IconPencil className="pointer-events-none absolute right-1 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground/70 group-focus-within:text-muted-foreground/70" />
         </label>
         <textarea
           aria-label="What this Track is for"

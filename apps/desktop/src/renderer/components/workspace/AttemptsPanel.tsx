@@ -1,19 +1,5 @@
 import { useMemo } from "react";
-import {
-  Check,
-  CircleDot,
-  Eye,
-  EyeOff,
-  Flag,
-  MessageSquare,
-  Minus,
-  Pencil,
-  Play,
-  Sparkles,
-  Terminal,
-  Upload,
-  X,
-} from "lucide-react";
+import { IconArrowOutOfBox, IconBubble2, IconCheckmark1, IconCircleRecord, IconConsole, IconCrossMedium, IconEyeOpen, IconEyeSlash, IconFlag1, IconMinusMedium, IconPencil, IconPlay, IconSparklesTwo } from "central-icons";
 import type { SessionDetail } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "../common/EmptyState";
@@ -30,14 +16,14 @@ import {
 type Event = SessionDetail["events"][number];
 
 const MOMENT_ICONS: Record<ReplayMoment["kind"], React.ComponentType<{ className?: string }>> = {
-  opened: Flag,
-  edit: Pencil,
-  run: Play,
-  submission: Upload,
-  verdict: CircleDot,
-  asked: Sparkles,
-  said: MessageSquare,
-  ended: Flag,
+  opened: IconFlag1,
+  edit: IconPencil,
+  run: IconPlay,
+  submission: IconArrowOutOfBox,
+  verdict: IconCircleRecord,
+  asked: IconSparklesTwo,
+  said: IconBubble2,
+  ended: IconFlag1,
 };
 
 /**
@@ -72,7 +58,7 @@ export function AttemptsPanel({
         <EmptyState
           compact
           description="Every edit, run, and submission is recorded here with its own timestamp. Spar reads this to see how you solved it, not just whether you did."
-          icon={Terminal}
+          icon={IconConsole}
           title="Nothing recorded yet"
         />
       </div>
@@ -171,9 +157,9 @@ function CaseRow({ item, startedAt }: { item: ReplayCase; startedAt: number }) {
           title={item.hidden ? "Hidden — only runs when you submit" : "Visible while you work"}
         >
           {item.hidden ? (
-            <EyeOff className="size-3 text-muted-foreground/45" />
+            <IconEyeSlash className="size-3 text-muted-foreground/45" />
           ) : (
-            <Eye className="size-3 text-muted-foreground/30" />
+            <IconEyeOpen className="size-3 text-muted-foreground/30" />
           )}
         </span>
         <span className={cn("min-w-0 flex-1 truncate text-ui", failing ? "text-foreground" : "text-foreground/80")}>
@@ -208,14 +194,14 @@ function Mark({ verdict }: { verdict: CaseVerdict }) {
   if (verdict === "passed") {
     return (
       <span className="grid size-3.5 place-items-center rounded-[3px] bg-[var(--success)]/15">
-        <Check className="size-2.5 text-[var(--success)]" />
+        <IconCheckmark1 className="size-2.5 text-[var(--success)]" />
       </span>
     );
   }
   if (verdict === "failed") {
     return (
       <span className="grid size-3.5 place-items-center rounded-[3px] bg-destructive/15">
-        <X className="size-2.5 text-destructive" />
+        <IconCrossMedium className="size-2.5 text-destructive" />
       </span>
     );
   }
@@ -228,7 +214,7 @@ function Mark({ verdict }: { verdict: CaseVerdict }) {
   }
   return (
     <span className="grid size-3.5 place-items-center" title="Skipped">
-      <Minus className="size-2.5 text-muted-foreground/50" />
+      <IconMinusMedium className="size-2.5 text-muted-foreground/50" />
     </span>
   );
 }

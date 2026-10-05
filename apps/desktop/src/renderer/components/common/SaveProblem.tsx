@@ -1,4 +1,4 @@
-import { Bookmark } from "lucide-react";
+import { IconBookmark } from "central-icons";
 import type { SavedProblem } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -69,7 +69,7 @@ export function SaveProblem({
         }}
         type="button"
       >
-        <Bookmark className={cn("size-3.5 transition-transform duration-150", saved && "fill-current")} />
+        <IconBookmark className={cn("size-3.5 transition-transform duration-150", saved && "fill-current")} />
       </TooltipTrigger>
       <TooltipContent>{saved ? "Saved — click to remove" : "Save for later"}</TooltipContent>
     </Tooltip>
@@ -108,7 +108,7 @@ export function saveWithReceipt({
     key: `saved:${problemKey}`,
     title: saved ? "Removed from Saved" : "Saved in Problems",
     detail: saved ? title : `${title} — open your saved list`,
-    glyph: <Bookmark className={saved ? undefined : "fill-current"} />,
+    glyph: <IconBookmark className={saved ? undefined : "fill-current"} />,
     action: { label: "Undo", onClick: () => void toggleSavedProblem(problemKey, snapshot) },
     ...(saved || !canOpenShelf() ? {} : { onClick: openSavedProblems }),
   });

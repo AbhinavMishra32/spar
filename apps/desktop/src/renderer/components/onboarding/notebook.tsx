@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { NotebookPen } from "lucide-react";
+import { IconPencilWave } from "central-icons";
 import type { Language, LearnerProfile, ProblemSource } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { LANGUAGE_LABEL } from "../common/LanguageGlyph";
@@ -157,7 +157,7 @@ export function NotebookPage({ lines, words, onWords, onWritten, onStamped, onSu
       <motion.div animate={{ opacity: 1, rotateX: 0, y: 0 }} className={cn(SURFACE, "relative overflow-hidden rounded-2xl")} initial={{ opacity: 0, rotateX: 30, y: 40 }} transition={GLIDE}>
         <div className="flex items-center justify-between border-b border-border px-5 py-2.5">
           <span className="flex items-center gap-2 text-ui-sm text-muted-foreground">
-            <NotebookPen className="size-3.5" /> <span className="font-mono">user.md</span>
+            <IconPencilWave className="size-3.5" /> <span className="font-mono">user.md</span>
           </span>
           <span className="text-ui-sm text-muted-foreground/70">Every Track reads it</span>
         </div>
@@ -231,7 +231,7 @@ export function NotebookPill({ count, bump, ref }: { count: number; bump: number
       transition={POP}
     >
       <motion.span animate={bump ? { rotate: [0, -14, 10, 0], scale: [1, 1.25, 1] } : {}} className="inline-flex" key={bump} transition={{ duration: 0.5 }}>
-        <NotebookPen className="size-3.5" />
+        <IconPencilWave className="size-3.5" />
       </motion.span>
       <span className="font-mono text-ui-sm">user.md</span>
       <AnimatePresence initial={false} mode="popLayout">

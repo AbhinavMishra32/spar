@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { BookOpen, FileCheck2, FileCode2, Puzzle, Shapes, SquareArrowOutUpRight } from "lucide-react";
+import { IconBook, IconFileBend, IconPageCheck, IconPuzzle, IconShapesPlusXSquareCircle, IconSquareArrowTopRight } from "central-icons";
 
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -128,7 +128,7 @@ export function Reference({ kind, target, label }: { kind: ReferenceKind; target
     if (!links.onOpenLesson) return <span className="font-medium">{label}</span>;
     return (
       <ReferenceTag
-        glyph={<BookOpen className="size-3" />}
+        glyph={<IconBook className="size-3" />}
         label={label}
         onClick={() => links.onOpenLesson?.(target)}
         title="Open the lesson"
@@ -154,7 +154,7 @@ export function Reference({ kind, target, label }: { kind: ReferenceKind; target
   if (kind === "concept") {
     return (
       <ReferenceTag
-        glyph={<Shapes className="size-3" />}
+        glyph={<IconShapesPlusXSquareCircle className="size-3" />}
         label={label}
         onClick={() => links.onOpenConcept?.(target)}
         title="Open the concept card"
@@ -167,7 +167,7 @@ export function Reference({ kind, target, label }: { kind: ReferenceKind; target
   if (present) {
     return (
       <ReferenceTag
-        glyph={<FileCode2 className="size-3" />}
+        glyph={<IconFileBend className="size-3" />}
         label={label}
         onClick={() => links.onOpenFile?.(target)}
         title="Open the file"
@@ -181,7 +181,7 @@ export function Reference({ kind, target, label }: { kind: ReferenceKind; target
     <Tooltip>
       <TooltipTrigger asChild>
         <ReferenceTag
-          glyph={<FileCode2 className="size-3" />}
+          glyph={<IconFileBend className="size-3" />}
           label={label}
           onClick={() => links.onCreateFile?.(target)}
           tone="muted"
@@ -210,7 +210,7 @@ function ChallengeReference({ label, target }: { label: string; target: string }
 
   const word = (
     <ReferenceTag
-      glyph={known ? <LanguageGlyph className="size-3.5" language={known.language} /> : <Puzzle className="size-3" />}
+      glyph={known ? <LanguageGlyph className="size-3.5" language={known.language} /> : <IconPuzzle className="size-3" />}
       label={label}
       onClick={() => links.onOpenChallenge?.(target)}
       title="Open the challenge"
@@ -269,7 +269,7 @@ function SubmissionReference({ label, target }: { label: string; target: string 
       <ReferenceTag
         glyph={submission
           ? <SubmissionGlyph judge={submission.judge} outcome={submission.outcome} size={12} />
-          : <FileCheck2 className="size-3" />}
+          : <IconPageCheck className="size-3" />}
         label={label}
         onClick={() => links.onOpenSubmission?.(target)}
         title="Open this submission"
@@ -318,7 +318,7 @@ export function collectReferences(source: string): Array<{ kind: ReferenceKind; 
   return found;
 }
 
-const CARD_ICON = { concept: Shapes, lesson: BookOpen, file: SquareArrowOutUpRight, submission: FileCheck2, challenge: Puzzle } as const;
+const CARD_ICON = { concept: IconShapesPlusXSquareCircle, lesson: IconBook, file: IconSquareArrowTopRight, submission: IconPageCheck, challenge: IconPuzzle } as const;
 
 /**
  * What the reply pointed at, gathered under it.

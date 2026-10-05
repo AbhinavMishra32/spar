@@ -1,4 +1,4 @@
-import { ExternalLink, Gavel, Laptop } from "lucide-react";
+import { IconLaw, IconMacbook, IconSquareArrowTopRight } from "central-icons";
 import type { ChallengeSource } from "@spar/domain";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
@@ -50,8 +50,8 @@ export function SourceBadge({ className, onOpen, source, size = "default" }: {
           {/* The judge, as an icon, in the row itself. Someone scanning a list of
               challenges can see at a glance which verdicts came from the source. */}
           {source.remoteJudge
-            ? <Gavel aria-label={`Judged by ${name}`} className="size-3 shrink-0 opacity-60" />
-            : <Laptop aria-label="Graded on this machine" className="size-3 shrink-0 opacity-60" />}
+            ? <IconLaw aria-label={`Judged by ${name}`} className="size-3 shrink-0 opacity-60" />
+            : <IconMacbook aria-label="Graded on this machine" className="size-3 shrink-0 opacity-60" />}
         </span>
       </HoverCardTrigger>
       <HoverCardContent align="start" className="w-[22rem] text-ui">
@@ -74,7 +74,7 @@ export function SourceBadge({ className, onOpen, source, size = "default" }: {
             onClick={() => onOpen(source.url)}
             type="button"
           >
-            <ExternalLink className="size-3" />Open on {name}
+            <IconSquareArrowTopRight className="size-3" />Open on {name}
           </button>
         )}
       </HoverCardContent>

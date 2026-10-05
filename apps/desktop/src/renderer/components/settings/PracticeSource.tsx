@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleAlert, Ellipsis, Gavel, Laptop, Loader2, RotateCw, ShieldCheck, Trash2 } from "lucide-react";
+import { IconArrowRotateClockwise, IconDotGrid1x3Horizontal, IconExclamationCircle, IconLaw, IconLoader, IconMacbook, IconShieldCheck, IconTrashCan } from "central-icons";
 import type { PracticeInventory, SourceJudgePreference, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -140,13 +140,13 @@ function SourceCard({
                 aria-label={`${name} options`}
                 className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
               >
-                {sourceBusy ? <Loader2 className="size-4 animate-spin" /> : <Ellipsis className="size-4" />}
+                {sourceBusy ? <IconLoader className="size-4 animate-spin" /> : <IconDotGrid1x3Horizontal className="size-4" />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => connect(source)}><RotateCw />Reconnect account</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => connect(source)}><IconArrowRotateClockwise />Reconnect account</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => void run(source, "disconnect", async () => api?.disconnectPracticeSource(source))} variant="destructive">
-                  <Trash2 />Disconnect
+                  <IconTrashCan />Disconnect
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -164,7 +164,7 @@ function SourceCard({
                 />
               )}
               <Button disabled={sourceBusy} onClick={() => connect(source)} size="sm">
-                {busy?.source === source && busy.action === "connect" ? <Loader2 className="size-3.5 animate-spin" /> : state === "expired" ? "Reconnect" : "Connect"}
+                {busy?.source === source && busy.action === "connect" ? <IconLoader className="size-3.5 animate-spin" /> : state === "expired" ? "Reconnect" : "Connect"}
               </Button>
             </div>
           )}
@@ -172,7 +172,7 @@ function SourceCard({
 
       {failure && (
         <Row className="min-h-0 items-start gap-2 py-2.5 text-destructive" role="alert">
-          <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+          <IconExclamationCircle className="mt-0.5 size-3.5 shrink-0" />
           <p className="text-ui leading-[1.5]">{failure}</p>
         </Row>
       )}
@@ -183,7 +183,7 @@ function SourceCard({
         )
         : !failure && !progress && state !== "expired" && (
           <Row className="min-h-0 items-start gap-2 py-2.5">
-            <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+            <IconShieldCheck className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
             <p className="text-ui leading-[1.5] text-muted-foreground">{item.authNote}</p>
           </Row>
         )}
@@ -238,7 +238,7 @@ function ConnectedSource({
           className="w-[18rem]"
           disabled={sourceBusy}
           onChange={(value) => void run(source, "judge", async () => api?.setPracticeJudge(source, value as SourceJudgePreference))}
-          options={[{ value: "source", label: name, icon: Gavel }, { value: "local", label: "This Mac", icon: Laptop }]}
+          options={[{ value: "source", label: name, icon: IconLaw }, { value: "local", label: "This Mac", icon: IconMacbook }]}
           value={item.judgePreference}
         />
       </Row>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, CalendarDays, Check, ChevronLeft, ChevronRight, Flame, Layers, Loader2, Pause, Play, Repeat2, Sparkles, TriangleAlert, Zap } from "lucide-react";
+import { IconArrowRight, IconArrowsRepeat, IconCalendar1, IconCheckmark1, IconChevronLeft, IconChevronRight, IconExclamationTriangle, IconFire1, IconLayersTwo, IconLightningBolt, IconLoader, IconPause, IconPlay, IconSparklesTwo } from "central-icons";
 import type { ReviewActivityEntry, ReviewCard, ReviewCardDetail, ReviewOverview } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -152,20 +152,20 @@ export function ReviewHub({
                 disabled={starting || !active.length}
                 onClick={() => void start()}
               >
-                {starting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />}
+                {starting ? <IconLoader className="animate-spin" data-icon="inline-start" /> : <IconSparklesTwo data-icon="inline-start" />}
                 {dueCount ? "Start review session" : "Review the weakest"}
-                <ArrowRight className="size-3.5" />
+                <IconArrowRight className="size-3.5" />
               </Button>
               <Button disabled={!active.length} onClick={() => onQuickRecall()} title="One recall question per card, no code" variant="ghost">
-                <Zap data-icon="inline-start" /> Quick recall
+                <IconLightningBolt data-icon="inline-start" /> Quick recall
               </Button>
             </div>
           </div>
           <div className="grid shrink-0 grid-cols-2 gap-2 max-md:w-full">
-            <Stat icon={CalendarDays} label="Due this week" value={String(weekAhead)} />
-            <Stat icon={Repeat2} label="Recall today" value={percent(overview.retention)} />
-            <Stat icon={Flame} label="Day streak" value={String(overview.streakDays)} />
-            <Stat icon={Layers} label="Reviews, 30 days" value={String(reviewed30)} />
+            <Stat icon={IconCalendar1} label="Due this week" value={String(weekAhead)} />
+            <Stat icon={IconArrowsRepeat} label="Recall today" value={percent(overview.retention)} />
+            <Stat icon={IconFire1} label="Day streak" value={String(overview.streakDays)} />
+            <Stat icon={IconLayersTwo} label="Reviews, 30 days" value={String(reviewed30)} />
           </div>
         </div>
       </div>
@@ -211,7 +211,7 @@ export function ReviewHub({
                 <p className="truncate text-ui-sm text-muted-foreground">{card.questionTitle} · recall {percent(card.retrievability)}{card.lapses ? ` · forgotten ${card.lapses}×` : ""}</p>
                 {(last?.missed?.[0] ?? card.pitfalls[0]?.mistake) && (
                   <p className="flex items-start gap-1.5 text-ui leading-[1.45] text-foreground/80">
-                    <TriangleAlert className="mt-[3px] size-3 shrink-0 text-[var(--warning)]" />
+                    <IconExclamationTriangle className="mt-[3px] size-3 shrink-0 text-[var(--warning)]" />
                     <span className="line-clamp-2">{last?.missed?.[0] ?? card.pitfalls[0]?.mistake}</span>
                   </p>
                 )}
@@ -241,9 +241,9 @@ export function ReviewHub({
         <div className="sticky bottom-4 z-20 mx-auto flex items-center gap-2 rounded-xl border border-[var(--recall)]/30 bg-popover/95 px-3 py-2 shadow-[var(--app-shadow-overlay)] backdrop-blur-xl">
           <span className="text-ui tabular-nums">{selected.size} selected</span>
           <Button onClick={() => setSelected(new Set())} variant="ghost">Clear</Button>
-          <Button onClick={() => onQuickRecall([...selected])} variant="outline"><Zap data-icon="inline-start" /> Quick recall</Button>
+          <Button onClick={() => onQuickRecall([...selected])} variant="outline"><IconLightningBolt data-icon="inline-start" /> Quick recall</Button>
           <Button className="bg-[var(--recall)] text-white hover:bg-[color-mix(in_oklch,var(--recall)_88%,black)]" disabled={starting} onClick={() => void start([...selected]).then(() => setSelected(new Set()))}>
-            {starting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Sparkles data-icon="inline-start" />} Review session
+            {starting ? <IconLoader className="animate-spin" data-icon="inline-start" /> : <IconSparklesTwo data-icon="inline-start" />} Review session
           </Button>
         </div>
       )}
@@ -261,7 +261,7 @@ export function ReviewHub({
   );
 }
 
-function Stat({ icon: Icon, label, value }: { icon: typeof Check; label: string; value: string }) {
+function Stat({ icon: Icon, label, value }: { icon: typeof IconCheckmark1; label: string; value: string }) {
   return (
     <div className="min-w-[8.5rem] rounded-xl border border-border/70 bg-[var(--color-background-elevated-secondary)]/60 px-3 py-2.5">
       <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground"><Icon className="size-3.5" />{label}</p>
@@ -312,8 +312,8 @@ function MonthCalendar({ month, onMonth, selected, onDay, today, dueByDay, doneB
       <div className="mb-3 flex items-center gap-1">
         <h3 className="flex-1 text-content font-semibold tracking-[-0.01em]">{label}</h3>
         <button className="rounded-md px-2 py-1 text-ui-sm text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => { const now = new Date(); onMonth(new Date(now.getFullYear(), now.getMonth(), 1)); onDay(today); }} type="button">Today</button>
-        <button aria-label="Previous month" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => shift(-1)} type="button"><ChevronLeft className="size-4" /></button>
-        <button aria-label="Next month" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => shift(1)} type="button"><ChevronRight className="size-4" /></button>
+        <button aria-label="Previous month" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => shift(-1)} type="button"><IconChevronLeft className="size-4" /></button>
+        <button aria-label="Next month" className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" onClick={() => shift(1)} type="button"><IconChevronRight className="size-4" /></button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground/60">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((name) => <span key={name} className="pb-1">{name}</span>)}
@@ -395,7 +395,7 @@ function DayAgenda({ day, today, due, done, filed, onOpen, onStart, starting }: 
         <h3 className="flex-1 text-content font-semibold tracking-[-0.01em]">{title}</h3>
         {future && due.length > 0 && (
           <Button disabled={starting} onClick={() => onStart(due.map((card) => card.id))} size="sm" variant="outline">
-            Review {due.length === 1 ? "it" : `these ${due.length}`} <ArrowRight className="size-3" />
+            Review {due.length === 1 ? "it" : `these ${due.length}`} <IconArrowRight className="size-3" />
           </Button>
         )}
       </div>
@@ -431,7 +431,7 @@ function DayAgenda({ day, today, due, done, filed, onOpen, onStart, starting }: 
                       {entry.source === "coach" ? "Coach review" : entry.source === "resolve" ? "Solved again" : "Recall card"} · {new Date(entry.reviewedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
                     </span>
                     {entry.feedback && <span className="line-clamp-2 text-ui-sm text-foreground/80">{entry.feedback}</span>}
-                    {entry.missed?.[0] && <span className="flex items-start gap-1 text-ui-sm text-foreground/75"><TriangleAlert className="mt-[2px] size-3 shrink-0 text-[var(--warning)]" /><span className="line-clamp-1">{entry.missed[0]}</span></span>}
+                    {entry.missed?.[0] && <span className="flex items-start gap-1 text-ui-sm text-foreground/75"><IconExclamationTriangle className="mt-[2px] size-3 shrink-0 text-[var(--warning)]" /><span className="line-clamp-1">{entry.missed[0]}</span></span>}
                   </button>
                 </li>
               ))}
@@ -445,7 +445,7 @@ function DayAgenda({ day, today, due, done, filed, onOpen, onStart, starting }: 
               {filed.map((entry) => (
                 <li key={entry.id}>
                   <button className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent" onClick={() => onOpen(entry.cardId)} type="button">
-                    <Sparkles className="size-3 shrink-0 text-muted-foreground" />
+                    <IconSparklesTwo className="size-3 shrink-0 text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate text-ui">{entry.cardTitle}</span>
                     <span className="shrink-0 truncate text-ui-sm text-muted-foreground">{entry.questionTitle}</span>
                   </button>
@@ -490,7 +490,7 @@ function CardRow({ card, last, checked, onToggle, onOpen }: { card: ReviewCard; 
         <span className={cn("w-[5.5rem] shrink-0 rounded px-1.5 py-px text-center text-ui-sm", card.suspended ? TONE_CLASS.later : TONE_CLASS[dueTone(card.dueAt)])}>
           {card.suspended ? "Paused" : dueLabel(card.dueAt)}
         </span>
-        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground" />
+        <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground" />
       </button>
     </div>
   );
@@ -531,19 +531,19 @@ function CardSheet({ api, cardId, onClose, onStart, onQuickRecall, onChanged, on
         <DialogDescription className="sr-only">Everything this review card holds: where you slipped, your code and every review.</DialogDescription>
         <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-5">
           <Eyebrow className="mb-2">Review card{detail ? ` · filed ${relativeTime(detail.card.createdAt)}` : ""}</Eyebrow>
-          {detail ? <ReviewDossier api={api} detail={detail} /> : <div className="grid h-40 place-items-center"><Loader2 className="size-4 animate-spin text-muted-foreground" /></div>}
+          {detail ? <ReviewDossier api={api} detail={detail} /> : <div className="grid h-40 place-items-center"><IconLoader className="size-4 animate-spin text-muted-foreground" /></div>}
         </div>
         {detail && (
           <div className="flex shrink-0 items-center gap-2 border-t border-border/70 bg-popover px-5 py-3">
             <Button onClick={() => void suspend()} variant="ghost">
-              {detail.card.suspended ? <Play data-icon="inline-start" /> : <Pause data-icon="inline-start" />}
+              {detail.card.suspended ? <IconPlay data-icon="inline-start" /> : <IconPause data-icon="inline-start" />}
               {detail.card.suspended ? "Resume" : "Pause"}
             </Button>
             <span className="flex-1" />
-            {!detail.card.suspended && <Button onClick={() => onQuickRecall(detail.card.id)} variant="outline"><Zap data-icon="inline-start" /> Quick recall</Button>}
+            {!detail.card.suspended && <Button onClick={() => onQuickRecall(detail.card.id)} variant="outline"><IconLightningBolt data-icon="inline-start" /> Quick recall</Button>}
             {!detail.card.suspended && (
               <Button className="bg-[var(--recall)] text-white hover:bg-[color-mix(in_oklch,var(--recall)_88%,black)]" onClick={() => onStart(detail.card.id)}>
-                <Sparkles data-icon="inline-start" /> Review in a session
+                <IconSparklesTwo data-icon="inline-start" /> Review in a session
               </Button>
             )}
           </div>

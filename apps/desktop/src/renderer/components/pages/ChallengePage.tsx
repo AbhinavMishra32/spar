@@ -1,25 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Panel, PanelGroup } from "react-resizable-panels";
-import {
-  ArrowRight,
-  CheckCircle2,
-  CornerDownRight,
-  FileCode2,
-  FlaskConical,
-  Loader2,
-  PanelBottom,
-  Play,
-  RotateCcw,
-  ShieldCheck,
-  XCircle,
-  Lightbulb,
-  WrapText,
-  Check,
-  Clock,
-  Flag,
-  Layers,
-} from "lucide-react";
+import { IconArrowCornerDownRight, IconArrowRight, IconArrowRotateCounterClockwise, IconCheckCircle2, IconCheckmark1, IconCircleX, IconClock, IconFileBend, IconFlag1, IconLab, IconLayersTwo, IconLayoutBottomFull, IconLightBulb, IconLinebreak, IconLoader, IconPlay, IconShieldCheck } from "central-icons";
 import type { ChallengeDetail, RatingPoint, ReviewCardDetail, ReviewOverview } from "@spar/domain";
 import type { ReviewFiled, SparApi } from "../../../shared/api";
 import { CardNotes, MemoryLine, ReviewTimeline } from "../review/InsightCard";
@@ -85,7 +67,7 @@ function Verdict({ outcome }: { outcome: NonNullable<RunOutcome> }) {
         passed ? "bg-[var(--success)]/12 text-[var(--success)]" : "bg-destructive/12 text-destructive",
       )}
     >
-      {passed ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}
+      {passed ? <IconCheckCircle2 className="size-3.5" /> : <IconCircleX className="size-3.5" />}
       {passed ? "All tests passed" : "Some tests failed"}
     </span>
   );
@@ -204,7 +186,7 @@ function Brief({
             <p className="truncate text-ui font-medium">{summary.sessionTitle}</p>
             <p className="mt-0.5 line-clamp-2 text-ui-sm leading-[1.55] text-muted-foreground">{detail.sessionGoal}</p>
           </div>
-          <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground/70" />
+          <IconArrowRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5 group-hover:text-foreground/70" />
         </button>
 
         {(summary.replacesQuestionTitle || summary.replacedByQuestionTitle) && (
@@ -212,7 +194,7 @@ function Brief({
             <div className="flex flex-col gap-1.5">
               {summary.replacesQuestionTitle && (
                 <p className="flex items-start gap-2 text-ui text-muted-foreground">
-                  <CornerDownRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
+                  <IconArrowCornerDownRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
                   <span>
                     Set in place of <span className="font-medium text-foreground">{summary.replacesQuestionTitle}</span>
                   </span>
@@ -220,7 +202,7 @@ function Brief({
               )}
               {summary.replacedByQuestionTitle && (
                 <p className="flex items-start gap-2 text-ui text-muted-foreground">
-                  <ArrowRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
+                  <IconArrowRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/50" />
                   <span>
                     Swapped out for <span className="font-medium text-foreground">{summary.replacedByQuestionTitle}</span>
                   </span>
@@ -236,7 +218,7 @@ function Brief({
             and runs is the long version, for when the short one is not enough. */}
         {reviewing ? (
           <p className="mt-6 flex items-start gap-2 rounded-lg border border-border bg-[var(--color-background-elevated-secondary)] px-3 py-2 text-ui leading-[1.6] text-muted-foreground">
-            <Clock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
+            <IconClock className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/70" />
             Your past submissions, the run log and what made it click are hidden until this review is filed — the point is to
             find the idea again, not to read it.
           </p>
@@ -273,7 +255,7 @@ function Brief({
         )}
 
         <p className="mt-8 flex items-start gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-ui-sm leading-[1.6] text-muted-foreground">
-          <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
+          <IconShieldCheck className="mt-0.5 size-3.5 shrink-0 text-muted-foreground/60" />
           {reviewing
             ? "This is a review, not an attempt. Passing the full check files it — first check and quick is Easy, several checks or a long time is Hard. Your abilities and the session are untouched."
             : "This is a practice copy. Running and checking here proves nothing to Spar — no attempt is recorded, your abilities do not move, and the session this came from is untouched."}
@@ -694,7 +676,7 @@ export function ChallengePage({
               title="Throw away your practice edits and start from the generated files"
               type="button"
             >
-              {resetting ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" />}
+              {resetting ? <IconLoader className="size-3 animate-spin" /> : <IconArrowRotateCounterClockwise className="size-3" />}
               Reset
             </button>}
             <button
@@ -703,7 +685,7 @@ export function ChallengePage({
               onClick={() => void run()}
               type="button"
             >
-              {running ? <Loader2 className="size-3 animate-spin" /> : <Play className="size-3" />}
+              {running ? <IconLoader className="size-3 animate-spin" /> : <IconPlay className="size-3" />}
               Run
               <kbd className="font-sans text-ui-sm text-muted-foreground/70">⌘↵</kbd>
             </button>
@@ -718,7 +700,7 @@ export function ChallengePage({
               }
               type="button"
             >
-              {checking ? <Loader2 className="size-3 animate-spin" /> : <FlaskConical className="size-3" />}
+              {checking ? <IconLoader className="size-3 animate-spin" /> : <IconLab className="size-3" />}
               {checking ? "Checking…" : "Check all"}
             </button>
           </>
@@ -785,7 +767,7 @@ export function ChallengePage({
                       title={file.path}
                       type="button"
                     >
-                      <FileGlyph className="shrink-0 opacity-80" fallback={FileCode2} path={file.path} />
+                      <FileGlyph className="shrink-0 opacity-80" fallback={IconFileBend} path={file.path} />
                       {fileName(file.path)}
                       {dirty[file.path] && <span className="size-1.5 rounded-full bg-foreground/50" />}
                     </button>
@@ -800,7 +782,7 @@ export function ChallengePage({
                       title={intellisense ? "Turn off suggestions and hints" : "Turn on suggestions and hints"}
                       type="button"
                     >
-                      <Lightbulb className="size-3.5" />
+                      <IconLightBulb className="size-3.5" />
                     </button>
                     <button
                       aria-label="Word wrap"
@@ -810,7 +792,7 @@ export function ChallengePage({
                       title={wordWrap ? "Disable word wrap" : "Enable word wrap"}
                       type="button"
                     >
-                      <WrapText className="size-3.5" />
+                      <IconLinebreak className="size-3.5" />
                     </button>
                     <button
                       className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -818,7 +800,7 @@ export function ChallengePage({
                       title="Toggle the result panel"
                       type="button"
                     >
-                      <PanelBottom className="size-3.5" />
+                      <IconLayoutBottomFull className="size-3.5" />
                     </button>
                   </div>
                 </div>
@@ -917,7 +899,7 @@ function ReviewTitle({ startedAt, checks, filed }: { startedAt: number; checks: 
     const next = `Next review ${dueLabel(filed.card.dueAt).toLowerCase()}`;
     return (
       <span className="flex min-w-0 items-center gap-2" title={`${filed.log.feedback ?? ""} ${next}.`.trim()}>
-        <Check className="size-3.5 shrink-0 text-[var(--success)]" />
+        <IconCheckmark1 className="size-3.5 shrink-0 text-[var(--success)]" />
         <span className="shrink-0">Filed as {RATING_LABEL[rating]}</span>
         <span className="truncate text-ui font-normal text-muted-foreground">{next}</span>
       </span>
@@ -927,7 +909,7 @@ function ReviewTitle({ startedAt, checks, filed }: { startedAt: number; checks: 
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   return (
     <span className="flex min-w-0 items-center gap-2" title="Solve it from a blank file. Passing “Check all” files the review.">
-      <Clock className="size-3.5 shrink-0 text-[var(--warning)]" />
+      <IconClock className="size-3.5 shrink-0 text-[var(--warning)]" />
       <span className="shrink-0">Review</span>
       <span className="shrink-0 text-ui font-normal tabular-nums text-muted-foreground">
         {clock} · {checks} check{checks === 1 ? "" : "s"}
@@ -942,7 +924,7 @@ function ReviewActions({ checks, filed, filing, onGiveUp, onDone, onFlashcard }:
   if (filed) {
     return (
       <button className="inline-flex h-6 items-center gap-1.5 rounded-md bg-foreground px-2 text-ui font-medium text-background transition-opacity hover:opacity-90" onClick={onDone} type="button">
-        Back to reviews <ArrowRight className="size-3" />
+        Back to reviews <IconArrowRight className="size-3" />
       </button>
     );
   }
@@ -952,11 +934,11 @@ function ReviewActions({ checks, filed, filing, onGiveUp, onDone, onFlashcard }:
           card is answered instead. Only before a check, while that is still true. */}
       {checks === 0 && (
         <button className={quiet} disabled={filing} onClick={onFlashcard} title="Leave without filing and answer this card's question instead" type="button">
-          <Layers className="size-3" /> Answer the card instead
+          <IconLayersTwo className="size-3" /> Answer the card instead
         </button>
       )}
       <button className={quiet} disabled={filing} onClick={onGiveUp} title="File this review as Again — it comes back tomorrow" type="button">
-        {filing ? <Loader2 className="size-3 animate-spin" /> : <Flag className="size-3" />} Give up
+        {filing ? <IconLoader className="size-3 animate-spin" /> : <IconFlag1 className="size-3" />} Give up
       </button>
       <span className="mx-1 h-4 w-px bg-border" />
     </>

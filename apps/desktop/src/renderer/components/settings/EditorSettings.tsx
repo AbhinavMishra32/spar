@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { IconCheckmark1 } from "central-icons";
 import { AnimatePresence, motion } from "motion/react";
 
 import { Switch } from "@/components/ui/switch";
@@ -97,7 +97,7 @@ function CodeFontPicker() {
                       initial={{ opacity: 0, scale: 0.6 }}
                       transition={{ duration: 0.16, ease: EASE }}
                     >
-                      <Check className="size-2.5" strokeWidth={3} />
+                      <IconCheckmark1 className="size-2.5" />
                     </motion.span>
                   )}
                 </AnimatePresence>

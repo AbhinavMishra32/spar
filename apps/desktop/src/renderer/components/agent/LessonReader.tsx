@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Dialog } from "radix-ui";
-import { BookOpen, Maximize2, Minimize2, X } from "lucide-react";
+import { IconBook, IconCrossMedium, IconExpand45, IconMinimize45 } from "central-icons";
 import { cn } from "@/lib/utils";
 import { LESSON_MORPH, lessonLayoutId } from "./taughtLesson";
 import { ArtifactCardRow } from "./ArtifactCard";
@@ -36,12 +36,12 @@ export function LessonReader({ lessonId, onClose }: { lessonId: string | null; o
                 transition={reduced ? { duration: 0 } : LESSON_MORPH}
               >
                 <motion.div className="flex min-h-0 flex-1 flex-col" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reduced ? 0 : 0.12 }}>
-                  <ArtifactCardRow className="px-5 py-3" icon={<BookOpen className="size-4 text-muted-foreground" />}>
+                  <ArtifactCardRow className="px-5 py-3" icon={<IconBook className="size-4 text-muted-foreground" />}>
                     <Dialog.Title className="min-w-0 flex-1 truncate text-thread font-semibold">{reading.lesson?.title ?? "Lesson"}</Dialog.Title>
                     <button type="button" aria-label={full ? "Leave fullscreen" : "Fill the window"} onClick={() => setFull((value) => !value)} className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
-                      {full ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                      {full ? <IconMinimize45 className="size-3.5" /> : <IconExpand45 className="size-3.5" />}
                     </button>
-                    <Dialog.Close aria-label="Close lesson" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"><X className="size-3.5" /></Dialog.Close>
+                    <Dialog.Close aria-label="Close lesson" className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"><IconCrossMedium className="size-3.5" /></Dialog.Close>
                   </ArtifactCardRow>
                   {reading.status === "ready" && reading.lesson
                     ? <div className={cn("flex min-h-0 flex-1 flex-col border-t border-border/50", full && "mx-auto w-full max-w-[52rem]")}><LessonContent lesson={reading.lesson} page={reading.page} onPage={reading.setPage} /></div>

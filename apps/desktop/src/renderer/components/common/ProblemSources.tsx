@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronsUpDown } from "lucide-react";
+import { IconChevronGrabberVertical } from "central-icons";
 import { DEFAULT_PROBLEM_SOURCES, PROBLEM_SOURCES, type ProblemSource, type SessionSummary } from "@spar/domain";
 import { SourceGlyph } from "./SourceGlyph";
 import { SparDots } from "./SparDots";
@@ -55,7 +55,7 @@ export function ProblemSourcesMenu({ value, onChange }: { value: ProblemSource[]
       <DropdownMenuTrigger asChild>
         <button className="inline-flex h-7 items-center gap-1.5 rounded-md pl-2.5 pr-1.5 text-ui text-foreground transition-colors hover:bg-accent data-[state=open]:bg-accent" type="button">
           {summary}
-          <ChevronsUpDown className="size-3.5 text-muted-foreground/70" />
+          <IconChevronGrabberVertical className="size-3.5 text-muted-foreground/70" />
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-60">

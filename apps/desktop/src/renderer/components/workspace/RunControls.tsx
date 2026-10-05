@@ -1,4 +1,4 @@
-import { Check, ChevronDown, Loader2, Lock, Monitor, Play, Send } from "lucide-react";
+import { IconCheckmark1, IconChevronBottom, IconImac, IconLoader, IconLock, IconPaperPlane, IconPlay } from "central-icons";
 import type { ChallengeSource } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -99,11 +99,11 @@ export function RunControls({
           type="button"
         >
           {running ? (
-            <Loader2 className="size-3 animate-spin" />
+            <IconLoader className="size-3 animate-spin" />
           ) : remote && source ? (
             <SourceGlyph className="size-3" source={source.source} />
           ) : (
-            <Play className="size-3" />
+            <IconPlay className="size-3" />
           )}
           Test
           {exampleCount > 0 && (
@@ -121,7 +121,7 @@ export function RunControls({
                 disabled={disabled || running || submitting}
                 type="button"
               >
-                <ChevronDown className="size-3" />
+                <IconChevronBottom className="size-3" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-64">
@@ -129,7 +129,7 @@ export function RunControls({
               <EngineItem
                 active={!remote}
                 description="Instant. Nothing leaves your computer."
-                icon={<Monitor className="size-3.5" />}
+                icon={<IconImac className="size-3.5" />}
                 label="This machine"
                 onSelect={() => onEngine("local")}
               />
@@ -158,11 +158,11 @@ export function RunControls({
             : `Runs the examples and ${hiddenCount ? `${hiddenCount} ` : ""}hidden cases you cannot see. If any fail you can fix them and submit again. ⇧⌘↵`}
         type="button"
       >
-        {submitting ? <Loader2 className="size-3 animate-spin" /> : graded ? <Check className="size-3" /> : <Send className="size-3" />}
+        {submitting ? <IconLoader className="size-3 animate-spin" /> : graded ? <IconCheckmark1 className="size-3" /> : <IconPaperPlane className="size-3" />}
         {submitting ? (judgedRemotely ? `Judging on ${sourceName}…` : "Judging…") : finalizing ? "Finalizing…" : graded ? "Solved" : "Submit"}
         {!submitting && !graded && !finalizing && (
           <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--color-background-elevated-secondary)] px-1.5 text-ui-sm font-normal tabular-nums text-muted-foreground">
-            <Lock className="size-2.5" />
+            <IconLock className="size-2.5" />
             {hiddenCount > 0 ? hiddenCount : "hidden"}
           </span>
         )}
@@ -179,7 +179,7 @@ function EngineItem({ active, label, description, icon, onSelect }: { active: bo
         <span className="block text-ui text-foreground">{label}</span>
         <span className="block text-ui-sm leading-[1.4] text-muted-foreground">{description}</span>
       </span>
-      <Check className={cn("mt-0.5 size-3.5 shrink-0", active ? "opacity-100" : "opacity-0")} />
+      <IconCheckmark1 className={cn("mt-0.5 size-3.5 shrink-0", active ? "opacity-100" : "opacity-0")} />
     </DropdownMenuItem>
   );
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowLeft, ArrowRight, Loader2, Pause, Play, RotateCcw } from "lucide-react";
+import { IconArrowLeft, IconArrowRight, IconArrowRotateCounterClockwise, IconLoader, IconPause, IconPlay } from "central-icons";
 import { hydrateView, type Snapshot } from "@spar/visualizer";
 import type { VisualizerView } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -92,7 +92,7 @@ export function ExplainedTrace({ part }: { part: ToolPart }) {
     return (
       <Shell>
         <div className="flex items-center gap-2 px-3.5 py-3 text-thread text-[var(--transcript-step)]">
-          <Loader2 className="size-3.5 animate-spin" />
+          <IconLoader className="size-3.5 animate-spin" />
           Drawing what happened…
         </div>
       </Shell>
@@ -280,15 +280,15 @@ function Controls({ atEnd, atStart, count, index, onPlay, onStep, playing }: {
   if (count < 2) return null;
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      <Glyph disabled={atStart} label="Previous step" onClick={() => onStep(index - 1)}><ArrowLeft className="size-3.5" /></Glyph>
+      <Glyph disabled={atStart} label="Previous step" onClick={() => onStep(index - 1)}><IconArrowLeft className="size-3.5" /></Glyph>
       <Glyph
         disabled={false}
         label={atEnd ? "Play again" : playing ? "Pause" : "Play"}
         onClick={onPlay}
       >
-        {atEnd ? <RotateCcw className="size-3.5" /> : playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
+        {atEnd ? <IconArrowRotateCounterClockwise className="size-3.5" /> : playing ? <IconPause className="size-3.5" /> : <IconPlay className="size-3.5" />}
       </Glyph>
-      <Glyph disabled={atEnd} label="Next step" onClick={() => onStep(index + 1)}><ArrowRight className="size-3.5" /></Glyph>
+      <Glyph disabled={atEnd} label="Next step" onClick={() => onStep(index + 1)}><IconArrowRight className="size-3.5" /></Glyph>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Lightbulb } from "lucide-react";
+import { IconChevronBottom, IconLightBulb } from "central-icons";
 import type { Language } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { ProblemStatement } from "./ProblemStatement";
@@ -33,9 +33,9 @@ export function SourceHints({ className, hints, language }: {
               onClick={() => setOpen((current) => shown ? current.filter((item) => item !== index) : [...current, index])}
               type="button"
             >
-              <Lightbulb className="size-3.5 shrink-0 text-[var(--warning)]" />
+              <IconLightBulb className="size-3.5 shrink-0 text-[var(--warning)]" />
               <span className="min-w-0 flex-1 text-ui font-medium">Hint {index + 1}</span>
-              <ChevronDown className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !shown && "-rotate-90")} />
+              <IconChevronBottom className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", !shown && "-rotate-90")} />
             </button>
             {shown && (
               <div className="border-t border-border/70 px-3 py-2">

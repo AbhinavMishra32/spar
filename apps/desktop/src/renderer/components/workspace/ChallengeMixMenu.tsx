@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, Plus, SlidersHorizontal, X } from "lucide-react";
+import { IconArrowRight, IconCheckmark1, IconCrossMedium, IconPlusMedium, IconSettingsSliderHor } from "central-icons";
 import { DEFAULT_CHALLENGE_MIX, challengeMixSchema, type ChallengeMix, type Language, type Lens, type LensDepth, type LensExample as LensExampleValue, type ProblemSource, type SessionSummary } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { DEPTH_COPY, SPAR_CHOICES, TEACHING_CHOICES, customLensId, isDefaultMix, lensCatalogue, lensInfo, sparChoice, type LensInfo, type SparChoice } from "../../../shared/challengeMix";
@@ -123,7 +123,7 @@ export function ChallengeMixMenu({ api, session, language, onChanged, onConnect,
           title="Coaching settings"
           type="button"
         >
-          <SlidersHorizontal className="size-3.5" />
+          <IconSettingsSliderHor className="size-3.5" />
           {/* What is on, as a stack of marks: the trigger says what the panel is
               set to before anyone opens it. */}
           <span className="flex items-center -space-x-1">
@@ -273,7 +273,7 @@ function Lenses({ language, mix, sparOn, onChange }: { language: Language; mix: 
                     onClick={() => remove(lens.id)}
                     type="button"
                   >
-                    <X className="size-3" />
+                    <IconCrossMedium className="size-3" />
                   </button>
                   <Segmented
                     ariaLabel={`How deep to go on ${info.label}`}
@@ -323,7 +323,7 @@ function CodeShift({ example, title }: { example: LensExampleValue; title?: stri
       {example.before && (
         <>
           <span className="max-w-full truncate text-muted-foreground/70 line-through decoration-muted-foreground/40">{example.before}</span>
-          <ArrowRight className="size-3 shrink-0 text-muted-foreground/60" />
+          <IconArrowRight className="size-3 shrink-0 text-muted-foreground/60" />
         </>
       )}
       <span className="max-w-full truncate text-foreground/80">{example.after}</span>
@@ -339,7 +339,7 @@ function AddRow({ label, lenses, onAdd, children }: { label: string; lenses: Len
       <div className="flex flex-wrap gap-1">
         {lenses.map((lens) => (
           <button className={CHIP} key={lens.id} onClick={() => onAdd(lens.id)} title={lens.about} type="button">
-            <Plus className="size-3 text-muted-foreground" />
+            <IconPlusMedium className="size-3 text-muted-foreground" />
             {lens.label}
           </button>
         ))}
@@ -359,7 +359,7 @@ function CustomLens({ onAdd }: { onAdd(label: string): void }) {
   if (!editing) {
     return (
       <button className={cn(CHIP, "border-dashed bg-transparent text-muted-foreground")} onClick={() => setEditing(true)} type="button">
-        <Plus className="size-3" />
+        <IconPlusMedium className="size-3" />
         Your own
       </button>
     );
@@ -417,7 +417,7 @@ function SavedTick({ saved }: { saved: number }) {
   }, [saved]);
   return (
     <span className={cn("inline-flex shrink-0 items-center gap-1 text-ui-sm text-success transition-opacity duration-300", visible ? "opacity-100" : "opacity-0")}>
-      <Check className="size-3" strokeWidth={2.5} />
+      <IconCheckmark1 className="size-3" />
       Saved
     </span>
   );

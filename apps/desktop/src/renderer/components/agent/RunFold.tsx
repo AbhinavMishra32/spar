@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { IconChevronRight } from "central-icons";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 
 /**
@@ -217,7 +217,7 @@ export function RunFold({
           className="inline-flex shrink-0"
           animate={{ rotate: open ? 90 : 0 }}
           transition={{ type: "spring", visualDuration: reduced ? 0 : 0.34, bounce: 0.2 }}
-        ><ChevronRight className="size-3.5" /></motion.span>
+        ><IconChevronRight className="size-3.5" /></motion.span>
       </button>
       )}
       {/* Animate to auto so the open fold continues to grow with streamed rows. */}

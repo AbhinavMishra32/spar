@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor from "@monaco-editor/react";
 import { Panel, PanelGroup } from "react-resizable-panels";
-import { ChevronDown, FileCode2, Flag, FolderTree, Languages, Lightbulb, Loader2, PanelBottom, RotateCcw, WrapText } from "lucide-react";
+import { IconArrowRotateCounterClockwise, IconChevronBottom, IconCodeTree, IconFileBend, IconFlag1, IconLayoutBottomFull, IconLightBulb, IconLinebreak, IconLoader, IconTranslate } from "central-icons";
 import type { ActiveQuestion, AttemptEvent, Language, RatingPoint, SessionDetail } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { runEvidence } from "../../../shared/testReport";
@@ -596,7 +596,7 @@ export function Workspace({
           <DialogFooter>
             <Button disabled={givingUp} onClick={() => setGiveUpOpen(false)} variant="secondary">Keep going</Button>
             <Button disabled={givingUp} onClick={() => void giveUp()} variant="destructive">
-              {givingUp ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Flag data-icon="inline-start" />}
+              {givingUp ? <IconLoader className="animate-spin" data-icon="inline-start" /> : <IconFlag1 data-icon="inline-start" />}
               Give up
             </Button>
           </DialogFooter>
@@ -614,7 +614,7 @@ export function Workspace({
           <DialogFooter>
             <Button disabled={resetting} onClick={() => setResetOpen(false)} variant="secondary">Cancel</Button>
             <Button disabled={resetting} onClick={() => void resetAttempt()}>
-              {resetting ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <RotateCcw data-icon="inline-start" />}
+              {resetting ? <IconLoader className="animate-spin" data-icon="inline-start" /> : <IconArrowRotateCounterClockwise data-icon="inline-start" />}
               Reset attempt
             </Button>
           </DialogFooter>
@@ -632,7 +632,7 @@ export function Workspace({
           <DialogFooter>
             <Button disabled={switchingLanguage} onClick={() => setLanguageTarget(null)} variant="secondary">Keep {LANGUAGE_LABEL[question.language]}</Button>
             <Button disabled={switchingLanguage} onClick={() => void switchLanguage()}>
-              {switchingLanguage ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Languages data-icon="inline-start" />}
+              {switchingLanguage ? <IconLoader className="animate-spin" data-icon="inline-start" /> : <IconTranslate data-icon="inline-start" />}
               Switch
             </Button>
           </DialogFooter>
@@ -748,7 +748,7 @@ export function Workspace({
                 {showTree && (
                   <div className="hairline-r flex w-44 shrink-0 flex-col bg-[var(--color-background-surface-under)]">
                     <div className="flex h-8 shrink-0 items-center gap-1.5 px-2.5 text-ui-sm font-medium tracking-[0.06em] text-muted-foreground/70">
-                      <FolderTree className="size-3.5" />
+                      <IconCodeTree className="size-3.5" />
                       FILES
                     </div>
                     <div className="app-scroll min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
@@ -772,7 +772,7 @@ export function Workspace({
                           title="Browse files"
                           type="button"
                         >
-                          <FolderTree className="size-3.5" />
+                          <IconCodeTree className="size-3.5" />
                         </button>
                         <FloatingFileTree
                           activePath={activeFile}
@@ -796,7 +796,7 @@ export function Workspace({
                       ))
                     ) : (
                       <span className="inline-flex h-6 items-center gap-1.5 rounded-md bg-accent px-2 text-ui">
-                        <FileGlyph className="text-muted-foreground" fallback={FileCode2} path={activeFile} />
+                        <FileGlyph className="text-muted-foreground" fallback={IconFileBend} path={activeFile} />
                         {fileName(activeFile) || "No file"}
                         {dirty && <span className="size-1.5 rounded-full bg-foreground/50" />}
                       </span>
@@ -812,7 +812,7 @@ export function Workspace({
                         title={intellisense ? "Turn off suggestions and hints" : "Turn on suggestions and hints"}
                         type="button"
                       >
-                        <Lightbulb className="size-3.5" />
+                        <IconLightBulb className="size-3.5" />
                       </button>
                       <button
                         aria-label="Word wrap"
@@ -822,7 +822,7 @@ export function Workspace({
                         title={wordWrap ? "Disable word wrap" : "Enable word wrap"}
                         type="button"
                       >
-                        <WrapText className="size-3.5" />
+                        <IconLinebreak className="size-3.5" />
                       </button>
                       <button
                         className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -830,7 +830,7 @@ export function Workspace({
                         title="Revert to the saved file"
                         type="button"
                       >
-                        <RotateCcw className="size-3.5" />
+                        <IconArrowRotateCounterClockwise className="size-3.5" />
                       </button>
                       <button
                         className="grid size-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -838,7 +838,7 @@ export function Workspace({
                         title="Toggle the result panel"
                         type="button"
                       >
-                        <PanelBottom className="size-3.5" />
+                        <IconLayoutBottomFull className="size-3.5" />
                       </button>
                     </div>
                   </div>

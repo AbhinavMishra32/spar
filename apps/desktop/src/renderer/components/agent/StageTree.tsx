@@ -1,7 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion, type Transition } from "motion/react";
 import { ThinkingOrb, type OrbState } from "thinking-orbs";
-import { Lock } from "lucide-react";
+import { IconLock } from "central-icons";
 import { cn } from "@/lib/utils";
 import { ProviderGlyph, hasProviderGlyph } from "../common/ProviderGlyph";
 import { IconAlert, IconCheck, IconChevronRight, IconCircleX, IconEdit, IconFile, IconPlay, IconPuzzle, IconSearch, IconSparkle, IconTerminal } from "./threadIcons";
@@ -904,7 +904,7 @@ function WithheldRow({ files }: { files: DraftFile[] }) {
       <ChildRow
         corner={lines ? <Pill id={String(lines)} tone="added">+{lines}</Pill> : null}
         depth={2}
-        mark={<Lock className="size-3.5" strokeWidth={1.75} />}
+        mark={<IconLock className="size-3.5" />}
         markKey="lock"
         onToggle={() => setOpen((value) => !value)}
         open={open}

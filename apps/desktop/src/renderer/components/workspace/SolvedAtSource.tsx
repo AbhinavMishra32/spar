@@ -1,9 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import {
-  Activity, ArrowBigUp, ArrowLeft, ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, Code2, Copy,
-  Cpu, Loader2, RotateCw, Timer, X,
-} from "lucide-react";
+import { IconArrowLeft, IconArrowRotateClockwise, IconArrowUpCircle, IconArrowUpRight, IconCheckmark1, IconChevronBottom, IconChevronLeft, IconChevronRight, IconCode, IconCrossMedium, IconHeartBeat, IconLoader, IconProcessor, IconSquareBehindSquare1, IconStopwatch } from "central-icons";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/format";
 import { plainMath } from "@/lib/tex";
@@ -146,7 +143,7 @@ export function SolvedRing({ solved, active, fresh = false, onClick }: {
               transition={{ duration: 0.9, ease: [0.22, 0.61, 0.36, 1], delay: 0.15 }}
             />
           </svg>
-          <Check className="relative size-3 text-[var(--success)]" strokeWidth={2.75} />
+          <IconCheckmark1 className="relative size-3 text-[var(--success)]" />
         </motion.button>
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>
@@ -206,13 +203,13 @@ export function SolvedView({ api, challengeId, solved, onRetry, className }: {
                   type="button"
                 >
                   <LeetCodeGlyph className="size-3" />
-                  <ArrowUpRight className="size-3" />
+                  <IconArrowUpRight className="size-3" />
                 </button>
               }
             >
               <div className="flex flex-col divide-y divide-border/70 rounded-xl border border-border bg-card">
-                <DotPlot icon={Timer} label="Runtime" language={languageName(solved.stats)} metric="runtime" onPick={(value) => toggle({ metric: "runtime", value })} picked={picked?.metric === "runtime" ? picked.value : null} stats={solved.stats} verb="faster than" />
-                <DotPlot icon={Cpu} label="Memory" language={languageName(solved.stats)} metric="memory" onPick={(value) => toggle({ metric: "memory", value })} picked={picked?.metric === "memory" ? picked.value : null} stats={solved.stats} verb="leaner than" />
+                <DotPlot icon={IconStopwatch} label="Runtime" language={languageName(solved.stats)} metric="runtime" onPick={(value) => toggle({ metric: "runtime", value })} picked={picked?.metric === "runtime" ? picked.value : null} stats={solved.stats} verb="faster than" />
+                <DotPlot icon={IconProcessor} label="Memory" language={languageName(solved.stats)} metric="memory" onPick={(value) => toggle({ metric: "memory", value })} picked={picked?.metric === "memory" ? picked.value : null} stats={solved.stats} verb="leaner than" />
               </div>
               <div ref={sample} className="scroll-mb-4">
                 <AnimatePresence initial={false} mode="popLayout">
@@ -282,7 +279,7 @@ function Section({ title, hint, trailing, children }: { title: string; hint?: st
 function Unavailable({ error, onRetry }: { error?: string | undefined; onRetry(): void }) {
   return (
     <div className="flex items-start gap-3 rounded-xl border border-border bg-card px-3.5 py-3">
-      <Activity className="mt-0.5 size-4 shrink-0 text-muted-foreground/70" />
+      <IconHeartBeat className="mt-0.5 size-4 shrink-0 text-muted-foreground/70" />
       <div className="min-w-0 flex-1">
         <p className="text-ui font-medium">The comparison didn’t load</p>
         <p className="mt-0.5 text-ui-sm leading-[1.55] text-muted-foreground">{error ?? "LeetCode hasn’t sent the runtime and memory spread for this submission yet."}</p>
@@ -292,7 +289,7 @@ function Unavailable({ error, onRetry }: { error?: string | undefined; onRetry()
         onClick={onRetry}
         type="button"
       >
-        <RotateCw className="size-3.5" />
+        <IconArrowRotateClockwise className="size-3.5" />
         Retry
       </button>
     </div>
@@ -483,19 +480,19 @@ function SampleCode({ api, challengeId, language, metric, value, onClose }: { ap
     <div className="code-block !my-0">
       <div className="code-block-header">
         <span className="code-block-language flex min-w-0 items-center gap-1.5">
-          {spar ? <LanguageGlyph className="size-3.5 shrink-0" language={spar} /> : <Code2 className="size-3.5 shrink-0" />}
+          {spar ? <LanguageGlyph className="size-3.5 shrink-0" language={spar} /> : <IconCode className="size-3.5 shrink-0" />}
           <span className="truncate font-sans text-ui-sm text-foreground/85">Someone else’s {formatBucket(value, metric)} solution</span>
         </span>
         <div className="code-block-actions">
-          {state.status === "loading" && <Loader2 className="size-3.5 animate-spin" />}
+          {state.status === "loading" && <IconLoader className="size-3.5 animate-spin" />}
           <button aria-label="Previous solution from here" className="disabled:opacity-30" disabled={!sample?.hasPrevious || skip === 0} onClick={() => setSkip((current) => Math.max(0, current - 1))} type="button">
-            <ChevronLeft className="size-3.5" />
+            <IconChevronLeft className="size-3.5" />
           </button>
           <button aria-label="Another solution from here" className="disabled:opacity-30" disabled={!sample?.hasNext} onClick={() => setSkip((current) => current + 1)} type="button">
-            <ChevronRight className="size-3.5" />
+            <IconChevronRight className="size-3.5" />
           </button>
           {sample && <CopyButton text={sample.code} />}
-          <button aria-label="Close" onClick={onClose} type="button"><X className="size-3.5" /></button>
+          <button aria-label="Close" onClick={onClose} type="button"><IconCrossMedium className="size-3.5" /></button>
         </div>
       </div>
       {state.status === "error" ? (
@@ -590,7 +587,7 @@ function Solutions({ api, challengeId, languageTag, onRead }: {
         <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3.5 py-3 text-ui-sm text-muted-foreground">
           <span className="min-w-0 flex-1">{error}</span>
           <button className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-md)] px-2 font-medium hover:bg-accent hover:text-foreground" onClick={() => void load(0)} type="button">
-            <RotateCw className="size-3.5" /> Retry
+            <IconArrowRotateClockwise className="size-3.5" /> Retry
           </button>
         </div>
       ) : !page && loading ? (
@@ -620,7 +617,7 @@ function Solutions({ api, challengeId, languageTag, onRead }: {
               onClick={() => void load(page.solutions.length)}
               type="button"
             >
-              {loading ? <Loader2 className="size-3.5 animate-spin" /> : <ChevronDown className="size-3.5" />}
+              {loading ? <IconLoader className="size-3.5 animate-spin" /> : <IconChevronBottom className="size-3.5" />}
               {loading ? "Loading…" : "More"}
             </button>
           )}
@@ -641,7 +638,7 @@ function SolutionRow({ solution, onRead }: { solution: PracticeSolutionSummary; 
         <span className="line-clamp-2 text-ui font-medium leading-[1.45] text-foreground">{cleanTitle(solution.title)}</span>
         <Byline solution={solution} />
       </span>
-      <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/0 group-hover:text-muted-foreground" />
+      <IconChevronRight className="size-3.5 shrink-0 text-muted-foreground/0 group-hover:text-muted-foreground" />
     </button>
   );
 }
@@ -654,7 +651,7 @@ function Byline({ solution }: { solution: PracticeSolutionSummary }) {
       <span className="truncate text-foreground/80" title={solution.author.username ? `@${solution.author.username}` : undefined}>{solution.official ? "LeetCode editorial" : solution.author.name}</span>
       <span aria-hidden className="text-muted-foreground/40">·</span>
       <span className="inline-flex shrink-0 items-center gap-0.5 tabular-nums" title={`${solution.upvotes.toLocaleString()} upvotes`}>
-        <ArrowBigUp className="size-3.5" />{compact(solution.upvotes)}
+        <IconArrowUpCircle className="size-3.5" />{compact(solution.upvotes)}
       </span>
       {solution.createdAt && (
         <>
@@ -710,7 +707,7 @@ function Article({ api, challengeId, summary, languageTag, onBack, onOpen }: {
           title="Back"
           type="button"
         >
-          <ArrowLeft className="size-4" />
+          <IconArrowLeft className="size-4" />
         </button>
         <Byline solution={solution} />
         <button
@@ -720,7 +717,7 @@ function Article({ api, challengeId, summary, languageTag, onBack, onOpen }: {
           title="Open on LeetCode"
           type="button"
         >
-          <ArrowUpRight className="size-4" />
+          <IconArrowUpRight className="size-4" />
         </button>
       </div>
       <div className="app-scroll min-h-0 flex-1 overflow-y-auto">
@@ -732,7 +729,7 @@ function Article({ api, challengeId, summary, languageTag, onBack, onOpen }: {
             <div className="flex items-center gap-3 text-ui-sm text-muted-foreground">
               <span className="min-w-0 flex-1">{state.message}</span>
               <button className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-md)] px-2 font-medium hover:bg-accent hover:text-foreground" onClick={() => setAttempt((value) => value + 1)} type="button">
-                <RotateCw className="size-3.5" /> Retry
+                <IconArrowRotateClockwise className="size-3.5" /> Retry
               </button>
             </div>
           ) : (
@@ -812,7 +809,7 @@ function CodeTabs({ blocks: written, languageTag }: { blocks: Array<{ label: str
             );
           }) : (
             <span className="code-block-language flex items-center gap-1.5">
-              {language ? <LanguageGlyph className="size-3.5" language={language} /> : <Code2 className="size-3.5" />}
+              {language ? <LanguageGlyph className="size-3.5" language={language} /> : <IconCode className="size-3.5" />}
               <span className="font-sans text-ui-sm">{block.label || "Code"}</span>
             </span>
           )}
@@ -930,7 +927,7 @@ function CopyButton({ text }: { text: string }) {
   }, [copied]);
   return (
     <button aria-label={copied ? "Copied" : "Copy code"} onClick={() => void navigator.clipboard.writeText(text).then(() => setCopied(true)).catch(() => undefined)} title={copied ? "Copied" : "Copy code"} type="button">
-      {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+      {copied ? <IconCheckmark1 className="size-3.5" /> : <IconSquareBehindSquare1 className="size-3.5" />}
     </button>
   );
 }

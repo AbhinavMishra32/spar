@@ -1,4 +1,4 @@
-import { Check } from "lucide-react";
+import { IconCheckmark1 } from "central-icons";
 import type { TeachingMode } from "@spar/domain";
 import { TEACHING_CHOICES } from "../../../shared/challengeMix";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,7 +27,7 @@ export function TeachingModePicker({ value, onChange, className }: { value: Teac
               <span className="block text-pretty text-ui-sm text-muted-foreground">{choice.detail}</span>
             </span>
             <span className={cn("mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border", on ? "border-primary bg-primary text-primary-foreground" : "border-border")}>
-              {on && <Check className="size-2.5" strokeWidth={3} />}
+              {on && <IconCheckmark1 className="size-2.5" />}
             </span>
           </button>
         );

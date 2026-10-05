@@ -1,12 +1,12 @@
 import { ArtifactCard, ArtifactCardRow } from "./ArtifactCard";
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useMotionValue, useReducedMotion } from "motion/react";
-import { ThinkingOrb, type OrbState } from "thinking-orbs";
-import { FileSearch } from "lucide-react";
+import { ThinkingOrb } from "thinking-orbs";
+import { IconPageSearch } from "central-icons";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSkill, IconSparkle, IconTerminal } from "./threadIcons";
+import { IconAlert, IconBook, IconCheck, IconCode, IconChevronRight, IconChip, IconDossier, IconDot, IconEdit, IconFile, IconFolder, IconGlobe, IconHistory, IconLightning, IconList, IconPlay, IconPuzzle, IconQuestion, IconSearch, IconSkill, IconSparkle, IconTerminal, IconThinking, LiveMark } from "./threadIcons";
 import { baresDetail, ToolDetail } from "./ToolDetail";
 import { toolSubject } from "./toolSubject";
 import { latestHeading, thoughts } from "./thoughts";
@@ -94,31 +94,6 @@ function useMarkArrival() {
 }
 
 /**
- * Which orb a running step spins.
- *
- * Nine states ship, and a transcript that used three of them was throwing away
- * the only thing the orb is for: telling the reader, before any text is read,
- * what kind of work is under way. Going out to the network does not look like
- * reading a file, and recording what someone understands does not look like
- * either. Names are matched both hyphenated and underscored because the
- * transcript carries tools from v0.7 as well as Construct's own.
- */
-function orbFor(tool: string): OrbState {
-  const name = tool.replace(/-/g, "_");
-  /* Out to the internet: the wires, not the globe. */
-  if (name.startsWith("web_") || name.startsWith("fetch_") || name.startsWith("sync_")) return "connecting";
-  if (name === "load_skill") return "searching";
-  if (name.startsWith("search_") || name.startsWith("read_") || name.startsWith("inspect_") || name.startsWith("list_") || name.startsWith("grep") || name === "replay_attempt") return "searching";
-  if (name.startsWith("write_") || name.startsWith("edit_") || name.startsWith("apply_") || name.startsWith("create_file")) return "shaping";
-  if (isChallengeAuthoringTool(name) || name.startsWith("plan_") || name.startsWith("path")) return "weaving";
-  if (name === "evaluate_attempt" || name.startsWith("run_") || name.startsWith("terminal") || name.startsWith("shell")) return "solving";
-  if (name === "ask_user_question") return "listening";
-  if (name.startsWith("record_") || name.startsWith("upsert_") || name.startsWith("flow_memory") || name.startsWith("remember")) return "breathing";
-  if (name.startsWith("set_") || name.startsWith("propose_") || name.startsWith("commit_") || name.startsWith("update_")) return "composing";
-  return "working";
-}
-
-/**
  * What a step did, as a mark.
  *
  * Every row used to end here with a tick, and the reason is worth recording:
@@ -127,15 +102,18 @@ function orbFor(tool: string): OrbState {
  * transcript of identical green ticks says only "something happened", which is
  * the one thing the reader already knows.
  *
- * Solid, not stroked. See `threadIcons` for why: at 16px a stroked glyph beside
- * 14px text is a smudge, and no stroke weight fixes it — filled shapes are what
- * hold a silhouette this small, and what make the marks read as one column
- * rather than as noise beside the words.
+ * While a step runs it wears this same glyph, pulsing (`LiveMark`), so landing
+ * is the mark going still rather than turning into a different picture.
  */
 const MARK = "size-4";
 
 function ToolIcon({ part }: { part: ToolPart }) {
-  if (part.phase === "running") return <ThinkingOrb aria-label="Working" size={20} state={orbFor(part.tool)} style={{ width: 15, height: 15 }} />;
+  if (part.phase === "running") {
+    /* Building a challenge keeps its orb: it is the one long, multi-stage job in
+       the thread, and it reads as its own thing on purpose. */
+    if (isChallengeAuthoringTool(part.tool)) return <ThinkingOrb aria-label="Building" size={20} state="weaving" style={{ width: 15, height: 15 }} />;
+    return <LiveMark label="Working"><ToolIcon part={{ ...part, phase: "done" }} /></LiveMark>;
+  }
   if (part.phase === "error") return <IconAlert className={cn(MARK, "text-[var(--miss)]")} />;
   /* Anything that reached the practice source is marked with the source's own logo.
      A magnifying glass over "Searching LeetCode for a problem" says the agent
@@ -208,14 +186,14 @@ function ToolIcon({ part }: { part: ToolPart }) {
     case "assign_practice_problem":
     case "reopen_challenge":
       return <IconPuzzle className={MARK} />;
-    /* Lucide already ships the combined document-lines + search glyph. It says
+    /* The history glyph: a look back at what the learner did. It says
        both what is being read and that this row is inspecting it. */
     case "read_attempt":
       return <IconHistory className={MARK} />;
     /* Both retired into read_attempt, and both still drawn: a transcript written
        before the merge is still a transcript somebody scrolls back through. */
     case "inspect_current_attempt":
-      return <FileSearch className={MARK} strokeWidth={1.75} />;
+      return <IconPageSearch className={MARK} />;
     case "replay_attempt":
       return <IconHistory className={MARK} />;
     case "evaluate_attempt":
@@ -530,8 +508,8 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
             transition={{ duration: reduced ? 0 : 0.34, ease: [0.22, 0.61, 0.36, 1], delay: reduced ? 0 : 0.08 }}
           />
           <motion.span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")} {...mark} {...(handoff ? { initial: false } : {})}>
-            {/* The mark changes when the call lands — an orb while it runs, the
-                tool's own glyph once it has. Crossing them on a scale rather
+            {/* The mark changes when the call lands — the tool's glyph pulsing
+                while it runs, still once it has. Crossing them on a scale rather
                 than cutting is what makes the finish of a step something you
                 can see out of the corner of your eye, which is where a reader
                 following a turn actually has it. */}
@@ -704,7 +682,7 @@ export function StatusRow({ body, continues = false }: { body: string; continues
 export function DraftRow({ draft, startedAt, continues = false }: { draft: ChallengeDraft; startedAt: number; continues?: boolean }) {
   const lines = draft.files.reduce((total, file) => total + file.lines, 0);
   return (
-    <GutterRow continues={continues} mark={<ThinkingOrb aria-label="Writing" size={20} state={orbFor("create_question")} style={{ width: 15, height: 15 }} />} markKey="writing">
+    <GutterRow continues={continues} mark={<ThinkingOrb aria-label="Writing" size={20} state="weaving" style={{ width: 15, height: 15 }} />} markKey="writing">
       {/* The call's own row, before the call: same title, same clock, same
           diff, so the row that replaces it changes nothing you can see. */}
       <div className={cn(LABEL_ROW, "text-[var(--transcript-step)]")}>
@@ -807,27 +785,11 @@ export const FINAL_GAP = "0.875rem";
  *  after it. A note under a row uses this so it lines up with the words it belongs
  *  to rather than nearly lining up with them. */
 export const UNDER_LABEL = "1.625rem";
-/** Where a thought's words sit the instant its orb goes, expressed as the padding
+/** Where a thought's words sit the instant its live mark goes, expressed as the padding
  *  that puts them back under UNDER_LABEL — the live row spends 6px of ROW's own
  *  padding getting there, so it asks for 6px less. Getting this wrong is not a
  *  static misalignment but a visible hop in the middle of a paragraph. */
 const SETTLING_FROM = "1.25rem";
-
-/** Which orb a thought wears.
- *
- * Every thought used to be `solving`, which made the liveliest thing in the
- * transcript the most repetitive: eight thoughts in a turn, eight identical
- * animations. There is nothing in a block of reasoning to read a state off — a
- * tool has its name, a thought has only itself — so the choice is arbitrary, and
- * arbitrary is best spent on variety. Keyed off the thought's own id rather than
- * drawn fresh, because an orb that reshuffled on every delta would be a strobe.
- */
-const THOUGHT_ORBS: OrbState[] = ["solving", "weaving", "working", "composing", "breathing", "shaping"];
-function orbForThought(id: string): OrbState {
-  let hash = 0;
-  for (let index = 0; index < id.length; index += 1) hash = (hash * 31 + id.charCodeAt(index)) | 0;
-  return THOUGHT_ORBS[Math.abs(hash) % THOUGHT_ORBS.length] ?? "solving";
-}
 
 /** Linked rows carry 4px of padding under their 24px mark, so every step of a
  *  run — call, status or lesson — sits on the same 28px rhythm. The connector
@@ -977,19 +939,19 @@ export function Reasoning({ part }: { part: Extract<RunPart, { kind: "reasoning"
 /**
  * A block of thinking: its heading, and the thinking behind it.
  *
- * Live, the mark is the orb and the title shimmers, and the stream inside
+ * Live, the mark is a pulsing bulb and the title shimmers, and the stream inside
  * follows its own tail — so opening it mid-thought shows where the model is, not
  * the paragraph it opened with — and is held to a height, because a thought is
  * as long as it is and the row it opens should not push the turn off the screen.
  *
- * Settled, the orb goes, and with it the gutter it stood in. A glyph on every
+ * Settled, the mark goes, and with it the gutter it stood in. A glyph on every
  * one of these was decoration, but removing it and keeping its column was worse
  * than either: the text sat indented under a blank space, which reads as a child
  * of the row above rather than as a step beside it. The thought ends at the
  * margin.
  *
  * `settling` is how it gets there. While the model thinks, the row's words sit a
- * label's width in; the moment the orb goes they have to travel that width, and
+ * label's width in; the moment the mark goes they have to travel that width, and
  * doing it in one frame is a jump in the middle of a paragraph the reader is
  * already looking at. It is only ever true for a thought that has just finished
  * in front of them — a transcript read back from storage was never indented and
@@ -1025,10 +987,10 @@ function Thought({
     return () => cancelAnimationFrame(frame);
   }, [home]);
 
-  /* Live, the orb stands in a tool row's gutter and there is nothing to travel.
+  /* Live, the mark stands in a tool row's gutter and there is nothing to travel.
      A tool row pulls itself 4px left of the prose column so its 24px mark centres
      where the reference centres it; this row carries ROW's own 6px of padding, so
-     it has to give back 10px to put its orb in the same column — otherwise the one
+     it has to give back 10px to put its mark in the same column — otherwise the one
      row in the transcript that says the model is thinking is the one row whose
      mark does not line up with the marks above it. The gap after the mark matches
      the tool row's for the same reason, which puts the words at UNDER_LABEL. */
@@ -1040,7 +1002,7 @@ function Thought({
     <>
       {live && (
         <span className={ROW_GLYPH}>
-          <ThinkingOrb aria-label="Thinking" size={20} state={orbForThought(id)} style={{ width: 15, height: 15 }} />
+          <LiveMark label="Thinking"><IconThinking className={MARK} /></LiveMark>
         </span>
       )}
       <span className={cn("min-w-0 truncate", live && "thinking-shimmer")}>{title}</span>
@@ -1125,7 +1087,7 @@ export function SolveRead({ part }: { part: ToolPart }) {
       <motion.div {...arrival} className={cn(ROW, "text-[var(--transcript-step)]")}>
         <span className={cn(ROW_GLYPH, "text-[var(--transcript-step-mark)]")}>
           {running
-            ? <ThinkingOrb aria-label="Reading your attempt" size={20} state="searching" style={{ width: 15, height: 15 }} />
+            ? <LiveMark label="Reading your attempt"><IconHistory className="size-4" /></LiveMark>
             : <IconHistory className="size-4" />}
         </span>
         <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>

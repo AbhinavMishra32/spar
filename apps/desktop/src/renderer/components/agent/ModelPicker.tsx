@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChevronDown, Search, Unplug } from "lucide-react";
+import { IconArrowUpRight, IconChevronBottom, IconMagnifyingGlass, IconPlugin1 } from "central-icons";
 import type { ProviderInventory, ReasoningEffort } from "../../../shared/api";
 import { patchProviders, refreshProviders, useProviders } from "../../hooks/use-providers";
 import { ComposerPill } from "./Composer";
@@ -158,7 +158,7 @@ export function ModelPicker({
             <span className="truncate">{activeModel?.name ?? inventory?.defaultModel.model}</span>
             {/* Collapsed rather than hidden, so the name does not shift sideways
                 the moment the pointer lands on it. */}
-            <ChevronDown className="size-3.5 w-0 shrink-0 opacity-0 transition-[width,opacity] duration-150 group-hover:w-3.5 group-hover:opacity-50 group-aria-expanded:w-3.5 group-aria-expanded:opacity-50" />
+            <IconChevronBottom className="size-3.5 w-0 shrink-0 opacity-0 transition-[width,opacity] duration-150 group-hover:w-3.5 group-hover:opacity-50 group-aria-expanded:w-3.5 group-aria-expanded:opacity-50" />
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>
@@ -190,7 +190,7 @@ export function ModelPicker({
           className="flex min-h-7 items-center gap-2 px-2"
           onKeyDown={(event) => event.stopPropagation()}
         >
-          <Search className="size-4 shrink-0 text-muted-foreground/70" />
+          <IconMagnifyingGlass className="size-4 shrink-0 text-muted-foreground/70" />
           <input
             ref={field}
             className="w-full bg-transparent text-thread leading-none outline-none placeholder:text-muted-foreground/60"
@@ -245,7 +245,7 @@ export function ModelPicker({
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onOpenSettings}>
               <span className="flex-1">Settings</span>
-              <ArrowUpRight className="size-3.5 opacity-45" />
+              <IconArrowUpRight className="size-3.5 opacity-45" />
             </DropdownMenuItem>
           </>
         )}
@@ -293,7 +293,7 @@ export function ReasoningPicker({
             ref={trigger}
           >
             <span className="truncate">{current.label}</span>
-            <ChevronDown className="size-3.5 shrink-0 opacity-50" />
+            <IconChevronBottom className="size-3.5 shrink-0 opacity-50" />
           </DropdownMenuTrigger>
         </TooltipTrigger>
         <TooltipContent>
@@ -390,7 +390,7 @@ export function ComposerModelPicker({ onOpenSettings, sessionId }: { onOpenSetti
     const expired = active?.state === "auth-expired";
     return (
       <ComposerPill
-        icon={Unplug}
+        icon={IconPlugin1}
         tone="warning"
         {...(onOpenSettings ? { onClick: onOpenSettings } : {})}
         title={expired ? `${active?.name} needs signing in again` : "No model provider is connected"}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NotebookIcon } from "@phosphor-icons/react";
+import { IconNotebook } from "central-icons";
 import { LEARNER_NOTEBOOK, type CoachNotebookVersion, type SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -104,7 +104,7 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
-        <Button variant="outline"><NotebookIcon data-icon="inline-start" weight="regular" />Coach's notebook</Button>
+        <Button variant="outline"><IconNotebook data-icon="inline-start" />Coach's notebook</Button>
       </DialogTrigger>
       <DialogContent className="gap-4 sm:max-w-2xl">
         <DialogHeader>
@@ -149,7 +149,7 @@ export function CoachNotebookDialog({ api, trackId }: { api: SparApi | undefined
             </div>
           ) : (
             <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center">
-              <NotebookIcon className="size-6 text-muted-foreground" />
+              <IconNotebook className="size-6 text-muted-foreground" />
               <p className="max-w-md text-ui leading-[1.55] text-muted-foreground">{EMPTY[scope]}</p>
             </div>
           )

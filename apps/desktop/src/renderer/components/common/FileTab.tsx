@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { FileCode2 } from "lucide-react";
+import { IconFileBend } from "central-icons";
 import { cn } from "@/lib/utils";
 import { FileGlyph } from "./LanguageGlyph";
 
@@ -20,7 +20,7 @@ export function FileTab({ path, active, dirty = false, className, ...props }: Co
       type="button"
       {...props}
     >
-      <FileGlyph className="shrink-0 opacity-80" fallback={FileCode2} path={path} />
+      <FileGlyph className="shrink-0 opacity-80" fallback={IconFileBend} path={path} />
       {path.split("/").pop()}
       {active && dirty && <span className="size-1.5 rounded-full bg-foreground/50" />}
     </button>

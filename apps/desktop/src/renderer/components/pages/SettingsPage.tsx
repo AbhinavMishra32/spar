@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, ChartColumn, Check, ChevronDown, ExternalLink, Ellipsis, Eye, Globe, KeyRound, Laptop, Link2, Loader2, Lock, LogOut, Moon, Palette, Plus, RotateCw, Settings2, Sparkle, Sun, Trash2, UserRound } from "lucide-react";
+import { IconArrowBoxLeft, IconArrowRotateClockwise, IconCalendar1, IconChainLink1, IconChart3, IconCheckmark1, IconChevronBottom, IconColorPalette, IconDotGrid1x3Horizontal, IconEyeOpen, IconGlobe, IconKey1, IconLoader, IconLock, IconMacbook, IconMoon, IconPlusMedium, IconSettingsSliderThree, IconSparkle, IconSquareArrowTopRight, IconSun, IconTrashCan, IconUser } from "central-icons";
 import { LANGUAGES as SUPPORTED_LANGUAGES, type Language } from "@spar/domain";
 import type { SavedAccount, SparApi, ProviderAccount, ProviderId, ProviderInventory, SubscriptionUsage, ReviewTargetMode, ThemePreference, UsageWindow } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -52,31 +52,28 @@ type NavItem = SidebarGroup<SettingsSection>["items"][number];
  * Spar and the person signed into it, four about the machinery that reads and
  * teaches and what it spends, three about what is kept and what it adds up to.
  */
-/* Lucide draws its sparkle as an outline; the Agent row wants it solid. */
-const SparkleFilled = ({ className }: { className?: string }) => <Sparkle className={className} fill="currentColor" />;
-
 const SETTINGS_NAV: Array<SidebarGroup<SettingsSection>> = [
   {
     label: "Spar",
     items: [
-      { id: "account", label: "Account", icon: UserRound, sections: ["Account", "About"] },
-      { id: "appearance", label: "Appearance", icon: Palette, sections: ["Appearance", "Editor", "Updates"] },
+      { id: "account", label: "Account", icon: IconUser, sections: ["Account", "About"] },
+      { id: "appearance", label: "Appearance", icon: IconColorPalette, sections: ["Appearance", "Editor", "Updates"] },
     ],
   },
   {
     label: "Training",
     items: [
-      { id: "agent", label: "Agent", icon: SparkleFilled, sections: ["Model", "Providers", "Tools", "Skills"] },
-      { id: "usage", label: "Usage", icon: ChartColumn, sections: ["Overview", "Plan limits", "Models", "Sessions"] },
-      { id: "learning", label: "Learning", icon: Settings2, sections: ["Training preferences"] },
-      { id: "connections", label: "Connections", icon: Link2, sections: ["Practice sources"] },
+      { id: "agent", label: "Agent", icon: IconSparkle, sections: ["Model", "Providers", "Tools", "Skills"] },
+      { id: "usage", label: "Usage", icon: IconChart3, sections: ["Overview", "Plan limits", "Models", "Sessions"] },
+      { id: "learning", label: "Learning", icon: IconSettingsSliderThree, sections: ["Training preferences"] },
+      { id: "connections", label: "Connections", icon: IconChainLink1, sections: ["Practice sources"] },
     ],
   },
   {
     label: "Your record",
     items: [
-      { id: "activity", label: "Activity", icon: CalendarDays, sections: ["Calendar", "Sources", "Rhythm", "Streak", "Solved"] },
-      { id: "privacy", label: "Data & Privacy", icon: Eye, sections: ["Data & Privacy"] },
+      { id: "activity", label: "Activity", icon: IconCalendar1, sections: ["Calendar", "Sources", "Rhythm", "Streak", "Solved"] },
+      { id: "privacy", label: "Data & Privacy", icon: IconEyeOpen, sections: ["Data & Privacy"] },
     ],
   },
 ];
@@ -148,7 +145,7 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
     <>
       <Row className="gap-4">
         <span className={cn("grid size-6 shrink-0 place-items-center transition-colors", active ? "text-foreground/85" : "text-muted-foreground/50")}>
-          <Globe className="size-[1.15rem]" />
+          <IconGlobe className="size-[1.15rem]" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-content font-medium">Web search</p>
@@ -174,7 +171,7 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
           is — replacing one is a deliberate act, not the default state. */}
       {held && !editing ? (
         <Row className="gap-3">
-          <span className="grid size-6 shrink-0 place-items-center text-muted-foreground/70"><KeyRound className="size-4" /></span>
+          <span className="grid size-6 shrink-0 place-items-center text-muted-foreground/70"><IconKey1 className="size-4" /></span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-ui text-muted-foreground">
               {source === "env" ? "Key supplied by the EXA_API_KEY environment variable." : `Key stored in ${credentialStore}.`}
@@ -186,14 +183,14 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
                 aria-label="Exa key options"
                 className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
               >
-                {busy ? <Loader2 className="size-4 animate-spin" /> : <Ellipsis className="size-4" />}
+                {busy ? <IconLoader className="size-4 animate-spin" /> : <IconDotGrid1x3Horizontal className="size-4" />}
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => setEditing(true)}><KeyRound />Replace key</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")}><ExternalLink />Exa dashboard</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => setEditing(true)}><IconKey1 />Replace key</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")}><IconSquareArrowTopRight />Exa dashboard</DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={() => void act(async () => api?.clearWebSearchKey())} variant="destructive">
-                  <Trash2 />Remove key
+                  <IconTrashCan />Remove key
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -201,7 +198,7 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
         </Row>
       ) : source !== "loading" && (source === "none" || editing) ? (
         <Row className="gap-3">
-          <span className="grid size-6 shrink-0 place-items-center text-muted-foreground/70"><KeyRound className="size-4" /></span>
+          <span className="grid size-6 shrink-0 place-items-center text-muted-foreground/70"><IconKey1 className="size-4" /></span>
           <Input
             autoComplete="off"
             autoFocus={editing}
@@ -213,11 +210,11 @@ function WebSearchRow({ api }: { api: SparApi | undefined }) {
             value={draft}
           />
           <Button disabled={busy || !draft.trim()} onClick={() => void act(async () => api?.saveWebSearchKey(draft.trim()))} size="sm">
-            {busy ? <Loader2 className="size-3.5 animate-spin" /> : "Save"}
+            {busy ? <IconLoader className="size-3.5 animate-spin" /> : "Save"}
           </Button>
           {editing
             ? <Button onClick={() => { setEditing(false); setDraft(""); }} size="sm" variant="ghost">Cancel</Button>
-            : <Button onClick={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")} size="sm" variant="ghost"><ExternalLink className="size-3.5" />Get one</Button>}
+            : <Button onClick={() => void api?.openExternal("https://dashboard.exa.ai/api-keys")} size="sm" variant="ghost"><IconSquareArrowTopRight className="size-3.5" />Get one</Button>}
         </Row>
       ) : null}
 
@@ -304,7 +301,7 @@ function ModelPicker({ provider, onSelect }: { provider: Provider; onSelect(mode
       >
         <ProviderGlyph className="size-3.5 shrink-0 opacity-70" provider={provider.id} />
         <span className="truncate">{current?.name ?? provider.selectedModel}</span>
-        <ChevronDown className="size-3 shrink-0 opacity-50" />
+        <IconChevronBottom className="size-3 shrink-0 opacity-50" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="max-h-72 min-w-[14rem]">
         <DropdownMenuLabel>{provider.name}</DropdownMenuLabel>
@@ -498,28 +495,28 @@ function ProviderRow({
           aria-label={`${provider.name} options`}
           className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-md)] text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground"
         >
-          <Ellipsis className="size-4" />
+          <IconDotGrid1x3Horizontal className="size-4" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {!isDefault && provider.models.length > 0 && (
             <DropdownMenuItem onSelect={onMakeDefault}>
-              <Check />
+              <IconCheckmark1 />
               Use as default
             </DropdownMenuItem>
           )}
           <DropdownMenuItem onSelect={onOpen}>
-            {provider.kind === "subscription" ? <RotateCw /> : <Lock />}
+            {provider.kind === "subscription" ? <IconArrowRotateClockwise /> : <IconLock />}
             {provider.kind === "subscription" ? "Reconnect account" : "Edit credentials"}
           </DropdownMenuItem>
           {provider.keyUrl && (
             <DropdownMenuItem onSelect={onKeyUrl}>
-              <ExternalLink />
+              <IconSquareArrowTopRight />
               Get an API key
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onDisconnect} variant="destructive">
-            <Trash2 />
+            <IconTrashCan />
             Disconnect
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -541,7 +538,7 @@ function ConnectRow({ available, onPick }: { available: Provider[]; onPick(provi
           card, and without the background it floated below one. */}
       <DropdownMenuTrigger className="flex min-h-[3.25rem] w-full items-center gap-3 bg-[var(--surface-secondary)] p-2.5 text-content text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground">
         <span className="grid size-6 shrink-0 place-items-center">
-          <Plus className="size-[1.15rem]" />
+          <IconPlusMedium className="size-[1.15rem]" />
         </span>
         Connect a provider
       </DropdownMenuTrigger>
@@ -775,9 +772,9 @@ export function SettingsPage({
                 void onThemeChange(value).catch((cause) => setError(message(cause))).finally(() => setThemeBusy(false));
               }}
               options={[
-                { value: "system", label: "Auto", icon: Laptop },
-                { value: "light", label: "Light", icon: Sun },
-                { value: "dark", label: "Dark", icon: Moon },
+                { value: "system", label: "Auto", icon: IconMacbook },
+                { value: "light", label: "Light", icon: IconSun },
+                { value: "dark", label: "Dark", icon: IconMoon },
               ]}
               value={theme}
             />
@@ -909,7 +906,7 @@ export function SettingsPage({
               <p className="text-content font-medium">Sign out</p>
               <p className="mt-0.5 text-ui text-muted-foreground">Remove this account and its local data from this {deviceNoun}. Anything already synced stays in your cloud history.</p>
             </div>
-            <Button onClick={() => setAccountAction("sign-out")} size="sm" variant="secondary"><LogOut />Sign out</Button>
+            <Button onClick={() => setAccountAction("sign-out")} size="sm" variant="secondary"><IconArrowBoxLeft />Sign out</Button>
           </Row>
         </Group>
         {/* Each account keeps its own profile, sessions and settings on this
@@ -932,7 +929,7 @@ export function SettingsPage({
               <p className="text-content font-medium">Add an account</p>
               <p className="mt-0.5 text-ui text-muted-foreground">Sign in or create another account. This one stays signed in, with its own data.</p>
             </div>
-            <Button disabled={busy} onClick={() => void moveTo((api) => api.addAccount())} size="sm" variant="secondary"><Plus />Add account</Button>
+            <Button disabled={busy} onClick={() => void moveTo((api) => api.addAccount())} size="sm" variant="secondary"><IconPlusMedium />Add account</Button>
           </Row>
         </Group><AboutSpar /></>}
 
@@ -942,7 +939,7 @@ export function SettingsPage({
               <p className="text-content font-medium">Delete account</p>
               <p className="mt-0.5 text-ui text-muted-foreground">Permanently remove your account and cloud-backed learning history. This cannot be undone.</p>
             </div>
-            <Button onClick={() => setAccountAction("delete")} size="sm" variant="destructive"><Trash2 />Delete account</Button>
+            <Button onClick={() => setAccountAction("delete")} size="sm" variant="destructive"><IconTrashCan />Delete account</Button>
           </Row>
         </Group>}
 
@@ -968,7 +965,7 @@ export function SettingsPage({
           <DialogFooter>
             <Button disabled={busy} onClick={() => setAccountAction(null)} variant="secondary">Cancel</Button>
             <Button disabled={busy} onClick={() => void finishAccountAction()} variant={accountAction === "delete" ? "destructive" : "default"}>
-              {busy && <Loader2 className="animate-spin" />}{accountAction === "delete" ? "Delete permanently" : "Sign out"}
+              {busy && <IconLoader className="animate-spin" />}{accountAction === "delete" ? "Delete permanently" : "Sign out"}
             </Button>
           </DialogFooter>
         </DialogContent>

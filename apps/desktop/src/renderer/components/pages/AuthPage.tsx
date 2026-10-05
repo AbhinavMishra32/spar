@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Eye, EyeOff } from "lucide-react";
+import { IconArrowRight, IconEyeOpen, IconEyeSlash } from "central-icons";
 import { motion } from "motion/react";
 import type { AuthCodePurpose, AuthRequest, SavedAccount, SparApi } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -252,7 +252,7 @@ export function AuthPage({
         tabIndex={-1}
         type="button"
       >
-        {reveal ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+        {reveal ? <IconEyeSlash className="size-3.5" /> : <IconEyeOpen className="size-3.5" />}
       </button>
     </div>
   );
@@ -367,7 +367,7 @@ export function AuthPage({
                   key={busy ? copy.busy : copy.action}
                   transition={TEXT}
                 >
-                  {busy ? copy.busy : <>{copy.action}<ArrowRight data-icon="inline-end" /></>}
+                  {busy ? copy.busy : <>{copy.action}<IconArrowRight data-icon="inline-end" /></>}
                 </motion.span>
               </Button>
             </form>

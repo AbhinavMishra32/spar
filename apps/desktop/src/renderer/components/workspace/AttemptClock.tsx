@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Clock3 } from "lucide-react";
+import { IconClock } from "central-icons";
 import { cn } from "@/lib/utils";
 import { duration } from "../../../shared/attemptReplay";
 
@@ -38,7 +38,7 @@ export function AttemptClock({ startedAt, completedAt, className }: { startedAt:
       )}
       title={running ? "Time on this attempt — every moment in your solve replay is measured from here" : "Time this attempt took"}
     >
-      <Clock3 className="size-3.5" aria-hidden="true" />
+      <IconClock className="size-3.5" aria-hidden="true" />
       {duration(elapsed)}
     </span>
   );

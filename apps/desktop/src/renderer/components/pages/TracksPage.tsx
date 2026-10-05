@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, CircleDot, Plus, Radar, ShieldCheck, Trash2 } from "lucide-react";
+import { IconArrowRight, IconCircleRecord, IconPlusMedium, IconShieldCheck, IconTarget2, IconTrashCan } from "central-icons";
 import { DEFAULT_PROBLEM_SOURCES, LANGUAGES, type Language, type ProblemSource, type TeachingMode, type Track } from "@spar/domain";
 import type { BootstrapData } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
@@ -42,7 +42,7 @@ export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
       <header className="flex items-start justify-between gap-4">
         <div><h1 className="text-[1.35rem] font-semibold tracking-[-0.03em]">Tracks</h1><p className="mt-1 max-w-[38rem] text-content text-muted-foreground">Separate workspaces for distinct goals. Each keeps its own sessions, learner model, memory, and training direction.</p></div>
         <Dialog onOpenChange={setOpen} open={open}>
-          <DialogTrigger asChild><Button disabled={busy}><Plus data-icon="inline-start" />New Track</Button></DialogTrigger>
+          <DialogTrigger asChild><Button disabled={busy}><IconPlusMedium data-icon="inline-start" />New Track</Button></DialogTrigger>
           <DialogContent className="sm:max-w-[30rem]">
             <DialogHeader><DialogTitle>Create a Track</DialogTitle><DialogDescription>Describe what you want to get better at. Spar chooses an initial direction, not a fixed syllabus.</DialogDescription></DialogHeader>
             <div className="flex flex-col gap-3">
@@ -78,7 +78,7 @@ export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
             </div>
             <DialogFooter>
               <Button onClick={() => setOpen(false)} variant="secondary">Cancel</Button>
-              <Button disabled={busy || goal.trim().length < 3} onClick={() => void create()}>Create Track<ArrowRight data-icon="inline-end" /></Button>
+              <Button disabled={busy || goal.trim().length < 3} onClick={() => void create()}>Create Track<IconArrowRight data-icon="inline-end" /></Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -86,7 +86,7 @@ export function TracksPage({ data, busy, onCreate, onOpen, onDelete }: {
 
       <div className="mt-6 flex flex-col gap-3">
         {data.tracks.map((track) => <TrackRow busy={busy} onDelete={onDelete} data={data} key={track.id} onOpen={onOpen} track={track} />)}
-        {!data.tracks.length && <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center"><Radar className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-content font-medium">No Tracks yet</p><p className="mt-1 text-ui text-muted-foreground">Create one from a goal; Spar will establish an independent learner workspace and initial direction.</p></div>}
+        {!data.tracks.length && <div className="rounded-xl border border-dashed border-border px-6 py-12 text-center"><IconTarget2 className="mx-auto size-6 text-muted-foreground" /><p className="mt-3 text-content font-medium">No Tracks yet</p><p className="mt-1 text-ui text-muted-foreground">Create one from a goal; Spar will establish an independent learner workspace and initial direction.</p></div>}
       </div>
     </main>
   </div>;
@@ -105,14 +105,14 @@ function TrackRow({ data, track, onOpen, onDelete, busy }: { data: BootstrapData
         <div className="flex items-center gap-2"><h2 className="truncate text-[1.05rem] font-semibold">{track.title}</h2>{active && <span className="rounded-md bg-accent px-1.5 py-0.5 text-ui-sm font-medium">Active</span>}</div>
         <p className="mt-1 line-clamp-2 text-ui leading-5 text-muted-foreground">{track.goal}</p>
         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-ui text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5"><CircleDot className="size-3.5" />{training.length} being investigated or trained</span>
-          <span className="inline-flex items-center gap-1.5"><ShieldCheck className="size-3.5" />{monitoring.length} monitored in this Track</span>
+          <span className="inline-flex items-center gap-1.5"><IconCircleRecord className="size-3.5" />{training.length} being investigated or trained</span>
+          <span className="inline-flex items-center gap-1.5"><IconShieldCheck className="size-3.5" />{monitoring.length} monitored in this Track</span>
           <span>{sessions.length} work session{sessions.length === 1 ? "" : "s"}</span>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <Dialog open={confirmOpen} onOpenChange={(open) => { if (!busy) setConfirmOpen(open); }}>
-          <DialogTrigger asChild><Button aria-label={`Delete ${track.title}`} disabled={busy} size="icon" variant="ghost"><Trash2 className="size-4" /></Button></DialogTrigger>
+          <DialogTrigger asChild><Button aria-label={`Delete ${track.title}`} disabled={busy} size="icon" variant="ghost"><IconTrashCan className="size-4" /></Button></DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Delete {track.title}?</DialogTitle>
@@ -124,7 +124,7 @@ function TrackRow({ data, track, onOpen, onDelete, busy }: { data: BootstrapData
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        <Button disabled={busy} onClick={() => void onOpen(track)} size="sm" variant={active ? "default" : "outline"}>Open<ArrowRight data-icon="inline-end" /></Button>
+        <Button disabled={busy} onClick={() => void onOpen(track)} size="sm" variant={active ? "default" : "outline"}>Open<IconArrowRight data-icon="inline-end" /></Button>
       </div>
     </div>
   </article>;

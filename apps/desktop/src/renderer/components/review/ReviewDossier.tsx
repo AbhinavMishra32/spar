@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronRight, CircleDashed, Crosshair, Eye, FileCode2, Lightbulb, Loader2, NotebookPen, Repeat2, Sparkles, TriangleAlert, XCircle } from "lucide-react";
+import { IconArrowsRepeat, IconCheckmark1, IconChevronRight, IconCircleDashed, IconCircleX, IconExclamationTriangle, IconEyeOpen, IconFileBend, IconLightBulb, IconLoader, IconPencilWave, IconSparklesTwo, IconTarget1 } from "central-icons";
 import type { ReviewCardDetail, ReviewLog } from "@spar/domain";
 import type { SparApi, ReviewSessionCard, ReviewSessionState } from "../../../shared/api";
 import type { SubmissionRecord, SubmissionRow } from "../../../shared/submissions";
@@ -47,7 +47,7 @@ export function Eyebrow({ children, className }: { children: React.ReactNode; cl
   return <p className={cn("text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[var(--recall)]", className)}>{children}</p>;
 }
 
-function SectionTitle({ icon: Icon, children, count }: { icon: typeof Check; children: React.ReactNode; count?: number }) {
+function SectionTitle({ icon: Icon, children, count }: { icon: typeof IconCheckmark1; children: React.ReactNode; count?: number }) {
   return (
     <h3 className="mb-2 flex items-center gap-1.5 text-ui-sm font-medium tracking-[0.02em] text-muted-foreground">
       <Icon className="size-3.5 text-muted-foreground/70" />
@@ -112,8 +112,8 @@ function SubmissionRowView({ api, row, label }: { api: SparApi | undefined; row:
   return (
     <li className="rounded-lg border border-border/70 bg-card/60">
       <button className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui" onClick={() => setOpen((value) => !value)} type="button">
-        <ChevronRight className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
-        {passed ? <Check className="size-3.5 shrink-0 text-[var(--success)]" /> : <XCircle className="size-3.5 shrink-0 text-destructive" />}
+        <IconChevronRight className={cn("size-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        {passed ? <IconCheckmark1 className="size-3.5 shrink-0 text-[var(--success)]" /> : <IconCircleX className="size-3.5 shrink-0 text-destructive" />}
         <span className="min-w-0 flex-1 truncate">
           <span className="font-medium">{label ?? row.challengeTitle}</span>
           <span className="text-muted-foreground"> · submission {row.ordinal}</span>
@@ -124,7 +124,7 @@ function SubmissionRowView({ api, row, label }: { api: SparApi | undefined; row:
       {open && (
         <div className="border-t border-border/60 px-2.5 pb-2.5 pt-2">
           {record === undefined ? (
-            <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground"><Loader2 className="size-3 animate-spin" /> Reading the code…</p>
+            <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground"><IconLoader className="size-3 animate-spin" /> Reading the code…</p>
           ) : record?.code ? (
             <>
               <FileCodeBlock body={record.code.text} className="max-h-72 overflow-auto" language={languageFor(record.code.path)} path={record.code.path} />
@@ -156,7 +156,7 @@ function PastWork({ api, detail }: { api: SparApi | undefined; detail: ReviewCar
       .then((lists) => { if (!cancelled) setRows(lists.flat().sort((left, right) => right.row.submittedAt.localeCompare(left.row.submittedAt))); });
     return () => { cancelled = true; };
   }, [api, challengeIds]);
-  if (rows === null) return <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground"><Loader2 className="size-3 animate-spin" /> Gathering your submissions…</p>;
+  if (rows === null) return <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground"><IconLoader className="size-3 animate-spin" /> Gathering your submissions…</p>;
   if (!rows.length) return <p className="text-ui-sm text-muted-foreground">No submissions recorded for this card's challenges.</p>;
   /* The ones reviews were judged on come first — that is the code the coach read. */
   const judged = new Set(detail.logs.map((log) => log.submissionId).filter(Boolean));
@@ -178,7 +178,7 @@ function Timeline({ logs }: { logs: ReviewLog[] }) {
           <span className="absolute -left-[21px] top-1 size-2.5 rounded-full ring-4 ring-[var(--color-background-surface)]" style={{ background: RATING_VAR[Math.min(4, Math.max(1, log.rating)) as 1 | 2 | 3 | 4] }} />
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm">
             <span className="inline-flex items-center gap-1 font-medium text-foreground/85">
-              {log.source === "coach" ? <Sparkles className="size-3 text-[var(--recall)]" /> : log.source === "resolve" ? <Repeat2 className="size-3" /> : log.source === "recall" ? <Lightbulb className="size-3" /> : <CircleDashed className="size-3" />}
+              {log.source === "coach" ? <IconSparklesTwo className="size-3 text-[var(--recall)]" /> : log.source === "resolve" ? <IconArrowsRepeat className="size-3" /> : log.source === "recall" ? <IconLightBulb className="size-3" /> : <IconCircleDashed className="size-3" />}
               {SOURCE_WORD[log.source]}
             </span>
             <Rating rating={log.rating} />
@@ -189,8 +189,8 @@ function Timeline({ logs }: { logs: ReviewLog[] }) {
           {log.answer && <p className="mt-1 rounded-md bg-[var(--color-background-elevated-secondary)] px-2 py-1 text-ui-sm italic text-muted-foreground">“{log.answer.slice(0, 280)}”</p>}
           {(log.held?.length || log.missed?.length) ? (
             <ul className="mt-1.5 flex flex-col gap-0.5 text-ui-sm">
-              {log.held?.map((text, index) => <li key={`h${index}`} className="flex gap-1.5 text-foreground/80"><Check className="mt-[3px] size-3 shrink-0 text-[var(--success)]" />{text}</li>)}
-              {log.missed?.map((text, index) => <li key={`m${index}`} className="flex gap-1.5 text-foreground/80"><TriangleAlert className="mt-[3px] size-3 shrink-0 text-[var(--warning)]" />{text}</li>)}
+              {log.held?.map((text, index) => <li key={`h${index}`} className="flex gap-1.5 text-foreground/80"><IconCheckmark1 className="mt-[3px] size-3 shrink-0 text-[var(--success)]" />{text}</li>)}
+              {log.missed?.map((text, index) => <li key={`m${index}`} className="flex gap-1.5 text-foreground/80"><IconExclamationTriangle className="mt-[3px] size-3 shrink-0 text-[var(--warning)]" />{text}</li>)}
             </ul>
           ) : null}
           {log.misconception && <p className="mt-1 text-ui-sm text-destructive/90">Believed: {log.misconception}</p>}
@@ -228,13 +228,13 @@ export function ReviewDossier({ api, detail, focus = null, deeper = false, spoil
           <div className="pointer-events-none absolute -right-8 -top-10 size-28 rounded-full bg-[var(--recall)]/10 blur-2xl" />
           {focus && (
             <div className="relative">
-              <p className="flex items-center gap-1.5 text-ui-sm font-medium text-[var(--recall)]"><Crosshair className="size-3.5" /> {deeper ? "Going deeper on" : "This review is watching for"}</p>
+              <p className="flex items-center gap-1.5 text-ui-sm font-medium text-[var(--recall)]"><IconTarget1 className="size-3.5" /> {deeper ? "Going deeper on" : "This review is watching for"}</p>
               <p className="mt-1 text-content leading-[1.55] text-foreground">{focus}</p>
             </div>
           )}
           {card.coachNote && (
             <div className={cn("relative", focus && "mt-3 border-t border-[var(--recall)]/15 pt-3")}>
-              <p className="flex items-center gap-1.5 text-ui-sm font-medium text-[var(--recall)]"><NotebookPen className="size-3.5" /> Coach's note</p>
+              <p className="flex items-center gap-1.5 text-ui-sm font-medium text-[var(--recall)]"><IconPencilWave className="size-3.5" /> Coach's note</p>
               <p className="mt-1 text-ui leading-[1.6] text-foreground/90">{card.coachNote}</p>
             </div>
           )}
@@ -249,11 +249,11 @@ export function ReviewDossier({ api, detail, focus = null, deeper = false, spoil
 
       {missed.length > 0 && (
         <section>
-          <SectionTitle count={missed.length} icon={TriangleAlert}>Where you slipped</SectionTitle>
+          <SectionTitle count={missed.length} icon={IconExclamationTriangle}>Where you slipped</SectionTitle>
           <ul className="flex flex-col gap-1.5">
             {missed.map((item) => (
               <li key={item.text} className="flex items-start gap-2.5 rounded-lg bg-[var(--warning)]/[0.07] px-2.5 py-2 text-ui leading-[1.5]">
-                <TriangleAlert className="mt-[3px] size-3.5 shrink-0 text-[var(--warning)]" />
+                <IconExclamationTriangle className="mt-[3px] size-3.5 shrink-0 text-[var(--warning)]" />
                 <div className="min-w-0 flex-1">
                   <p className="text-foreground/90">{item.text}</p>
                   {item.fix && <p className="mt-0.5 text-ui-sm text-muted-foreground">Fix: {item.fix}</p>}
@@ -270,11 +270,11 @@ export function ReviewDossier({ api, detail, focus = null, deeper = false, spoil
 
       {held.length > 0 && (
         <section>
-          <SectionTitle count={held.length} icon={Check}>What now holds</SectionTitle>
+          <SectionTitle count={held.length} icon={IconCheckmark1}>What now holds</SectionTitle>
           <ul className="flex flex-col gap-1">
             {held.map((item) => (
               <li key={item.text} className="flex items-start gap-2 text-ui leading-[1.5] text-foreground/85">
-                <Check className="mt-[3px] size-3.5 shrink-0 text-[var(--success)]" />
+                <IconCheckmark1 className="mt-[3px] size-3.5 shrink-0 text-[var(--success)]" />
                 {item.text}
               </li>
             ))}
@@ -283,12 +283,12 @@ export function ReviewDossier({ api, detail, focus = null, deeper = false, spoil
       )}
 
       <section>
-        <SectionTitle icon={FileCode2}>Your code</SectionTitle>
+        <SectionTitle icon={IconFileBend}>Your code</SectionTitle>
         <PastWork api={api} detail={detail} />
       </section>
 
       <section>
-        <SectionTitle count={detail.logs.filter((log) => log.source !== "implicit").length} icon={Repeat2}>Review history</SectionTitle>
+        <SectionTitle count={detail.logs.filter((log) => log.source !== "implicit").length} icon={IconArrowsRepeat}>Review history</SectionTitle>
         <Timeline logs={detail.logs} />
       </section>
 
@@ -298,8 +298,8 @@ export function ReviewDossier({ api, detail, focus = null, deeper = false, spoil
           onClick={() => setIdeaOpen((value) => !value)}
           type="button"
         >
-          <ChevronRight className={cn("size-3.5 transition-transform", ideaOpen && "rotate-90")} />
-          <Eye className="size-3.5" />
+          <IconChevronRight className={cn("size-3.5 transition-transform", ideaOpen && "rotate-90")} />
+          <IconEyeOpen className="size-3.5" />
           The idea itself
           {spoilerGuard && !ideaOpen && <span className="ml-1 font-normal text-muted-foreground/70">— try the review first; reading it now turns it into a reading test</span>}
         </button>
@@ -368,7 +368,7 @@ function QueueItem({ entry, index, selected, deeper, onSelect }: { entry: Review
         <span
           className={cn("grid size-5 shrink-0 place-items-center rounded-full text-[10px] font-semibold tabular-nums", entry.status === "current" ? "bg-[var(--recall)] text-white" : "bg-[var(--color-background-elevated-secondary)] text-muted-foreground")}
         >
-          {entry.reviewedHere ? <Check className="size-3" style={{ color: RATING_VAR[Math.min(4, Math.max(1, entry.reviewedHere.rating)) as 1 | 2 | 3 | 4] }} /> : index + 1}
+          {entry.reviewedHere ? <IconCheckmark1 className="size-3" style={{ color: RATING_VAR[Math.min(4, Math.max(1, entry.reviewedHere.rating)) as 1 | 2 | 3 | 4] }} /> : index + 1}
         </span>
         <span className="min-w-0 flex-1 truncate">{card.title}</span>
         {entry.reviewedHere ? <Rating rating={entry.reviewedHere.rating} /> : entry.status === "current" ? <span className="text-ui-sm font-medium text-[var(--recall)]">{deeper ? "Deeper" : "Now"}</span> : null}
@@ -392,7 +392,7 @@ export function ReviewBanner({ api, sessionId, refreshKey }: { api: SparApi | un
   return (
     <div className="mx-4 mt-3 rounded-xl border border-[var(--recall)]/25 bg-[var(--recall)]/[0.07] px-3.5 py-2.5">
       <p className="flex items-center gap-1.5 text-ui-sm font-medium text-[var(--recall)]">
-        <Repeat2 className="size-3.5" />
+        <IconArrowsRepeat className="size-3.5" />
         {deeper ? "Going deeper on" : "Review"} · <span className="truncate">{card.title}</span>
       </p>
       {current.learnerNote && <p className="mt-1 text-content leading-[1.5] text-foreground">{current.learnerNote}</p>}
@@ -412,7 +412,7 @@ export function ReviewBrief({ api, sessionId, refreshKey, className }: { api: Sp
   const current = state?.current?.cardId ?? null;
   useEffect(() => setPicked(null), [current]);
   if (!state) {
-    return <div className={cn("grid h-full place-items-center text-ui text-muted-foreground", className)}><Loader2 className="size-4 animate-spin" /></div>;
+    return <div className={cn("grid h-full place-items-center text-ui text-muted-foreground", className)}><IconLoader className="size-4 animate-spin" /></div>;
   }
   const selectedId = picked ?? current ?? state.queue.find((entry) => entry.status === "queued")?.detail.card.id ?? state.queue[0]?.detail.card.id ?? null;
   const selected = state.queue.find((entry) => entry.detail.card.id === selectedId) ?? null;
@@ -442,7 +442,7 @@ export function ReviewBrief({ api, sessionId, refreshKey, className }: { api: Sp
               </div>
             ) : (
               <button className="mt-3 inline-flex items-center gap-1 text-ui-sm font-medium text-muted-foreground hover:text-foreground" onClick={() => reveal(selected.detail.card.id)} type="button">
-                <ChevronRight className="size-3.5" /> {selected.reviewedHere ? "Everything about this card" : "Show it anyway"}
+                <IconChevronRight className="size-3.5" /> {selected.reviewedHere ? "Everything about this card" : "Show it anyway"}
               </button>
             )}
           </div>
@@ -461,10 +461,10 @@ function Verdict({ log }: { log: ReviewLog }) {
       <div className="flex items-center gap-2"><Rating rating={log.rating} /><span className="text-ui-sm text-muted-foreground">{relativeTime(log.reviewedAt)}</span></div>
       {log.feedback && <p className="text-content leading-[1.55] text-foreground">{log.feedback}</p>}
       {!!log.held?.length && (
-        <ul className="flex flex-col gap-1">{log.held.map((item) => <li className="flex gap-1.5 text-ui text-foreground/85" key={item}><Check className="mt-0.5 size-3.5 shrink-0 text-[var(--rate-good)]" />{item}</li>)}</ul>
+        <ul className="flex flex-col gap-1">{log.held.map((item) => <li className="flex gap-1.5 text-ui text-foreground/85" key={item}><IconCheckmark1 className="mt-0.5 size-3.5 shrink-0 text-[var(--rate-good)]" />{item}</li>)}</ul>
       )}
       {!!log.missed?.length && (
-        <ul className="flex flex-col gap-1">{log.missed.map((item) => <li className="flex gap-1.5 text-ui text-foreground/85" key={item}><TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-[var(--rate-hard)]" />{item}</li>)}</ul>
+        <ul className="flex flex-col gap-1">{log.missed.map((item) => <li className="flex gap-1.5 text-ui text-foreground/85" key={item}><IconExclamationTriangle className="mt-0.5 size-3.5 shrink-0 text-[var(--rate-hard)]" />{item}</li>)}</ul>
       )}
     </div>
   );

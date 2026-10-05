@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Command } from "cmdk";
-import { Clock, Eye, History, LayoutGrid, Library, Map, Plus, Search, Settings, Target, Waypoints } from "lucide-react";
+import { IconBooks, IconClock, IconEyeOpen, IconHistory, IconHome, IconLayoutGrid1, IconMagnifyingGlass, IconMap, IconPlusMedium, IconSettingsGear1, IconTargetArrow } from "central-icons";
 import type { ChallengeHistorySummary, ConceptSummary, SessionSummary } from "@spar/domain";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { LANGUAGE_LABEL } from "@/components/common/LanguageGlyph";
@@ -111,7 +111,7 @@ export function SearchPalette({
 
         <Command className="flex min-w-0 flex-col" label="Search Spar" loop shouldFilter={false}>
           <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
-            <Search className="size-4 shrink-0 text-muted-foreground" />
+            <IconMagnifyingGlass className="size-4 shrink-0 text-muted-foreground" />
             <Command.Input
               autoFocus
               className="h-full min-w-0 flex-1 bg-transparent text-[0.9375rem] text-foreground outline-none placeholder:text-muted-foreground/70"
@@ -175,17 +175,17 @@ function Hint({ keys, children }: { keys: string; children: string }) {
 /** Nav glyphs, matching the sidebar's — a row that sends you to Challenges is
  *  drawn with the icon that is already sitting next to the word Challenges. */
 const PLACE_ICON: Record<PalettePlace["page"], React.ComponentType<{ className?: string }>> = {
-  home: Waypoints,
-  tracks: Target,
-  track: Target,
-  history: History,
-  review: Clock,
-  problems: Library,
-  visualizer: Eye,
-  sessions: LayoutGrid,
-  ability: Map,
-  challenges: History,
-  settings: Settings,
+  home: IconHome,
+  tracks: IconTargetArrow,
+  track: IconTargetArrow,
+  history: IconHistory,
+  review: IconClock,
+  problems: IconBooks,
+  visualizer: IconEyeOpen,
+  sessions: IconLayoutGrid1,
+  ability: IconMap,
+  challenges: IconHistory,
+  settings: IconSettingsGear1,
 };
 
 /**
@@ -225,7 +225,7 @@ const GLYPH = "size-3.5 text-foreground/70";
 function rowContent(hit: SearchHit): { icon: React.ReactNode; title: string; sub?: string; meta?: string } {
   switch (hit.kind) {
     case "action":
-      return { icon: <Plus className={GLYPH} />, title: hit.action.label, meta: "⌘N" };
+      return { icon: <IconPlusMedium className={GLYPH} />, title: hit.action.label, meta: "⌘N" };
 
     case "session": {
       const session = hit.session;
@@ -236,7 +236,7 @@ function rowContent(hit: SearchHit): { icon: React.ReactNode; title: string; sub
       const sub = [session.activeQuestion?.title, session.currentFocus[0], session.objective, session.originalGoal]
         .find((value) => value && value.trim().length > 0);
       return {
-        icon: <LayoutGrid className={GLYPH} />,
+        icon: <IconLayoutGrid1 className={GLYPH} />,
         title: session.title,
         ...(sub ? { sub } : {}),
         meta: `${done > 0 ? `${done} done · ` : ""}${relativeTime(session.updatedAt)}`,
@@ -249,7 +249,7 @@ function rowContent(hit: SearchHit): { icon: React.ReactNode; title: string; sub
       // hunting "1" wants to see that this is LeetCode 1 before anything else.
       const origin = challenge.source ? `${challenge.source.source === "codeforces" ? "Codeforces" : "LeetCode"} ${challenge.source.displayId}` : LANGUAGE_LABEL[challenge.language];
       return {
-        icon: <Target className={GLYPH} />,
+        icon: <IconTargetArrow className={GLYPH} />,
         title: challenge.title,
         sub: `${origin} · ${challenge.sessionTitle}`,
         meta: relativeTime(challenge.updatedAt),

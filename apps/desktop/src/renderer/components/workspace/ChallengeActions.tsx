@@ -1,4 +1,4 @@
-import { ChevronDown, Flag, RotateCcw } from "lucide-react";
+import { IconArrowRotateCounterClockwise, IconChevronBottom, IconFlag1 } from "central-icons";
 import type { ChallengeSource, Language } from "@spar/domain";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LANGUAGE_LABEL, LanguageGlyph } from "../common/LanguageGlyph";
@@ -62,17 +62,17 @@ export function ChallengeActions({
             type="button"
           >
             <AttemptClock className="px-0" completedAt={completedAt} startedAt={startedAt} />
-            {!attemptLocked && <ChevronDown className="size-3 shrink-0 text-muted-foreground/60 transition-transform group-data-[state=open]:rotate-180" />}
+            {!attemptLocked && <IconChevronBottom className="size-3 shrink-0 text-muted-foreground/60 transition-transform group-data-[state=open]:rotate-180" />}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuItem onSelect={onRestartTimer}>
-            <RotateCcw aria-hidden />
+            <IconArrowRotateCounterClockwise aria-hidden />
             Restart the timer
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onGiveUp} variant="destructive">
-            <Flag aria-hidden />
+            <IconFlag1 aria-hidden />
             Give up and move on
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -92,7 +92,7 @@ export function ChallengeActions({
             {LANGUAGE_LABEL[language]}
             {languageLocked
               ? <span className="w-0.5" />
-              : <ChevronDown className="size-3 opacity-60 transition-transform group-data-[state=open]:rotate-180" />}
+              : <IconChevronBottom className="size-3 opacity-60 transition-transform group-data-[state=open]:rotate-180" />}
           </button>
         </LanguageMenu>
         <RunControls source={source} {...run} />

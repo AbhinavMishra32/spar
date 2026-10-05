@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, Lightbulb, Repeat2, Sparkles, TriangleAlert } from "lucide-react";
+import { IconArrowsRepeat, IconChevronRight, IconExclamationTriangle, IconLightBulb, IconSparklesTwo } from "central-icons";
 import { REVIEW_FORMAT_LABEL, REVIEW_TARGETS, REVIEW_TARGET_LABEL, type ReviewCard, type ReviewLog, type ReviewTarget } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
@@ -45,7 +45,7 @@ export function InsightCardBody({ card, compact = false }: { card: ReviewCard; c
           <ul className="flex flex-col gap-1.5">
             {card.pitfalls.map((pitfall, index) => (
               <li key={index} className="flex items-start gap-2 text-ui leading-[1.55]">
-                <TriangleAlert className="mt-[3px] size-3 shrink-0 text-[var(--warning)]" />
+                <IconExclamationTriangle className="mt-[3px] size-3 shrink-0 text-[var(--warning)]" />
                 <span>
                   <span className="text-foreground/85">{pitfall.mistake}</span>
                   <span className="text-muted-foreground"> — {pitfall.fix}</span>
@@ -125,7 +125,7 @@ export function ReviewTimeline({ logs }: { logs: ReviewLog[] }) {
               </span>
               <RatingPill rating={log.rating as 1 | 2 | 3 | 4} muted={log.source === "implicit"} />
               <span className="w-12 shrink-0 text-right tabular-nums text-muted-foreground/70">+{Math.round(log.scheduledDays)}d</span>
-              {readable && <ChevronRight className={cn("size-3 shrink-0 text-muted-foreground/50 transition-transform", expanded && "rotate-90")} />}
+              {readable && <IconChevronRight className={cn("size-3 shrink-0 text-muted-foreground/50 transition-transform", expanded && "rotate-90")} />}
             </button>
             {expanded && (
               <div className="mb-2 ml-6 flex flex-col gap-2 rounded-lg bg-[var(--color-background-elevated-secondary)] px-3 py-2 text-ui-sm leading-[1.6]">
@@ -144,7 +144,7 @@ export function ReviewTimeline({ logs }: { logs: ReviewLog[] }) {
 }
 
 function SourceGlyph({ source }: { source: ReviewLog["source"] }) {
-  const Icon = source === "solve" ? Sparkles : source === "resolve" ? Repeat2 : Lightbulb;
+  const Icon = source === "solve" ? IconSparklesTwo : source === "resolve" ? IconArrowsRepeat : IconLightBulb;
   return <Icon className={cn("size-3 shrink-0", source === "implicit" ? "text-muted-foreground/40" : "text-muted-foreground/70")} />;
 }
 
@@ -329,7 +329,7 @@ function Note({ card, target }: { card: ReviewCard; target: ReviewTarget }) {
     <ul className="flex flex-col gap-2">
       {card.pitfalls.map((pitfall, index) => (
         <li className="flex items-start gap-2" key={index}>
-          <TriangleAlert className="mt-[4px] size-3 shrink-0 text-[var(--warning)]" />
+          <IconExclamationTriangle className="mt-[4px] size-3 shrink-0 text-[var(--warning)]" />
           <span>{pitfall.mistake}<span className="text-muted-foreground"> — {lowerFirst(pitfall.fix)}</span></span>
         </li>
       ))}

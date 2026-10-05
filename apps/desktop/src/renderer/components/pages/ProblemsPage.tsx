@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Bookmark, LayoutGrid, Library, Loader2, Rows3, Search, TriangleAlert, Waypoints } from "lucide-react";
+import { IconArrowUpRight, IconBookmark, IconBooks, IconExclamationTriangle, IconHome, IconLayoutGrid1, IconListBullets, IconLoader, IconMagnifyingGlass } from "central-icons";
 import type { AbilityHistorySummary, ChallengeHistorySummary, ConceptSummary, LearnerProgress } from "@spar/domain";
 import type { SparApi } from "../../../shared/api";
 import { cn } from "@/lib/utils";
@@ -201,7 +201,7 @@ export function ProblemsPage({
         <div className="mx-auto w-full max-w-[72rem] px-8 py-3">
           <div className="flex flex-wrap items-center gap-2">
           <div className="relative min-w-[14rem] flex-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <IconMagnifyingGlass className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               aria-label="Search problems"
               className="h-8 w-full rounded-lg border border-border bg-card pl-8 pr-8 text-ui outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-[var(--border-strong)]"
@@ -211,7 +211,7 @@ export function ProblemsPage({
               value={query}
             />
             {search.loading && (
-              <Loader2 aria-hidden className="absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground/70" />
+              <IconLoader aria-hidden className="absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 animate-spin text-muted-foreground/70" />
             )}
           </div>
 
@@ -250,9 +250,9 @@ export function ProblemsPage({
                  `aria-hidden`, so a segment with no label is a tab with no
                  accessible name — and two abstract glyphs are a guess even for
                  someone who can see them. */
-              { value: "list", label: "List", icon: Rows3 },
-              { value: "grid", label: "Grid", icon: LayoutGrid },
-              { value: "map", label: "Map", icon: Waypoints },
+              { value: "list", label: "List", icon: IconListBullets },
+              { value: "grid", label: "Grid", icon: IconLayoutGrid1 },
+              { value: "map", label: "Map", icon: IconHome },
             ]}
             value={view}
           />
@@ -307,7 +307,7 @@ export function ProblemsPage({
                 onClick={() => setOnlySaved((value) => !value)}
                 type="button"
               >
-                <Bookmark className={cn("size-3.5", onlySaved && "fill-current")} />
+                <IconBookmark className={cn("size-3.5", onlySaved && "fill-current")} />
                 Saved
                 <span className="tabular-nums text-muted-foreground">{savedCount}</span>
               </button>
@@ -323,7 +323,7 @@ export function ProblemsPage({
             as "Codeforces has three problems about this". */}
         {view !== "map" && (search.failed.length > 0 || search.error) && (
           <div className="mt-3 flex items-start gap-2 rounded-lg border border-[var(--warning)]/30 bg-[var(--warning)]/8 px-3 py-2 text-ui text-muted-foreground">
-            <TriangleAlert className="mt-px size-3.5 shrink-0 text-[var(--warning)]" />
+            <IconExclamationTriangle className="mt-px size-3.5 shrink-0 text-[var(--warning)]" />
             <span className="min-w-0 flex-1">
               {search.error
                 ? `Spar could not reach its practice sources. ${search.error}`
@@ -352,7 +352,7 @@ export function ProblemsPage({
                       ? "Nothing matches these filters. Widen one, or clear the search."
                       : "Connect a practice source in Settings to browse real problems, or start a session on the home page and let the agent write you one."
                 }
-                icon={Library}
+                icon={IconBooks}
                 title={search.loading ? "Looking" : filtered ? "No problems match" : "No problems yet"}
                 {...(filtered && !search.loading
                   ? {
@@ -468,7 +468,7 @@ function NextUp({ item, onOpen, pending }: { item: ProblemItem; onOpen(): void; 
       </div>
 
       <span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-[var(--color-background-elevated-secondary)] px-3 text-ui font-medium transition-colors group-hover:bg-accent">
-        {pending ? <Loader2 className="size-3.5 animate-spin" /> : <ArrowUpRight className="size-3.5" />}
+        {pending ? <IconLoader className="size-3.5 animate-spin" /> : <IconArrowUpRight className="size-3.5" />}
         {pending ? "Opening…" : item.kind === "challenge" ? "Open" : "Start solving"}
       </span>
     </button>

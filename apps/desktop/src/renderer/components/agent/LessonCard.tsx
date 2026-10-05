@@ -1,6 +1,6 @@
 import { Tabs } from "radix-ui";
 import { useState } from "react";
-import { BookOpen, ChevronDown, Maximize2 } from "lucide-react";
+import { IconBook, IconChevronBottom, IconExpand45 } from "central-icons";
 import { motion, useReducedMotion } from "motion/react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ArtifactCard, ArtifactCardRow } from "./ArtifactCard";
@@ -31,7 +31,7 @@ export function LessonCard({ part }: { part: ToolPart }) {
         style={{ borderRadius: "1.4rem" }}
         inert={lifted}
       >
-        <ArtifactCardRow icon={<BookOpen className="size-4 text-[var(--transcript-step-mark)]" />}>
+        <ArtifactCardRow icon={<IconBook className="size-4 text-[var(--transcript-step-mark)]" />}>
           <div className="min-w-0 flex-1 pr-14">
             <CollapsibleTrigger disabled={!lesson.id} className="block w-full truncate rounded-md text-left text-thread font-semibold text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">{lesson.title}</CollapsibleTrigger>
             <p className="mt-0.5 truncate text-thread-tool text-muted-foreground">
@@ -40,9 +40,9 @@ export function LessonCard({ part }: { part: ToolPart }) {
           </div>
         </ArtifactCardRow>
         <div className="absolute right-1.5 top-1.5 flex items-center gap-0.5">
-          {lesson.id && links.onOpenLesson && <button type="button" aria-label={`Open ${lesson.title} in a modal`} onClick={() => links.onOpenLesson?.(lesson.id!)} className={CARD_ACTION}><Maximize2 className="size-3.5" /></button>}
+          {lesson.id && links.onOpenLesson && <button type="button" aria-label={`Open ${lesson.title} in a modal`} onClick={() => links.onOpenLesson?.(lesson.id!)} className={CARD_ACTION}><IconExpand45 className="size-3.5" /></button>}
           <CollapsibleTrigger disabled={!lesson.id} aria-label={expanded ? "Collapse lesson" : "Expand lesson"} className={CARD_ACTION}>
-            <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={reduced ? { duration: 0 } : LESSON_MORPH}><ChevronDown className="size-3.5" /></motion.span>
+            <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={reduced ? { duration: 0 } : LESSON_MORPH}><IconChevronBottom className="size-3.5" /></motion.span>
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent expandDuration={0.26}>

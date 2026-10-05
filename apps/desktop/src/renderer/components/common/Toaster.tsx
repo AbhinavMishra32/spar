@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { X } from "lucide-react";
+import { IconCrossMedium } from "central-icons";
 import { cn } from "@/lib/utils";
 import { dismissToast, useToasts, type Toast } from "@/hooks/use-toasts";
 
@@ -111,7 +111,7 @@ function ToastRow({ reduced, toast }: { reduced: boolean; toast: Toast }) {
         onClick={() => dismissToast(toast.id)}
         type="button"
       >
-        <X className="size-3.5" />
+        <IconCrossMedium className="size-3.5" />
       </button>
 
       {toast.progress !== undefined && (

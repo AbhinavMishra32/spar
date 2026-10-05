@@ -1,4 +1,4 @@
-import { ArrowUpRight, CheckCircle2, CircleDashed, CircleSlash, RefreshCw, XCircle } from "lucide-react";
+import { IconArrowRotateRightLeft, IconArrowUpRight, IconCheckCircle2, IconCircleBanSign, IconCircleDashed, IconCircleX } from "central-icons";
 import type { ChallengeHistorySummary, ConceptSummary, ConceptTag } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { shortTime } from "@/lib/format";
@@ -8,11 +8,11 @@ import { Meter, MeterKey } from "@/components/ui/meter";
 
 /** The outcome marks, shared by every list that shows a challenge under a concept. */
 export const OUTCOME_ICON = {
-  passed: { icon: CheckCircle2, className: "text-[var(--success)]", label: "Passed" },
-  failed: { icon: XCircle, className: "text-destructive", label: "Failed" },
-  abandoned: { icon: CircleSlash, className: "text-muted-foreground/70", label: "Given up on" },
-  replaced: { icon: RefreshCw, className: "text-muted-foreground/70", label: "Replaced" },
-  open: { icon: CircleDashed, className: "text-[var(--warning)]", label: "Open" },
+  passed: { icon: IconCheckCircle2, className: "text-[var(--success)]", label: "Passed" },
+  failed: { icon: IconCircleX, className: "text-destructive", label: "Failed" },
+  abandoned: { icon: IconCircleBanSign, className: "text-muted-foreground/70", label: "Given up on" },
+  replaced: { icon: IconArrowRotateRightLeft, className: "text-muted-foreground/70", label: "Replaced" },
+  open: { icon: IconCircleDashed, className: "text-[var(--warning)]", label: "Open" },
 } as const;
 
 export function OutcomeMark({ className, outcome }: { className?: string; outcome: keyof typeof OUTCOME_ICON }) {
@@ -169,7 +169,7 @@ function ConceptPreview({ challenges, concept, openable }: { challenges: Challen
       {openable && (
         <p className="flex items-center gap-1 text-ui-sm text-muted-foreground/70">
           Click to see everything under this
-          <ArrowUpRight className="size-3" />
+          <IconArrowUpRight className="size-3" />
         </p>
       )}
     </div>

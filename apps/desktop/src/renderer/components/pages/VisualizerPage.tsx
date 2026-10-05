@@ -1,26 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { Panel, PanelGroup, type ImperativePanelHandle } from "react-resizable-panels";
-import {
-  AlertCircle,
-  ChevronDown,
-  Code2,
-  Download,
-  Eye,
-  Layers,
-  Library,
-  Loader2,
-  Maximize2,
-  Minimize2,
-  Minus,
-  Play,
-  Plus,
-  RotateCcw,
-  Sparkles,
-  SquareTerminal,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { IconArrowInbox, IconArrowRotateCounterClockwise, IconBooks, IconChevronBottom, IconCode, IconConsoleSimple, IconCrossMedium, IconExclamationCircle, IconExclamationTriangle, IconExpand45, IconEyeOpen, IconLayersTwo, IconLoader, IconMinimize45, IconMinusMedium, IconPlay, IconPlusMedium, IconSparklesTwo } from "central-icons";
 import type { Language } from "@spar/domain";
 import { dialect } from "@spar/visualizer";
 import { cn } from "@/lib/utils";
@@ -202,16 +183,16 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
           ref={editorPane}
         >
           <header className="flex h-10 shrink-0 items-center gap-2 border-b border-border px-3">
-            <Code2 className="size-3.5 text-muted-foreground" />
+            <IconCode className="size-3.5 text-muted-foreground" />
             <span className="font-mono text-ui font-medium">{spoken.fileName}</span>
             {state.stale && <span className="size-1.5 rounded-full bg-warning" title="Edited since the last run" />}
             <div className="ml-auto flex items-center gap-0.5">
               <Button className="text-muted-foreground" onClick={() => setPicking(true)} size="xs" variant="ghost">
-                <Library data-icon="inline-start" />
+                <IconBooks data-icon="inline-start" />
                 Problem
               </Button>
               <Button className="text-muted-foreground" onClick={exportScript} size="icon-xs" title="Export a runnable script" variant="ghost">
-                <Download />
+                <IconArrowInbox />
               </Button>
               <Button
                 className="text-muted-foreground"
@@ -220,7 +201,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                 title="Reset to the starting example"
                 variant="ghost"
               >
-                <RotateCcw />
+                <IconArrowRotateCounterClockwise />
               </Button>
             </div>
           </header>
@@ -242,7 +223,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
             {/* ---- Inputs ---------------------------------------------------- */}
             <Panel className="app-scroll min-h-0 overflow-y-auto border-t border-border" defaultSize={52} minSize={15} order={2}>
                 <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-border bg-[var(--color-background-surface-under)] px-3 py-2">
-                  <SquareTerminal className="size-3.5 text-muted-foreground" />
+                  <IconConsoleSimple className="size-3.5 text-muted-foreground" />
                   <span className="text-ui font-medium">Input</span>
 
                   {/* Which function to start from. Hidden when there is only one,
@@ -252,7 +233,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                       <DropdownMenuTrigger asChild>
                         <Button className="max-w-52 text-muted-foreground" size="xs" variant="ghost">
                           <span className="truncate font-mono">{state.entry?.label ?? "choose"}</span>
-                          <ChevronDown data-icon="inline-end" />
+                          <IconChevronBottom data-icon="inline-end" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="start">
@@ -266,7 +247,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                   )}
 
                   <div className="ml-auto flex items-center gap-1.5">
-                    {state.status === "analyzing" && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+                    {state.status === "analyzing" && <IconLoader className="size-3 animate-spin text-muted-foreground" />}
                     <Segmented
                       ariaLabel="How to give input"
                       className="w-36"
@@ -293,14 +274,14 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                       LeetCode's own types or from Spar reading their file. */}
                   {state.spec.origin !== "none" && state.draft.mode === "form" && (
                     <p className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-                      <Sparkles className="size-3" />
+                      <IconSparklesTwo className="size-3" />
                       {state.spec.origin === "signature" ? "Built from the signature this problem declares." : "Built from your code."}
                     </p>
                   )}
 
                   {state.spec.warnings.map((warning) => (
                     <p className="flex items-start gap-1.5 text-ui-sm text-muted-foreground" key={warning}>
-                      <TriangleAlert className="mt-px size-3 shrink-0 text-warning" />
+                      <IconExclamationTriangle className="mt-px size-3 shrink-0 text-warning" />
                       <span>{warning}</span>
                     </p>
                   ))}
@@ -342,7 +323,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
 
         <div className="flex shrink-0 items-center gap-2 border-t border-border px-3 py-2.5">
           <Button className="flex-1" disabled={state.status === "tracing"} onClick={() => void state.run()}>
-            {state.status === "tracing" ? <Loader2 className="animate-spin" data-icon="inline-start" /> : <Play data-icon="inline-start" />}
+            {state.status === "tracing" ? <IconLoader className="animate-spin" data-icon="inline-start" /> : <IconPlay data-icon="inline-start" />}
             {state.status === "tracing" ? "Tracing…" : "Run"}
             <kbd className="ml-1 rounded bg-primary-foreground/15 px-1 text-ui-sm">⌘↵</kbd>
           </Button>
@@ -359,8 +340,8 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
             className="w-52"
             onChange={(value) => setMemory(value === "memory")}
             options={[
-              { value: "structure", label: "Structure", icon: Eye },
-              { value: "memory", label: "Memory", icon: Layers },
+              { value: "structure", label: "Structure", icon: IconEyeOpen },
+              { value: "memory", label: "Memory", icon: IconLayersTwo },
             ]}
             value={memory ? "memory" : "structure"}
           />
@@ -369,13 +350,13 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
           <div className="ml-auto flex items-center gap-1">
             <div className="flex items-center rounded-lg bg-[var(--color-background-elevated-secondary)] p-0.5">
               <Button className="text-muted-foreground" onClick={() => setZoom((value) => Math.max(0.5, value - 0.1))} size="icon-xs" title="Zoom out" variant="ghost">
-                <Minus />
+                <IconMinusMedium />
               </Button>
               <button className="px-1 text-ui-sm tabular-nums text-muted-foreground hover:text-foreground" onClick={() => setZoom(1)} type="button">
                 {Math.round(zoom * 100)}%
               </button>
               <Button className="text-muted-foreground" onClick={() => setZoom((value) => Math.min(1.8, value + 0.1))} size="icon-xs" title="Zoom in" variant="ghost">
-                <Plus />
+                <IconPlusMedium />
               </Button>
             </div>
             <Button
@@ -385,7 +366,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
               title={expanded ? "Show the editor" : "Fill the window"}
               variant="ghost"
             >
-              {expanded ? <Minimize2 /> : <Maximize2 />}
+              {expanded ? <IconMinimize45 /> : <IconExpand45 />}
             </Button>
           </div>
         </header>
@@ -410,7 +391,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                 <div className="grid h-full place-items-center px-8 text-center">
                   <div className="max-w-sm">
                     <div className="mx-auto grid size-11 place-items-center rounded-2xl border border-border bg-card">
-                      <Eye className="size-4 text-muted-foreground" />
+                      <IconEyeOpen className="size-4 text-muted-foreground" />
                     </div>
                     <h2 className="mt-3 text-[1.05rem] font-semibold tracking-[-0.02em]">Watch it run</h2>
                     <p className="mt-1 text-ui text-muted-foreground">
@@ -418,11 +399,11 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                     </p>
                     <div className="mt-4 flex items-center justify-center gap-2">
                       <Button disabled={state.status === "tracing"} onClick={() => void state.run()} size="sm">
-                        <Play data-icon="inline-start" />
+                        <IconPlay data-icon="inline-start" />
                         Run
                       </Button>
                       <Button onClick={() => setPicking(true)} size="sm" variant="outline">
-                        <Library data-icon="inline-start" />
+                        <IconBooks data-icon="inline-start" />
                         Pick a problem
                       </Button>
                     </div>
@@ -445,7 +426,7 @@ export function VisualizerPage({ api, dark, onError }: { api: SparApi | undefine
                 )}
                 role="status"
               >
-                <AlertCircle className="mt-px size-3.5 shrink-0" />
+                <IconExclamationCircle className="mt-px size-3.5 shrink-0" />
                 <div className="min-w-0">
                   <p className="font-medium">{verdict.title}</p>
                   <pre className="mt-0.5 whitespace-pre-wrap break-words font-mono text-ui-sm opacity-90">{verdict.detail}</pre>

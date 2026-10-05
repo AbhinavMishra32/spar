@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { IconMagnifyingGlass } from "central-icons";
 import { cn } from "@/lib/utils";
 import { ROW as SHELL_ROW, ROW_ICON, ROW_ICON_TONE, SectionLabel } from "../shell/Sidebar";
 
@@ -131,7 +131,7 @@ export function SettingsSidebar<Id extends string>({
             className="order-first flex h-auto cursor-text items-center justify-center pl-2.5 text-muted-foreground select-none"
             onPointerDown={() => field.current?.focus()}
           >
-            <Search className={ROW_ICON} />
+            <IconMagnifyingGlass className={ROW_ICON} />
           </div>
           <input
             ref={field}

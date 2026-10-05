@@ -226,6 +226,12 @@ export class LocalStore {
        carried one, lessons taught through one, feedback that read the code
        through one. The coach reads it every turn, so a lens the learner set is
        a thread through the whole Track rather than a setting it forgets. */
+    /* The coach's own conversation in a session, as the model sees it: every
+       message, tool call, result and its reasoning, kept between turns so the
+       next one continues it instead of starting over. `sections` is the
+       journey as it last reached the coach, so the next turn can say only what
+       changed. `prompt_ref` is the prompt and tools it was started under. */
+    this.db.exec("CREATE TABLE IF NOT EXISTS coach_conversations (session_id TEXT PRIMARY KEY, prompt_ref TEXT NOT NULL, messages TEXT NOT NULL, sections TEXT NOT NULL, updated_at TEXT NOT NULL)");
     this.db.exec("CREATE TABLE IF NOT EXISTS lens_log (id TEXT PRIMARY KEY, track_key TEXT NOT NULL, session_id TEXT NOT NULL, lens_id TEXT NOT NULL, kind TEXT NOT NULL, note TEXT NOT NULL, created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS lens_log_track ON lens_log(track_key, lens_id, created_at);");
     this.ensureColumn("questions", "introduction_reason", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("questions", "revision", "INTEGER NOT NULL DEFAULT 0");
@@ -457,6 +463,9 @@ export class LocalStore {
     const target=this.db.prepare("SELECT rowid,role,body FROM agent_messages WHERE id=? AND session_id=?").get(messageId,sessionId) as {rowid:number;role:string;body:string}|undefined;
     if(!target||target.role!=="learner")return null;
     const removed=this.db.prepare("DELETE FROM agent_messages WHERE session_id=? AND rowid>=?").run(sessionId,target.rowid).changes;
+    /* The coach's conversation ran past the cut too; the next turn starts a new
+       one from the record and the messages that are left. */
+    this.clearConversation(sessionId);
     /* Not enqueued for sync: the cloud transcript is append-only and has no
        delete route, so a row here would be written and dropped on the next
        drain. The local conversation is the one the learner is rewinding. */
@@ -694,6 +703,18 @@ export class LocalStore {
   setSessionChallengeMix(sessionId:string,mix:ChallengeMix){const parsed=challengeMixSchema.parse(mix);const result=this.db.prepare("UPDATE sessions SET challenge_mix=? WHERE id=?").run(storedChallengeMix(parsed),sessionId);if(result.changes!==1)throw new Error("Session not found");return parsed;}
   logLens(sessionId:string,lensId:string,kind:LensLogKind,note:string){this.db.prepare("INSERT INTO lens_log (id,track_key,session_id,lens_id,kind,note,created_at) VALUES (?,?,?,?,?,?,?)").run(randomUUID(),this.trackIdForSession(sessionId)??"",sessionId,lensId,kind,note.trim().slice(0,400),new Date().toISOString());}
   /** The latest entries per lens on the session's Track, newest first. */
+  /** The coach's saved conversation in a session, or null when the next turn starts one. */
+  readConversation(sessionId:string):StoredConversation|null{
+    const row=this.db.prepare("SELECT prompt_ref,messages,sections,updated_at FROM coach_conversations WHERE session_id=?").get(sessionId) as {prompt_ref:string;messages:string;sections:string;updated_at:string}|undefined;
+    if(!row)return null;
+    try{return{promptRef:row.prompt_ref,messages:JSON.parse(row.messages) as unknown[],sections:JSON.parse(row.sections) as Array<{key:string;text:string}>,updatedAt:row.updated_at};}
+    catch{return null;}
+  }
+  saveConversation(sessionId:string,conversation:{promptRef:string;messages:unknown[];sections:Array<{key:string;text:string}>}){
+    this.db.prepare("INSERT INTO coach_conversations (session_id,prompt_ref,messages,sections,updated_at) VALUES (?,?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET prompt_ref=excluded.prompt_ref,messages=excluded.messages,sections=excluded.sections,updated_at=excluded.updated_at").run(sessionId,conversation.promptRef,JSON.stringify(conversation.messages),JSON.stringify(conversation.sections),new Date().toISOString());
+  }
+  /** Drops it, so the next turn starts from the whole record. */
+  clearConversation(sessionId:string){this.db.prepare("DELETE FROM coach_conversations WHERE session_id=?").run(sessionId);}
   lensLog(sessionId:string,perLens=3):Record<string,LensLogEntry[]>{const rows=this.db.prepare("SELECT lens_id,kind,note,created_at FROM lens_log WHERE track_key=? ORDER BY created_at DESC LIMIT 200").all(this.trackIdForSession(sessionId)??"") as Array<{lens_id:string;kind:LensLogKind;note:string;created_at:string}>;const log:Record<string,LensLogEntry[]>={};for(const row of rows){const list=(log[row.lens_id]??=[]);if(list.length<perLens)list.push({kind:row.kind,note:row.note,at:row.created_at});}return log;}
   challengeMixForSession(sessionId:string):ChallengeMix{const row=this.db.prepare("SELECT challenge_mix FROM sessions WHERE id=?").get(sessionId) as {challenge_mix:string|null}|undefined;return parseChallengeMix(row?.challenge_mix??null);}
   problemSourcesForSession(sessionId:string):ProblemSource[]{const row=this.db.prepare("SELECT problem_sources FROM sessions WHERE id=?").get(sessionId) as {problem_sources:string|null}|undefined;return parseProblemSources(row?.problem_sources??null);}
@@ -701,7 +722,7 @@ export class LocalStore {
   /* Permanent, and the learner is told so before it runs. Cascades cover the
      session's own children; attempt events and checkpoints are keyed on ids
      rather than declared as foreign keys, so they are removed by hand. */
-  deleteSession(sessionId:string){return this.db.transaction(()=>{const row=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!row)return false;this.db.prepare("DELETE FROM attempt_events WHERE attempt_id IN (SELECT id FROM attempts WHERE session_id=?)").run(sessionId);this.db.prepare("DELETE FROM checkpoints WHERE session_id=?").run(sessionId);this.db.prepare("DELETE FROM sessions WHERE id=?").run(sessionId);this.enqueue("session-delete",{sessionId});return true;})();}
+  deleteSession(sessionId:string){return this.db.transaction(()=>{const row=this.db.prepare("SELECT id FROM sessions WHERE id=?").get(sessionId) as {id:string}|undefined;if(!row)return false;this.db.prepare("DELETE FROM attempt_events WHERE attempt_id IN (SELECT id FROM attempts WHERE session_id=?)").run(sessionId);this.db.prepare("DELETE FROM checkpoints WHERE session_id=?").run(sessionId);this.clearConversation(sessionId);this.db.prepare("DELETE FROM sessions WHERE id=?").run(sessionId);this.enqueue("session-delete",{sessionId});return true;})();}
   updateAbility(input:{abilityId:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation}){const target=this.db.prepare("SELECT ability_title FROM training_targets WHERE ability_id=? ORDER BY created_at DESC LIMIT 1").get(input.abilityId) as {ability_title:string}|undefined;const existing=this.abilityRow(input.abilityId);return this.writeAbility({id:input.abilityId,title:existing?.title??target?.ability_title??"Observed ability",...input},existing);}
   upsertAbility(input:{title:string;markdown:string;evidenceEventIds:string[];summary?:string;practice?:string[];concepts?:ConceptTagInput[];status?:AbilityStatus;evidence?:EvidenceInterpretation[];pattern?:PatternInterpretation},trackId?:string|null){const scope=this.learningTrackId(trackId);if(scope===null&&trackId===undefined)throw new Error("A Track is required before writing learner memory");const found=this.db.prepare("SELECT id FROM ability_documents WHERE track_id IS ? AND lower(title)=lower(?) ORDER BY updated_at DESC LIMIT 1").get(scope,input.title) as {id:string}|undefined;const existing=found?this.abilityRow(found.id):undefined;return this.writeAbility({id:existing?.id??randomUUID(),trackId:scope,...input},existing);}
   ensureAbility(id:string,title:string,trackId?:string|null){const scope=trackId===undefined?(this.trackIdForAbilityTarget(id)??this.learningTrackId()):this.learningTrackId(trackId);if(scope===null&&trackId===undefined)throw new Error("A Track is required before writing learner memory");const now=new Date().toISOString();this.db.prepare("INSERT OR IGNORE INTO ability_documents (id,title,markdown,version,status,updated_at,evidence_ids,summary,practice,earned_at,track_id) VALUES (?,?,?,?,?,?,?,?,?,NULL,?)").run(id,title,`# ${title}\n\nIntroduced as an active learning target. Evidence is still uncertain.`,1,"uncertain",now,"[]","",'[]',scope);this.reconcileAbilityState(id);return this.readAbility(id);}
@@ -1960,6 +1981,9 @@ function parseProblemSources(value: string | null): ProblemSource[] {
 }
 
 /** The default mix is stored as null, like the default sources. */
+/** The coach's conversation in a session, as saved between turns. */
+export type StoredConversation = { promptRef: string; messages: unknown[]; sections: Array<{ key: string; text: string }>; updatedAt: string };
+
 function storedChallengeMix(mix: ChallengeMix): string | null {
   const parsed = challengeMixSchema.parse(mix);
   return JSON.stringify(parsed) === JSON.stringify(DEFAULT_CHALLENGE_MIX) ? null : JSON.stringify(parsed);
