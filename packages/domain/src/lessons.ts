@@ -23,13 +23,13 @@ import { id, isoDate } from "./model.js";
 /** One page. The title is what the deck's rail and the card's preview show, so
  *  it has to say what the page is about rather than number it. */
 export const lessonPageSchema = z.object({
-  title: z.string().min(3).max(90),
+  title: z.string(),
   /** Markdown. Spar's own `[[concept:…]]` and `[[lesson:…]]` references work
    *  here exactly as they do in a reply — see `MarkdownLinks`. */
-  body: z.string().min(20).max(4_000),
+  body: z.string(),
   /** The one sentence to keep if they keep nothing else. Optional because not
    *  every page has a line worth pulling out, and a forced one is filler. */
-  takeaway: z.string().min(8).max(200).optional(),
+  takeaway: z.string().optional(),
 });
 export type LessonPage = z.infer<typeof lessonPageSchema>;
 
@@ -46,27 +46,27 @@ export type LessonPage = z.infer<typeof lessonPageSchema>;
 export const lessonReferenceSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("url"),
-    label: z.string().min(3).max(120),
+    label: z.string(),
     url: z.string().url(),
     /** Why this one is worth the click, in the agent's own words. */
-    note: z.string().min(8).max(240),
+    note: z.string(),
   }),
   z.object({
     kind: z.literal("concept"),
-    label: z.string().min(2).max(120),
-    slug: z.string().min(2).max(60),
-    note: z.string().min(8).max(240),
+    label: z.string(),
+    slug: z.string(),
+    note: z.string(),
   }),
   z.object({
     kind: z.literal("lesson"),
-    label: z.string().min(3).max(120),
+    label: z.string(),
     lessonId: id,
-    note: z.string().min(8).max(240),
+    note: z.string(),
   }),
   z.object({
     kind: z.literal("reading"),
-    label: z.string().min(3).max(120),
-    note: z.string().min(8).max(240),
+    label: z.string(),
+    note: z.string(),
   }),
 ]);
 export type LessonReference = z.infer<typeof lessonReferenceSchema>;
@@ -81,13 +81,13 @@ export type LessonReference = z.infer<typeof lessonReferenceSchema>;
  * card can show what was taught about it alongside what was tested.
  */
 export const lessonInputSchema = z.object({
-  title: z.string().min(4).max(90),
-  summary: z.string().min(20).max(300),
-  concepts: z.array(z.string().min(2).max(60)).min(1).max(5)
+  title: z.string(),
+  summary: z.string(),
+  concepts: z.array(z.string()).min(1)
     .describe("concept slugs, primary first, in the same vocabulary challenges are tagged with"),
-  pages: z.array(lessonPageSchema).min(1).max(8),
-  references: z.array(lessonReferenceSchema).max(6).default([]),
-  lens: z.string().min(1).max(60).optional()
+  pages: z.array(lessonPageSchema).min(1),
+  references: z.array(lessonReferenceSchema).default([]),
+  lens: z.string().min(1).optional()
     .describe("The id of a lens in Coaching settings this lesson teaches through, when it does. Logged in that lens's history."),
 });
 export type LessonInput = z.infer<typeof lessonInputSchema>;

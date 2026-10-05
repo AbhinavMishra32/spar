@@ -100,7 +100,7 @@ function shownFile(patch: Record<string, unknown>): { path: string; content: str
     const map = patch[field];
     if (!map || typeof map !== "object" || Array.isArray(map)) continue;
     for (const [path, content] of Object.entries(map as Record<string, unknown>)) {
-      if (typeof content === "string" && content) found = { path, content: content.length > 6_000 ? `${content.slice(0, 6_000)}\n…` : content };
+      if (typeof content === "string" && content) found = { path, content };
     }
   }
   return found;

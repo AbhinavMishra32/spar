@@ -29,10 +29,10 @@ export function languageForPath(filePath: string): Language | null {
  *  `language` is the default every new session starts in — a default, not a
  *  constraint: naming another language in a goal still wins. */
 export const learnerProfileSchema = z.object({
-  name: z.string().min(1).max(60),
+  name: z.string().min(1),
   experience: z.enum(["new", "working", "senior"]),
-  focus: z.array(z.string().min(1)).max(12).default([]),
-  weakness: z.string().max(600).default(""),
+  focus: z.array(z.string().min(1)).default([]),
+  weakness: z.string().default(""),
   language: languageSchema,
   completedAt: isoDate,
 });
@@ -42,9 +42,9 @@ export type LearnerProfile = z.infer<typeof learnerProfileSchema>;
  *  own. `goal` is what actually starts the session, so it has to read like
  *  something the learner said; `why` names the intake answer it came from. */
 export const sessionSuggestionSchema = z.object({
-  title: z.string().min(3).max(70),
-  goal: z.string().min(10).max(400),
-  why: z.string().min(3).max(160),
+  title: z.string(),
+  goal: z.string(),
+  why: z.string(),
 });
 export type SessionSuggestion = z.infer<typeof sessionSuggestionSchema>;
 
@@ -131,22 +131,22 @@ export const lensDepthSchema = z.enum(LENS_DEPTHS);
 export type LensDepth = z.infer<typeof lensDepthSchema>;
 /** A catalogue id, or `custom:<slug>` for one the learner named — which then
  *  carries its own label. */
-const lensId = z.string().min(1).max(60);
+const lensId = z.string().min(1);
 /** What a lens changes, taken from the learner's own code by the coach. */
-export const lensExampleSchema = z.object({ before: z.string().trim().max(80).optional(), after: z.string().trim().min(1).max(80) });
+export const lensExampleSchema = z.object({ before: z.string().trim().optional(), after: z.string().trim().min(1) });
 export type LensExample = z.infer<typeof lensExampleSchema>;
-export const lensSchema = z.object({ id: lensId, depth: lensDepthSchema, label: z.string().trim().min(1).max(60).optional(), example: lensExampleSchema.optional() });
+export const lensSchema = z.object({ id: lensId, depth: lensDepthSchema, label: z.string().trim().min(1).optional(), example: lensExampleSchema.optional() });
 export type Lens = z.infer<typeof lensSchema>;
-export const lensSuggestionSchema = z.object({ id: lensId, label: z.string().trim().min(1).max(60).optional(), reason: z.string().trim().min(3).max(240), example: lensExampleSchema.optional() });
+export const lensSuggestionSchema = z.object({ id: lensId, label: z.string().trim().min(1).optional(), reason: z.string().trim(), example: lensExampleSchema.optional() });
 export type LensSuggestion = z.infer<typeof lensSuggestionSchema>;
 export const challengeMixSchema = z.object({
   sparUse: sparUseSchema.default("balanced"),
   /** Unknown catalogue ids are kept and ignored, so a catalogue change never
    *  throws away a learner's choice. */
-  lenses: z.array(lensSchema).max(24).default([]),
-  suggestions: z.array(lensSuggestionSchema).max(6).default([]),
-  dismissed: z.array(lensId).max(60).default([]),
-  instructions: z.string().max(2_000).default(""),
+  lenses: z.array(lensSchema).default([]),
+  suggestions: z.array(lensSuggestionSchema).default([]),
+  dismissed: z.array(lensId).default([]),
+  instructions: z.string().default(""),
 });
 export type ChallengeMix = z.infer<typeof challengeMixSchema>;
 export const DEFAULT_CHALLENGE_MIX: ChallengeMix = challengeMixSchema.parse({});
@@ -330,7 +330,7 @@ export const savedProblemSchema = z.object({
    *  spelling both populations already dedupe on, so a Codeforces problem saved
    *  from a search and the same problem later practised in a session are one
    *  saved row rather than two. */
-  key: z.string().min(3),
+  key: z.string(),
   savedAt: isoDate,
   /** Only for a problem the device cannot otherwise describe — see above. */
   snapshot: z.object({
@@ -495,8 +495,8 @@ export type AbilityDetail = z.infer<typeof abilityDetailSchema>;
 export const trackStatusSchema = z.enum(["active", "paused", "completed"]);
 export const trackSchema = z.object({
   id,
-  title: z.string().min(1).max(80),
-  goal: z.string().min(3).max(1000),
+  title: z.string().min(1),
+  goal: z.string(),
   status: trackStatusSchema,
   /* The language every challenge in this Track is written in. Null means "follow
      the profile", which is what a Track created before Tracks had a language of
@@ -622,12 +622,12 @@ export type LearnerProgress = z.infer<typeof learnerProgressSchema>;
  */
 export const askUserQuestionInputSchema = z.object({
   questions: z.array(z.object({
-    header: z.string().trim().min(1).max(40),
-    question: z.string().trim().min(3).max(1000),
-    options: z.array(z.object({ label: z.string().trim().min(1).max(120) })).min(2).max(3),
+    header: z.string().trim().min(1),
+    question: z.string().trim(),
+    options: z.array(z.object({ label: z.string().trim().min(1) })).min(2),
     multiple: z.boolean().default(false),
     custom: z.boolean().default(true),
-  })).min(1).max(3),
+  })).min(1),
 });
 export const askUserQuestionRequestSchema = askUserQuestionInputSchema.extend({ id });
 export type AskUserQuestionInput = z.infer<typeof askUserQuestionInputSchema>;

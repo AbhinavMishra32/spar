@@ -278,7 +278,7 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
   ipcMain.handle(ipc.attemptAbandon, async (_event, value) => {
     const input = value as { sessionId?: unknown; attemptId?: unknown; reason?: unknown };
     const sessionId = zUuid(input.sessionId); const attemptId = zUuid(input.attemptId);
-    const reason = typeof input.reason === "string" ? input.reason.trim().slice(0, 500) : "";
+    const reason = typeof input.reason === "string" ? input.reason.trim() : "";
     const result = deps.store.abandonAttempt(attemptId, reason);
     if (result.sessionId !== sessionId) throw new Error("Attempt does not belong to this session");
     const reviewed = deps.store.reviews.reviewOfChallenge(result.questionId);

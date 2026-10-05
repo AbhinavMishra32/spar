@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_PAYLOAD, splitActionTitle, toolPayload } from "./toolPayload.js";
+import { splitActionTitle, toolPayload } from "./toolPayload.js";
 
 describe("the agent's title for a step", () => {
   /* The compiler is handed a create_question input verbatim and rejects a key it
@@ -18,7 +18,7 @@ describe("the agent's title for a step", () => {
   it("normalises what it will render, since this becomes a transcript row", () => {
     expect(splitActionTitle({ actionTitle: "  Checking\n  your arrays evidence.  " }).actionTitle)
       .toBe("Checking your arrays evidence");
-    expect(splitActionTitle({ actionTitle: "x".repeat(200) }).actionTitle).toHaveLength(70);
+    expect(splitActionTitle({ actionTitle: "x".repeat(200) }).actionTitle).toHaveLength(200);
   });
 
   it("leaves a call with no title untouched", () => {
@@ -67,10 +67,15 @@ describe("tool payloads in the transcript", () => {
     expect(rendered).toContain("\"limit\": 5");
   });
 
-  it("bounds a payload rather than storing an unbounded one per call", () => {
-    const rendered = toolPayload("web_fetch", { text: "x".repeat(MAX_PAYLOAD * 2) });
-    expect(rendered.length).toBeLessThan(MAX_PAYLOAD + 200);
-    expect(rendered).toContain("truncated");
+  it("keeps a large payload whole and parseable, so the thread can still draw its card", () => {
+    const text = "x".repeat(100_000);
+    expect(JSON.parse(toolPayload("web_fetch", { text }))).toEqual({ text });
+  });
+
+  it("keeps a notebook and the version it replaced whole, since the card diffs them", () => {
+    const page = "line\n".repeat(2_500);
+    const rendered = toolPayload("update_notebook", { status: "saved", version: 42, markdown: `${page}new`, previous: page });
+    expect(JSON.parse(rendered)).toMatchObject({ markdown: `${page}new`, previous: page });
   });
 
   it("survives a payload that cannot be serialised instead of failing the turn", () => {

@@ -410,8 +410,7 @@ function namedVerdicts(output: string): Array<{ name: string; passed: boolean }>
   for (const line of output.replace(/\r\n/g, "\n").split("\n")) {
     const point = /^(not ok|ok)(?:\s+\d+)?(?:\s*[-–]\s*(.*?))?(?:\s+#\s*(?:SKIP|TODO).*)?$/i.exec(line.trim());
     if (!point) continue;
-    named.push({ name: (point[2] ?? "").trim().slice(0, 120) || `case ${named.length + 1}`, passed: point[1]?.toLowerCase() === "ok" });
-    if (named.length >= 40) break;
+    named.push({ name: (point[2] ?? "").trim() || `case ${named.length + 1}`, passed: point[1]?.toLowerCase() === "ok" });
   }
   return named;
 }
@@ -420,7 +419,6 @@ function summarize(run: ValidationRun) {
   return `Exited ${run.exitCode} in ${run.durationMs}ms: ${diagnose(run)}`;
 }
 
-const DIAGNOSTIC_BUDGET = 700;
 
 /**
  * The agent repairs a rejected candidate from this string and nothing else.
@@ -464,7 +462,7 @@ export function diagnose(run: ValidationRun): string {
   const failedAt = lines.findIndex((line) => /^not ok\b/.test(line.trim()));
   if (failedAt >= 0) {
     const caseName = lines.slice(0, failedAt).reverse().find((line) => /^#\s*Subtest:/.test(line)) ?? lines[failedAt] ?? "test failed";
-    const details = lines.slice(failedAt + 1, failedAt + 35).filter((line) => !tapFraming(line) && /^\s*(?:error|expected|actual|operator|code):/.test(line));
+    const details = lines.slice(failedAt + 1).filter((line) => !tapFraming(line) && /^\s*(?:error|expected|actual|operator|code):/.test(line));
     return clamp([caseName, ...details]);
   }
 
@@ -476,14 +474,18 @@ export function diagnose(run: ValidationRun): string {
   const assertion = lines.filter((line) => /Assertion failed|AssertionError|Error:|Exception|Segmentation fault|abort|terminate called/i.test(line));
   if (assertion.length) return clamp(assertion);
 
-  return clamp(lines.slice(0, 6));
+  return clamp(lines);
 }
+
+const DIAGNOSTIC_CHARS = 2_000;
 
 function clamp(lines: string[]): string {
   // "# Subtest:" is TAP framing around the failing case's name; the name is the
   // information, so the marker is dropped once the line has been classified.
   const joined = lines.map((line) => line.trim().replace(/^#\s*Subtest:\s*/, "")).join(" | ");
-  return joined.length > DIAGNOSTIC_BUDGET ? `${joined.slice(0, DIAGNOSTIC_BUDGET)}…` : joined;
+  /* Read by the model that repairs the candidate. The failing lines lead, so
+     the cut keeps what identifies the fault and says how much it left out. */
+  return joined.length > DIAGNOSTIC_CHARS ? `${joined.slice(0, DIAGNOSTIC_CHARS)}… (${joined.length - DIAGNOSTIC_CHARS} more characters of output)` : joined;
 }
 function stableJson(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`; if (value && typeof value === "object") return `{${Object.entries(value as Record<string,unknown>).sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`; return JSON.stringify(value); }
 

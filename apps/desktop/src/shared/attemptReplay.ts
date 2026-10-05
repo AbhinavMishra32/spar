@@ -415,7 +415,7 @@ function describePayload(event: ReplayEvent): string {
   }
   if (event.type === "agent_message") {
     const kind = text(payload.kind);
-    return `${kind === "reply" ? "replied " : kind ? `${kind} ` : ""}"${clip(text(payload.body) ?? "", 400)}"`;
+    return `${kind === "reply" ? "replied " : kind ? `${kind} ` : ""}"${flat(text(payload.body) ?? "")}"`;
   }
   if (event.type === "attempt_completed" || event.type === "submission_evaluated") {
     const reason = text(payload.reason);
@@ -446,7 +446,7 @@ function caseLine(record: { name: string; status: CaseVerdict; expected?: string
 }
 
 function scalar(value: unknown): string {
-  if (typeof value === "string") return value.length > 120 ? `"${value.slice(0, 120)}…"` : value;
+  if (typeof value === "string") return value;
   if (Array.isArray(value)) return `[${value.length}]`;
   if (value && typeof value === "object") return "{…}";
   return String(value);
@@ -891,14 +891,13 @@ function numeric(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function clip(value: string, limit: number): string {
-  const flat = value.replace(/\s+/g, " ").trim();
-  return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
+function flat(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 function firstLine(value: string): string {
   const line = value.split("\n").map((entry) => entry.trim()).find(Boolean) ?? "";
-  return line.length > 160 ? `${line.slice(0, 160)}…` : line;
+  return line;
 }
 
 function caseList(value: unknown): Array<{ name: string; status: CaseVerdict; expected?: string; actual?: string; message?: string }> {

@@ -1,12 +1,5 @@
-/** Beyond this a payload is not something anyone reads, and it is stored per call
- *  for the life of the session. Generous enough that redaction, not truncation,
- *  is what removes the bulk. */
-export const MAX_PAYLOAD = 16_000;
-
 /** The field every tool carries so the agent can name the row it will draw. */
 export const ACTION_TITLE_KEY = "actionTitle";
-/** A transcript row, not a paragraph. */
-const MAX_TITLE = 70;
 
 /**
  * The agent's title for this step, separated from the arguments it belongs to.
@@ -21,7 +14,7 @@ export function splitActionTitle(input: unknown): { actionTitle: string; argumen
   if (!input || typeof input !== "object" || Array.isArray(input)) return { actionTitle: "", arguments: input };
   const { [ACTION_TITLE_KEY]: title, ...rest } = input as Record<string, unknown>;
   const text = typeof title === "string" ? title.trim().replace(/\s+/g, " ").replace(/\.$/, "") : "";
-  return { actionTitle: text.slice(0, MAX_TITLE), arguments: rest };
+  return { actionTitle: text, arguments: rest };
 }
 
 /** Every key whose value is, or contains, the answer to a challenge. */
@@ -44,15 +37,19 @@ const SOLUTION_KEYS = new Set(["referenceFiles", "hiddenTests", "knownIncorrectF
  */
 export function toolPayload(name: string, value: unknown): string {
   try {
-    const text = JSON.stringify(value, (key, nested) => {
-      if (!SOLUTION_KEYS.has(key)) return nested;
-      const count = Array.isArray(nested) ? nested.length : nested && typeof nested === "object" ? Object.keys(nested as object).length : 0;
-      return `⟨withheld — ${count} ${count === 1 ? "entry" : "entries"}; showing this would give away the challenge⟩`;
-    }, 2) ?? "";
-    return text.length > MAX_PAYLOAD ? `${text.slice(0, MAX_PAYLOAD)}\n… truncated (${text.length - MAX_PAYLOAD} more characters)` : text;
+    return serialise(value);
   } catch {
     /* A payload that cannot be serialised is not worth failing a turn over —
        circular references and host objects both land here. */
     return `⟨could not serialise the ${name} payload⟩`;
   }
+}
+
+
+function serialise(value: unknown): string {
+  return JSON.stringify(value, (key, nested) => {
+    if (!SOLUTION_KEYS.has(key)) return nested;
+    const count = Array.isArray(nested) ? nested.length : nested && typeof nested === "object" ? Object.keys(nested as object).length : 0;
+    return `⟨withheld — ${count} ${count === 1 ? "entry" : "entries"}; showing this would give away the challenge⟩`;
+  }, 2) ?? "";
 }

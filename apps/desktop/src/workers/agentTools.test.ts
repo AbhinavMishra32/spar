@@ -137,9 +137,8 @@ describe("set_challenge", () => {
     expect(setChallengeInputSchema.parse({ ...brief, concepts: [{ slug: "window-invariant-restoration" }] }).concepts[0]?.role).toBe("supporting");
   });
 
-  it("rejects an unknown mode and a too-short brief", () => {
+  it("rejects an unknown mode and a brief with no concepts", () => {
     expect(() => setChallengeInputSchema.parse({ ...brief, mode: "append" })).toThrow();
-    expect(() => setChallengeInputSchema.parse({ ...brief, brief: "too short" })).toThrow();
     expect(() => setChallengeInputSchema.parse({ ...brief, concepts: [] })).toThrow();
   });
 });

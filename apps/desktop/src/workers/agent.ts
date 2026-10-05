@@ -54,7 +54,6 @@ const CHALLENGE_REPAIRS_PER_DRAFT = 2;
 /** Compactions a turn may try before saying it does not fit the model. */
 const OVERFLOW_RETRY_LIMIT = 2;
 /** How much of a rejected candidate's statement the coach is shown. */
-const FAILED_STATEMENT_CHARS = 600;
 
 type PrivateChallengeBudget = { repairRemaining: number };
 /** One host compile of a candidate design. */
@@ -432,7 +431,7 @@ async function setChallenge(
   const { actionTitle, arguments: args } = splitActionTitle(input);
   const brief = setChallengeInputSchema.parse(args);
   const hostName = brief.mode === "new" ? "create_question" : "replace_current_question";
-  const titled = { label: (brief.stretch || brief.brief).slice(0, 120), ...(actionTitle ? { actionTitle } : {}) };
+  const titled = { label: brief.stretch || brief.brief, ...(actionTitle ? { actionTitle } : {}) };
   const model = { model: context.provider.model, provider: context.provider.provider };
   const emit = (event: Record<string, unknown>) => parentPort.postMessage({ kind: "event", requestId: runId, event });
   const progress = (detail: string) => emit({ type: "tool", tool: "set_challenge", phase: "progress", callId: id, detail });
@@ -554,11 +553,6 @@ function briefFields(brief: SetChallengeInput, hostName: "create_question" | "re
   };
 }
 
-/** Cut to a length, and said so where it was cut. */
-function clipped(text: string, limit: number): string {
-  return text.length > limit ? `${text.slice(0, limit)}\n…(cut at ${limit} of ${text.length} characters)` : text;
-}
-
 /** The result the coach reads: what was published, in enough detail to talk
  *  about it — or what was built and every check it failed. Facts only; what to
  *  do next is the coach's call. */
@@ -575,8 +569,8 @@ function challengeForModel(brief: SetChallengeInput, candidate: Record<string, u
       title: candidate.title,
       difficulty: brief.difficulty,
       language: brief.language,
-      statement: typeof candidate.statement === "string" ? clipped(candidate.statement, 8_000) : "",
-      ...(starter ? { starter: { path: starter[0], text: clipped(String(starter[1]), 4_000) } } : {}),
+      statement: typeof candidate.statement === "string" ? candidate.statement : "",
+      ...(starter ? { starter: { path: starter[0], text: String(starter[1]) } } : {}),
       cases: report.caseCounts,
       ...(typeof record.replacedQuestionId === "string" ? { replacedQuestionId: record.replacedQuestionId } : {}),
       /* The review link's outcome, refusal included: dropping it let the coach
@@ -591,7 +585,7 @@ function challengeForModel(brief: SetChallengeInput, candidate: Record<string, u
   return {
     status: "invalid",
     ...(typeof candidate.title === "string" ? { candidateTitle: candidate.title } : {}),
-    ...(typeof candidate.statement === "string" && candidate.statement ? { candidateStatement: clipped(candidate.statement, FAILED_STATEMENT_CHARS) } : {}),
+    ...(typeof candidate.statement === "string" && candidate.statement ? { candidateStatement: candidate.statement } : {}),
     failedChecks: failures,
     ...(revisions.length ? { privateRevisions: revisions.map((revision) => revision.line) } : {}),
     ...(providerError ? { providerError: `The repair model's call failed: ${providerError}` } : {}),
@@ -609,6 +603,11 @@ function steeringMessage(texts: string[]): string {
   return steeringSection(texts.map(clampSteer)).trim();
 }
 
+/** Each result's share of the digest. The digest exists because the conversation
+ *  overflowed, so it has to be smaller than what it replaces; the tools are still
+ *  there for the whole of any one result. */
+const DIGEST_RESULT_CHARS = 1_500;
+
 /** The turn's work so far, for a conversation rebuilt after an overflow: what
  *  each tool did, in a line or two, so nothing is redone and nothing claimed. */
 function workDigest(outcomes: Outcomes): string {
@@ -616,10 +615,10 @@ function workDigest(outcomes: Outcomes): string {
   for (const [name, entries] of outcomes) {
     for (const entry of entries.slice(-3)) {
       const result = stableJson(forModel(name, entry.result));
-      lines.push(`- ${name}: ${result.length > 600 ? `${result.slice(0, 600)}…` : result}`);
+      lines.push(`- ${name}: ${result.length > DIGEST_RESULT_CHARS ? `${result.slice(0, DIGEST_RESULT_CHARS)}… (${result.length - DIGEST_RESULT_CHARS} more characters)` : result}`);
     }
   }
-  return lines.length ? `\n\n# Work already done this turn (the conversation was compacted to fit)\n${lines.join("\n")}\nContinue from here. These results are shortened: call a tool again when you need what was cut.` : "";
+  return lines.length ? `\n\n# Work already done this turn (the conversation was compacted to fit)\n${lines.join("\n")}\nContinue from here. Long results are shortened here; call the tool again for the whole of one you need.` : "";
 }
 
 async function runTurn(request: Request, stopped: AbortSignal) {
@@ -1071,7 +1070,7 @@ function summarizeToolInput(name: string, input: unknown): { label?: string; fil
   if (name === "read_record") return { label: [text("kind"), text("id")].filter(Boolean).join(" ") };
   if (name === "update_notebook") { const note = text("note"); return note ? { label: note } : {}; }
   if (name === "set_challenge_mix") { const note = text("note"); return note ? { label: note } : {}; }
-  if (name === "set_challenge") { const stretch = text("stretch"); return stretch ? { label: stretch.slice(0, 120) } : {}; }
+  if (name === "set_challenge") { const stretch = text("stretch"); return stretch ? { label: stretch } : {}; }
   if (name === "create_question" || name === "replace_current_question") {
     const files: AgentActivityFile[] = [];
     for (const [field, group] of [["starterFiles", "starter"], ["referenceFiles", "reference"], ["visibleTests", "visible"], ["hiddenTests", "hidden"]] as const) {
@@ -1175,12 +1174,12 @@ function describeToolResult(name: string, value: unknown): string {
         cases ? `${cases} cases (${visible} visible, ${hidden} hidden)` : "",
       ].filter(Boolean).join(" · ");
     }
-    return [`status ${record.status}`, ...failedChecks(value)].join(" · ").slice(0, 320);
+    return [`status ${record.status}`, ...failedChecks(value)].join(" · ");
   }
   if ((name === "assign_practice_problem" || name === "reopen_challenge") && typeof record.status === "string") {
     // The transcript row only has one line to spare; the agent's own repair
     // feedback is built separately and is not clipped to fit a UI label.
-    return [`status ${record.status}`, ...failedChecks(value)].join(" · ").slice(0, 320);
+    return [`status ${record.status}`, ...failedChecks(value)].join(" · ");
   }
   /* The visualiser's rows read as what the learner would say happened, because
      "12 results" from a step search is the least informative thing about it. */
@@ -1200,22 +1199,22 @@ function describeToolResult(name: string, value: unknown): string {
     const rest = record.total > 1 ? `${record.total} in all` : "";
     const found = [why, at].filter(Boolean).join(" at ");
     if (!found) return record.total ? `${record.total} matching step${record.total === 1 ? "" : "s"}` : "nothing matched";
-    return [found, rest].filter(Boolean).join(" · ").slice(0, 120);
+    return [found, rest].filter(Boolean).join(" · ");
   }
   /* What the step did, for the same reason. A step number and a line number are
      coordinates; what the learner came for is what moved at them. */
   if (name === "visualize_read_step" && typeof record.step === "number") {
     const changed = Array.isArray(record.changed) ? record.changed.filter((entry): entry is string => typeof entry === "string") : [];
     const where = `step ${record.step}`;
-    if (changed.length) return `${where} · ${changed.slice(0, 2).join(", ")}${changed.length > 2 ? ` +${changed.length - 2}` : ""}`.slice(0, 120);
+    if (changed.length) return `${where} · ${changed.slice(0, 2).join(", ")}${changed.length > 2 ? ` +${changed.length - 2}` : ""}`;
     const locals = record.locals && typeof record.locals === "object" ? Object.entries(record.locals as Record<string, unknown>) : [];
-    if (locals.length) return `${where} · ${locals.slice(0, 2).map(([key, value]) => `${key}=${String(value)}`).join(", ")}`.slice(0, 120);
+    if (locals.length) return `${where} · ${locals.slice(0, 2).map(([key, value]) => `${key}=${String(value)}`).join(", ")}`;
     return `${where} · line ${String(record.line ?? "")}`;
   }
   if (name === "visualize_explain" && typeof record.steps === "number") return `${record.steps} step${record.steps === 1 ? "" : "s"} shown`;
   if (name === "teach_lesson" && typeof record.pages === "number") return `${record.pages} page${record.pages === 1 ? "" : "s"} taught`;
   if (name === "search_lessons" && Array.isArray(record.lessons)) return `${record.lessons.length} already taught`;
-  if (typeof record.error === "string" && typeof record.note === "string") return record.note.slice(0, 200);
+  if (typeof record.error === "string" && typeof record.note === "string") return record.note;
   if (Array.isArray(value)) return `${value.length} result${value.length === 1 ? "" : "s"}`;
   if (typeof record.outcome === "string") return `outcome ${record.outcome}`;
   return "";

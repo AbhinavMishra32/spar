@@ -11,13 +11,10 @@
             "properties": {
               "header": {
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 40
+                "minLength": 1
               },
               "question": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 1000
+                "type": "string"
               },
               "options": {
                 "type": "array",
@@ -26,8 +23,7 @@
                   "properties": {
                     "label": {
                       "type": "string",
-                      "minLength": 1,
-                      "maxLength": 120
+                      "minLength": 1
                     }
                   },
                   "required": [
@@ -35,8 +31,7 @@
                   ],
                   "additionalProperties": false
                 },
-                "minItems": 2,
-                "maxItems": 3
+                "minItems": 2
               },
               "multiple": {
                 "type": "boolean",
@@ -54,12 +49,10 @@
             ],
             "additionalProperties": false
           },
-          "minItems": 1,
-          "maxItems": 3
+          "minItems": 1
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -86,7 +79,6 @@
         "slug": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 120,
           "description": "The problem's URL slug, exactly as the source gave it."
         },
         "concepts": {
@@ -96,14 +88,10 @@
             "properties": {
               "slug": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
                 "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
               },
               "title": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 80,
                 "description": "only needed for a concept Spar has not seen before"
               },
               "kind": {
@@ -116,8 +104,6 @@
               },
               "parentSlug": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
                 "description": "the area a new sub-concept belongs under, e.g. sliding-window"
               },
               "role": {
@@ -135,13 +121,10 @@
             "additionalProperties": false
           },
           "minItems": 1,
-          "maxItems": 5,
           "description": "What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and names what this problem actually exercises. A prerequisite or transfer problem can use a different concept from the current target; explain the connection in your reply."
         },
         "why": {
           "type": "string",
-          "minLength": 20,
-          "maxLength": 1500,
           "description": "One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns."
         },
         "language": {
@@ -165,18 +148,14 @@
           "properties": {
             "ability": {
               "type": "string",
-              "minLength": 2,
-              "maxLength": 200,
               "description": "The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."
             },
             "gap": {
               "type": "string",
-              "maxLength": 1500,
               "description": "What is still uncertain about this learner that this problem probes."
             },
             "evidence": {
               "type": "string",
-              "maxLength": 1500,
               "description": "What a pass or a fail will tell you."
             }
           },
@@ -188,14 +167,10 @@
         },
         "levelReason": {
           "type": "string",
-          "minLength": 10,
-          "maxLength": 600,
           "description": "Why this problem's level is right here, when that is worth keeping with the choice."
         },
         "replaceReason": {
           "type": "string",
-          "minLength": 3,
-          "maxLength": 1500,
           "description": "When a challenge is already open: why this one takes its place. Their attempt is closed as replaced and this one records it as its predecessor."
         },
         "review": {
@@ -217,14 +192,10 @@
             },
             "focus": {
               "type": "string",
-              "minLength": 8,
-              "maxLength": 1500,
               "description": "Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."
             },
             "forLearner": {
               "type": "string",
-              "minLength": 8,
-              "maxLength": 600,
               "description": "Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."
             }
           },
@@ -237,7 +208,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -275,18 +245,15 @@
               "path": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 200,
                 "description": "The file, for starter, reference and test edits. May be omitted when that part has one file."
               },
               "find": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4000,
                 "description": "The exact text to replace, copied from the current version; it must occur exactly once. To add something, find the passage it goes next to and repeat that passage in replace with the addition."
               },
               "replace": {
                 "type": "string",
-                "maxLength": 8000,
                 "description": "What the passage becomes."
               }
             },
@@ -297,24 +264,89 @@
             ],
             "additionalProperties": false
           },
-          "minItems": 1,
-          "maxItems": 20
+          "minItems": 1
         },
         "note": {
           "type": "string",
-          "minLength": 3,
-          "maxLength": 300,
           "description": "What changed and why, in one sentence. Stored with the challenge."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
       "required": [
         "edits",
         "note"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "file_review": {
+    "description": "File your judgement of a spaced-review card from evidence you have read. The rating moves the card's schedule; held, missed and the summary are what the learner and later reviews see. Without a rating it only rewrites the card's note.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "cardId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The card being reviewed."
+        },
+        "rating": {
+          "type": "string",
+          "enum": [
+            "again",
+            "hard",
+            "good",
+            "easy"
+          ],
+          "description": "How well the idea held in this evidence, as a spaced-review grade you decide: again — they did not have it; hard — got there, but the weak spot showed again or needed help; good — held with ordinary friction; easy — clean and immediate. Omit to leave the schedule alone."
+        },
+        "summary": {
+          "type": "string",
+          "description": "What you saw, written to the learner: how this attempt compares with how they handled the idea before. Required with a rating."
+        },
+        "held": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "What they now do right that the card or an earlier review said they missed."
+        },
+        "missed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "What is still missing or shaky, specifically enough that the next review can aim at it."
+        },
+        "note": {
+          "type": "string",
+          "description": "Replaces the card's standing note: what its next review should press on, given everything so far. Keep it current; drop what is fixed."
+        },
+        "challengeId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The challenge the evidence came from. Omit for the one this turn is about."
+        },
+        "attemptId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The attempt judged. Omit for the latest attempt at that challenge."
+        },
+        "submissionId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The submission that carried the evidence, when one did. Omit for the latest."
+        },
+        "actionTitle": {
+          "type": "string",
+          "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
+        }
+      },
+      "required": [
+        "cardId"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -328,12 +360,10 @@
         "name": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 48,
           "description": "The skill's name exactly as listed under SKILLS."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -351,7 +381,6 @@
       "properties": {
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -383,7 +412,6 @@
             ]
           },
           "minItems": 1,
-          "maxItems": 6,
           "description": "log: every event, in order, with its payload and per-case lines, including what the learner asked the agent and what it replied while the attempt was open. cases: each case's verdict in every run, with pass and failure counts. runs: each run's score and which cases newly passed or newly failed against the last run that saw them. code: the diff of what the learner changed before each run, against the code the previous run executed, beside that run's newly passing and failing cases — read this before asking what change made something pass, because it usually already says. turning-points: the runs where the score moved most — the breakthrough that first passed everything after failing, and large jumps — each with the diff just before it and anything asked or said in between, which is the evidence for what made it click and whether the idea was theirs. timings: totals, the gap before the first run, the longest gap between events, and each edit stretch. Defaults to log, cases, runs, code and turning-points."
         },
         "segments": {
@@ -397,11 +425,8 @@
         "eventTypes": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 3,
-            "maxLength": 40
+            "type": "string"
           },
-          "maxItems": 12,
           "description": "Keep only these event types in the log, e.g. [\"test_run\"] for nothing but the runs, or [\"file_changed\",\"test_run\"] for the edit-and-run rhythm. Omit for every type. Recorded types: attempt_started, file_changed, command_executed, test_run, submission_created, submission_evaluated, attempt_completed, hint_requested, learner_remark, agent_message."
         },
         "cases": {
@@ -432,13 +457,11 @@
         },
         "maxLines": {
           "type": "integer",
-          "minimum": 20,
-          "maximum": 2000,
+          "minimum": 1,
           "description": "Cap on log lines, newest kept, and it says how many it dropped. Omit to return all log lines. Only applies when explicitly requested."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -461,7 +484,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -498,7 +520,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -545,7 +566,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -571,7 +591,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -614,7 +633,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -643,12 +661,10 @@
         },
         "id": {
           "type": "string",
-          "minLength": 2,
           "description": "The challenge, ability, lesson or review card id, or the concept slug."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -687,13 +703,11 @@
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 40,
           "default": 20,
-          "description": "How many submissions to return. The list reads oldest first and a longer history is cut from the front, so the cap keeps the most recent and the ordinals stay absolute."
+          "description": "How many submissions to return, most recent kept. Ordinals stay absolute."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -713,25 +727,18 @@
         },
         "title": {
           "type": "string",
-          "minLength": 4,
-          "maxLength": 160,
           "description": "The pattern as a short handle the learner can recognise later, in plain words: \"Shrink the window only when the invariant breaks\", not \"Sliding window\" and not the problem's title."
         },
         "trigger": {
           "type": "string",
-          "maxLength": 1200,
           "description": "What in a problem statement should make someone reach for this: the shape of the input, the question asked, the constraint. Written so it would still apply to a problem with a different story."
         },
         "insight": {
           "type": "string",
-          "minLength": 20,
-          "maxLength": 2000,
           "description": "The key realisation itself, as the learner would need to say it to themselves: why it works, not just what to do."
         },
         "invariant": {
           "type": "string",
-          "minLength": 8,
-          "maxLength": 800,
           "description": "The condition the solution maintains, when there is one — the loop invariant, the recurrence, what the data structure guarantees."
         },
         "click": {
@@ -739,7 +746,6 @@
           "properties": {
             "summary": {
               "type": "string",
-              "maxLength": 1500,
               "description": "What changed between stuck and solved, from the turning points: the realisation behind the change, in their terms. If they passed first try, say what they recognised immediately."
             },
             "runOrdinal": {
@@ -749,7 +755,6 @@
             },
             "diff": {
               "type": "string",
-              "maxLength": 4000,
               "description": "The few changed lines that carried it, quoted from the turning-point diff. Omit when the change was a rewrite."
             }
           },
@@ -770,14 +775,10 @@
             "type": "object",
             "properties": {
               "mistake": {
-                "type": "string",
-                "minLength": 4,
-                "maxLength": 600
+                "type": "string"
               },
               "fix": {
-                "type": "string",
-                "minLength": 4,
-                "maxLength": 600
+                "type": "string"
               }
             },
             "required": [
@@ -786,37 +787,27 @@
             ],
             "additionalProperties": false
           },
-          "maxItems": 4,
           "description": "Mistakes the replay shows they actually made, each with the correction, phrased so they generalise. Empty when there were none; never invent them."
         },
         "rubric": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 4,
-            "maxLength": 500
+            "type": "string"
           },
-          "maxItems": 5,
           "description": "What a correct recall of this idea must contain, point by point. The grader checks review answers against exactly this list, so each point must be checkable from a free-text answer."
         },
         "transfer": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 8,
-            "maxLength": 600
+            "type": "string"
           },
-          "maxItems": 4,
           "description": "Variations where the same idea applies or must bend: changed constraints, a different story with the same structure, the case where it breaks. Seeds for future review prompts."
         },
         "concepts": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 2,
-            "maxLength": 60
+            "type": "string"
           },
-          "maxItems": 4,
           "description": "Concept slugs the idea belongs to, the pattern itself first. Omit to use the challenge's own tags. Cards sharing the first concept share review credit."
         },
         "targets": {
@@ -832,13 +823,10 @@
             ]
           },
           "minItems": 1,
-          "maxItems": 5,
           "description": "What later reviews should make them recall — each review rehearses one: `problem` — this exact challenge again, worth it for a classic they will meet in interviews; `pattern` — spotting and applying the technique in a new story; `concept` — the invariant or property that makes it correct; `turning-point` — the realisation that got them unstuck, the default when there was a real struggle; `pitfall` — the mistake they kept making, when it cost them several runs. Pick the ones this solve earned, usually two or three. If the learner said what they want to remember, follow that. The learner can change these on the card. Omit to use turning-point and pattern."
         },
         "remember": {
           "type": "string",
-          "minLength": 3,
-          "maxLength": 1500,
           "description": "What the learner said they want to remember from this problem, when you asked them — their words, lightly cleaned up, not your summary. Reviews aim at it, so the card's insight, click and targets must be about what they pointed at. Required for a new card when they have chosen to decide what their reviews ask about; omit otherwise."
         },
         "firstGrade": {
@@ -853,7 +841,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -861,6 +848,70 @@
         "title",
         "insight",
         "firstGrade"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
+  "reopen_challenge": {
+    "description": "Set a challenge the learner has already done as this session's challenge again: the same problem with fresh starter code. Their earlier code is not in the workspace.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "challengeId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The challenge to set again."
+        },
+        "why": {
+          "type": "string",
+          "description": "Why this problem again, for this learner now. Stored with the challenge for later turns."
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "cardId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The review card this challenge is about, from the journey's Review session section or read_record kind review."
+            },
+            "purpose": {
+              "type": "string",
+              "enum": [
+                "review",
+                "deeper"
+              ],
+              "default": "review",
+              "description": "review: this attempt is the card's review, judged with file_review when it ends. deeper: practice beyond the review, aimed at the weak spot a review exposed — the learner chose to dig in, or you judged they need it before moving on. A deeper challenge is practice, not a review; file_review only if its evidence changes what you believe about the card."
+            },
+            "focus": {
+              "type": "string",
+              "description": "Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."
+            },
+            "forLearner": {
+              "type": "string",
+              "description": "Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."
+            }
+          },
+          "required": [
+            "cardId",
+            "focus"
+          ],
+          "additionalProperties": false,
+          "description": "When this repeat is a review of a card, or practice going deeper on one. Its forLearner is the place to say what went wrong last time and what this attempt should show."
+        },
+        "replaceReason": {
+          "type": "string",
+          "description": "When a challenge is already open: why this one takes its place. Their attempt is closed as replaced and this one records it as its predecessor."
+        },
+        "actionTitle": {
+          "type": "string",
+          "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
+        }
+      },
+      "required": [
+        "challengeId",
+        "why"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"
@@ -885,21 +936,17 @@
         },
         "observedComplexity": {
           "type": "string",
-          "maxLength": 500,
           "description": "The time complexity of what they actually wrote, e.g. \"O(n)\" or \"O(n log n) from the sort\"."
         },
         "approach": {
           "type": "string",
-          "maxLength": 1500,
           "description": "What they actually did, in one sentence, in their own terms."
         },
         "reasons": {
           "type": "array",
           "items": {
-            "type": "string",
-            "maxLength": 1000
+            "type": "string"
           },
-          "maxItems": 6,
           "description": "What you saw: for `rework`, the requirement missed and the nudge the learner sees, without the solution."
         },
         "lenses": {
@@ -910,13 +957,10 @@
               "id": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 60,
                 "description": "A lens id from Coaching settings."
               },
               "note": {
                 "type": "string",
-                "minLength": 8,
-                "maxLength": 300,
                 "description": "What their code showed through that lens: a line from their code and the idiomatic or deeper take on it."
               }
             },
@@ -926,12 +970,10 @@
             ],
             "additionalProperties": false
           },
-          "maxItems": 3,
           "description": "Their code read through the learner's lenses: for each lens it has something to say about, what it showed. Logged in the lens's history, so later turns know what was covered."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1008,7 +1050,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1023,7 +1064,6 @@
       "properties": {
         "query": {
           "type": "string",
-          "minLength": 2,
           "description": "Words or a concept slug."
         },
         "kinds": {
@@ -1040,18 +1080,15 @@
             ]
           },
           "minItems": 1,
-          "maxItems": 6,
           "description": "Which parts of the record to search. Omit for all."
         },
         "limit": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 12,
           "default": 6
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1081,18 +1118,14 @@
           "properties": {
             "ability": {
               "type": "string",
-              "minLength": 2,
-              "maxLength": 200,
               "description": "The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."
             },
             "gap": {
               "type": "string",
-              "maxLength": 1500,
               "description": "What is still uncertain about this learner that this challenge probes."
             },
             "evidence": {
               "type": "string",
-              "maxLength": 1500,
               "description": "What a pass or a fail will tell you."
             }
           },
@@ -1104,13 +1137,10 @@
         },
         "stretch": {
           "type": "string",
-          "maxLength": 1500,
           "description": "What is new for this learner, when that is worth recording."
         },
         "brief": {
           "type": "string",
-          "minLength": 40,
-          "maxLength": 4000,
           "description": "The problem for the builder: what the learner is given and what they must produce, the idea it should make them reach for, anything the learner asked for, and the code-shape convention to keep (for example: LeetCode-style TreeNode with a typed class Solution method, as in their previous challenges). Describe the problem, not the method, unless the method is itself the drill: the builder writes what you give it into the statement, and a named technique there takes away the part of the problem where they work out what to reach for. Plain prose; no code needed."
         },
         "language": {
@@ -1155,14 +1185,10 @@
             "properties": {
               "slug": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
                 "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
               },
               "title": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 80,
                 "description": "only needed for a concept Spar has not seen before"
               },
               "kind": {
@@ -1175,8 +1201,6 @@
               },
               "parentSlug": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
                 "description": "the area a new sub-concept belongs under, e.g. sliding-window"
               },
               "role": {
@@ -1194,7 +1218,6 @@
             "additionalProperties": false
           },
           "minItems": 1,
-          "maxItems": 5,
           "description": "What this challenge is about, most specific first. Exactly one entry has role primary."
         },
         "requiresComplexityAnalysis": {
@@ -1204,32 +1227,24 @@
         "solutionRequirements": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 4,
-            "maxLength": 160
+            "type": "string"
           },
-          "maxItems": 4,
           "description": "How the solution must be written, when the method is itself what is being practised and the learner knows it (\"recursive\" in a recursion drill). The host prints these under the statement and review_solution holds the solution to them, so each one tells the learner the method. A limit on cost (\"O(k) extra space\") goes in the brief as a constraint instead, which leaves them to find the method."
         },
         "skills": {
           "type": "array",
           "items": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 48
+            "minLength": 1
           },
-          "maxItems": 3,
           "description": "Skills from the skills list the builder should follow for this challenge, for example one about figures in statements."
         },
         "why": {
           "type": "string",
-          "maxLength": 1500,
           "description": "Why this challenge for this learner now, kept with the challenge for later turns."
         },
         "reason": {
           "type": "string",
-          "minLength": 3,
-          "maxLength": 1500,
           "description": "For revise or replace: what the learner asked for, or why the open challenge has to change."
         },
         "lens": {
@@ -1238,13 +1253,10 @@
             "id": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 60,
               "description": "One of the learner's lenses in Coaching settings, by its id."
             },
             "sideQuest": {
               "type": "string",
-              "minLength": 10,
-              "maxLength": 600,
               "description": "What this problem makes them practise through that lens, built into the task — a requirement, part of the starter, or the shape of the data."
             }
           },
@@ -1274,14 +1286,10 @@
             },
             "focus": {
               "type": "string",
-              "minLength": 8,
-              "maxLength": 1500,
               "description": "Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."
             },
             "forLearner": {
               "type": "string",
-              "minLength": 8,
-              "maxLength": 600,
               "description": "Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."
             }
           },
@@ -1294,7 +1302,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1311,30 +1318,136 @@
       "$schema": "http://json-schema.org/draft-07/schema#"
     }
   },
+  "set_challenge_mix": {
+    "description": "Change this session's coaching settings, or suggest a lens. The settings are the learner's: when to write a Spar problem versus assigning a real one, and lenses (areas to go deeper on, each at mention, teach or drill). A suggestion waits in the learner's settings menu until they accept or dismiss it, with an example from their own code when you give one. The journey lists suggestions already pending or turned down.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "spar": {
+          "type": "string",
+          "enum": [
+            "never",
+            "struggling",
+            "less",
+            "balanced",
+            "more",
+            "always"
+          ],
+          "description": "When to write a Spar problem. never: real problems only. struggling: real by default, Spar to repair a concept they are stuck on. less / more: mostly real / mostly Spar. balanced: your call. always: only Spar problems."
+        },
+        "lenses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "A catalogue id — lang-idioms, lang-stdlib, lang-types, lang-deep (the Track's language), from-scratch, under-the-hood, complexity, edge-cases, clean-code — or custom:<slug> for one the learner named or you name in a suggestion."
+              },
+              "depth": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "mention",
+                  "teach",
+                  "drill"
+                ]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Required for a custom lens: its name, in the learner's words."
+              },
+              "example": {
+                "type": "object",
+                "properties": {
+                  "before": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "A short line from their code, as they wrote it."
+                  },
+                  "after": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The same line through the lens."
+                  }
+                },
+                "required": [
+                  "after"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "id",
+              "depth"
+            ],
+            "additionalProperties": false
+          },
+          "description": "Lenses to add, change or turn off. Others keep their current depth."
+        },
+        "suggest": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "example": {
+                "$ref": "#/properties/lenses/items/properties/example"
+              },
+              "reason": {
+                "type": "string",
+                "description": "What you saw in their code, in one line to the learner: \"You hand-rolled a heap twice — heapq does it in one line.\""
+              }
+            },
+            "required": [
+              "id",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "note": {
+          "type": "string",
+          "description": "One line saying what changed, shown to the learner."
+        },
+        "actionTitle": {
+          "type": "string",
+          "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
+        }
+      },
+      "required": [
+        "note"
+      ],
+      "additionalProperties": false,
+      "$schema": "http://json-schema.org/draft-07/schema#"
+    }
+  },
   "teach_lesson": {
     "description": "Write the learner a lesson — pages of markdown with fenced code, figures and [[concept:slug|words]] or [[lesson:id|words]] links — and put it in this conversation, where it stays. Returns its id for citing as [[lesson:<id>|title]]. References carry url only for a page you actually fetched or know exists.",
     "inputSchema": {
       "type": "object",
       "properties": {
         "title": {
-          "type": "string",
-          "minLength": 4,
-          "maxLength": 90
+          "type": "string"
         },
         "summary": {
-          "type": "string",
-          "minLength": 20,
-          "maxLength": 300
+          "type": "string"
         },
         "concepts": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 2,
-            "maxLength": 60
+            "type": "string"
           },
           "minItems": 1,
-          "maxItems": 5,
           "description": "concept slugs, primary first, in the same vocabulary challenges are tagged with"
         },
         "pages": {
@@ -1343,19 +1456,13 @@
             "type": "object",
             "properties": {
               "title": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 90
+                "type": "string"
               },
               "body": {
-                "type": "string",
-                "minLength": 20,
-                "maxLength": 4000
+                "type": "string"
               },
               "takeaway": {
-                "type": "string",
-                "minLength": 8,
-                "maxLength": 200
+                "type": "string"
               }
             },
             "required": [
@@ -1364,8 +1471,7 @@
             ],
             "additionalProperties": false
           },
-          "minItems": 1,
-          "maxItems": 8
+          "minItems": 1
         },
         "references": {
           "type": "array",
@@ -1379,18 +1485,14 @@
                     "const": "url"
                   },
                   "label": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 120
+                    "type": "string"
                   },
                   "url": {
                     "type": "string",
                     "format": "uri"
                   },
                   "note": {
-                    "type": "string",
-                    "minLength": 8,
-                    "maxLength": 240
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1409,19 +1511,13 @@
                     "const": "concept"
                   },
                   "label": {
-                    "type": "string",
-                    "minLength": 2,
-                    "maxLength": 120
+                    "type": "string"
                   },
                   "slug": {
-                    "type": "string",
-                    "minLength": 2,
-                    "maxLength": 60
+                    "type": "string"
                   },
                   "note": {
-                    "type": "string",
-                    "minLength": 8,
-                    "maxLength": 240
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1440,18 +1536,14 @@
                     "const": "lesson"
                   },
                   "label": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 120
+                    "type": "string"
                   },
                   "lessonId": {
                     "type": "string",
                     "format": "uuid"
                   },
                   "note": {
-                    "type": "string",
-                    "minLength": 8,
-                    "maxLength": 240
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1470,14 +1562,10 @@
                     "const": "reading"
                   },
                   "label": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 120
+                    "type": "string"
                   },
                   "note": {
-                    "type": "string",
-                    "minLength": 8,
-                    "maxLength": 240
+                    "type": "string"
                   }
                 },
                 "required": [
@@ -1489,18 +1577,15 @@
               }
             ]
           },
-          "maxItems": 6,
           "default": []
         },
         "lens": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 60,
           "description": "The id of a lens in Coaching settings this lesson teaches through, when it does. Logged in that lens's history."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1526,13 +1611,10 @@
         },
         "title": {
           "type": "string",
-          "minLength": 2,
-          "maxLength": 200,
           "description": "Required when introducing an ability."
         },
         "markdown": {
           "type": "string",
-          "minLength": 20,
           "description": "The ability document: what the learner can and cannot yet do, with the evidence."
         },
         "evidenceEventIds": {
@@ -1545,8 +1627,6 @@
         },
         "summary": {
           "type": "string",
-          "minLength": 10,
-          "maxLength": 800,
           "description": "One sentence in plain words: what the learner can now do. Written to them, not about them."
         },
         "concepts": {
@@ -1556,14 +1636,10 @@
             "properties": {
               "slug": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
                 "description": "kebab-case, as specific as the challenge really is: prefer window-invariant-restoration over sliding-window, or aliasing over references-and-mutation"
               },
               "title": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 80,
                 "description": "only needed for a concept Spar has not seen before"
               },
               "kind": {
@@ -1576,8 +1652,6 @@
               },
               "parentSlug": {
                 "type": "string",
-                "minLength": 2,
-                "maxLength": 60,
                 "description": "the area a new sub-concept belongs under, e.g. sliding-window"
               },
               "role": {
@@ -1594,17 +1668,13 @@
             ],
             "additionalProperties": false
           },
-          "maxItems": 6,
           "description": "The concepts this ability covers, which is how the learner reaches the challenges behind it."
         },
         "practice": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 10,
-            "maxLength": 600
+            "type": "string"
           },
-          "maxItems": 4,
           "description": "Drills for going further on this exact ability, each phrased as the learner's own goal because each one starts a session. Vary the transfer context, not just the difficulty."
         },
         "status": {
@@ -1627,9 +1697,7 @@
                 "format": "uuid"
               },
               "statement": {
-                "type": "string",
-                "minLength": 8,
-                "maxLength": 300
+                "type": "string"
               },
               "polarity": {
                 "type": "string",
@@ -1662,21 +1730,16 @@
             ],
             "additionalProperties": false
           },
-          "maxItems": 8,
           "description": "Nuanced interpretations of exact durable events. Describe the behavior observed, not a score. Contradictory is as much evidence as supporting: a long struggle or an idea they had to be walked to counts against the ability, and a pass after heavy hints is assisted."
         },
         "pattern": {
           "type": "object",
           "properties": {
             "title": {
-              "type": "string",
-              "minLength": 3,
-              "maxLength": 200
+              "type": "string"
             },
             "description": {
-              "type": "string",
-              "minLength": 10,
-              "maxLength": 400
+              "type": "string"
             },
             "status": {
               "type": "string",
@@ -1693,8 +1756,7 @@
               "items": {
                 "type": "string",
                 "format": "uuid"
-              },
-              "maxItems": 12
+              }
             }
           },
           "required": [
@@ -1708,7 +1770,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1742,12 +1803,10 @@
               "find": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 4000,
                 "description": "Text copied exactly from the current notebook, long enough to occur only once."
               },
               "replace": {
                 "type": "string",
-                "maxLength": 6000,
                 "description": "What it becomes. Empty to delete it."
               }
             },
@@ -1758,24 +1817,19 @@
             "additionalProperties": false
           },
           "minItems": 1,
-          "maxItems": 20,
           "description": "Replacements applied in order to the current notebook."
         },
         "markdown": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 12000,
           "description": "The whole notebook, replacing the current one. Only to start it or reorganise it; otherwise use edits."
         },
         "note": {
           "type": "string",
-          "minLength": 3,
-          "maxLength": 300,
           "description": "One line saying what changed, shown to the learner."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1797,8 +1851,6 @@
         },
         "title": {
           "type": "string",
-          "minLength": 3,
-          "maxLength": 160,
           "description": "What this shows, in the learner's language. Not the tool's name for it."
         },
         "steps": {
@@ -1812,8 +1864,6 @@
               },
               "caption": {
                 "type": "string",
-                "minLength": 3,
-                "maxLength": 400,
                 "description": "What to notice in this step, addressed to the learner. One sentence, no preamble."
               },
               "focus": {
@@ -1821,7 +1871,6 @@
                 "items": {
                   "type": "string"
                 },
-                "maxItems": 6,
                 "description": "Draw only these: local names like \"counts\", or heap ids like \"@n2\". Use it — a picture of the two things your sentence is about lands, and a picture of every object in scope does not. Omit only when the whole state genuinely is the point."
               },
               "hold": {
@@ -1837,8 +1886,7 @@
             ],
             "additionalProperties": false
           },
-          "minItems": 1,
-          "maxItems": 8
+          "minItems": 1
         },
         "autoplay": {
           "type": "boolean",
@@ -1846,12 +1894,10 @@
         },
         "takeaway": {
           "type": "string",
-          "maxLength": 1000,
           "description": "Optional: the one sentence the whole sequence adds up to, shown under it."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1903,12 +1949,10 @@
         },
         "limit": {
           "type": "integer",
-          "minimum": 1,
-          "maximum": 24
+          "minimum": 1
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1935,7 +1979,6 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -1963,24 +2006,20 @@
         },
         "code": {
           "type": "string",
-          "maxLength": 4000,
           "description": "The source to trace, when from is code. Keep it to the smallest program that shows the idea."
         },
         "setup": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 400,
           "description": "The single call to trace, e.g. `search([1,3,9], 9)`. Without this nothing runs."
         },
         "maxSteps": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 6000,
           "description": "Step budget. The default is ample; raise it only for a run you know is long."
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -2002,12 +2041,10 @@
             "type": "string",
             "format": "uri"
           },
-          "minItems": 1,
-          "maxItems": 5
+          "minItems": 1
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
@@ -2024,8 +2061,7 @@
       "type": "object",
       "properties": {
         "query": {
-          "type": "string",
-          "minLength": 2
+          "type": "string"
         },
         "limit": {
           "type": "integer",
@@ -2035,291 +2071,11 @@
         },
         "actionTitle": {
           "type": "string",
-          "maxLength": 120,
           "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
         }
       },
       "required": [
         "query"
-      ],
-      "additionalProperties": false,
-      "$schema": "http://json-schema.org/draft-07/schema#"
-    }
-  },
-  "file_review": {
-    "description": "File your judgement of a spaced-review card from evidence you have read. The rating moves the card's schedule; held, missed and the summary are what the learner and later reviews see. Without a rating it only rewrites the card's note.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "cardId": {
-          "type": "string",
-          "format": "uuid",
-          "description": "The card being reviewed."
-        },
-        "rating": {
-          "type": "string",
-          "enum": [
-            "again",
-            "hard",
-            "good",
-            "easy"
-          ],
-          "description": "How well the idea held in this evidence, as a spaced-review grade you decide: again — they did not have it; hard — got there, but the weak spot showed again or needed help; good — held with ordinary friction; easy — clean and immediate. Omit to leave the schedule alone."
-        },
-        "summary": {
-          "type": "string",
-          "minLength": 8,
-          "maxLength": 1500,
-          "description": "What you saw, written to the learner: how this attempt compares with how they handled the idea before. Required with a rating."
-        },
-        "held": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 4,
-            "maxLength": 400
-          },
-          "maxItems": 6,
-          "description": "What they now do right that the card or an earlier review said they missed."
-        },
-        "missed": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 4,
-            "maxLength": 400
-          },
-          "maxItems": 6,
-          "description": "What is still missing or shaky, specifically enough that the next review can aim at it."
-        },
-        "note": {
-          "type": "string",
-          "minLength": 8,
-          "maxLength": 1500,
-          "description": "Replaces the card's standing note: what its next review should press on, given everything so far. Keep it current; drop what is fixed."
-        },
-        "challengeId": {
-          "type": "string",
-          "format": "uuid",
-          "description": "The challenge the evidence came from. Omit for the one this turn is about."
-        },
-        "attemptId": {
-          "type": "string",
-          "format": "uuid",
-          "description": "The attempt judged. Omit for the latest attempt at that challenge."
-        },
-        "submissionId": {
-          "type": "string",
-          "format": "uuid",
-          "description": "The submission that carried the evidence, when one did. Omit for the latest."
-        },
-        "actionTitle": {
-          "type": "string",
-          "maxLength": 120,
-          "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
-        }
-      },
-      "required": [
-        "cardId"
-      ],
-      "additionalProperties": false,
-      "$schema": "http://json-schema.org/draft-07/schema#"
-    }
-  },
-  "reopen_challenge": {
-    "description": "Set a challenge the learner has already done as this session's challenge again: the same problem with fresh starter code. Their earlier code is not in the workspace.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "challengeId": {
-          "type": "string",
-          "format": "uuid",
-          "description": "The challenge to set again."
-        },
-        "why": {
-          "type": "string",
-          "minLength": 10,
-          "maxLength": 1500,
-          "description": "Why this problem again, for this learner now. Stored with the challenge for later turns."
-        },
-        "review": {
-          "type": "object",
-          "properties": {
-            "cardId": {
-              "type": "string",
-              "format": "uuid",
-              "description": "The review card this challenge is about, from the journey's Review session section or read_record kind review."
-            },
-            "purpose": {
-              "type": "string",
-              "enum": [
-                "review",
-                "deeper"
-              ],
-              "default": "review",
-              "description": "review: this attempt is the card's review, judged with file_review when it ends. deeper: practice beyond the review, aimed at the weak spot a review exposed — the learner chose to dig in, or you judged they need it before moving on. A deeper challenge is practice, not a review; file_review only if its evidence changes what you believe about the card."
-            },
-            "focus": {
-              "type": "string",
-              "minLength": 8,
-              "maxLength": 1500,
-              "description": "Private to you: what this review is checking — the step, pattern or mistake from the card and its earlier reviews that you want to see whether they now handle — e.g. \"deciding what the recursive call returns before writing it; last time they returned a flag where a height was needed\". The learner does not see it."
-            },
-            "forLearner": {
-              "type": "string",
-              "minLength": 8,
-              "maxLength": 600,
-              "description": "Shown to the learner above the problem, in your voice: why they are seeing this problem and what this attempt is their chance to show — e.g. \"Last time the running total counted partial windows. This time, make every compared sum a full window.\" Name what went wrong before and what to get right; never the fix itself. Omit when a plain problem is the better test."
-            }
-          },
-          "required": [
-            "cardId",
-            "focus"
-          ],
-          "additionalProperties": false,
-          "description": "When this repeat is a review of a card, or practice going deeper on one. Its forLearner is the place to say what went wrong last time and what this attempt should show."
-        },
-        "replaceReason": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 1500,
-          "description": "When a challenge is already open: why this one takes its place. Their attempt is closed as replaced and this one records it as its predecessor."
-        },
-        "actionTitle": {
-          "type": "string",
-          "maxLength": 120,
-          "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
-        }
-      },
-      "required": [
-        "challengeId",
-        "why"
-      ],
-      "additionalProperties": false,
-      "$schema": "http://json-schema.org/draft-07/schema#"
-    }
-  },
-  "set_challenge_mix": {
-    "description": "Change this session's coaching settings, or suggest a lens. The settings are the learner's: when to write a Spar problem versus assigning a real one, and lenses (areas to go deeper on, each at mention, teach or drill). A suggestion waits in the learner's settings menu until they accept or dismiss it, with an example from their own code when you give one. The journey lists suggestions already pending or turned down.",
-    "inputSchema": {
-      "type": "object",
-      "properties": {
-        "spar": {
-          "type": "string",
-          "enum": [
-            "never",
-            "struggling",
-            "less",
-            "balanced",
-            "more",
-            "always"
-          ],
-          "description": "When to write a Spar problem. never: real problems only. struggling: real by default, Spar to repair a concept they are stuck on. less / more: mostly real / mostly Spar. balanced: your call. always: only Spar problems."
-        },
-        "lenses": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 60,
-                "description": "A catalogue id — lang-idioms, lang-stdlib, lang-types, lang-deep (the Track's language), from-scratch, under-the-hood, complexity, edge-cases, clean-code — or custom:<slug> for one the learner named or you name in a suggestion."
-              },
-              "depth": {
-                "type": "string",
-                "enum": [
-                  "off",
-                  "mention",
-                  "teach",
-                  "drill"
-                ]
-              },
-              "label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 60,
-                "description": "Required for a custom lens: its name, in the learner's words."
-              },
-              "example": {
-                "type": "object",
-                "properties": {
-                  "before": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 80,
-                    "description": "A short line from their code, as they wrote it."
-                  },
-                  "after": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 80,
-                    "description": "The same line through the lens."
-                  }
-                },
-                "required": [
-                  "after"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "required": [
-              "id",
-              "depth"
-            ],
-            "additionalProperties": false
-          },
-          "maxItems": 8,
-          "description": "Lenses to add, change or turn off. Others keep their current depth."
-        },
-        "suggest": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "id": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 60
-              },
-              "label": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 60
-              },
-              "example": {
-                "$ref": "#/properties/lenses/items/properties/example"
-              },
-              "reason": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 240,
-                "description": "What you saw in their code, in one line to the learner: \"You hand-rolled a heap twice — heapq does it in one line.\""
-              }
-            },
-            "required": [
-              "id",
-              "reason"
-            ],
-            "additionalProperties": false
-          },
-          "maxItems": 2
-        },
-        "note": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 200,
-          "description": "One line saying what changed, shown to the learner."
-        },
-        "actionTitle": {
-          "type": "string",
-          "maxLength": 120,
-          "description": "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\"."
-        }
-      },
-      "required": [
-        "note"
       ],
       "additionalProperties": false,
       "$schema": "http://json-schema.org/draft-07/schema#"

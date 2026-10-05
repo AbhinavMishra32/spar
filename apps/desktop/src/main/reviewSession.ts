@@ -77,7 +77,7 @@ export class ReviewService {
     if (found.row.closed_at) throw new Error("That review has already been filed.");
     const card = store.reviews.card(found.row.card_id);
     if (!card) throw new Error("That review card no longer exists.");
-    const text = answer.trim().slice(0, 8_000);
+    const text = answer.trim();
     const cueShown = found.row.cue_shown === 1;
     let grade: ReviewGrade;
     if (isBlankAnswer(text)) {
@@ -161,7 +161,7 @@ export class ReviewService {
         click: card.click.summary, independence: card.independence,
         ...(card.remember ? { remember: card.remember } : {}), pitfalls: card.pitfalls, rubric: card.rubric, transfer: card.transfer,
         concepts: card.concepts.map((tag) => tag.title),
-        ...(target === "problem" && record ? { statement: record.design.statement.slice(0, 4_000) } : {}),
+        ...(target === "problem" && record ? { statement: record.design.statement } : {}),
       },
       target,
       memory,

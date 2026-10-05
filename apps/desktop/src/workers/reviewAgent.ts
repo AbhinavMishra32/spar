@@ -162,9 +162,9 @@ export function parseReviewPrompt(text: string, formats: ReviewFormat[]): Review
   const cleaned = {
     format: record.format,
     prompt: typeof record.prompt === "string" ? record.prompt.trim() : record.prompt,
-    ...(typeof record.answer === "string" && record.answer.trim().length >= 3 ? { answer: record.answer.trim().slice(0, 1_500) } : {}),
+    ...(typeof record.answer === "string" && record.answer.trim().length >= 3 ? { answer: record.answer.trim() } : {}),
     cue: typeof record.cue === "string" && record.cue.trim() ? record.cue.trim() : null,
-    expected: Array.isArray(record.expected) ? record.expected.filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => String(entry).trim().slice(0, 300)).slice(0, 6) : record.expected,
+    expected: Array.isArray(record.expected) ? record.expected.filter((entry) => typeof entry === "string" && entry.trim()).map((entry) => String(entry).trim()) : record.expected,
   };
   const parsed = reviewPromptSchema.safeParse(cleaned);
   if (!parsed.success) return null;
@@ -178,15 +178,15 @@ export function parseReviewGrade(text: string): ReviewGrade | null {
   const raw = objectIn(text);
   if (!raw || typeof raw !== "object") return null;
   const record = raw as Record<string, unknown>;
-  const list = (value: unknown) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string").map((entry) => String(entry).slice(0, 300)).slice(0, 6) : [];
+  const list = (value: unknown) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string").map((entry) => String(entry)) : [];
   const rating = typeof record.rating === "string" ? Number(record.rating) : record.rating;
   const parsed = reviewGradeSchema.safeParse({
     verdict: record.verdict,
     rating: typeof rating === "number" ? Math.round(rating) : rating,
     hits: list(record.hits),
     misses: list(record.misses),
-    feedback: typeof record.feedback === "string" ? record.feedback.trim().slice(0, 400) : record.feedback,
-    misconception: typeof record.misconception === "string" && record.misconception.trim() ? record.misconception.trim().slice(0, 300) : null,
+    feedback: typeof record.feedback === "string" ? record.feedback.trim() : record.feedback,
+    misconception: typeof record.misconception === "string" && record.misconception.trim() ? record.misconception.trim() : null,
   });
   return parsed.success ? parsed.data : null;
 }

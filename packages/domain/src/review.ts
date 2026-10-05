@@ -96,17 +96,17 @@ export const insightIndependenceSchema = z.enum(["independent", "assisted", "unk
 export type InsightIndependence = z.infer<typeof insightIndependenceSchema>;
 
 export const insightPitfallSchema = z.object({
-  mistake: z.string().min(4).max(240),
-  fix: z.string().min(4).max(240),
+  mistake: z.string(),
+  fix: z.string(),
 });
 
 export const insightClickSchema = z.object({
   /** What changed between stuck and solved, in the learner's terms. */
-  summary: z.string().min(8).max(500),
+  summary: z.string(),
   /** The run that turned it, as `read_attempt` numbers runs. */
   runOrdinal: z.number().int().min(1).nullable(),
   /** The lines that did it, when the agent quoted them from the diff. */
-  diff: z.string().max(1_600).nullable(),
+  diff: z.string().nullable(),
 });
 
 /** Where a review came from: the solve that filed the card, a recall card, a
@@ -195,14 +195,14 @@ export const reviewPromptSchema = z.object({
    *  saved before targets existed. */
   target: reviewTargetSchema.optional(),
   /** The question, as markdown. May carry a fenced code block. */
-  prompt: z.string().min(10).max(4_000),
+  prompt: z.string(),
   /** The back of the card: what a good answer says, short enough to take in at
    *  a glance. Absent on prompts written before cards had backs. */
-  answer: z.string().min(3).max(1_500).optional(),
+  answer: z.string().optional(),
   /** One nudge the learner can ask to see. Asking caps the grade at Hard. */
-  cue: z.string().min(4).max(400).nullable(),
+  cue: z.string().nullable(),
   /** What a complete answer contains, point by point. */
-  expected: z.array(z.string().min(3).max(300)).min(1).max(6),
+  expected: z.array(z.string()).min(1),
 });
 export type ReviewPrompt = z.infer<typeof reviewPromptSchema>;
 
@@ -216,12 +216,12 @@ export type ReviewPending = z.infer<typeof reviewPendingSchema>;
 export const reviewGradeSchema = z.object({
   verdict: z.enum(["correct", "partial", "incorrect"]),
   rating: z.number().int().min(1).max(4),
-  hits: z.array(z.string().max(300)).max(6),
-  misses: z.array(z.string().max(300)).max(6),
+  hits: z.array(z.string()),
+  misses: z.array(z.string()),
   /** Written to the learner: what held, what did not, one thing to keep. */
-  feedback: z.string().min(4).max(1_200),
+  feedback: z.string(),
   /** A wrong belief the answer revealed, if it revealed one. */
-  misconception: z.string().max(300).nullable(),
+  misconception: z.string().nullable(),
 });
 export type ReviewGrade = z.infer<typeof reviewGradeSchema>;
 

@@ -76,7 +76,7 @@ export function ChallengeBrief({
 
   return (
     <>
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         <ChallengeEmblem className="shrink-0" question={brief} size={40} />
         <div className="min-w-0 flex-1">
           {/* The problem's name, and under it what Spar is using the problem to
@@ -93,9 +93,9 @@ export function ChallengeBrief({
               larger now and shared by both surfaces, and at this size the same
               pull is what keeps a semibold line from falling apart — the setting
               `ChallengeIntro` has always used. */}
-          <p className="truncate text-content-title font-semibold tracking-[-0.015em]">{brief.title}</p>
+          <p className="text-pretty break-words text-content-title font-semibold leading-tight tracking-[-0.015em]">{brief.title}</p>
           {brief.abilityTitle && (
-            <p className="mt-0.5 truncate text-content-sm leading-[1.35] text-muted-foreground">Testing: {brief.abilityTitle}</p>
+            <p className="mt-1 text-pretty break-words text-content-sm leading-[1.35] text-muted-foreground">Testing: {brief.abilityTitle}</p>
           )}
         </div>
         {brief.source && (

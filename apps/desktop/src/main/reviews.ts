@@ -110,7 +110,7 @@ export class ReviewLedger {
       const stamp = now.toISOString();
       const content = [input.attemptId, input.title.trim(), input.trigger.trim(), input.insight.trim(), input.invariant?.trim() || null, JSON.stringify(input.click), input.independence, JSON.stringify(input.pitfalls), JSON.stringify(input.rubric), JSON.stringify(input.transfer), JSON.stringify(unique(input.conceptSlugs))] as const;
       const targets = input.targets?.length ? JSON.stringify(cleanTargets(input.targets)) : null;
-      const remember = input.remember?.trim().slice(0, 600) || null;
+      const remember = input.remember?.trim() || null;
       if (existing) {
         this.db.prepare("UPDATE review_cards SET attempt_id=?, title=?, trigger_cue=?, insight=?, invariant=?, click=?, independence=?, pitfalls=?, rubric=?, transfer=?, concept_slugs=?, targets=COALESCE(?, targets), remember=COALESCE(?, remember), version=version+1, updated_at=? WHERE id=?")
           .run(...content, targets, remember, stamp, existing.id);
@@ -327,14 +327,14 @@ export class ReviewLedger {
 
   /** The coach's standing note on what this card's next review should press on. */
   setCoachNote(cardId: string, note: string | null, now = new Date()) {
-    this.db.prepare("UPDATE review_cards SET coach_note=?, updated_at=? WHERE id=?").run(note?.trim().slice(0, 1_500) || null, now.toISOString(), cardId);
+    this.db.prepare("UPDATE review_cards SET coach_note=?, updated_at=? WHERE id=?").run(note?.trim() || null, now.toISOString(), cardId);
   }
 
   /** File a challenge the coach set as this card's review, and what it meant to watch. */
   linkChallenge(questionId: string, cardId: string, focus: string | null, purpose: ReviewChallengeLink["purpose"] = "review", learnerNote: string | null = null, now = new Date()) {
     if (!this.card(cardId, now)) throw new Error("That review card no longer exists.");
     this.db.prepare("INSERT INTO review_challenges (question_id, card_id, focus, learner_note, purpose, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(question_id) DO UPDATE SET card_id=excluded.card_id, focus=excluded.focus, learner_note=excluded.learner_note, purpose=excluded.purpose")
-      .run(questionId, cardId, focus?.trim().slice(0, 1_500) || null, learnerNote?.trim().slice(0, 600) || null, purpose, now.toISOString());
+      .run(questionId, cardId, focus?.trim() || null, learnerNote?.trim() || null, purpose, now.toISOString());
   }
 
   /** The card a challenge was set to review, if it was set as one. */

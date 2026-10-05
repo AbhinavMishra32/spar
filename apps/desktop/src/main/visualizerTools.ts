@@ -195,10 +195,10 @@ export class VisualizerToolbox {
       .slice(0, MAX_PICKS);
     if (!cleaned.length) return { error: "no-steps", note: "Pick at least one step, each with a caption saying what the learner should notice in it." };
 
-    const title = String(input.title ?? "").trim().slice(0, 90) || "What happens when this runs";
+    const title = String(input.title ?? "").trim() || "What happens when this runs";
     const view = sliceView(run.trace, run.language, run.code, title, cleaned, input.autoplay !== false);
     const id = randomUUID();
-    this.store.saveVisualization({ id, sessionId, title, payload: { ...view, setup: run.setup, takeaway: String(input.takeaway ?? "").trim().slice(0, 400) } });
+    this.store.saveVisualization({ id, sessionId, title, payload: { ...view, setup: run.setup, takeaway: String(input.takeaway ?? "").trim() } });
 
     /* Deliberately thin. The card the learner sees is drawn from the stored row,
        fetched by id — so this result carries what the agent needs to write its

@@ -190,11 +190,11 @@ function MarkdownRecordCard({ label, markdown, previous, version, unchanged, pag
   return (
     <div className="pb-1.5 pt-0.5">
       <div className="transcript-block min-w-0 overflow-hidden">
-        <div className="flex min-w-0 items-center gap-2 border-b border-border/50 px-3 py-1.5 text-thread-tool">
+        <div className="flex min-w-0 items-start gap-2 border-b border-border/50 px-3 py-1.5 text-thread-tool">
           {version !== null && (
             <span className="shrink-0 rounded-md bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 font-mono tabular-nums text-muted-foreground">v{version}</span>
           )}
-          <span className="min-w-0 flex-1 truncate text-[var(--transcript-step)]" title={label}>
+          <span className="min-w-0 flex-1 text-pretty break-words text-[var(--transcript-step)]">
             {label}
             {unchanged && <span className="ml-1.5 text-muted-foreground">· unchanged</span>}
           </span>

@@ -325,7 +325,7 @@ export async function executeTrainingTool(
      proposed, so an update written without them could only restate the claim. */
   if (name === "read_ability") {
     const abilityId = String(value.abilityId);
-    return { ability: local.readAbility(abilityId), patterns: local.patternsForAbility(abilityId), evidence: local.evidenceForAbility(abilityId).slice(0, 12) };
+    return { ability: local.readAbility(abilityId), patterns: local.patternsForAbility(abilityId), evidence: local.evidenceForAbility(abilityId) };
   }
   if (name === "update_ability") {
     const abilityId = typeof value.abilityId === "string" && value.abilityId ? value.abilityId : "";
@@ -594,7 +594,7 @@ function readRecord(local: LocalStore, value: Record<string, unknown>, trackId: 
   if (value.kind === "ability") {
     const ability = local.readAbility(id);
     if (!ability) return { error: "not-found", note: "No ability with that id. search_record with kinds [\"abilities\"] finds ability ids." };
-    return { ability, patterns: local.patternsForAbility(id), evidence: local.evidenceForAbility(id).slice(0, 12) };
+    return { ability, patterns: local.patternsForAbility(id), evidence: local.evidenceForAbility(id) };
   }
   if (value.kind === "lesson") {
     const found = local.readLesson(id);
@@ -635,7 +635,7 @@ function readReview(local: LocalStore, cardId: string) {
     },
     reviews: logs.filter((log) => log.source !== "implicit").map((log) => ({
       at: log.reviewedAt, source: log.source, format: log.format, target: log.target, rating: RATING_NAME[log.rating as 1 | 2 | 3 | 4],
-      ...(log.prompt ? { asked: log.prompt.slice(0, 600) } : {}), ...(log.answer ? { answer: log.answer.slice(0, 600) } : {}),
+      ...(log.prompt ? { asked: log.prompt } : {}), ...(log.answer ? { answer: log.answer } : {}),
       ...(log.feedback ? { feedback: log.feedback } : {}), held: log.held ?? [], missed: log.missed ?? [],
       ...(log.misconception ? { misconception: log.misconception } : {}),
       ...(log.challengeId ? { challengeId: log.challengeId } : {}), ...(log.attemptId ? { attemptId: log.attemptId } : {}), ...(log.submissionId ? { submissionId: log.submissionId } : {}),
@@ -745,10 +745,10 @@ function builderContext(local: LocalStore, sessionId: string, trackId: string | 
   return { open: openDesign, recentStarters: recent, earlier, lens: chosen ? { label: chosen.label, about: chosen.about } : null };
 }
 
-/** The first sentence or line of a task, clipped. */
+/** The first sentence or line of a task. */
 function oneLine(task: string): string {
   const first = task.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0] ?? "";
-  return first.length > 160 ? `${first.slice(0, 159)}…` : first;
+  return first;
 }
 
 /* A named lens must be one the learner has. Whether this problem carries one
@@ -962,8 +962,7 @@ function activeAttemptId(local: LocalStore, sessionId: string): string {
 function solveHead(files: Array<{ path: string; text: string }>): { path: string; text: string } | null {
   const [file] = files;
   if (!file) return null;
-  const head = file.text.split("\n").slice(0, SOLVE_HEAD_LINES).join("\n");
-  return { path: file.path, text: head.length > SOLVE_HEAD ? `${head.slice(0, SOLVE_HEAD)}…` : head };
+  return { path: file.path, text: file.text };
 }
 
 function sectionList(value: unknown): ReplaySection[] {
@@ -1216,10 +1215,6 @@ function pick(design: import("@spar/domain").QuestionDesign, changed: Array<{ pa
   return changed.map(({ part, path }) => ({ part, ...(path ? { path } : {}), text: part === "statement" || part === "title" ? design[part] : design[FILE_PARTS[part]][path!] ?? "" }));
 }
 
-/** The opening of the learner's solve, as `read_attempt` carries it. A screen
- *  of code at the size the transcript draws it, and no more. */
-const SOLVE_HEAD_LINES = 28;
-const SOLVE_HEAD = 1_200;
 
 /** Every file this attempt saved, most recently saved first. The order is what
  *  decides which file the transcript draws as "your solve", so it is the one

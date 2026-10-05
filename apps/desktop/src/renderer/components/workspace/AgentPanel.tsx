@@ -133,6 +133,7 @@ export function AgentPanel({
     onDraft(draft.slice(prefix.length));
   }, [challengeContext, draft, onDraft, trail]);
   const busy = run?.status === "streaming";
+
   const pending = detail.pendingLearnerQuestion;
   const stop = useStopTurn(detail.summary.id);
 
@@ -150,17 +151,17 @@ export function AgentPanel({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Identity stays put while the body swaps: which problem you are on is
-          not a property of the view you happen to be reading it in. */}
-      <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-        <span className="shrink-0 font-mono text-ui-sm tabular-nums text-muted-foreground/70">#{question.ordinal}</span>
-        <span className="min-w-0 flex-1 truncate text-ui font-medium">{question.title}</span>
+      {/* Stays put while the body swaps. Controls only: the statement opens with
+          the problem's title and the toolbar's stepper says which challenge this
+          is, so a title drawn here would only repeat them. */}
+      <div className="flex min-h-10 shrink-0 items-center gap-2 px-3 py-1.5">
         <ChallengeRatingBadge
           conceptContext={concepts}
           concepts={question.concepts}
           difficulty={question.difficulty}
           learnerRating={learnerRating}
           source={question.source}
+          summary
         />
         <ViewSwitch<View>
           ariaLabel="Panel view"

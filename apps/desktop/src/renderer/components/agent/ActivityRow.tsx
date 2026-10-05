@@ -467,7 +467,7 @@ export function ToolRow({ part, after, continues = false, thinking }: { part: To
           <QuestionTitle question={question} />
         </span>
       ) : (
-      <span className={cn("min-w-0 truncate", running && "thinking-shimmer")}>
+      <span className={cn("min-w-0 text-pretty break-words", running && "thinking-shimmer")}>
         <ToolTitle part={part} />
         {/* What the call is doing or came back with, beside what it was for.
             While a multi-stage call runs this moves from validation to repair

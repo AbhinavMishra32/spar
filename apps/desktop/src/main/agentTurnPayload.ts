@@ -153,15 +153,15 @@ export function journeyDocument(input: TurnPayloadInput): string {
     sections.push([`## Current training target`, `- Ability: ${String(target.ability_title)} (${ability?.ability.status ?? "uncertain"})`, target.specific_gap ? `- Gap: ${String(target.specific_gap)}` : "", target.desired_evidence ? `- Evidence sought: ${String(target.desired_evidence)}` : "", `- Set ${ago(String(target.created_at))}. A new aim replaces it.`].filter(Boolean).join("\n"));
   }
 
-  const abilities = store.listAbilities(trackId).slice(0, 8);
+  const abilities = store.listAbilities(trackId);
   if (abilities.length) {
     sections.push(["## Abilities", ...abilities.map((entry) => `- ${entry.title} — ${entry.status}, v${entry.version}, ${entry.evidenceCount} evidence (id ${entry.id})${entry.summary ? `: ${entry.summary}` : ""}`)].join("\n"));
   }
 
-  const patterns = store.listPatterns(trackId).filter((pattern) => pattern.status !== "resolved").slice(0, 8);
+  const patterns = store.listPatterns(trackId).filter((pattern) => pattern.status !== "resolved");
   if (patterns.length) sections.push(["## Open patterns (your hypotheses about how they go wrong)", ...patterns.map((pattern) => `- [${pattern.status}] ${pattern.title}: ${pattern.description}`)].join("\n"));
 
-  const lessons = store.recentLessons(6, trackId);
+  const lessons = store.recentLessons(Number.MAX_SAFE_INTEGER, trackId);
   if (lessons.length) sections.push(["## Lessons you have taught", ...lessons.map((entry) => `- [[lesson:${entry.id}|${entry.title}]] — ${entry.summary} (${ago(entry.taughtAt)})`)].join("\n"));
 
   /* Reviews live in review sessions only. A training session is about the
@@ -172,9 +172,20 @@ export function journeyDocument(input: TurnPayloadInput): string {
   const intake = store.freshIntakeAnswer(sessionId);
   if (intake) sections.push(`## The learner's answer to your question\nYou asked: ${intake.question}\nThey answered: ${intake.answer}`);
 
-  const conversation = session.messages.slice(-12).filter((message) => message.body.trim());
+  /* The whole session, the recent part word for word. Older messages keep their
+     first sentence so the arc of the session stays in view without the journey
+     growing with every message ever sent; what mattered from them is what the
+     notebook is for. */
+  const conversation = session.messages.filter((message) => message.body.trim());
   if (conversation.length) {
-    sections.push(["## This session so far", ...conversation.map((message) => `**${message.role === "learner" ? "Learner" : message.role === "agent" ? "You" : "Spar"}** (${ago(message.createdAt)}): ${message.body.trim().slice(0, 1_500)}`)].join("\n\n"));
+    const speaker = (message: (typeof conversation)[number]) => message.role === "learner" ? "Learner" : message.role === "agent" ? "You" : "Spar";
+    const older = conversation.slice(0, Math.max(0, conversation.length - RECENT_MESSAGES));
+    const recent = conversation.slice(older.length);
+    sections.push([
+      "## This session so far",
+      ...(older.length ? [`Earlier, first sentence of each:\n${older.map((message) => `- ${speaker(message)} (${ago(message.createdAt)}): ${firstSentence(message.body)}`).join("\n")}`, "Then, in full:"] : []),
+      ...recent.map((message) => `**${speaker(message)}** (${ago(message.createdAt)}): ${message.body.trim()}`),
+    ].join("\n\n"));
   }
 
   const skills = skillsSection(input.skills ?? []);
@@ -223,7 +234,7 @@ function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarte
 function challengeLine(challenge: JourneyChallenge, ordinal: number): string {
   const outcome = challenge.replacedByTitle ? `replaced by "${challenge.replacedByTitle}"` : challenge.outcome ?? "not finished";
   const source = challenge.source === "spar" ? "Spar-written" : challenge.source === "leetcode" ? "LeetCode" : "Codeforces";
-  return `### ${ordinal}. ${challenge.title} — ${outcome}\n${source} · ${challenge.difficulty} (${challenge.itemRating})${challenge.concepts.length ? ` · ${challenge.concepts.join(", ")}` : ""}${challenge.task ? `\nTask: ${challenge.task.replace(/\s+/g, " ").slice(0, 200)}` : ""}`;
+  return `### ${ordinal}. ${challenge.title} — ${outcome}\n${source} · ${challenge.difficulty} (${challenge.itemRating})${challenge.concepts.length ? ` · ${challenge.concepts.join(", ")}` : ""}${challenge.task ? `\nTask: ${challenge.task.replace(/\s+/g, " ")}` : ""}`;
 }
 
 function practiceLine(summary: unknown): string {
@@ -265,7 +276,7 @@ function reviewSessionSection(store: LocalStore, sessionId: string): string {
     const status = here ? `reviewed here: ${RATING_WORD[here.rating]}` : current?.card.id === card.id ? "being reviewed now" : "not reviewed yet";
     const dueDays = Math.round((Date.parse(card.dueAt) - now) / 86_400_000);
     const submissions = store.submissionsForQuestion(card.questionId);
-    const past = logs.filter((log) => log.source !== "implicit").reverse().slice(0, 6);
+    const past = logs.filter((log) => log.source !== "implicit").reverse();
     lines.push([
       `### ${index + 1}. ${card.title} — card ${card.id} (${status})`,
       `From "${card.questionTitle}" (challenge ${card.questionId}${card.attemptId ? `, solved in attempt ${card.attemptId}` : ""}). Concepts: ${card.concepts.map((tag) => tag.slug).join(", ") || "none"}.`,
@@ -277,7 +288,7 @@ function reviewSessionSection(store: LocalStore, sessionId: string): string {
       card.pitfalls.length ? `Slips on the solve: ${card.pitfalls.map((pitfall) => `${pitfall.mistake} → ${pitfall.fix}`).join("; ")}` : "",
       card.remember ? `What they said they want to remember: ${card.remember}` : "",
       card.coachNote ? `Your note on this card: ${card.coachNote}` : "",
-      past.length ? `Reviews, newest first:\n${past.map((log) => `- ${ago(log.reviewedAt)} · ${log.source}${log.format && log.source === "recall" ? ` (${log.format})` : ""} · ${RATING_WORD[log.rating]}${log.feedback ? ` · ${log.feedback.replace(/\s+/g, " ").slice(0, 300)}` : ""}${log.held?.length ? ` · held: ${log.held.join("; ")}` : ""}${log.missed?.length ? ` · missed: ${log.missed.join("; ")}` : ""}${log.submissionId ? ` · submission ${log.submissionId}` : log.attemptId ? ` · attempt ${log.attemptId}` : ""}`).join("\n")}` : "",
+      past.length ? `Reviews, newest first:\n${past.map((log) => `- ${ago(log.reviewedAt)} · ${log.source}${log.format && log.source === "recall" ? ` (${log.format})` : ""} · ${RATING_WORD[log.rating]}${log.feedback ? ` · ${log.feedback.replace(/\s+/g, " ")}` : ""}${log.held?.length ? ` · held: ${log.held.join("; ")}` : ""}${log.missed?.length ? ` · missed: ${log.missed.join("; ")}` : ""}${log.submissionId ? ` · submission ${log.submissionId}` : log.attemptId ? ` · attempt ${log.attemptId}` : ""}`).join("\n")}` : "",
       submissions.length ? `Submissions on the original challenge: ${submissions.length}, the last ${submissions.at(-1)!.outcome} (${submissions.at(-1)!.passedCases}/${submissions.at(-1)!.totalCases}), id ${submissions.at(-1)!.id}.` : "",
       links.length ? `Challenges set for this card: ${links.map((link) => `"${link.challengeTitle}" (${link.purpose === "deeper" ? "going deeper" : "review"}, ${link.challengeId}, ${link.outcome}${link.purpose === "review" ? link.reviewed ? ", judged" : ", not judged" : ""})`).join("; ")}` : "",
     ].filter(Boolean).join("\n"));
@@ -322,4 +333,11 @@ function ratingLine(rating: Rating): string {
     return `${difficulty} (${price}) ${chance(price)}`;
   }).join(", ");
   return `- Rating ${Math.round(rating.rating)} ± ${Math.round(2 * rating.deviation)}. Predicted solve chance on LeetCode ${leetcode}. Spar's difficulty words are priced foundation 900, developing 1200, proficient 1500, advanced 1800. The range narrows only with informative results: wins on problems they were expected to solve barely move it.`;
+}
+
+/** Messages the journey carries word for word; older ones keep a sentence. */
+const RECENT_MESSAGES = 30;
+
+function firstSentence(text: string): string {
+  return text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0] ?? "";
 }

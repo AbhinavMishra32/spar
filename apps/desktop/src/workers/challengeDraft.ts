@@ -1,10 +1,6 @@
 import { parseStreamingJson } from "@earendil-works/pi-ai";
 import type { ChallengeDraft } from "../shared/api.js";
 
-/** Enough of any one shown file to watch it being written; the whole of it is
- *  in the workspace once the challenge lands. */
-const MAX_SHOWN = 6_000;
-const MAX_STATEMENT = 2_400;
 
 const GROUPS: Array<[key: string, group: ChallengeDraft["files"][number]["group"], shown: boolean]> = [
   ["starterFiles", "starter", true],
@@ -36,7 +32,7 @@ export function challengeDraft(key: string, json: string): ChallengeDraft {
     for (const [path, content] of Object.entries(map as Record<string, unknown>)) {
       if (!path) continue;
       const text = typeof content === "string" ? content : "";
-      files.push({ group, path, lines: lineCount(text), ...(shown ? { content: text.length > MAX_SHOWN ? `${text.slice(0, MAX_SHOWN)}\n…` : text } : {}) });
+      files.push({ group, path, lines: lineCount(text), ...(shown ? { content: text } : {}) });
     }
   }
   const incorrect = value.knownIncorrectFiles;
@@ -52,7 +48,7 @@ export function challengeDraft(key: string, json: string): ChallengeDraft {
   if (text("title")) draft.title = text("title");
   if (text("language")) draft.language = text("language");
   const statement = text("statement");
-  if (statement) draft.statement = statement.length > MAX_STATEMENT ? `${statement.slice(0, MAX_STATEMENT)}…` : statement;
+  if (statement) draft.statement = statement;
   return draft;
 }
 
