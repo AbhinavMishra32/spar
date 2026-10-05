@@ -82,6 +82,21 @@ describe("sourceTagsForConcept", () => {
     expect(sourceTagsForConcept("cancellation")).toEqual([]);
   });
 
+  it("searches a sub-concept under its area's tag first", () => {
+    // k-selection's own tag is quickselect; its problems are filed under heaps.
+    expect(sourceTagsForConcept("k-selection")[0]).toBe("heap-priority-queue");
+    expect(sourceTagsForConcept("priority-selection")[0]).toBe("heap-priority-queue");
+  });
+
+  it("reads a coined slug by the topic its words name", () => {
+    // The coach's own fine-grained slugs, from a real heap Track.
+    for (const slug of ["heap-priority-payload", "heap-lexicographic-tie-breaking", "heap-priority-negation"]) {
+      expect(sourceTagsForConcept(slug)[0]).toBe("heap-priority-queue");
+    }
+    expect(sourceTagsForConcept("heap")[0]).toBe("heap-priority-queue");
+    expect(sourceTagsForConcept("bounded-candidate-retention")).toEqual([]);
+  });
+
   it("normalises the concept it is given", () => {
     expect(sourceTagsForConcept("Dynamic Programming")).toEqual(sourceTagsForConcept(conceptSlug("dynamic-programming")));
   });

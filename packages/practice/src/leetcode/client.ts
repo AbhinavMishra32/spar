@@ -137,6 +137,16 @@ export class LeetCodeClient {
     ])].slice(0, 8);
 
     const found = await this.searchOnce(input, requested, authenticated);
+    /* LeetCode's keywords match titles only, so "heap" finds nothing in a
+       problemset full of heap problems. A free-text query that comes back empty
+       is read once more as a topic, and the tag it named is what was searched. */
+    if (!found.problems.length && input.query.trim() && !requested.length) {
+      const topic = sourceTagsForConcept(input.query.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")).slice(0, 1);
+      if (topic.length) {
+        const byTopic = await this.searchOnce({ ...input, query: "" }, topic, authenticated);
+        return { ...byTopic, appliedTags: topic, droppedTags: [] };
+      }
+    }
     if (found.problems.length || requested.length < 2) return { ...found, appliedTags: requested, droppedTags: [] };
     /* Every tag together matched nothing. Narrowing to the first — the tag for the
        concept the caller named first — is the one relaxation that keeps the search

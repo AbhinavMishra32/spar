@@ -1,8 +1,7 @@
-import { ESTABLISHED_DEVIATION } from "@spar/domain";
+import { itemRating, solveProbability, type Rating } from "@spar/domain";
 import type { ProblemSource } from "@spar/domain";
 import type { LocalStore, JourneyChallenge } from "./store.js";
 import { LEARNER_NOTEBOOK, type CoachNotebookVersion } from "../shared/api.js";
-import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import type { AgentTurnKind } from "../workers/agentPolicy.js";
 import { sessionSourcesSection, skillsSection } from "../workers/sessionContext.js";
 import { challengeMixInstructions } from "../shared/challengeMix.js";
@@ -84,7 +83,6 @@ export function journeyDocument(input: TurnPayloadInput): string {
   const target = store.latestTarget(sessionId);
   const rating = store.currentRating();
   const ability = target ? store.readAbilityDetail(String(target.ability_id)) : null;
-  const window = trainingWindow({ rating, abilityStatus: ability?.ability.status ?? "uncertain", experience: profile?.experience ?? "new" });
   const language = track?.language ?? profile?.language ?? "javascript";
   const sections: string[] = [];
 
@@ -98,17 +96,17 @@ export function journeyDocument(input: TurnPayloadInput): string {
   const learnerNotebook = store.readNotebook(LEARNER_NOTEBOOK);
   sections.push(learnerNotebook
     ? `## user.md — who they are, on every Track; read this first (${written(learnerNotebook)})\n${learnerNotebook.markdown}`
-    : "## user.md — who they are, on every Track; read this first\n_Empty. Start it with update_notebook (notebook \"user\") this turn: who they are, what they are working towards, how they like to be taught, and anything you already know about them that is true beyond this Track._");
+    : "## user.md — who they are, on every Track; read this first\n_Empty so far. update_notebook with notebook \"user\" writes it: who they are, what they are working towards, how they like to be taught._");
   const notebook = store.readNotebook(trackId);
   sections.push(notebook
     ? `## Track notebook (${written(notebook)})\n${notebook.markdown}`
-    : "## Track notebook\n_Empty. Start it with update_notebook this turn: what they are working towards here and what you have seen so far._");
+    : "## Track notebook\n_Empty so far._");
 
   sections.push([
     "## Learner",
     profile ? `- ${[profile.name, profile.experience ? `${profile.experience} programmer` : "", profile.focus ? `focus: ${profile.focus}` : ""].filter(Boolean).join(" · ")}` : "- No profile yet.",
     profile?.weakness ? `- Says they struggle with: ${profile.weakness}` : "",
-    `- Rating ${Math.round(rating.rating)}${rating.deviation > ESTABLISHED_DEVIATION ? " (provisional — few graded results yet)" : ""}. Spar challenge prices: foundation 900 · developing 1200 · proficient 1500 · advanced 1800. Provider problems that fit them now are rated about ${window.minRating}–${window.maxRating}.`,
+    ratingLine(rating),
     `- Language for this Track: ${language}${track?.language ? "" : " (from their profile)"}.`,
   ].filter(Boolean).join("\n"));
 
@@ -121,15 +119,21 @@ export function journeyDocument(input: TurnPayloadInput): string {
   ].filter(Boolean).join("\n"));
 
 
-  const journey = store.journey(trackId, 14);
+  /* Every challenge on the Track, the recent ones in full and the rest a line
+     each. Showing only the last fourteen let the coach write a problem it had
+     already set twice, because the first two were out of sight. */
+  const journey = store.journey(trackId, 1_000);
   if (!journey.challenges.length) {
     sections.push("## Challenges on this Track\nNone yet. This is the start of their journey here.");
   } else {
-    const shown = journey.challenges;
-    const earlier = journey.total - shown.length;
-    const lines = [`## Challenges on this Track (${earlier > 0 ? `last ${shown.length} of ${journey.total}` : `${journey.total}`}, oldest first)`];
+    const all = journey.challenges;
+    const detailed = 14;
+    const earlier = Math.max(0, all.length - detailed);
+    const lines = [`## Challenges on this Track (${all.length}, oldest first)`];
     const openId = session.question && !session.question.attemptCompletedAt ? session.question.id : null;
-    shown.forEach((challenge, index) => lines.push(challengeEntry(challenge, earlier + index + 1, index >= shown.length - 3, challenge.id === openId)));
+    all.forEach((challenge, index) => lines.push(index < earlier
+      ? challengeLine(challenge, index + 1)
+      : challengeEntry(challenge, index + 1, index >= all.length - 3, challenge.id === openId)));
     sections.push(lines.join("\n\n"));
   }
 
@@ -195,7 +199,7 @@ function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarte
     challenge.elapsedMs !== null ? minutes(challenge.elapsedMs) : "",
     challenge.testRuns ? `${challenge.testRuns} run${challenge.testRuns === 1 ? "" : "s"}` : "",
     challenge.totalCases ? `${challenge.passedCases ?? 0}/${challenge.totalCases} cases on the last run` : "",
-    challenge.outcome ? challenge.assistance : "",
+    challenge.outcome ? (challenge.assistance === "assisted" ? "the coach helped during it" : challenge.assistance === "independent" ? "no help from the coach during it" : "") : "",
     ago(challenge.createdAt),
   ].filter(Boolean).join(" · ");
   const lines = [
@@ -215,11 +219,18 @@ function challengeEntry(challenge: JourneyChallenge, ordinal: number, withStarte
   return lines.filter(Boolean).join("\n");
 }
 
+/** An older challenge, in one line: enough to see what was already set. */
+function challengeLine(challenge: JourneyChallenge, ordinal: number): string {
+  const outcome = challenge.replacedByTitle ? `replaced by "${challenge.replacedByTitle}"` : challenge.outcome ?? "not finished";
+  const source = challenge.source === "spar" ? "Spar-written" : challenge.source === "leetcode" ? "LeetCode" : "Codeforces";
+  return `### ${ordinal}. ${challenge.title} — ${outcome}\n${source} · ${challenge.difficulty} (${challenge.itemRating})${challenge.concepts.length ? ` · ${challenge.concepts.join(", ")}` : ""}${challenge.task ? `\nTask: ${challenge.task.replace(/\s+/g, " ").slice(0, 200)}` : ""}`;
+}
+
 function practiceLine(summary: unknown): string {
   if (!summary || typeof summary !== "object") return "";
   const value = summary as { providers?: Array<{ name?: string; connected?: boolean; judgesSubmissions?: boolean }>; alreadyAssigned?: Array<{ title?: string; slug?: string; source?: string }> };
   const providers = (value.providers ?? []).map((entry) => `${entry.name}${entry.connected ? " (connected" : " (not signed in"}${entry.judgesSubmissions ? ", judges submissions)" : ", graded locally on published examples)"}`);
-  const assigned = (value.alreadyAssigned ?? []).slice(0, 12).map((entry) => entry.title ?? entry.slug).filter(Boolean);
+  const assigned = (value.alreadyAssigned ?? []).map((entry) => entry.title ?? entry.slug).filter(Boolean);
   return [providers.length ? `Providers: ${providers.join("; ")}.` : "", assigned.length ? `Already assigned from providers: ${assigned.join(", ")}.` : ""].filter(Boolean).join("\n");
 }
 
@@ -297,4 +308,18 @@ export function ago(iso: string | null | undefined, now = Date.now()): string {
 /** Whether the learner still has a challenge in front of them. */
 export function openQuestion(session: { question: { attemptCompletedAt: string | null } | null }): boolean {
   return Boolean(session.question && !session.question.attemptCompletedAt);
+}
+
+/* The rating as facts the coach can reason with: the number, how wide it still
+   is, and what it predicts at the prices problems are actually set at. A
+   "fits them now" window used to stand here, capped at 1200 for anyone who
+   called themselves new until the rating stopped being provisional — which
+   wins on easy problems never make it — so the coach searched easies forever. */
+function ratingLine(rating: Rating): string {
+  const chance = (price: number) => `${Math.round(solveProbability(rating, price) * 100)}%`;
+  const leetcode = (["easy", "medium", "hard"] as const).map((difficulty) => {
+    const price = itemRating({ source: "leetcode", difficulty });
+    return `${difficulty} (${price}) ${chance(price)}`;
+  }).join(", ");
+  return `- Rating ${Math.round(rating.rating)} ± ${Math.round(2 * rating.deviation)}. Predicted solve chance on LeetCode ${leetcode}. Spar's difficulty words are priced foundation 900, developing 1200, proficient 1500, advanced 1800. The range narrows only with informative results: wins on problems they were expected to solve barely move it.`;
 }

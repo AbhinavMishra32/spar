@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { Language } from "@spar/domain";
+import { itemRating, type Language } from "@spar/domain";
 import type { PracticeGateway, PracticeProblemBundle } from "../gateway.js";
 import { practiceSource } from "../sources.js";
 import { PracticeAuthError, type PracticeCase } from "../types.js";
@@ -124,9 +124,10 @@ async function run(tool: PracticeToolDefinition, args: Record<string, unknown>, 
           id: problem.displayId,
           title: problem.title,
           difficulty: problem.difficulty,
-          /* Codeforces' own number, where it has one: the same scale the
-             learner's window is stated in, so a hit can be compared directly. */
-          ...(problem.sourceRating ? { rating: problem.sourceRating } : {}),
+          /* On the learner's rating scale: Codeforces' own number where it has
+             one, otherwise the difficulty band's price, so every hit can be
+             compared with the journey's solve chances directly. */
+          rating: itemRating({ source: problem.source, difficulty: problem.difficulty, sourceRating: problem.sourceRating }),
           acceptanceRate: problem.acceptanceRate,
           concepts: problem.concepts,
           sourceTags: problem.topicTags,
@@ -138,6 +139,12 @@ async function run(tool: PracticeToolDefinition, args: Record<string, unknown>, 
            concepts at once cannot all be honoured and the search says which one
            survived rather than quietly answering a different question. */
         filteredBy: found.appliedTags,
+        /* Concepts were asked for and none of them names a topic this source
+           files problems under, so nothing was filtered. Said outright: these
+           results used to read as on-topic hits. */
+        ...(Array.isArray(args.concepts) && args.concepts.length && !found.appliedTags.length
+          ? { unfiltered: `None of ${args.concepts.map((concept) => `\`${String(concept)}\``).join(", ")} maps to a ${source.name} topic, so these results are not filtered by topic. Name the area instead (for example \`heaps\` rather than one idea inside it), or search the topic as free text.` }
+          : {}),
         ...(found.droppedTags.length
           ? { relaxed: `No problem carries every tag at once, so this searched \`${found.appliedTags.join(", ")}\` and dropped ${found.droppedTags.map((tag) => `\`${tag}\``).join(", ")}. Name one concept at a time to control which.` }
           : {}),
@@ -152,7 +159,7 @@ async function run(tool: PracticeToolDefinition, args: Record<string, unknown>, 
              with a different phrasing until the budget is gone. So an empty answer
              says which filter to loosen, and says outright that writing the
              challenge instead is a legitimate way out. */
-          : `Nothing matched ${describeFilters(found.appliedTags, args)}. Loosen one filter rather than rewording the query: drop the difficulty, set \`status\` to \`any\`, name a single broader concept, or search free text with no concepts at all. If a second search still finds nothing, write the challenge yourself rather than searching again.`,
+          : `Nothing matched ${describeFilters(found.appliedTags, args)}. Loosen one filter rather than rewording the query: drop the difficulty or the rating range, set \`status\` to \`any\`, or name a single broader concept.`,
       };
     }
 

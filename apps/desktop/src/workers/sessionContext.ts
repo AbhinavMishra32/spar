@@ -21,12 +21,9 @@ export function sessionSourcesSection(problemSources: string[] | undefined, prac
   const scope = `Search, read and assign only ${names} problems; the host refuses any other provider.`;
   if (!sparAuthoring) {
     if (!practiceSource) return `${header} No provider tool is available this turn, so you cannot set a challenge. Say so plainly and suggest they connect ${names} in Settings or allow Spar-written challenges for this session.`;
-    return `${header} ${scope} You cannot write a challenge: set_challenge is not available. Every challenge is a real ${names} problem you found.
-
-Finding the right one is the work, as your instructions set out: level first, search the rating window, shortlist and read two or three. With no Spar problems to bridge with, the bridge before a hard problem is an easier real one that isolates the mechanism it adds. If nothing fits, widen one thing at a time: the parent concept, a free-text query for the technique, a neighbouring rating band.
-Real problems are coarser than lessons: choose the problem first and teach toward it, and when the learner asks to practise, assign the closest real problem this turn and say what in it will be new.`;
+    return `${header} ${scope} set_challenge is not available here, so every challenge is a real ${names} problem. Real problems are coarser than lessons: choose the problem, then teach toward what in it is new.`;
   }
-  return `${header} ${scope} Write your own with set_challenge when no ${names} problem fits.`;
+  return `${header} ${scope} set_challenge writes Spar's own.`;
 }
 
 /** The skills this turn can load: names and the one sentence that says when each

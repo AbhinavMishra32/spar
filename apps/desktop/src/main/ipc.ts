@@ -19,7 +19,6 @@ import { sourceSubmissionOutput } from "../shared/sourceOutput.js";
 import { canonicalWorkspacePath } from "../shared/workspacePath.js";
 import { challengeFiles, challengeTimeline, seedFiles } from "./challengeFiles.js";
 import { openChosenProblem } from "./practiceChoice.js";
-import { trainingWindow } from "./practiceAssignmentPolicy.js";
 import { judgeCaseBlock } from "./judgeCases.js";
 import type { AuthService } from "./auth.js";
 import type { LocalStore } from "./store.js";
@@ -232,7 +231,7 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
         providers:(narrowed?enabledSources:connectedSources).map((entry)=>({source:entry.source,name:entry.name,region:entry.region,connected:entry.state==="connected",judgesSubmissions:entry.judgesSubmissions})),
         /* What has already been set from the source, so the agent can see it has
            asked for this problem before without spending a tool call to find out. */
-        alreadyAssigned:deps.store.assignedPracticeProblems(12,session.summary.trackId),
+        alreadyAssigned:deps.store.assignedPracticeProblems(500,session.summary.trackId),
       }:null;
       /* Bound once, because it now answers two questions: what the Track is, and
          which language its challenges are written in. */

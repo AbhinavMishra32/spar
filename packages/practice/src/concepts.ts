@@ -173,10 +173,45 @@ export function conceptTagsForProblem(tags: Array<string | { slug: string }>, pr
  */
 export function sourceTagsForConcept(concept: string): string[] {
   const slug = conceptSlug(concept);
+  const seed = seededConcept(slug);
+  /* A sub-concept searches its area's tag first. `k-selection`'s own tag is
+     quickselect and `priority-selection`'s is ordered-set; searching those for a
+     heap target found almost nothing, while the area's heap-priority-queue tag
+     is where its problems are filed. */
+  if (seed) {
+    const area = seed.parentSlug ? REVERSE.get(seed.parentSlug) ?? [] : [];
+    const own = REVERSE.get(slug) ?? [];
+    const tags = [...new Set([...area, ...own])];
+    if (tags.length) return tags;
+  }
   const direct = REVERSE.get(slug);
   if (direct?.length) return direct;
-  const parent = seededConcept(slug)?.parentSlug;
-  return (parent ? REVERSE.get(parent) : undefined) ?? [];
+  return tagsByWords(slug);
+}
+
+/**
+ * Tags for a slug the agent coined: `heap-priority-payload` is a heap concept
+ * whatever else it names. Each of its words is matched against LeetCode's tag
+ * names and Spar's area names, in the slug's own order, so the first word
+ * that names a topic decides. Empty when no word does — the caller reports
+ * that the search ran unfiltered instead of passing it off as on topic.
+ */
+function tagsByWords(slug: string): string[] {
+  const words = slug.split("-").filter((word) => word.length >= 3);
+  for (const word of words) {
+    const tags = Object.keys(TAG_TO_CONCEPT).filter((tag) => tag.split("-").some((part) => sameWord(part, word)));
+    const areas = [...REVERSE.entries()].filter(([concept]) => concept.split("-").some((part) => sameWord(part, word))).flatMap(([, list]) => list);
+    const found = [...new Set([...tags, ...areas])];
+    if (found.length) return found;
+  }
+  return [];
+}
+
+/** One word for another, singular or plural: heap and heaps, window and windows. */
+function sameWord(left: string, right: string): boolean {
+  if (left.length < 3 || right.length < 3) return false;
+  const strip = (value: string) => value.replace(/(es|s)$/, "");
+  return left === right || strip(left) === strip(right);
 }
 
 const REVERSE = (() => {

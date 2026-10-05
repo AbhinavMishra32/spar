@@ -1,4 +1,4 @@
-import type { Language } from "@spar/domain";
+import { seededConcept, type Language } from "@spar/domain";
 import { PracticeAuthError, PracticeSourceError, type PracticeAccount, type PracticeProblem, type PracticeSearchInput, type PracticeSubmission, type PracticeVerdict } from "../types.js";
 import { casesForCodeforcesProblem, codeforcesDifficulty, codeforcesSlug, normalizeCodeforcesProblem, normalizeCodeforcesSummary, parseCodeforcesSlug, type CodeforcesProblemStatWire, type CodeforcesProblemWire } from "./normalize.js";
 import { CODEFORCES_ORIGIN, codeforcesHeaders, verifyCodeforcesSession, type CodeforcesSession } from "./session.js";
@@ -50,8 +50,14 @@ export class CodeforcesClient {
     const set = await this.problemset();
     const session = await this.readSession();
     const statuses = session ? statusIndex(await this.userSubmissions(session.handle, 10_000)) : new Map<string, "solved" | "attempted">();
-    const query = input.query.toLowerCase();
+    let query = input.query.toLowerCase();
     const requested = [...input.tags.map(slugify), ...(input.concepts ?? []).flatMap(codeforcesTagsForConcept)].filter(Boolean);
+    /* A topic typed as text ("heap") is not in any name or tag, so it is read as
+       the topic's tag instead. */
+    if (query && !requested.length && !set.problems.some((problem) => `${codeforcesSlug(problem)} ${problem.name ?? ""} ${(problem.tags ?? []).map(slugify).join(" ")}`.toLowerCase().includes(query))) {
+      const topic = codeforcesTagsForConcept(query);
+      if (topic.length) { requested.push(...topic); query = ""; }
+    }
     const matches = set.problems.flatMap((problem) => {
       const slug = codeforcesSlug(problem);
       const status = statuses.get(slug) ?? (session ? "todo" : "unknown");
@@ -213,7 +219,34 @@ function counts(values: Array<"easy" | "medium" | "hard">) { return { total: val
 function streak(rows: SubmissionWire[]) { const days = new Set(rows.filter((row) => row.verdict === "OK").map((row) => iso(row.creationTimeSeconds).slice(0, 10))); let count = 0; const cursor = new Date(); while (days.has(cursor.toISOString().slice(0, 10))) { count += 1; cursor.setUTCDate(cursor.getUTCDate() - 1); } return count; }
 function iso(seconds?: number) { return seconds ? new Date(seconds * 1000).toISOString() : ""; }
 function slugify(value: string) { return value.toLowerCase().trim().replace(/[^a-z0-9+#]+/g, "-").replace(/^-|-$/g, ""); }
-function codeforcesTagsForConcept(value: string) { const slug = slugify(value); return ({ "dynamic-programming": ["dp"], "depth-first-search": ["dfs-and-similar"], "bit-masking": ["bitmasks"], "modular-arithmetic": ["number-theory"], "arrays": ["data-structures", "sortings"], "state-management": ["implementation"], "recursive-decomposition": ["brute-force"], "strings": ["strings"] } as Record<string, string[]>)[slug] ?? [slug]; }
+/* Spar's areas in Codeforces's own tag names. Codeforces has no heap or
+   sliding-window tag; those problems are filed under data structures and two
+   pointers. A sub-concept searches its area's tag, and a concept with no
+   Codeforces home contributes no tag rather than its own slug, which matched
+   nothing and emptied every search it was part of. */
+const CODEFORCES_AREA_TAGS: Record<string, string[]> = {
+  "dynamic-programming": ["dp"], "memoization": ["dp"], "depth-first-search": ["dfs-and-similar"], "breadth-first-search": ["graphs"],
+  "bit-masking": ["bitmasks"], "bit-manipulation": ["bitmasks"], "modular-arithmetic": ["number-theory"], "numeric-reasoning": ["math"],
+  "arrays": ["sortings"], "state-management": ["implementation"], "recursive-decomposition": ["divide-and-conquer"], "strings": ["strings"],
+  "substring-search": ["strings"], "heaps": ["data-structures"], "hash-maps": ["hashing"], "union-find": ["dsu"], "sliding-window": ["two-pointers"],
+  "two-pointers": ["two-pointers"], "binary-search": ["binary-search"], "graphs": ["graphs"], "topological-order": ["graphs"], "trees": ["trees"],
+  "greedy": ["greedy"], "prefix-sums": ["data-structures"], "stacks-queues": ["data-structures"], "monotonic-stack": ["data-structures"],
+  "linked-lists": ["data-structures"], "intervals": ["sortings"], "sweep-line": ["sortings"], "backtracking": ["brute-force"], "recursion": ["brute-force"],
+};
+function codeforcesTagsForConcept(value: string): string[] {
+  const slug = slugify(value);
+  const direct = CODEFORCES_AREA_TAGS[slug];
+  if (direct) return direct.slice(0, 1);
+  const parent = seededConcept(slug)?.parentSlug;
+  if (parent && CODEFORCES_AREA_TAGS[parent]) return CODEFORCES_AREA_TAGS[parent]!.slice(0, 1);
+  /* A coined slug: its first word that names an area decides, as for LeetCode. */
+  const singular = (word: string) => word.replace(/(es|s)$/, "");
+  for (const word of slug.split("-").filter((part) => part.length >= 3)) {
+    const area = Object.keys(CODEFORCES_AREA_TAGS).find((key) => key.split("-").some((piece) => singular(piece) === singular(word)));
+    if (area) return CODEFORCES_AREA_TAGS[area]!.slice(0, 1);
+  }
+  return [];
+}
 function verdictName(value?: string) { return ({ OK: "Accepted", WRONG_ANSWER: "Wrong Answer", TIME_LIMIT_EXCEEDED: "Time Limit Exceeded", MEMORY_LIMIT_EXCEEDED: "Memory Limit Exceeded", RUNTIME_ERROR: "Runtime Error", COMPILATION_ERROR: "Compilation Error", IDLENESS_LIMIT_EXCEEDED: "Idleness Limit Exceeded", TESTING: "Judging" } as Record<string, string>)[value ?? ""] ?? (value ? value.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : "Unknown"); }
 function languageId(html: string, language: Language) {
   const options = [...html.matchAll(/<option[^>]+value=["']([^"']+)["'][^>]*>([\s\S]*?)<\/option>/gi)]

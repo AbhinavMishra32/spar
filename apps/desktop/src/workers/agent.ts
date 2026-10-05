@@ -532,6 +532,11 @@ async function setChallenge(
 
 /** The result the coach reads: what was published, in enough detail to talk
  *  about it — or every failed check, and what to do about them. */
+/** Cut to a length, and said so where it was cut. */
+function clipped(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit)}\n…(cut at ${limit} of ${text.length} characters)` : text;
+}
+
 function challengeForModel(brief: SetChallengeInput, candidate: Record<string, unknown>, value: unknown, revisions: Revision[]): unknown {
   const record = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
   if (isPlayableQuestion(value)) {
@@ -545,11 +550,13 @@ function challengeForModel(brief: SetChallengeInput, candidate: Record<string, u
       title: candidate.title,
       difficulty: brief.difficulty,
       language: brief.language,
-      statement: typeof candidate.statement === "string" ? candidate.statement.slice(0, 2_000) : "",
-      ...(starter ? { starter: { path: starter[0], text: String(starter[1]).slice(0, 2_000) } } : {}),
+      statement: typeof candidate.statement === "string" ? clipped(candidate.statement, 8_000) : "",
+      ...(starter ? { starter: { path: starter[0], text: clipped(String(starter[1]), 4_000) } } : {}),
       cases: report.caseCounts,
       ...(typeof record.replacedQuestionId === "string" ? { replacedQuestionId: record.replacedQuestionId } : {}),
-      ...(typeof record.repairAttempts === "number" && record.repairAttempts ? { repairs: record.repairAttempts } : {}),
+      /* The review link's outcome, refusal included: dropping it let the coach
+         believe a link it asked for was made. */
+      ...(record.review ? { review: record.review } : {}),
       ...(record.followsLessonNote ? { followsLessonNote: record.followsLessonNote } : {}),
       note: "Published and open in the learner's editor. Tell them why this one and why now, and one concrete first step — without the solution.",
     };
@@ -586,7 +593,7 @@ function workDigest(outcomes: Outcomes): string {
       lines.push(`- ${name}: ${result.length > 600 ? `${result.slice(0, 600)}…` : result}`);
     }
   }
-  return lines.length ? `\n\n# Work already done this turn (the conversation was compacted to fit)\n${lines.join("\n")}\nContinue from here; do not repeat these calls.` : "";
+  return lines.length ? `\n\n# Work already done this turn (the conversation was compacted to fit)\n${lines.join("\n")}\nContinue from here. These results are shortened: call a tool again when you need what was cut.` : "";
 }
 
 async function runTurn(request: Request, stopped: AbortSignal) {
@@ -725,6 +732,7 @@ async function runTurn(request: Request, stopped: AbortSignal) {
         overflowRetries += 1;
         agent.state.messages = agent.state.messages.filter((entry) => (entry.role as string) === "system");
         compacted = workDigest(outcomes);
+        callCounts.clear();
         pending = message;
         parentPort.postMessage({ kind: "event", requestId: request.id, event: { type: "status", detail: `context-overflow:compacted:${overflowRetries}` } });
         continue;

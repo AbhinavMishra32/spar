@@ -73,7 +73,7 @@ export function ChallengeCardMeta({ stop }: { stop: ChallengeStop }) {
         {failed > 0 && <><span className="text-muted-foreground/50">·</span><span className="font-medium tabular-nums text-destructive">{failed}</span><span>failed</span></>}
       </span>
       <span className="inline-flex shrink-0 items-center gap-1 tabular-nums"><Play className="size-3" />{runs} runs</span>
-      {stop.assistance === "assisted" && <span className="shrink-0">Hints used</span>}
+      {stop.assistance === "assisted" && <span className="shrink-0">Coach helped</span>}
     </span>
   );
 }

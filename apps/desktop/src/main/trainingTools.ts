@@ -12,7 +12,7 @@ import type { UtilityClient } from "./utilityClient.js";
 import type { WorkspaceService } from "./workspaces.js";
 import type { WebSearchService } from "./webSearch.js";
 import type { PracticeService } from "./practice.js";
-import { assessPracticeAssignment, trainingWindow } from "./practiceAssignmentPolicy.js";
+import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 import { reviewTargetMode } from "./reviewSession.js";
 import { practiceSourceName } from "./practiceChoice.js";
 import { SOURCE_READ_TOOLS, VISUALIZER_TOOLS } from "../workers/agentPolicy.js";
@@ -403,10 +403,15 @@ async function assignPracticeProblem(
     return refuse("grading", `${practiceSourceName(provider)} is not judging submissions right now and Spar could not build a runnable case for "${design.title}"${mounted.harnessNote ? ` (${mounted.harnessNote})` : ""}. Nothing could grade this, so it must not be set. Choose a problem with published examples, or write the challenge yourself.`);
   }
 
-  /* The concept and rationale comparisons stay advisory: the agent owns the
-     choice of a transfer or repeat problem. */
+  /* A real problem can open a session: its aim becomes the training target, as
+     set_challenge's does. Before this, only set_challenge could create a target,
+     so the first move of every session had to be a Spar-written problem. */
+  const aim = value.aim && typeof value.aim === "object" ? value.aim as { ability?: unknown; gap?: unknown; evidence?: unknown } : null;
+  if (aim && typeof aim.ability === "string" && typeof aim.gap === "string" && typeof aim.evidence === "string") {
+    commitCandidateTarget(local, sessionId, local.trackIdForSession(sessionId), { trainingTarget: { ability: aim.ability, specificGap: aim.gap, desiredEvidence: aim.evidence, avoidTesting: [] } });
+  }
   const target = local.latestTarget(sessionId);
-  if (!target) return refuse("training target", "A persisted training target is required before assigning a provider problem.");
+  if (!target) return refuse("training target", "This session has no training target yet. Pass aim with the ability, the gap and the evidence this problem is for.");
   const ability = local.readAbilityDetail(String(target.ability_id));
   const targetSnapshot = {
     abilityTitle: String(target.ability_title),
@@ -421,15 +426,12 @@ async function assignPracticeProblem(
     target: targetSnapshot,
     candidate: { difficulty: mounted.problem.difficulty, concepts: mounted.problem.concepts.map((concept) => concept.slug), source: mounted.problem.source, sourceRating: mounted.problem.sourceRating },
     proposedConcepts: conceptTags(value.concepts),
-    why: String(value.why ?? ""),
   });
 
-  /* The level check is information, not a gate. Refusing problems outside the
-     window, with a note telling the coach to set a bridge instead, is what
-     stacked Spar-written bridges in front of LeetCode easies the learner then
-     solved in minutes. The coach sees where the problem sits against the window
-     and decides; `levelReason`, when given, is kept with the choice. */
-  const level = adaptiveChecks.find((check) => check.name === "learner level");
+  /* The level check is information, not a gate. Refusing problems outside a
+     rating window, with a note telling the coach to set a bridge instead, is
+     what stacked Spar-written bridges in front of LeetCode easies the learner
+     then solved in minutes. `levelReason`, when given, is kept with the choice. */
   const levelReason = String(value.levelReason ?? "").trim();
   const introductionReason = [String(value.why ?? "").trim(), levelReason].filter(Boolean).join(" ");
 
@@ -467,7 +469,6 @@ async function assignPracticeProblem(
        set. */
     assigned: "This problem is now the learner's challenge. The selection notes are context for explaining the fit honestly, not open items.",
     selectionNotes: adaptiveChecks,
-    ...(level && !level.passed ? { window: trainingWindow(targetSnapshot) } : {}),
     ...followsLesson(local, concepts, local.trackIdForSession(sessionId)),
     ...(activeQuestion ? { replacedQuestionId: activeQuestion.id } : {}),
     ...(mounted.harnessNote ? { note: mounted.harnessNote } : {}),

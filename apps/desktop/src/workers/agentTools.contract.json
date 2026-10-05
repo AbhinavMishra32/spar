@@ -162,11 +162,41 @@
           ],
           "description": "The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn."
         },
+        "aim": {
+          "type": "object",
+          "properties": {
+            "ability": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 200,
+              "description": "The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."
+            },
+            "gap": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1500,
+              "description": "The specific thing still uncertain about this learner that this problem probes."
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 1500,
+              "description": "What a pass or a fail will tell you."
+            }
+          },
+          "required": [
+            "ability",
+            "gap",
+            "evidence"
+          ],
+          "additionalProperties": false,
+          "description": "What this problem should reveal; it becomes the session's training target. Needed when the session has none yet, and worth giving whenever the aim has moved on from the current one."
+        },
         "levelReason": {
           "type": "string",
           "minLength": 10,
           "maxLength": 600,
-          "description": "When the problem is priced well outside the window the journey gives: why a harder or easier problem is right here. Kept with the choice."
+          "description": "Why this problem's level is right here, when that is worth keeping with the choice."
         },
         "replaceReason": {
           "type": "string",
@@ -973,7 +1003,7 @@
     }
   },
   "search_practice_problems": {
-    "description": "Search every available problem provider for real problems. Results carry `source`; keep it paired with `slug` when reading or assigning a candidate. Prefer a fitting real problem over writing one because it carries a real judge, calibrated difficulty, and—when that provider is connected—the learner's own history. Search by Spar concept slug (translated separately to each provider's tags) and narrow by rating: set minRating and maxRating to the window the journey gives (\"Provider problems that fit them now are rated about …\") rather than guessing a difficulty word — a LeetCode medium is priced 1600 and may sit well above a developing learner. `todo` is useful when you want something new.",
+    "description": "Search every available problem provider for real problems. Results carry `source`; keep it paired with `slug` when reading or assigning a candidate. Prefer a fitting real problem over writing one because it carries a real judge, calibrated difficulty, and—when that provider is connected—the learner's own history. Search by Spar concept slug (translated separately to each provider's tags) or by topic as free text, and narrow by difficulty or rating when you have a level in mind; the journey gives the learner's predicted solve chance at each LeetCode difficulty. `todo` is useful when you want something new.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -985,12 +1015,12 @@
             "maxLength": 60
           },
           "maxItems": 5,
-          "description": "Spar concept slugs, e.g. [\"window-invariant-restoration\"]. Translated to the source's own tags, walking up to the area when the sub-concept has no tag of its own."
+          "description": "Spar concept slugs, e.g. [\"window-invariant-restoration\"]. Translated to the source's own tags: a sub-concept searches its area's tag, and a coined slug is matched by the topic its words name. The result says when nothing could be translated."
         },
         "query": {
           "type": "string",
           "maxLength": 200,
-          "description": "Free text, for when the concept vocabulary does not reach what you mean."
+          "description": "Free text. Titles are matched first; a topic name with no title hits (\"heap\") searches that topic's tag."
         },
         "difficulty": {
           "type": "string",
@@ -1004,13 +1034,13 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4000,
-          "description": "Lowest problem rating to return, on the Codeforces scale — the low end of the window in the journey's Learner section. Codeforces filters on each problem's own rating; LeetCode is narrowed to the difficulty bands whose price falls inside the window (easy 1200, medium 1600, hard 2100)."
+          "description": "Lowest problem rating to return, on the Codeforces scale. Codeforces filters on each problem's own rating; LeetCode is narrowed to the difficulty bands whose price falls inside the range (easy 1200, medium 1600, hard 2100)."
         },
         "maxRating": {
           "type": "integer",
           "minimum": 0,
           "maximum": 4000,
-          "description": "Highest problem rating to return — the high end of the window in the journey's Learner section."
+          "description": "Highest problem rating to return."
         },
         "status": {
           "type": "string",

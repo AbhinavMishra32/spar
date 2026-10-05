@@ -335,7 +335,12 @@ export const toolDefinitions = {
       concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, in Spar's vocabulary, most specific first. Exactly one entry has role primary and names what this problem actually exercises. A prerequisite or transfer problem can use a different concept from the current target; explain the connection in your reply."),
       why: z.string().min(20).max(1_500).describe("One or two sentences explaining why this problem is useful now, including its relationship to the current target if it is a prerequisite, transfer, or repeat. Stored with the challenge for later turns."),
       language: languageSchema.optional().describe("The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn."),
-      levelReason: z.string().min(10).max(600).optional().describe("When the problem is priced well outside the window the journey gives: why a harder or easier problem is right here. Kept with the choice."),
+      aim: z.object({
+        ability: z.string().min(2).max(200).describe("The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."),
+        gap: z.string().min(8).max(1_500).describe("The specific thing still uncertain about this learner that this problem probes."),
+        evidence: z.string().min(8).max(1_500).describe("What a pass or a fail will tell you."),
+      }).optional().describe("What this problem should reveal; it becomes the session's training target. Needed when the session has none yet, and worth giving whenever the aim has moved on from the current one."),
+      levelReason: z.string().min(10).max(600).optional().describe("Why this problem's level is right here, when that is worth keeping with the choice."),
       replaceReason: z.string().min(3).max(1_500).optional().describe("Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."),
       review: reviewLinkSchema.optional().describe("When this problem is a spaced review of a card: it needs the card's idea, aimed at what it and its past reviews say they missed. The attempt is linked to the card, and when it ends you judge it with file_review."),
     }),

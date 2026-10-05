@@ -1023,8 +1023,8 @@ describe("coach's notebook",()=>{
       const {sessionId}=store.createSession("Practise graphs");
       const input={store,sessionId,message:"hi",turnKind:"learner-message" as const,webSearch:false,practiceSource:false,practiceSummary:null,accountId:"test"};
       const empty=agentTurnPayload(input).context;
-      expect(empty).toContain("## user.md — who they are, on every Track; read this first\n_Empty.");
-      expect(empty).toContain("## Track notebook\n_Empty.");
+      expect(empty).toContain("## user.md — who they are, on every Track; read this first\n_Empty so far.");
+      expect(empty).toContain("## Track notebook\n_Empty so far._");
       expect(empty.indexOf("## user.md")).toBeLessThan(empty.indexOf("## Track notebook"));
       expect(empty.indexOf("## Track notebook")).toBeLessThan(empty.indexOf("## Learner\n"));
       const trackId=store.readSession(sessionId)!.summary.trackId??null;
@@ -1034,7 +1034,7 @@ describe("coach's notebook",()=>{
       const context=agentTurnPayload(input).context;
       expect(context).toMatch(/## user\.md — who they are, on every Track; read this first \(v1, last written by you [^)]*\)\nNew programmer; wants diagrams\./);
       expect(context).toMatch(/## Track notebook \(v2, last edited by the learner [^)]*\)\nForgets visited sets on grids\./);
-      expect(context).not.toContain("_Empty.");
+      expect(context).not.toContain("_Empty so far");
     }finally{store.close();}
   });
 

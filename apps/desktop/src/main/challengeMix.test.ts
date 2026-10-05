@@ -155,3 +155,18 @@ describe("lenses across the whole Track", () => {
     } finally { store.close(); }
   });
 });
+
+/* The rating as facts. A "fits them now" window used to stand here, capped at
+   1200 for a learner who called themselves new until the rating was
+   established, so a learner rated 1797 was only ever searched LeetCode easies. */
+describe("the learner's level in the journey", () => {
+  it("states the rating with its range and the solve chance at each LeetCode difficulty, with no window", () => {
+    const store = new LocalStore(":memory:");
+    try {
+      const { sessionId } = store.createSession("Heaps for interviews");
+      const text = turn(store, sessionId);
+      expect(text).toMatch(/Rating \d+ ± \d+\. Predicted solve chance on LeetCode easy \(1200\) \d+%, medium \(1600\) \d+%, hard \(2100\) \d+%/);
+      expect(text).not.toContain("fit them now");
+    } finally { store.close(); }
+  });
+});

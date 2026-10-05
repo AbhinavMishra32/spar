@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { ESTABLISHED_DEVIATION, UNRATED } from "@spar/domain";
-import { assessPracticeAssignment, trainingWindow } from "./practiceAssignmentPolicy.js";
+import { assessPracticeAssignment } from "./practiceAssignmentPolicy.js";
 
-/** An established learner sitting mid-scale, so a window computed around them is
- *  a window and not the wide band a provisional rating produces. */
 const rated = { rating: 1500, deviation: 80, volatility: 0.06 };
 
 const target = {
@@ -12,107 +9,47 @@ const target = {
   desiredEvidence: "Uses a loop rather than one conditional shrink",
   abilityStatus: "developing" as const,
   abilityConcepts: ["window-invariant-restoration"],
-  experience: "working" as const,
+  experience: "new" as const,
   rating: rated,
 };
 
-/* What replaced `difficultyBand`, which returned a list of provider words keyed
-   on ability status. The window is in rating points and is inverted out of the
-   same curve that scores the result afterwards, so the level a problem is
-   admitted at and the level it is graded at cannot drift apart. */
-describe("the window of problems worth setting", () => {
-  it("aims a diagnostic near even money and a monitoring check above the learner", () => {
-    const diagnostic = trainingWindow({ rating: rated, abilityStatus: "uncertain" });
-    const monitoring = trainingWindow({ rating: rated, abilityStatus: "independent" });
-    expect(diagnostic.minRating).toBeLessThan(diagnostic.maxRating);
-    expect(monitoring.maxRating).toBeGreaterThan(diagnostic.maxRating);
-    expect(monitoring.minRating).toBeGreaterThan(diagnostic.minRating);
+/* The checks are facts for the coach, not a gate. A rating window used to sit
+   here, capped at 1200 for anyone who called themselves new until the rating was
+   established — which wins on easy problems never make it — so a learner rated
+   1797 was told only LeetCode easies fit. */
+describe("practice assignment notes", () => {
+  it("states the price and the predicted solve chance, and never fails on level", () => {
+    for (const sourceRating of [800, 1500, 2600]) {
+      const level = assessPracticeAssignment({
+        target,
+        candidate: { difficulty: "hard", concepts: ["sliding-window"], source: "codeforces", sourceRating },
+        proposedConcepts: [{ slug: "window-invariant-restoration", parentSlug: "sliding-window", role: "primary" }],
+      }).find((check) => check.name === "learner level")!;
+      expect(level.passed).toBe(true);
+      expect(level.detail).toContain(`Priced at ${sourceRating}`);
+      expect(level.detail).toMatch(/about \d+% of the time/);
+      expect(level.detail).not.toMatch(/window/);
+    }
   });
 
-  /* Traced 2026-09-25: a new learner's band started above the "new" ceiling and
-     the window collapsed to 1282-1282, flagging a LeetCode easy (1200) — the
-     problem the cap exists to send them to — as too easy. */
-  it("ends a capped beginner's window at the ceiling instead of collapsing above it", () => {
-    // Provisional still, but risen past the start after a few passes.
-    const risen = { rating: 1700, deviation: 150, volatility: 0.06 };
-    const window = trainingWindow({ rating: risen, abilityStatus: "uncertain", experience: "new" });
-    const uncapped = trainingWindow({ rating: risen, abilityStatus: "uncertain", experience: "senior" });
-    expect(uncapped.minRating).toBeGreaterThan(1200);
-    expect(window.maxRating).toBe(1200);
-    expect(window.maxRating - window.minRating).toBeGreaterThanOrEqual(150);
-  });
-
-  it("widens while the rating is still a guess, because more problems are plausibly the right one", () => {
-    const unsure = trainingWindow({ rating: UNRATED, abilityStatus: "developing", experience: "senior" });
-    const measured = trainingWindow({ rating: rated, abilityStatus: "developing", experience: "senior" });
-    expect(unsure.maxRating - unsure.minRating).toBeGreaterThan(measured.maxRating - measured.minRating);
-  });
-
-  /* Every learner starts at the same provisional 1500 whatever they said about
-     themselves, so the claim caps the window until there is evidence — and stops
-     mattering the moment there is. */
-  it("caps a beginner's window by what they claimed, only until the rating is measured", () => {
-    const claimed = trainingWindow({ rating: UNRATED, abilityStatus: "developing", experience: "new" });
-    const unclaimed = trainingWindow({ rating: UNRATED, abilityStatus: "developing", experience: "senior" });
-    expect(claimed.maxRating).toBeLessThan(unclaimed.maxRating);
-    expect(rated.deviation).toBeLessThanOrEqual(ESTABLISHED_DEVIATION);
-    expect(trainingWindow({ rating: rated, abilityStatus: "developing", experience: "new" }).maxRating)
-      .toBe(trainingWindow({ rating: rated, abilityStatus: "developing", experience: "senior" }).maxRating);
-  });
-
-  it("never closes the window, even when the cap sits below the band", () => {
-    const window = trainingWindow({ rating: { rating: 2200, deviation: 200, volatility: 0.06 }, abilityStatus: "independent", experience: "new" });
-    expect(window.maxRating).toBeGreaterThanOrEqual(window.minRating);
-  });
-});
-
-describe("practice assignment policy", () => {
-  it("accepts a sub-concept aimed at the matching provider family and target", () => {
-    const window = trainingWindow(target);
-    const checks = assessPracticeAssignment({
-      target,
-      /* Priced inside the window by its published Codeforces rating, which is
-         already the scale the learner is rated on. */
-      candidate: { difficulty: "medium", concepts: ["sliding-window", "arrays"], source: "codeforces", sourceRating: Math.round((window.minRating + window.maxRating) / 2) },
-      proposedConcepts: [{ slug: "window-invariant-restoration", parentSlug: "sliding-window", role: "primary" }],
-      why: "This requires repeated shrinking until the window is valid, which directly discriminates the persisted gap.",
-    });
-    expect(checks.every((check) => check.passed)).toBe(true);
-  });
-
-  it("rejects a problem priced past the window, and an unrelated one", () => {
-    const checks = assessPracticeAssignment({
-      target: { ...target, abilityStatus: "uncertain" },
-      candidate: { difficulty: "hard", concepts: ["graphs", "depth-first-search"], source: "codeforces", sourceRating: 2600 },
-      proposedConcepts: [{ slug: "window-invariant-restoration", parentSlug: "sliding-window", role: "primary" }],
-      why: "This is a generally useful contest problem.",
-    });
-    expect(checks.filter((check) => !check.passed).map((check) => check.name)).toEqual(expect.arrayContaining(["learner level", "provider concept", "target rationale"]));
-  });
-
-  /* The refusal has to be actionable: the agent searches by rating, so a level
-     check that only says "too hard" sends it guessing. */
-  it("names the rating range to search when it turns a problem down for level", () => {
+  it("does not cap a self-described beginner below what their rating says", () => {
+    const strong = { ...target, rating: { rating: 1800, deviation: 180, volatility: 0.06 } };
     const level = assessPracticeAssignment({
-      target,
-      candidate: { difficulty: "hard", concepts: ["sliding-window"], source: "codeforces", sourceRating: 2600 },
-      proposedConcepts: [{ slug: "window-invariant-restoration", parentSlug: "sliding-window", role: "primary" }],
-      why: "This requires repeated shrinking until the window is valid.",
-    }).find((check) => check.name === "learner level")!;
-    expect(level.passed).toBe(false);
-    expect(level.detail).toContain("2600");
-    expect(level.detail).toContain(String(trainingWindow(target).maxRating));
-  });
-
-  /* A LeetCode problem publishes no per-problem rating, so it is priced by its
-     band — and the check has to work on that, because it is most of the catalogue. */
-  it("prices a problem the source did not rate by its band", () => {
-    const checks = assessPracticeAssignment({
-      target,
+      target: strong,
       candidate: { difficulty: "medium", concepts: ["sliding-window"], source: "leetcode", sourceRating: null },
       proposedConcepts: [{ slug: "window-invariant-restoration", parentSlug: "sliding-window", role: "primary" }],
-      why: "This requires repeated shrinking until the window is valid, which discriminates the persisted gap.",
+    }).find((check) => check.name === "learner level")!;
+    expect(level.passed).toBe(true);
+    expect(level.detail).toContain("Priced at 1600");
+  });
+
+  it("says when the aim is not among the provider's tags", () => {
+    const checks = assessPracticeAssignment({
+      target,
+      candidate: { difficulty: "hard", concepts: ["graphs", "depth-first-search"], source: "codeforces", sourceRating: 2600 },
+      proposedConcepts: [{ slug: "window-invariant-restoration", parentSlug: "sliding-window", role: "primary" }],
     });
-    expect(checks.find((check) => check.name === "learner level")!.detail).toMatch(/Priced at \d+/);
+    expect(checks.find((check) => check.name === "provider concept")?.passed).toBe(false);
+    expect(checks.map((check) => check.name)).toEqual(["learner level", "provider concept"]);
   });
 });

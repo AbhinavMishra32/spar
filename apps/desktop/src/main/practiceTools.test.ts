@@ -116,29 +116,31 @@ describe("assign_practice_problem", () => {
     files: { ...design.starterFiles, ...design.visibleTests }, cases: [], harnessNote: "",
   }));
 
-  it("sets a problem priced outside the learner's window, and says where it sits", async () => {
+  it("sets a hard problem with its price and solve chance as notes, not a window", async () => {
     const store = new LocalStore(":memory:");
     const { service, workspaces } = practiceStub({ mount: hardMount() });
     try {
-      const sessionId = targetedSession(store);
-      const result = await assign(store, sessionId, service, workspaces);
+      const result = await assign(store, targetedSession(store), service, workspaces, { levelReason: "The learner asked for a hard problem to see where they stand." });
+      const level = (result.selectionNotes as Array<{ name: string; passed: boolean; detail: string }>).find((check) => check.name === "learner level")!;
       expect(result.status).toBe("playable");
-      expect((result.selectionNotes as Array<{ name: string; passed: boolean }>).find((check) => check.name === "learner level")?.passed).toBe(false);
-      expect(result.window).toMatchObject({ minRating: expect.any(Number), maxRating: expect.any(Number) });
+      expect(level.passed).toBe(true);
+      expect(level.detail).toMatch(/Priced at \d+; at their rating they would solve it about \d+% of the time/);
+      expect(result).not.toHaveProperty("window");
       expect(workspaces.replaceAll).toHaveBeenCalled();
     } finally { store.close(); }
   });
 
-  it("sets a deliberate stretch, still reporting the other comparisons without vetoing", async () => {
+  /* A real problem can open a session. Only set_challenge could create a
+     training target, so every session's first move had to be Spar-written. */
+  it("opens a session with a real problem, its aim becoming the training target", async () => {
     const store = new LocalStore(":memory:");
-    const { service, workspaces } = practiceStub({ mount: hardMount() });
+    const { service, workspaces } = practiceStub();
     try {
-      const result = await assign(store, targetedSession(store), service, workspaces, { why: "This is a generally useful contest problem.", levelReason: "The learner asked for a hard contest problem to see where they stand." });
-      const notes = result.selectionNotes as Array<{ name: string; passed: boolean }>;
+      const { sessionId } = store.createSession("Heaps for interviews");
+      expect((await assign(store, sessionId, service, workspaces)).status).toBe("invalid");
+      const result = await assign(store, sessionId, service, workspaces, { aim: { ability: "Index mapping", gap: "Remembering where a value was seen", evidence: "One pass with a map" } });
       expect(result.status).toBe("playable");
-      expect(notes.filter((check) => !check.passed).map((check) => check.name))
-        .toEqual(expect.arrayContaining(["learner level", "provider concept", "target rationale"]));
-      expect(workspaces.replaceAll).toHaveBeenCalled();
+      expect(String(store.latestTarget(sessionId)?.ability_title)).toBe("Index mapping");
     } finally { store.close(); }
   });
 
