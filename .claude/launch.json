@@ -42,6 +42,15 @@
       "port": 4319
     },
     {
+      "name": "spar-launch-video",
+      "runtimeExecutable": "/bin/sh",
+      "runtimeArgs": [
+        "-c",
+        "cd /Users/abhinavmishra/solin/spar-launch-video && exec npx remotion studio src/index.ts --port 3123 --no-open"
+      ],
+      "port": 3123
+    },
+    {
       "name": "opaline-docs",
       "runtimeExecutable": "/bin/sh",
       "runtimeArgs": [

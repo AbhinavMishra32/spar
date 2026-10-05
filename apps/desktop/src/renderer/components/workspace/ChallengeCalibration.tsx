@@ -1,4 +1,4 @@
-import { challengeItemRating, INITIAL_DEVIATION, solveProbability, type ChallengeSource, type ConceptTag, type Question, type RatingPoint } from "@spar/domain";
+import { challengeItemRating, ESTABLISHED_DEVIATION, INITIAL_DEVIATION, solveProbability, type ChallengeSource, type ConceptTag, type Question, type RatingPoint } from "@spar/domain";
 import { cn } from "@/lib/utils";
 import { approximateRating, describeChance, leetcodeBand, sparRating } from "@/lib/ratingScale";
 import { outcomeBands, standingOf } from "@/lib/concepts";
@@ -59,6 +59,7 @@ export function ChallengeRatingBadge({
   difficulty,
   learnerRating,
   source,
+  summary = false,
 }: {
   /** What the concept chips need to preview and open. */
   conceptContext?: ConceptContext | undefined;
@@ -66,6 +67,8 @@ export function ChallengeRatingBadge({
   difficulty: Question["difficulty"];
   learnerRating?: RatingPoint | null | undefined;
   source: ChallengeSource | null;
+  /** Says the two headline figures beside the word, where a row has room. */
+  summary?: boolean;
 }) {
   return (
     <HoverCard>
@@ -75,9 +78,13 @@ export function ChallengeRatingBadge({
             keep. `select-none` for the same reason — it is a label, and a label
             that highlights under a drag reads as text somebody meant to copy. */}
         <span
-          className="shrink-0 cursor-default select-none outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-ring/60"
+          className={cn(
+            "flex cursor-default select-none items-center gap-3 outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-ring/60",
+            summary ? "@container min-w-0 flex-1" : "shrink-0",
+          )}
           tabIndex={0}
         >
+          {summary && <CalibrationSummary difficulty={difficulty} learnerRating={learnerRating} source={source} />}
           <DifficultyPill difficulty={difficulty} />
         </span>
       </HoverCardTrigger>
@@ -91,6 +98,81 @@ export function ChallengeRatingBadge({
         />
       </HoverCardContent>
     </HoverCard>
+  );
+}
+
+/**
+ * The card, folded into the row it hangs off. The problem's rating, the strip
+ * that places it against the learner, their odds, and the two scales people
+ * know — each dropping out as the row narrows, least telling first, so the
+ * figure and the strip are the last things left. The full reading stays
+ * behind the hover.
+ */
+function CalibrationSummary({ difficulty, learnerRating, source }: {
+  difficulty: Question["difficulty"];
+  learnerRating?: RatingPoint | null | undefined;
+  source: ChallengeSource | null;
+}) {
+  const item = challengeItemRating({ difficulty, source });
+  const rated = learnerRating && learnerRating.deviation <= ESTABLISHED_DEVIATION ? learnerRating : null;
+  const chance = rated
+    ? solveProbability({ rating: rated.rating, deviation: rated.deviation, volatility: rated.volatility }, item.rating)
+    : null;
+  const tenths = chance == null ? null : Math.max(1, Math.min(9, Math.round(chance * 10)));
+  const comfortable = rated ? rated.rating >= item.rating : null;
+
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-3 whitespace-nowrap text-ui-sm tabular-nums text-muted-foreground">
+      <span className="flex shrink-0 items-baseline gap-1">
+        <span className="font-semibold text-foreground">{sparRating(item.rating)}</span>
+        <span className="hidden text-muted-foreground/70 @min-[20rem]:inline">rating</span>
+      </span>
+
+      <span className="relative h-1 min-w-10 max-w-48 flex-1 rounded-full bg-[var(--color-background-elevated-secondary)]">
+        {rated && (
+          <span
+            aria-hidden
+            className={cn("absolute inset-y-0 rounded-full", comfortable ? "bg-[var(--success)]/45" : "bg-[var(--warning)]/45")}
+            style={{
+              left: `${Math.min(position(item.rating), position(rated.rating))}%`,
+              width: `${Math.abs(position(rated.rating) - position(item.rating))}%`,
+            }}
+          />
+        )}
+        <span
+          aria-hidden
+          className="absolute top-1/2 size-[7px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[1px] bg-foreground/80"
+          style={{ left: `${position(item.rating)}%` }}
+        />
+        {rated && (
+          <span
+            aria-hidden
+            className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-background bg-foreground"
+            style={{ left: `${position(rated.rating)}%` }}
+          />
+        )}
+      </span>
+
+      {rated && tenths != null && (
+        <span className="hidden shrink-0 items-center gap-1 @min-[17rem]:flex">
+          <span>You</span>
+          <span className="font-medium text-foreground/85">{sparRating(rated.rating)}</span>
+          <span className="text-muted-foreground/40">·</span>
+          <span className={cn(comfortable ? "text-[var(--success)]" : "text-[var(--warning)]")}>{tenths}/10</span>
+        </span>
+      )}
+
+      <span className="ml-auto hidden shrink-0 items-center gap-2.5 @min-[27rem]:flex">
+        <span className="inline-flex items-center gap-1" title={`LeetCode ${leetcodeBand(item.rating)}`}>
+          <LeetCodeGlyph className="size-3 shrink-0" />
+          {approximateRating(item.rating, "leetcode")}
+        </span>
+        <span className="inline-flex items-center gap-1" title="Codeforces">
+          <CodeforcesGlyph className="size-3 shrink-0" />
+          {approximateRating(item.rating, "codeforces")}
+        </span>
+      </span>
+    </span>
   );
 }
 

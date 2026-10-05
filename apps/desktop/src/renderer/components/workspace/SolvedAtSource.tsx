@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { relativeTime } from "@/lib/format";
+import { plainMath } from "@/lib/tex";
 import type {
   PracticeSampleCode, PracticeSolution, PracticeSolutionSummary, PracticeSubmissionStats, SolvedAtSource, SparApi,
 } from "../../../shared/api";
@@ -766,7 +767,7 @@ function ArticleBody({ content, languageTag }: { content: string; languageTag: s
         <Markdown
           className="text-thread [&_h1]:mb-1.5 [&_h1]:mt-6 [&_h1]:text-content [&_h1]:font-semibold [&_h2]:mb-1.5 [&_h2]:mt-6 [&_h2]:text-content [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:mt-5 [&_h3]:text-thread [&_h3]:font-semibold [&>:first-child]:mt-0"
           key={index}
-          source={segment.text}
+          source={proseMath(segment.text)}
         />
       ) : segment.kind === "image" ? (
         <img alt={segment.alt} className="my-3 max-h-[24rem] w-auto max-w-full self-start rounded-[var(--radius-lg)] ring-[0.5px] ring-[var(--border-strong)]" key={index} loading="lazy" referrerPolicy="no-referrer" src={segment.url} />
@@ -777,8 +778,14 @@ function ArticleBody({ content, languageTag }: { content: string; languageTag: s
   );
 }
 
-function CodeTabs({ blocks, languageTag }: { blocks: Array<{ label: string; body: string }>; languageTag: string }) {
+function CodeTabs({ blocks: written, languageTag }: { blocks: Array<{ label: string; body: string }>; languageTag: string }) {
   const preferred = sparLanguage(languageTag);
+  /* A fence with no language is, on a solution filtered to the learner's
+     language, almost always in it — read it that way rather than as "Code". */
+  const blocks = useMemo(
+    () => written.map((block) => (block.label || !preferred ? block : { ...block, label: LANGUAGE_LABEL[preferred] })),
+    [written, preferred],
+  );
   const [index, setIndex] = useState(() => Math.max(0, blocks.findIndex((block) => preferred && sparLanguage(block.label) === preferred)));
   const block = blocks[Math.min(index, blocks.length - 1)]!;
   const language = sparLanguage(block.label);
@@ -815,6 +822,25 @@ function CodeTabs({ blocks, languageTag }: { blocks: Array<{ label: string; body
       <Colorized body={block.body.replace(/\t/g, "    ")} language={language ?? (block.label.toLowerCase() || "text")} />
     </div>
   );
+}
+
+/**
+ * LeetCode write-ups mark maths with dollars, `$$O(n \log n)$$` or `$O(1)$`.
+ * Spar has no maths engine on purpose (see `lib/tex.ts`): it turns the notation
+ * a practice app actually uses into characters. That is done here, before the
+ * prose renderer sees the line, so a subscript like `x_i` is not read as
+ * emphasis on the way. Code spans are left alone; a dollar there is a dollar.
+ */
+export function proseMath(prose: string): string {
+  const math = (inner: string) => plainMath(`\\(${inner.replace(/\s*\n\s*/g, " ").trim()}\\)`);
+  return prose
+    .split(/(`[^`]*`)/)
+    .map((part, index) => index % 2
+      ? part
+      : part
+        .replace(/\$\$([\s\S]+?)\$\$/g, (_match, inner: string) => math(inner))
+        .replace(/(^|[^\\$])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g, (_match, before: string, inner: string) => `${before}${math(inner)}`))
+    .join("");
 }
 
 function parseArticle(content: string): Segment[] {
