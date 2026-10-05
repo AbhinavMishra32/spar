@@ -110,7 +110,7 @@ export type ReplayStats = {
   neverPassed: number;
   regressions: number;
   longestGapMs: number;
-  outcome: "passed" | "failed" | "abandoned" | "in-progress";
+  outcome: "passed" | "failed" | "abandoned" | "replaced" | "in-progress";
   /** True when the learner submitted without ever running the visible cases. */
   submittedBlind: boolean;
 };
@@ -167,7 +167,11 @@ export function foldAttempt(
   const ordered = [...events].sort((left, right) => left.sequence - right.sequence);
   const now = context.now ?? Date.now();
   const startedAt = ordered.length ? time(ordered[0]!) : now;
-  const completion = ordered.find((event) => event.type === "attempt_completed");
+  /* The latest completion, unless the attempt was reopened after it: a solve
+     sent back for rework is open again, not "graded passed". */
+  const lastCompletion = [...ordered].reverse().find((event) => event.type === "attempt_completed");
+  const reopenedAfter = lastCompletion && ordered.some((event) => event.sequence > lastCompletion.sequence && event.type === "attempt_started" && event.payload.reopened === true);
+  const completion = reopenedAfter ? undefined : lastCompletion;
   const endedAt = ordered.length ? time(ordered.at(-1)!) : now;
   const at = (event: ReplayEvent) => time(event) - startedAt;
 
@@ -359,7 +363,7 @@ export function foldAttempt(
     neverPassed: cases.filter((item) => item.neverPassed).length,
     regressions: cases.filter((item) => item.regressed).length,
     longestGapMs,
-    outcome: outcome === "passed" || outcome === "failed" || outcome === "abandoned" || outcome === "in-progress" ? outcome : "failed",
+    outcome: outcome === "passed" || outcome === "failed" || outcome === "abandoned" || outcome === "replaced" || outcome === "in-progress" ? outcome : "failed",
     submittedBlind: Boolean(firstRun?.submission),
   };
 
@@ -541,8 +545,7 @@ export function formatSolveLog(replay: AttemptReplay, filters: Partial<ReplayFil
   const at = (ms: number) => clock(replay.startedAt + ms, true);
   lines.push(`SOLVE LOG — ${challenge.title} (${challenge.language})`);
   lines.push(`opened ${ago(replay.startedAt, replay.now)} (${dayAndClock(replay.startedAt, replay.now)}) · it is now ${clock(replay.now)} · ${outcomeWord(replay)} · ${stats.events} events · ${stats.runs} runs · ${stats.submissions} submissions · ${stats.saves} saves · ${stats.casesTracked} distinct test cases`);
-  lines.push(`Times are the learner's local clock. Nothing here is inferred; it is what was recorded.`);
-  lines.push(`When you mention a moment to the learner, say it the way a person would — "at 6:20pm", "about 10 minutes ago", "on your third run" — never with seconds, an offset or a timestamp.`);
+  lines.push(`Times are the learner's local clock. The log is what was recorded; the turning-point labels are drawn from how the score moved between runs.`);
   if (cut > 0) lines.push(`Filtered to events after the last submission at ${at(cut)}.`);
   if (types) lines.push(`Filtered to event types: ${[...types].join(", ")}.`);
 
@@ -620,7 +623,7 @@ export function formatSolveLog(replay: AttemptReplay, filters: Partial<ReplayFil
       const run = point.run;
       const label = point.kind === "first-try" ? "passed first try" : point.kind === "breakthrough" ? "breakthrough" : "jump";
       lines.push(`  ${label} · run ${run.ordinal} at ${at(run.offsetMs)} · ${run.submission ? "submission" : "visible"} ${point.before} → ${point.after}${run.fixed.length ? `   newly passing: ${quoteList(run.fixed)}` : ""}${run.broke.length ? `   newly failing: ${quoteList(run.broke)}` : ""}`);
-      if (point.kind === "first-try") lines.push("    Nothing failed before this, so there was no stuck phase: the idea was there from the first draft. Ask what they recognised, rather than reading a change.");
+      if (point.kind === "first-try") lines.push("    No run failed before this one.");
       lines.push(`    between the previous run and this one: ${point.elapsed}${point.said.length ? "" : ", nothing asked or said"}`);
       for (const said of point.said) lines.push(`      ${said}`);
       if (point.diff.length) lines.push(...point.diff.map((line) => `    ${line}`));
@@ -724,6 +727,7 @@ function filterCases(cases: ReplayCase[], filter: CaseFilter): ReplayCase[] {
 function outcomeWord(replay: AttemptReplay): string {
   if (replay.stats.outcome === "in-progress") return "still open";
   if (replay.stats.outcome === "abandoned") return "abandoned by the learner";
+  if (replay.stats.outcome === "replaced") return "replaced by another challenge";
   return `graded ${replay.stats.outcome}`;
 }
 

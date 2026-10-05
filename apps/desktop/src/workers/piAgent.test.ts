@@ -86,7 +86,7 @@ describe("the training agent, on pi's runtime", () => {
 
       const tools = requests[0]?.context.messages.flatMap((message) => message.role === "system" ? message.toolsAdded ?? [] : []) ?? [];
       expect(tools.map((tool) => tool.name)).toEqual(["search_record"]);
-      expect(tools[0]?.parameters).toMatchObject({ type: "object", required: ["query", "actionTitle"] });
+      expect(tools[0]?.parameters).toMatchObject({ type: "object", required: ["query"] });
       expect(requests[0]?.context.messages[0]).toMatchObject({ role: "system", content: "system" });
       expect(requests[0]?.context.messages.filter((message) => message.role === "user")).toHaveLength(1);
     } finally { faux.unregister(); }

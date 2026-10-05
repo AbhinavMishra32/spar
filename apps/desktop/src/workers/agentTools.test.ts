@@ -95,11 +95,11 @@ describe("the tool contract, against the pinned reference", () => {
     expect(search?.parse({ query: "arrays", actionTitle: "Checking arrays" })).toMatchObject({ query: "arrays", limit: 6 });
   });
 
-  it("gives every tool a required action title", () => {
+  it("offers every tool an optional action title", () => {
     for (const [name, tool] of Object.entries(current)) {
       const schema = tool.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
       expect(schema.properties, name).toHaveProperty("actionTitle");
-      expect(schema.required, name).toContain("actionTitle");
+      expect(schema.required ?? [], name).not.toContain("actionTitle");
     }
   });
 
@@ -126,8 +126,8 @@ describe("set_challenge", () => {
 
   it("hands the coach the teaching decision, not the test harness", () => {
     const schema = current.set_challenge?.inputSchema as { required?: string[]; properties?: Record<string, unknown> };
-    expect(schema.required).toEqual(expect.arrayContaining(["mode", "aim", "stretch", "brief", "language", "kind", "difficulty", "concepts", "requiresComplexityAnalysis", "why"]));
-    for (const optional of ["solutionRequirements", "skills", "reason"]) expect(schema.required).not.toContain(optional);
+    expect(schema.required).toEqual(expect.arrayContaining(["mode", "aim", "brief", "language", "kind", "difficulty", "concepts"]));
+    for (const optional of ["stretch", "requiresComplexityAnalysis", "why", "solutionRequirements", "skills", "reason", "actionTitle"]) expect(schema.required).not.toContain(optional);
     for (const harness of ["starterFiles", "referenceFiles", "visibleTests", "hiddenTests", "knownIncorrectFiles"]) expect(schema.properties).not.toHaveProperty(harness);
   });
 

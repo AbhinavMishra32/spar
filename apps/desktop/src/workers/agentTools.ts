@@ -35,13 +35,13 @@ const questionInputSchema=z.object({ concepts:z.array(conceptTagInputSchema).min
 const authoredQuestionInputSchema = questionInputSchema.extend({
   lens: z.object({ id: z.string().min(1).max(60), sideQuest: z.string().min(10).max(600) }).optional().describe("Carried from set_challenge: the drill lens this challenge carries."),
   review: z.object({ cardId: z.string().uuid(), focus: z.string().max(1_500), purpose: z.enum(["review", "deeper"]).optional() }).optional().describe("Carried from set_challenge: the review card this challenge reviews."),
-  why: z.string().min(10).max(1_500).describe("Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."),
+  why: z.string().max(1_500).optional().describe("Why this particular question is useful for this learner now: the evidence or request behind it and what the attempt should reveal. A deliberate repeat, transfer, or topic switch is fine when justified. Stored with the published question for later turns."),
   runCommand: z.string().min(1).optional().describe("A descriptive command for the challenge. The host uses its fixed language runner for validation and learner tests; this value cannot select pytest or change execution. Python test files execute directly with python3 and must call any defined test functions themselves."),
   hiddenTests: z.record(z.string()).describe("The unseen grading contract. For a function, execute at least twenty-four cases, preferably a seeded sweep checked against a simple oracle. For a module, execute at least twelve cases. For a repair, extension, or repository task, execute at least eight meaningful scenarios covering the defect, boundaries, and interactions. Emit one verdict per case and show input, expected, and actual on failure. Choose the tests that prove this task, rather than padding case counts."),
   trainingTarget: z.object({
     ability: z.string().min(2),
-    specificGap: z.string().min(8),
-    desiredEvidence: z.string().min(8),
+    specificGap: z.string(),
+    desiredEvidence: z.string(),
     avoidTesting: z.array(z.string()),
   }).optional().describe("Only when this candidate changes what the learner is practicing: persist a corrected evidence target with the question. Use this when the previous target is stale or contradicted by a passed challenge. Omit it to retain the current target."),
 });
@@ -88,19 +88,19 @@ export const setChallengeInputSchema = z.object({
   mode: z.enum(["new", "revise", "replace"]).describe("new: no challenge is open. revise: rebuild the open challenge around the same task when its contract or code shape changes (typed starters, another language); for a few passages, edit_challenge is faster and keeps the learner's code. replace: swap the open challenge for a different problem, because the learner asked or it is clearly wrong for them."),
   aim: z.object({
     ability: z.string().min(2).max(200).describe("The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."),
-    gap: z.string().min(8).max(1_500).describe("The specific thing still uncertain about this learner that this challenge probes."),
-    evidence: z.string().min(8).max(1_500).describe("What a pass or a fail will tell you."),
-  }).describe("What this challenge should reveal. It becomes the session's training target, replacing the previous one."),
-  stretch: z.string().min(10).max(1_500).describe("What is new for this learner relative to their recent work. For revise, say what changes."),
+    gap: z.string().max(1_500).optional().describe("What is still uncertain about this learner that this challenge probes."),
+    evidence: z.string().max(1_500).optional().describe("What a pass or a fail will tell you."),
+  }).describe("What this challenge trains. It becomes the session's training target."),
+  stretch: z.string().max(1_500).optional().describe("What is new for this learner, when that is worth recording."),
   brief: z.string().min(40).max(4_000).describe("The problem for the builder: what the learner is given and what they must produce, the idea it should make them reach for, anything the learner asked for, and the code-shape convention to keep (for example: LeetCode-style TreeNode with a typed class Solution method, as in their previous challenges). Describe the problem, not the method, unless the method is itself the drill: the builder writes what you give it into the statement, and a named technique there takes away the part of the problem where they work out what to reach for. Plain prose; no code needed."),
   language: languageSchema,
   kind: z.enum(["function", "module", "repair", "extension", "repository"]),
   difficulty: z.enum(["foundation", "developing", "proficient", "advanced"]).describe("An absolute price on the learner's rating scale: foundation 900, developing 1200, proficient 1500, advanced 1800."),
   concepts: z.array(conceptTagInputSchema).min(1).max(5).describe("What this challenge is about, most specific first. Exactly one entry has role primary."),
-  requiresComplexityAnalysis: z.boolean().describe("Whether the learner states the time and space complexity of their solution after it passes. Usually true for algorithm and data-structure problems, since saying what their own code costs is part of solving one; false where Big-O says nothing, such as syntax, API use, debugging, UI, refactoring or repository work."),
+  requiresComplexityAnalysis: z.boolean().optional().describe("Whether the learner states the time and space complexity of their solution after it passes. Usually true for algorithm and data-structure problems, since saying what their own code costs is part of solving one; false where Big-O says nothing, such as syntax, API use, debugging, UI, refactoring or repository work."),
   solutionRequirements: z.array(z.string().min(4).max(160)).max(4).optional().describe("How the solution must be written, when the method is itself what is being practised and the learner knows it (\"recursive\" in a recursion drill). The host prints these under the statement and review_solution holds the solution to them, so each one tells the learner the method. A limit on cost (\"O(k) extra space\") goes in the brief as a constraint instead, which leaves them to find the method."),
   skills: z.array(z.string().min(1).max(48)).max(3).optional().describe("Skills from the skills list the builder should follow for this challenge, for example one about figures in statements."),
-  why: z.string().min(10).max(1_500).describe("Why this challenge for this learner now. Stored with the challenge for later turns."),
+  why: z.string().max(1_500).optional().describe("Why this challenge for this learner now, kept with the challenge for later turns."),
   reason: z.string().min(3).max(1_500).optional().describe("For revise or replace: what the learner asked for, or why the open challenge has to change."),
   lens: z.object({
     id: z.string().min(1).max(60).describe("One of the learner's lenses in Coaching settings, by its id."),
@@ -139,7 +139,7 @@ export const toolDefinitions = {
     id: z.string().min(2).describe("The challenge, ability, lesson or review card id, or the concept slug."),
   })],
   read_attempt: [
-    "Read an attempt's current code, deterministic runner verdict, and recorded solve history. The runner is the authority on correctness. Returns the complete report and source files, plus a sequence-to-event-ID index for ability evidence. Payloads are represented once in the report instead of duplicated as raw events. Start with one call and work from that evidence. Use sections, eventTypes, cases or scope when you want a focused view.",
+    "Read an attempt: the learner's current code, the runner's verdict (the authority on correctness), and its recorded history — runs, diffs, what was said, turning points — with a sequence-to-event-id index for ability evidence. sections, eventTypes, cases and scope narrow the view.",
     z.object({
       attemptId: z.string().uuid().optional()
         .describe("Omit for the attempt the learner has open right now, which is almost always the one you mean. Name one only to read a different attempt out of their history."),
@@ -158,7 +158,7 @@ export const toolDefinitions = {
     }),
   ],
   read_submissions: [
-    "Read what the learner actually submitted at a challenge, in order. Without `submissionId` it returns every submission's verdict and case counts — this is the tool for \"what have they tried\", for seeing whether they converged or thrashed, and for finding which submission a question is about. With `submissionId` it returns that one in full: the exact code that was sent and every case it was graded on, including the inputs and expected/actual values of the ones that failed. Cite any submission you refer to as [[submission:<id>|a few words]] so the learner can open it — never quote its id in your prose.",
+    "Read what the learner submitted at a challenge. Without `submissionId`: every submission's verdict and case counts, in order. With it: that submission's exact code and every case it was graded on, including the inputs and expected/actual values of failures. Submissions are cited as [[submission:<id>|a few words]], which the learner can open.",
     z.object({
       challengeId: z.string().uuid().optional()
         .describe("The challenge whose submissions to list. Omit for the one the learner has open right now."),
@@ -169,25 +169,25 @@ export const toolDefinitions = {
       limit: z.number().int().min(1).max(40).default(20).describe("How many submissions to return. The list reads oldest first and a longer history is cut from the front, so the cap keeps the most recent and the ordinals stay absolute."),
     }),
   ],
-  review_solution: ["Judge HOW the passing solution was written, after the runner has already settled that it works. Send it back only for a requirement the challenge actually stated, or for a solution that defeats the point of the exercise — hardcoding the test inputs, calling a library that does the whole thing being taught, or a complexity class the challenge ruled out. A different-but-legitimate approach is not grounds for rework.", z.object({
+  review_solution: ["Record how a passing solution was written, after the runner settled that it works. `rework` reopens the challenge for the learner; `accepted` records the review. The challenge's stated requirements are in the turn that reports the solve.", z.object({
     attemptId: z.string().uuid(),
-    verdict: z.enum(["accepted", "rework"]).describe("`rework` reopens the challenge for the learner, so it is for a stated requirement the solution misses."),
-    observedComplexity: z.string().min(2).max(500).describe("The time complexity of what they actually wrote, e.g. \"O(n)\" or \"O(n log n) from the sort\"."),
-    approach: z.string().min(10).max(1_500).describe("What they actually did, in one sentence, in their own terms."),
-    reasons: z.array(z.string().min(8).max(1_000)).max(6).describe("For `rework`, the requirement missed and what to change — no solution, still only the nudge. For `accepted`, what made it a good use of the idea. Written to the learner."),
+    verdict: z.enum(["accepted", "rework"]).describe("`rework` reopens the challenge for the learner."),
+    observedComplexity: z.string().max(500).optional().describe("The time complexity of what they actually wrote, e.g. \"O(n)\" or \"O(n log n) from the sort\"."),
+    approach: z.string().max(1_500).optional().describe("What they actually did, in one sentence, in their own terms."),
+    reasons: z.array(z.string().max(1_000)).max(6).optional().describe("What you saw: for `rework`, the requirement missed and the nudge the learner sees, without the solution."),
     lenses: z.array(z.object({
       id: z.string().min(1).max(60).describe("A lens id from Coaching settings."),
-      note: z.string().min(8).max(300).describe("What their code showed through that lens, which you then say in your reply — a line from their code and the idiomatic or deeper take on it."),
+      note: z.string().min(8).max(300).describe("What their code showed through that lens: a line from their code and the idiomatic or deeper take on it."),
     })).max(3).optional().describe("Their code read through the learner's lenses: for each lens it has something to say about, what it showed. Logged in the lens's history, so later turns know what was covered."),
   })],
-  update_ability: ["Introduce an ability as uncertain when you start training it, or append an evidence-backed version to one. Give it the summary, concepts and practice drills that make it something the learner can see and train once the evidence supports it. The status is a claim to the learner about what they can do on their own, so it moves with the weight of the evidence: a pass they were walked to says less than one they found.", z.object({
+  update_ability: ["Introduce an ability or add an evidence-backed version of one: its document, the one-sentence summary the learner sees, its concepts and practice drills, and a status. The status is shown to the learner on the Abilities page as a claim about what they can do on their own; evidence entries interpret specific attempt events.", z.object({
     abilityId: z.string().uuid().optional().describe("The ability to update. Omit to introduce one by title (an existing ability with the same title is updated)."),
     title: z.string().min(2).max(200).optional().describe("Required when introducing an ability."),
     markdown: z.string().min(20).describe("The ability document: what the learner can and cannot yet do, with the evidence."),
     evidenceEventIds: z.array(z.string().uuid()).default([]),
     ...abilityClaimShape,
   })],
-  update_notebook: ["Change one of your notebooks, your primary memory of this learner: the one for this Track, or user.md, the one about the person that every Track reads. Usually with edits: exact replacements of the passages that changed, so everything else stays as it was. Send the whole markdown instead to start the notebook or to reorganise it. The learner can read and edit both.", z.object({
+  update_notebook: ["Change one of your notebooks: the Track notebook, or user.md, the one about the person that every Track reads. Edits replace exact passages and leave the rest as it was; the whole markdown replaces the document. The learner can read and edit both.", z.object({
     /* "learner" is user.md's earlier name, still accepted from older threads. */
     notebook: z.enum(["track", "user", "learner"]).default("track").describe("track: their progress on this Track. user: user.md, the person across every Track — their onboarding answers, who they are, how they like to be taught, what helps them, habits seen wherever they work."),
     edits: z.array(z.object({
@@ -197,7 +197,7 @@ export const toolDefinitions = {
     markdown: z.string().min(1).max(12_000).optional().describe("The whole notebook, replacing the current one. Only to start it or reorganise it; otherwise use edits."),
     note: z.string().min(3).max(300).describe("One line saying what changed, shown to the learner."),
   })],
-  set_challenge_mix: ["Change this session's coaching settings, or suggest a lens. Change settings only when the learner asks in chat: when to write a Spar problem versus assigning a real LeetCode/Codeforces problem, and lenses — areas to go deeper on, each at a depth (mention: a line in feedback; teach: explain it when relevant; drill: Spar problems that force it). Send only what they asked for. Attach an example lifted from their own code whenever you have one — it is what the learner sees on the lens. suggest is the one part you may use on your own: when their code shows a pattern a lens would fix (range(len(xs)) loops, a hand-rolled heap), propose that lens with the reason in one line; it waits in the learner's settings menu until they accept or dismiss it. The journey lists the ones already pending or turned down.", z.object({
+  set_challenge_mix: ["Change this session's coaching settings, or suggest a lens. The settings are the learner's: when to write a Spar problem versus assigning a real one, and lenses (areas to go deeper on, each at mention, teach or drill). A suggestion waits in the learner's settings menu until they accept or dismiss it, with an example from their own code when you give one. The journey lists suggestions already pending or turned down.", z.object({
     spar: z.enum(["never", "struggling", "less", "balanced", "more", "always"]).optional().describe("When to write a Spar problem. never: real problems only. struggling: real by default, Spar to repair a concept they are stuck on. less / more: mostly real / mostly Spar. balanced: your call. always: only Spar problems."),
     lenses: z.array(z.object({
       id: z.string().min(1).max(60).describe("A catalogue id — lang-idioms, lang-stdlib, lang-types, lang-deep (the Track's language), from-scratch, under-the-hood, complexity, edge-cases, clean-code — or custom:<slug> for one the learner named or you name in a suggestion."),
@@ -213,7 +213,7 @@ export const toolDefinitions = {
     })).max(2).optional(),
     note: z.string().min(3).max(200).describe("One line saying what changed, shown to the learner."),
   })],
-  edit_challenge: ["Change the open Spar-written challenge in place: reword a sentence that confused them, add or fix a figure, add an example, fix a typo, add a visible test case, adjust a type in the starter. Each edit replaces one exact passage — copied from the current text, occurring once — in one part of the challenge. Nothing is rebuilt and the learner keeps their place and their code: a statement or title edit is checked for its figures, and an edit to the starter, reference or tests reruns the full validation before it lands. The journey shows the open challenge's statement and starter; read_record the challenge for its reference and tests. Use set_challenge revise instead when the task, its contract or its code shape changes.", z.object({
+  edit_challenge: ["Change passages of the open Spar-written challenge in place. Each edit replaces one exact passage, occurring once, in the statement, title, starter, reference or visible tests. Nothing is rebuilt and the learner keeps their code and clock; statement and title edits have their figures checked, and code edits rerun the full validation before they land. The journey shows the open challenge's statement and starter; read_record has its reference and tests.", z.object({
     edits: z.array(z.object({
       part: z.enum(["statement", "title", "starter", "reference", "visibleTests"]).describe("Which part of the challenge the passage is in."),
       path: z.string().min(1).max(200).optional().describe("The file, for starter, reference and test edits. May be omitted when that part has one file."),
@@ -222,24 +222,24 @@ export const toolDefinitions = {
     })).min(1).max(20),
     note: z.string().min(3).max(300).describe("What changed and why, in one sentence. Stored with the challenge."),
   })],
-  set_challenge: ["Set the learner's next challenge from a brief. A builder writes the statement, starter, reference, tests and plausible wrong solutions; the host compiles and validates them and repairs recoverable failures before anything is published. Returns the published challenge, or the failed checks when it could not be validated — then adjust the brief (often simpler) and call again.", setChallengeInputSchema],
+  set_challenge: ["Set the learner's next challenge from a brief. A builder writes the statement, starter, reference and tests; the host compiles and validates them and repairs recoverable failures before anything is published. Returns the published challenge, or the checks that failed.", setChallengeInputSchema],
   record_insight: [
-    "File the core idea that solved this challenge as an insight card for spaced review. Write it from the replay — especially read_attempt's turning-points — not from the problem statement: what made it click for THIS learner, the cue they should have spotted, the invariant that makes it correct, and the mistakes they actually made on the way. Spar schedules the card with FSRS and later writes fresh review prompts from it (a new problem needing the same idea, a what-if, their own earlier bug to spot), so every field must be about the transferable pattern, never about this problem's specific inputs or code. Call it once per solved challenge; a challenge solved again refines its existing card.",
+    "File the idea that solved a challenge as an insight card for spaced review. Spar schedules it with FSRS and later writes review prompts from it — a new problem needing the same idea, a what-if, their own earlier bug — so it is about the transferable pattern rather than this problem's inputs. A challenge solved again refines its existing card.",
     z.object({
       attemptId: z.string().uuid().optional().describe("The solved attempt. Omit for the one this turn is about."),
       title: z.string().min(4).max(160).describe("The pattern as a short handle the learner can recognise later, in plain words: \"Shrink the window only when the invariant breaks\", not \"Sliding window\" and not the problem's title."),
-      trigger: z.string().min(10).max(1_200).describe("What in a problem statement should make someone reach for this: the shape of the input, the question asked, the constraint. Written so it would still apply to a problem with a different story."),
-      insight: z.string().min(20).max(2_000).describe("The key realisation itself, in two to four sentences, as the learner would need to say it to themselves. Why it works, not just what to do."),
+      trigger: z.string().max(1_200).optional().describe("What in a problem statement should make someone reach for this: the shape of the input, the question asked, the constraint. Written so it would still apply to a problem with a different story."),
+      insight: z.string().min(20).max(2_000).describe("The key realisation itself, as the learner would need to say it to themselves: why it works, not just what to do."),
       invariant: z.string().min(8).max(800).optional().describe("The condition the solution maintains, when there is one — the loop invariant, the recurrence, what the data structure guarantees."),
       click: z.object({
-        summary: z.string().min(8).max(1_500).describe("What changed between stuck and solved, from the turning points: the realisation behind the change, in their terms. If they passed first try, say what they recognised immediately."),
+        summary: z.string().max(1_500).optional().describe("What changed between stuck and solved, from the turning points: the realisation behind the change, in their terms. If they passed first try, say what they recognised immediately."),
         runOrdinal: z.number().int().min(1).optional().describe("The run the breakthrough landed on, as read_attempt numbers them."),
         diff: z.string().max(4_000).optional().describe("The few changed lines that carried it, quoted from the turning-point diff. Omit when the change was a rewrite."),
-      }),
-      independence: z.enum(["independent", "assisted", "unknown"]).describe("Whether the breakthrough was theirs. `assisted` when the log shows the agent explaining the idea, or a lesson on it, shortly before the change that made it pass."),
-      pitfalls: z.array(z.object({ mistake: z.string().min(4).max(600), fix: z.string().min(4).max(600) })).max(4).describe("Mistakes the replay shows they actually made, each with the correction, phrased so they generalise. Empty when there were none; never invent them."),
-      rubric: z.array(z.string().min(4).max(500)).min(2).max(5).describe("What a correct recall of this idea must contain, point by point. The grader checks review answers against exactly this list, so each point must be checkable from a free-text answer."),
-      transfer: z.array(z.string().min(8).max(600)).min(1).max(4).describe("Variations where the same idea applies or must bend: changed constraints, a different story with the same structure, the case where it breaks. Seeds for future review prompts."),
+      }).optional(),
+      independence: z.enum(["independent", "assisted", "unknown"]).optional().describe("Whether the breakthrough was theirs. `assisted` when the log shows the agent explaining the idea, or a lesson on it, shortly before the change that made it pass."),
+      pitfalls: z.array(z.object({ mistake: z.string().min(4).max(600), fix: z.string().min(4).max(600) })).max(4).optional().describe("Mistakes the replay shows they actually made, each with the correction, phrased so they generalise. Empty when there were none; never invent them."),
+      rubric: z.array(z.string().min(4).max(500)).max(5).optional().describe("What a correct recall of this idea must contain, point by point. The grader checks review answers against exactly this list, so each point must be checkable from a free-text answer."),
+      transfer: z.array(z.string().min(8).max(600)).max(4).optional().describe("Variations where the same idea applies or must bend: changed constraints, a different story with the same structure, the case where it breaks. Seeds for future review prompts."),
       concepts: z.array(z.string().min(2).max(60)).max(4).optional().describe("Concept slugs the idea belongs to, the pattern itself first. Omit to use the challenge's own tags. Cards sharing the first concept share review credit."),
       targets: z.array(z.enum(["problem", "pattern", "concept", "turning-point", "pitfall"])).min(1).max(5).optional().describe("What later reviews should make them recall — each review rehearses one: `problem` — this exact challenge again, worth it for a classic they will meet in interviews; `pattern` — spotting and applying the technique in a new story; `concept` — the invariant or property that makes it correct; `turning-point` — the realisation that got them unstuck, the default when there was a real struggle; `pitfall` — the mistake they kept making, when it cost them several runs. Pick the ones this solve earned, usually two or three. If the learner said what they want to remember, follow that. The learner can change these on the card. Omit to use turning-point and pattern."),
       remember: z.string().min(3).max(1_500).optional().describe("What the learner said they want to remember from this problem, when you asked them — their words, lightly cleaned up, not your summary. Reviews aim at it, so the card's insight, click and targets must be about what they pointed at. Required for a new card when they have chosen to decide what their reviews ask about; omit otherwise."),
@@ -247,16 +247,16 @@ export const toolDefinitions = {
     }),
   ],
   reopen_challenge: [
-    "Set a challenge the learner has already done as this session's challenge again: the same problem with fresh starter code — for a review card, usually its own original challenge (read_record kind review names it). Use it when doing that exact problem again is the right test — a classic they should own, or a card whose problem target is the problem itself; write a fresh problem with set_challenge when the idea in a new story is the better test. Reword or add to it afterwards with edit_challenge if the statement should change.",
+    "Set a challenge the learner has already done as this session's challenge again: the same problem with fresh starter code. Their earlier code is not in the workspace.",
     z.object({
       challengeId: z.string().uuid().describe("The challenge to set again."),
       why: z.string().min(10).max(1_500).describe("Why this problem again, for this learner now. Stored with the challenge for later turns."),
       review: reviewLinkSchema.optional().describe("When this repeat is a review of a card, or practice going deeper on one. Its forLearner is the place to say what went wrong last time and what this attempt should show."),
-      replaceReason: z.string().min(3).max(1_500).optional().describe("Required only when a challenge is already open and this one is to take its place — say what the learner asked for."),
+      replaceReason: z.string().min(3).max(1_500).optional().describe("When a challenge is already open: why this one takes its place. Their attempt is closed as replaced and this one records it as its predecessor."),
     }),
   ],
   file_review: [
-    "File your judgement of a spaced-review card, from evidence you have read: usually an attempt at a challenge set as its review, or at the card's own challenge again, sometimes a conversation where they explained the idea. Compare what they did with what the card and its past reviews say they missed — read_record kind review, then read_attempt and read_submissions for the code — and decide for yourself how well the idea held. The rating moves the card's schedule, so it should be honest in both directions: a pass that still fumbled the step the review was about is not good. Omit rating to only rewrite the card's note without filing a review.",
+    "File your judgement of a spaced-review card from evidence you have read. The rating moves the card's schedule; held, missed and the summary are what the learner and later reviews see. Without a rating it only rewrites the card's note.",
     z.object({
       cardId: z.string().uuid().describe("The card being reviewed."),
       rating: z.enum(["again", "hard", "good", "easy"]).optional().describe("How well the idea held in this evidence, as a spaced-review grade you decide: again — they did not have it; hard — got there, but the weak spot showed again or needed help; good — held with ordinary friction; easy — clean and immediate. Omit to leave the schedule alone."),
@@ -269,15 +269,15 @@ export const toolDefinitions = {
       submissionId: z.string().uuid().optional().describe("The submission that carried the evidence, when one did. Omit for the latest."),
     }),
   ],
-  ask_user_question: ["Suspend the session for one focused learner answer, as a few mutually exclusive choices. Each option is one self-contained line the learner can scan — no subtitle, no second sentence — so write the whole choice into the label. The learner can always type their own answer instead.", askUserQuestionInputSchema],
+  ask_user_question: ["Pause the session for the learner's answer to a question with a few mutually exclusive choices, each one self-contained line. The learner can always type their own answer instead.", askUserQuestionInputSchema],
   teach_lesson: [
-    "Write the learner a lesson and put it in this conversation. Use it when the useful thing to hand them is an idea rather than a problem. Scale it to what is being taught: one or two pages for a single misconception, more only when the idea has that many parts. For a new mechanism start with a tiny input, show each state change and why, then name the invariant. Each page is one idea, markdown, may use fenced code and [[concept:slug|words]] or [[lesson:id|words]]. Every reference says why it is worth their time: url only for a page you actually fetched or know exists, reading for a book or chapter named from memory. Tag concepts in the same vocabulary as challenges. Point at it in your reply as [[lesson:<the id this returns>|its title]].",
+    "Write the learner a lesson — pages of markdown with fenced code, figures and [[concept:slug|words]] or [[lesson:id|words]] links — and put it in this conversation, where it stays. Returns its id for citing as [[lesson:<id>|title]]. References carry url only for a page you actually fetched or know exists.",
     lessonInputSchema,
   ],
-  load_skill: ["Load one of the skills listed under Skills in the journey document: returns that skill's full instructions. Load a skill before doing the work it describes, the first time in a turn you need it — its instructions are not in your context until you do. Loading the same skill twice in one turn returns the same text.", z.object({ name: z.string().min(1).max(48).describe("The skill's name exactly as listed under SKILLS.") })],
-  open_visualizer: ["Load the execution visualiser: Spar can run code under a real tracer and draw every variable, structure and pointer at any step, inline in this conversation. Call this whenever the learner is confused about what their code is actually doing at some point in the run — a value that is not what they expect, a loop that ends early, a pointer somewhere surprising, an off-by-one — or when a small idea would land better shown than described. Returns instructions and the visualiser's tools.", z.object({})],
+  load_skill: ["Load one of the skills listed under Skills in the journey document: returns that skill's full instructions, which are not in your context until loaded.", z.object({ name: z.string().min(1).max(48).describe("The skill's name exactly as listed under SKILLS.") })],
+  open_visualizer: ["Load the execution visualiser's instructions: Spar can run code under a real tracer and draw every variable, structure and pointer at any step, inline in this conversation.", z.object({})],
   visualize_run: [
-    "Trace one run. Either the learner's own file (from: \"attempt\") to explain why THEIR code does what it does, or a short snippet you write yourself (`code`) to illustrate an idea that is not in their file — a two-line snippet traced and drawn is a good answer to \"why does this give 4 and not 5\". Returns a compact digest of the run: which lines ran and how often, which way every branch went, what each variable started and ended as. Never trace a working solution to the challenge the learner is currently on.",
+    "Trace one run: the learner's own file (from: \"attempt\") or a short snippet you write (`code`). Returns a digest — which lines ran and how often, which way each branch went, what each variable started and ended as. A traced working solution to the challenge they have open would hand them the answer, so this traces their code or other code, not that.",
     z.object({
       from: z.enum(["attempt", "code"]).default("code").describe("attempt reads the learner's own implementation file in this session; code traces what you pass below."),
       code: z.string().max(4_000).optional().describe("The source to trace, when from is code. Keep it to the smallest program that shows the idea."),
@@ -286,7 +286,7 @@ export const toolDefinitions = {
     }),
   ],
   visualize_find: [
-    "Find the step that matters in a traced run. Every filter given must hold. Use this instead of guessing a step index or walking steps from zero — the interesting step in a 400-step run is never step 3.",
+    "Find the steps in a traced run that match every filter given.",
     z.object({
       runId: z.string().min(1).describe("From visualize_run."),
       variable: z.string().optional().describe("Steps where this local changed value, including where it first appeared."),
@@ -298,11 +298,11 @@ export const toolDefinitions = {
     }),
   ],
   visualize_read_step: [
-    "Read one instant of a traced run exactly: every local in scope, the objects those locals point at, the branch decision if there was one, and what changed since the step before. Read the steps that carry the explanation, not the run — visualize_find names them, and a digest plus two or three read steps is a finished answer.",
+    "Read one instant of a traced run: every local in scope, the objects they point at, the branch decision, and what changed since the step before.",
     z.object({ runId: z.string().min(1), step: z.number().int().min(0).describe("The step index, from visualize_find or the digest.") }),
   ],
   visualize_explain: [
-    "Direct the animation the learner sees. Pick the two to five steps that carry the explanation; for each, write one plain sentence, name what to draw, and say how long to hold on it. It plays inline in your reply at the pace you set, and they can pause and step through it. Afterwards write the one thing it is evidence for — do not describe the frames again in prose.",
+    "Direct the animation the learner sees: steps from a traced run, each with one plain sentence, what to draw and how long to hold. It plays inline in your reply, and they can pause and step through it.",
     z.object({
       runId: z.string().min(1),
       title: z.string().min(3).max(160).describe("What this shows, in the learner's language. Not the tool's name for it."),
@@ -316,8 +316,8 @@ export const toolDefinitions = {
       takeaway: z.string().max(1_000).optional().describe("Optional: the one sentence the whole sequence adds up to, shown under it."),
     }),
   ],
-  web_search: ["Search the web for current, external information: what a company's interviews actually cover, what a library's current API is, what a topic's standard formulation is. Returns titles, URLs, and short extracts. Use it to ground a goal in reality when the learner's own record cannot answer the question, and prefer one focused query over several vague ones.", z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(10).default(5) })],
-  web_fetch: ["Read one or more web pages in full, by URL. Use it after web_search has told you which page is worth reading. http and https only.", z.object({ urls: z.array(z.string().url()).min(1).max(5) })],
+  web_search: ["Search the web for current, external information. Returns titles, URLs and short extracts.", z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(10).default(5) })],
+  web_fetch: ["Read one or more web pages in full, by URL. http and https only.", z.object({ urls: z.array(z.string().url()).min(1).max(5) })],
   /**
    * Setting a real problem instead of writing one.
    *
@@ -328,7 +328,7 @@ export const toolDefinitions = {
    * statement about why, and the ledger would gain a challenge nobody can explain.
    */
   assign_practice_problem: [
-    "Set a real problem from any available provider as this session's challenge. Use the exact `source` and `slug` returned by search. Read it before assigning it. Its judge, difficulty, and the learner's earlier attempts can help you choose a direct exercise, prerequisite, transfer, or deliberate repeat. The journey gives the learner's rating and the window of provider ratings that fits them now; the result says where this problem sits against it. The host checks availability and grading, mounts the problem, and records the concepts and reason you provide.",
+    "Set a real problem from a provider as this session's challenge, by the exact `source` and `slug` a search returned. The host checks availability and grading, mounts the problem, and records the concepts and reason you give; the result states its price and the learner's predicted solve chance.",
     z.object({
       source: z.enum(["leetcode", "codeforces"]).describe("The provider identity returned by search. A slug is only unique inside its provider."),
       slug: z.string().min(1).max(120).describe("The problem's URL slug, exactly as the source gave it."),
@@ -337,11 +337,11 @@ export const toolDefinitions = {
       language: languageSchema.optional().describe("The language to write this challenge in. Omit only when the context's preferredLanguage is already right; name one whenever the learner has asked for a different language in this session, because that is what makes their request stick beyond this turn."),
       aim: z.object({
         ability: z.string().min(2).max(200).describe("The ability this trains, in a few words. Use the exact title of an ability in the journey when this trains it; a new title starts a new ability."),
-        gap: z.string().min(8).max(1_500).describe("The specific thing still uncertain about this learner that this problem probes."),
-        evidence: z.string().min(8).max(1_500).describe("What a pass or a fail will tell you."),
-      }).optional().describe("What this problem should reveal; it becomes the session's training target. Needed when the session has none yet, and worth giving whenever the aim has moved on from the current one."),
+        gap: z.string().max(1_500).optional().describe("What is still uncertain about this learner that this problem probes."),
+        evidence: z.string().max(1_500).optional().describe("What a pass or a fail will tell you."),
+      }).optional().describe("What this problem trains; it becomes the session's training target. Needed when the session has none yet."),
       levelReason: z.string().min(10).max(600).optional().describe("Why this problem's level is right here, when that is worth keeping with the choice."),
-      replaceReason: z.string().min(3).max(1_500).optional().describe("Required only when a challenge is already open and this problem is to take its place — say what the learner asked for. Their attempt is closed as replaced and this problem records it as its predecessor. Never set it to move someone off a challenge they did not ask to leave."),
+      replaceReason: z.string().min(3).max(1_500).optional().describe("When a challenge is already open: why this one takes its place. Their attempt is closed as replaced and this one records it as its predecessor."),
       review: reviewLinkSchema.optional().describe("When this problem is a spaced review of a card: it needs the card's idea, aimed at what it and its past reviews say they missed. The attempt is linked to the card, and when it ends you judge it with file_review."),
     }),
   ],
@@ -387,8 +387,8 @@ export const sourceToolDefinitions = Object.fromEntries(
 export function withActionTitle(schema: z.ZodTypeAny): z.ZodTypeAny {
   if (!(schema instanceof z.ZodObject)) return schema;
   return schema.extend({
-    [ACTION_TITLE_KEY]: z.string().min(3).max(70).describe(
-      "A short, specific title for this step, in the learner's language, shown as the row for this call in the transcript. Say what this particular call is for — \"Checking whether arrays have been tested\", \"Reading how you solved the window repair\" — not the tool's generic purpose. Sentence case, no trailing period, present participle while it runs.",
+    [ACTION_TITLE_KEY]: z.string().max(120).optional().describe(
+      "What this call is for, in a few words the learner sees in their thread, e.g. \"Reading how you solved the window repair\".",
     ),
   });
 }

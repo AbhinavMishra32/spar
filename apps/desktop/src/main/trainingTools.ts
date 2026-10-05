@@ -64,7 +64,7 @@ function followsLesson(local: LocalStore, concepts: ConceptTagInput[], trackId: 
   if (!found) return {};
   return {
     followsLesson: { id: found.id, title: found.title, taughtAt: found.taughtAt },
-    followsLessonNote: `This challenge shares a concept tag with "${found.title}". Decide whether the lesson helps with this step; if it does, explain the connection and point to [[lesson:${found.id}|${found.title}]].`,
+    followsLessonNote: `This challenge shares a concept tag with the lesson "${found.title}", cited as [[lesson:${found.id}|${found.title}]].`,
   };
 }
 
@@ -259,7 +259,7 @@ export async function executeTrainingTool(
   if (name === "create_question") {
     const activeQuestion = openChallenge(local, sessionId);
     if (activeQuestion) {
-      return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${activeQuestion.title}) is already active for this session. End this agent turn instead of publishing another challenge.` }] } };
+      return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: `A playable challenge (${activeQuestion.title}) is already active for this session, so this one was not published.` }] } };
     }
     const compiled = await compileCandidate(input, sessionId, workspaces, runner, "authored", progress);
     if (!compiled.report.valid) return { status: "invalid", report: compiled.report };
@@ -286,7 +286,7 @@ export async function executeTrainingTool(
     if (!stillActive || stillActive.id !== activeQuestion.id) return { status: "invalid", report: { valid: false, checks: [{ name: "session lifecycle", passed: false, detail: "The active challenge changed while this replacement compiled. The candidate was discarded." }] } };
     await workspaces.replaceAll(sessionId, { ...compiled.design.starterFiles, ...compiled.design.visibleTests });
     commitCandidateTarget(local, sessionId, trackId, value);
-    const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? "The learner asked the agent to adapt the challenge."), conceptTags(value.concepts), undefined, String(value.why ?? "").trim());
+    const question = local.replaceQuestion(sessionId, compiled.design, compiled.report, String(value.reason ?? ""), conceptTags(value.concepts), undefined, String(value.why ?? "").trim());
     if (compiled.design.lens) local.logLens(sessionId, compiled.design.lens.id, "challenge", `"${compiled.design.title}" — ${compiled.design.lens.sideQuest}`);
     rememberTrackLanguage(local, trackId, value);
     return { status: "playable", question, replacedQuestionId: activeQuestion.id, report: compiled.report, ...followsLesson(local, conceptTags(value.concepts), trackId), ...linkReview(local, sessionId, question.id, value.review) };
@@ -294,6 +294,11 @@ export async function executeTrainingTool(
   if (name === "edit_challenge") return editChallenge(local, sessionId, value, workspaces, runner, progress);
   if (name === "review_solution") {
     const attemptId = String(value.attemptId);
+    /* Reviewing can reopen the attempt, so it is held to this session's own.
+       An attempt still open is allowed: a run that passed every case and failed
+       only its exit code is settled here. */
+    const subject = local.attemptSubject(attemptId);
+    if (!subject || subject.session_id !== sessionId) return { review: null, note: "No attempt with that id in this session." };
     const verdict = value.verdict === "rework" ? "rework" : "accepted";
     const reasons = Array.isArray(value.reasons) ? value.reasons.map((entry) => String(entry)).slice(0, 6) : [];
     logLensNotes(local, sessionId, value.lenses);
@@ -381,7 +386,7 @@ async function assignPracticeProblem(
   const activeQuestion = openChallenge(local, sessionId);
   const replaceReason = String(value.replaceReason ?? "").trim();
   if (activeQuestion && !replaceReason) {
-    return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already active for this session. If the learner asked for a different problem, assign this one again with \`replaceReason\` and it will supersede theirs; otherwise end this agent turn instead of assigning another problem.`);
+    return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already active for this session, so this one was not assigned. Passing \`replaceReason\` supersedes it; their attempt is closed as replaced.`);
   }
 
   let mounted: Awaited<ReturnType<PracticeService["mount"]>>;
@@ -407,11 +412,11 @@ async function assignPracticeProblem(
      set_challenge's does. Before this, only set_challenge could create a target,
      so the first move of every session had to be a Spar-written problem. */
   const aim = value.aim && typeof value.aim === "object" ? value.aim as { ability?: unknown; gap?: unknown; evidence?: unknown } : null;
-  if (aim && typeof aim.ability === "string" && typeof aim.gap === "string" && typeof aim.evidence === "string") {
-    commitCandidateTarget(local, sessionId, local.trackIdForSession(sessionId), { trainingTarget: { ability: aim.ability, specificGap: aim.gap, desiredEvidence: aim.evidence, avoidTesting: [] } });
+  if (aim && typeof aim.ability === "string" && aim.ability.trim()) {
+    commitCandidateTarget(local, sessionId, local.trackIdForSession(sessionId), { trainingTarget: { ability: aim.ability, specificGap: typeof aim.gap === "string" ? aim.gap : "", desiredEvidence: typeof aim.evidence === "string" ? aim.evidence : "", avoidTesting: [] } });
   }
   const target = local.latestTarget(sessionId);
-  if (!target) return refuse("training target", "This session has no training target yet. Pass aim with the ability, the gap and the evidence this problem is for.");
+  if (!target) return refuse("training target", "This session has no training target yet; aim sets one.");
   const ability = local.readAbilityDetail(String(target.ability_id));
   const targetSnapshot = {
     abilityTitle: String(target.ability_title),
@@ -509,7 +514,7 @@ async function reopenChallenge(
 
   const activeQuestion = openChallenge(local, sessionId);
   const replaceReason = String(value.replaceReason ?? "").trim();
-  if (activeQuestion && !replaceReason) return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already open. Set this one with replaceReason only if the learner asked to leave it; otherwise end the turn.`);
+  if (activeQuestion && !replaceReason) return refuse("session lifecycle", `A playable challenge (${activeQuestion.title}) is already open, so this one was not set. Passing replaceReason supersedes it; their attempt is closed as replaced.`);
   const stored = local.questionDesign(challengeId);
   if (!stored) return refuse("challenge", "That challenge has no stored design to set again. Write a fresh problem with set_challenge.");
   const target = local.questionTarget(challengeId);
@@ -569,7 +574,7 @@ function searchRecord(local: LocalStore, value: Record<string, unknown>, trackId
   if (kinds.has("concepts")) result.concepts = local.conceptGraph(query, Math.min(14, limit * 2), trackId);
   if (kinds.has("lessons")) result.lessons = local.searchLessons(query, limit);
   const found = Object.values(result).some((entry) => Array.isArray(entry) && entry.length > 0);
-  return { ...result, note: found ? "Patterns and observations are your own earlier readings of this learner; one new matching observation promotes a hypothesis to a pattern. For a concept, read_record kind concept splits the evidence by sub-concept." : "Nothing in the record matches. An untested concept is not a weak one." };
+  return { ...result, note: found ? "Patterns and observations are your own earlier readings of this learner. For a concept, read_record kind concept splits the evidence by sub-concept." : "Nothing in the record matches. An untested concept is not a weak one." };
 }
 
 function readRecord(local: LocalStore, value: Record<string, unknown>, trackId: string | null) {
@@ -598,7 +603,7 @@ function readRecord(local: LocalStore, value: Record<string, unknown>, trackId: 
   }
   if (value.kind === "concept") {
     const report = local.conceptEvidenceReport(id, 3, trackId);
-    return { concepts: report, note: report.length ? "Read subConcepts before the totals: an area's average hides the one that is failing." : "No tagged challenges under this concept yet." };
+    return { concepts: report, note: report.length ? "subConcepts break the totals down; an area's average can hide one sub-concept that is failing." : "No tagged challenges under this concept yet." };
   }
   if (value.kind === "review") return readReview(local, id);
   return { error: "unknown-kind", note: "kind is one of challenge, ability, lesson, concept, review." };
@@ -644,7 +649,7 @@ function readReview(local: LocalStore, cardId: string) {
 /* Reviews happen in review sessions, which the learner opens from History. A
    training session is theirs for the next step, and a review slipped into one
    is a step they did not ask to spend. */
-const NOT_A_REVIEW_SESSION = "This is a training session, and reviews happen only in review sessions, which the learner starts from History. Do not set or judge reviews here; if they ask to review something, tell them to start a review session.";
+const NOT_A_REVIEW_SESSION = "This is a training session. Reviews are linked and filed in review sessions, which the learner starts from History.";
 
 const RATING_NAME = { 1: "again", 2: "hard", 3: "good", 4: "easy" } as const;
 
@@ -814,19 +819,21 @@ async function readAttemptForAgent(local: LocalStore, value: Record<string, unkn
  *
  * Refused for anything but a pass: a card is a claim that there is an idea here
  * the learner got to, and an abandoned or failing attempt has not got there yet.
- * An assisted breakthrough is capped at Hard for its first grade, whatever the
- * agent proposed — the idea arrived from outside, so the first review comes
- * early enough to find out whether it stayed.
+ * The first grade is the agent's: it read the solve, and the host capping it
+ * for an assisted breakthrough second-guessed a judgement made on more evidence.
  */
 function recordInsight(local: LocalStore, value: Record<string, unknown>, sessionId: string) {
   const attemptId = String(value.attemptId ?? "") || activeAttemptId(local, sessionId);
   const subject = attemptId ? local.attemptSubject(attemptId) : null;
   if (!subject) return { status: "invalid", note: "No attempt to file an insight against. Name the solved attempt." };
-  const outcome = [...local.readAttempt(attemptId)].reverse().find((event) => event.type === "attempt_completed")?.payload.outcome;
-  if (outcome !== "passed") return { status: "invalid", note: "That attempt has not passed, so there is no solved idea to file yet. File the insight on the turn after they solve it." };
+  /* The latest of a completion and a reopen decides: a solve that review_solution
+     sent back reads "passed" in its completion event, but it is open again. */
+  const latest = [...local.readAttempt(attemptId)].reverse().find((event) => event.type === "attempt_completed" || (event.type === "attempt_started" && event.payload.reopened === true));
+  const outcome = latest?.type === "attempt_completed" ? latest.payload.outcome : null;
+  if (outcome !== "passed") return { status: "invalid", note: latest?.type === "attempt_started" ? "That attempt was reopened for rework, so it is not solved yet." : "That attempt has not passed, so there is no solved idea to file yet." };
   const remember = typeof value.remember === "string" ? value.remember.trim() : "";
   if (!remember && reviewTargetMode(local) === "ask" && !local.reviews.cardForQuestion(subject.question_id)) {
-    return { status: "invalid", note: "This learner decides what their reviews ask about. Ask them with ask_user_question what they want to remember from this problem — options named from this solve (the step that cracked it, the general pattern, the problem itself), multiple allowed, custom on — then file the card about what they chose, with targets from their answer and their words as remember." };
+    return { status: "invalid", note: "This learner chose to decide what their reviews ask about, so the card needs their answer first: file it with `remember` in their words and `targets` from what they chose." };
   }
   const named = stringList(value.concepts);
   const slugs = named.length
@@ -835,7 +842,7 @@ function recordInsight(local: LocalStore, value: Record<string, unknown>, sessio
   const click = value.click && typeof value.click === "object" ? value.click as Record<string, unknown> : {};
   const independence = value.independence === "independent" || value.independence === "assisted" ? value.independence : "unknown";
   const proposed = ({ again: 1, hard: 2, good: 3, easy: 4 } as const)[String(value.firstGrade) as "again" | "hard" | "good" | "easy"] ?? 3;
-  const firstRating = independence === "assisted" ? Math.min(proposed, 2) as 1 | 2 : proposed;
+  const firstRating = proposed;
   const pitfalls = Array.isArray(value.pitfalls) ? value.pitfalls.flatMap((item) => {
     if (!item || typeof item !== "object") return [];
     const row = item as Record<string, unknown>;
@@ -867,7 +874,6 @@ function recordInsight(local: LocalStore, value: Record<string, unknown>, sessio
     firstReviewInDays: created ? days : null,
     dueAt: card.dueAt,
     targets: card.targets,
-    ...(firstRating !== proposed ? { gradeCapped: "The breakthrough was assisted, so the first grade was capped at hard and the first review comes sooner." } : {}),
     related,
     note: created
       ? `Filed. The first review is due in about ${days} day${days === 1 ? "" : "s"}.${related.length ? " Related cards on the same pattern are listed." : ""}`

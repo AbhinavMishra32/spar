@@ -282,7 +282,7 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
     const result = deps.store.abandonAttempt(attemptId, reason);
     if (result.sessionId !== sessionId) throw new Error("Attempt does not belong to this session");
     const reviewed = deps.store.reviews.reviewOfChallenge(result.questionId);
-    deps.store.addMessage(sessionId, "system", `The learner gave up on this challenge${reason ? `: ${reason}` : "."}${reviewed && reviewed.purpose === "review" && !reviewed.reviewed ? ` It was a review of card ${reviewed.card.id} ("${reviewed.card.title}"); judge it with file_review.` : ""}`);
+    deps.store.addMessage(sessionId, "system", `The learner gave up on this challenge${reason ? `: ${reason}` : "."}${reviewed && reviewed.purpose === "review" && !reviewed.reviewed ? ` It was a review of card ${reviewed.card.id} ("${reviewed.card.title}").` : ""}`);
   });
 
   ipcMain.handle(ipc.attemptReset, (_event, value) => {
@@ -961,13 +961,13 @@ export function installIpc(deps: { store: LocalStore; accounts: { folders: Accou
     /* The learner chose to say what their reviews ask about. The question goes
        through the same ask_user_question as any other, and record_insight is
        refused without their answer, so the choice holds even if this is missed. */
-    const askToRemember=reviewTargetMode(deps.store)==="ask"?" The learner chose to decide what their reviews ask about: before record_insight, ask them with ask_user_question what they want to remember from this problem (multiple answers and custom answers on, options named from this solve: the step that cracked it, the general pattern, the problem itself), write the card about what they pointed at, and pass their words as remember.":"";
+    const askToRemember=reviewTargetMode(deps.store)==="ask"?" The learner chose to decide what their reviews ask about, so an insight card for this solve needs their answer, passed as record_insight's remember.":"";
     const verdict=source?`${source.source==="leetcode"?"LeetCode":"Codeforces"} accepted the submission against every hidden case it has`:`every visible and hidden test passes${requirementsNote(bundle.design)}`;
     const reviewed=deps.store.reviews.reviewOfChallenge(bundle.question_id);
     const reviewNote=!reviewed?"":reviewed.purpose==="deeper"
-      ?` This was practice going deeper on card ${reviewed.card.id} ("${reviewed.card.title}")${reviewed.focus?`, aimed at: ${reviewed.focus}`:""}. Read how they did it and decide whether the weak spot is handled now — more practice, back to the card, or on to the next one.`
-      :reviewed.reviewed?"":` This challenge was set as a review of card ${reviewed.card.id} ("${reviewed.card.title}")${reviewed.focus?`, to see: ${reviewed.focus}`:""}. Read how they did it — the attempt and the code — against the card and its earlier reviews, and judge it with file_review.`;
-    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId}: ${verdict}.${complexityNote}${reviewNote}${lensNote(deps.store,sessionId)}${reviewed?"":askToRemember}`,"system","attempt-complete");
+      ?` This was practice going deeper on card ${reviewed.card.id} ("${reviewed.card.title}")${reviewed.focus?`, aimed at: ${reviewed.focus}`:""}. `
+      :reviewed.reviewed?"":` This challenge was set as a review of card ${reviewed.card.id} ("${reviewed.card.title}")${reviewed.focus?`, to see: ${reviewed.focus}`:""}.`;
+    void startAgentTurn(sessionId,`The learner solved attempt ${attemptId}: ${verdict}.${complexityNote}${reviewNote}${reviewed?"":askToRemember}`,"system","attempt-complete");
   };
   const submitToSource = async (input: { sessionId: string; attemptId: string; bundle: NonNullable<ReturnType<LocalStore["submissionBundle"]>>; source: NonNullable<NonNullable<ReturnType<LocalStore["readSession"]>>["question"]>["source"] }) => {
     const { sessionId, attemptId, bundle } = input;
@@ -1298,19 +1298,10 @@ const MAX_SUBMIT_OUTPUT = 200_000;
  * with the event is what makes the review a check against something specific
  * rather than a general impression of the code.
  */
-/** The learner's lenses, named on the turn that reads their code: feedback is
- *  where mention and teach happen, and a solve is the moment there is code to
- *  read through them. */
-function lensNote(store: LocalStore, sessionId: string): string {
-  const lenses = store.challengeMixForSession(sessionId).lenses;
-  if (!lenses.length) return "";
-  return ` Read their code through the learner's lenses too (${lenses.map((lens) => `${lens.label ?? lens.id} at ${lens.depth}`).join(", ")}): put what it shows in review_solution's lenses, and bring into your reply what is worth their hearing.`;
-}
-
 function requirementsNote(design: { solutionRequirements?: string[] | undefined }): string {
   const requirements = design.solutionRequirements ?? [];
-  if (!requirements.length) return " Review how they wrote it before you write anything down: read their code, say what approach and complexity it actually is, and accept it unless it defeats the point of the exercise.";
-  return ` This challenge required: ${requirements.map((entry) => `"${entry}"`).join("; ")}. Check their code against those before you write anything down: passing the tests the wrong way is not practice for the thing this challenge was for.`;
+  if (!requirements.length) return "";
+  return `. This challenge required: ${requirements.map((entry) => `"${entry}"`).join("; ")}`;
 }
 
 function runOutput(stdout: string, stderr: string) {

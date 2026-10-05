@@ -150,7 +150,13 @@ describe("lenses across the whole Track", () => {
     try {
       const { sessionId } = store.createSession("Trees");
       store.setSessionChallengeMix(sessionId, drill);
-      await executeTrainingTool("review_solution", { attemptId: "00000000-0000-4000-8000-000000000000", verdict: "accepted", observedComplexity: "O(n)", approach: "Recursion over both children", reasons: ["Clean recursion"], lenses: [{ id: "lang-idioms", note: "sum() over a generator reads better" }, { id: "off-lens", note: "should be dropped" }] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient).catch(() => undefined);
+      store.setTrainingTarget(sessionId, { ability: "Trees", specificGap: "Sum", desiredEvidence: "Returns the sum", avoidTesting: [] });
+      const { attemptId } = store.createQuestion(sessionId, {
+        title: "Tree sum", language: "python", kind: "function", difficulty: "foundation", statement: "Return the sum of every value in a binary tree.",
+        starterFiles: { "solution.py": "" }, referenceFiles: { "solution.py": "" }, visibleTests: { "test_solution.py": "" }, hiddenTests: { "test_hidden.py": "" },
+        knownIncorrectFiles: [{ "solution.py": "" }], runCommand: "pytest", accidentalDifficulty: [], expectedFailureSignatures: ["off by one"],
+      }, { valid: true });
+      await executeTrainingTool("review_solution", { attemptId, verdict: "accepted", observedComplexity: "O(n)", approach: "Recursion over both children", reasons: ["Clean recursion"], lenses: [{ id: "lang-idioms", note: "sum() over a generator reads better" }, { id: "off-lens", note: "should be dropped" }] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient).catch(() => undefined);
       expect(store.lensLog(sessionId)).toEqual({ "lang-idioms": [expect.objectContaining({ kind: "feedback", note: "sum() over a generator reads better" })] });
     } finally { store.close(); }
   });

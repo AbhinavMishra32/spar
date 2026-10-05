@@ -81,7 +81,7 @@ describe("reading back what the agent already worked out", () => {
     }
   });
 
-  it("finds an earlier hypothesis through the record search, so a second sighting can promote it", async () => {
+  it("finds an earlier pattern through the record search, so a second sighting can be joined to it", async () => {
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Practise variable windows");
@@ -89,23 +89,19 @@ describe("reading back what the agent already worked out", () => {
       const first = store.createQuestion(sessionId, design("Shrink until valid"), { valid: true });
       const firstEvent = observed(store, sessionId, first.attemptId, target.abilityId, "Restored the invariant once and stopped shrinking.", "pattern");
       store.completeAttempt(first.attemptId, "failed");
-      /* One attempt cannot make a pattern, by design — so this is exactly the
-         state the next turn has to be able to find and finish. */
-      expect(store.listPatterns()[0]?.status).toBe("hypothesis");
+      /* The agent's status stands; what the next turn needs is to find it. */
+      expect(store.listPatterns()[0]?.status).toBe("pattern");
 
       const found = await executeTrainingTool("search_record", { query: "window invariant restoration shrinking" }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { abilities: Array<{ id: string }>; patterns: Array<{ title: string; status: string }>; observations: Array<{ statement: string }>; challenges: unknown[]; note: string };
       expect(found.abilities.map((row) => row.id)).toContain(target.abilityId);
-      expect(found.patterns).toMatchObject([{ title: "Stops after one shrink", status: "hypothesis" }]);
+      expect(found.patterns).toMatchObject([{ title: "Stops after one shrink", status: "pattern" }]);
       expect(found.observations[0]?.statement).toContain("stopped shrinking");
-      expect(found.note).toContain("promotes a hypothesis");
+      expect(found.note).toContain("your own earlier readings");
 
       const narrowed = await executeTrainingTool("search_record", { query: "window invariant restoration shrinking", kinds: ["patterns"] }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as Record<string, unknown>;
       expect(Object.keys(narrowed).sort()).toEqual(["note", "observations", "patterns"]);
 
-      /* Promotion needs both events named in the same call, which is the whole
-         reason the first one has to be findable: an agent that cannot retrieve
-         its own earlier observation can only ever link the attempt in front of
-         it, and the host will refuse that for as long as it keeps happening. */
+      /* Finding the first observation is what lets the second be joined to it. */
       const second = store.createQuestion(sessionId, design("Shrink an event stream"), { valid: true });
       observed(store, sessionId, second.attemptId, target.abilityId, "The same single-shrink restoration appeared in a different structure.", "pattern", [firstEvent]);
       expect(store.listPatterns()[0]).toMatchObject({ status: "pattern", evidenceCount: 2 });
@@ -538,7 +534,7 @@ describe("filing an insight when the learner decides what to remember", () => {
     rubric: ["add the incoming item", "drop the outgoing item"], transfer: ["Average of every block of k"], firstGrade: "good",
   };
 
-  it("sends the agent to ask first, then keeps the learner's words on the card", async () => {
+  it("needs the learner's answer first, then keeps their words on the card", async () => {
     const store = new LocalStore(":memory:");
     try {
       const { sessionId } = store.createSession("Practise windows");
@@ -549,7 +545,7 @@ describe("filing an insight when the learner decides what to remember", () => {
 
       const refused = await executeTrainingTool("record_insight", { ...card, attemptId: solved.attemptId }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; note: string };
       expect(refused.status).toBe("invalid");
-      expect(refused.note).toContain("ask_user_question");
+      expect(refused.note).toContain("remember");
 
       const filed = await executeTrainingTool("record_insight", { ...card, attemptId: solved.attemptId, targets: ["turning-point"], remember: "Moving the max check after the first window is what fixed it" }, sessionId, store, {} as WorkspaceService, {} as UtilityClient) as { status: string; cardId: string };
       expect(filed.status).toBe("filed");

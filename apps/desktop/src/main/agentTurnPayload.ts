@@ -150,7 +150,7 @@ export function journeyDocument(input: TurnPayloadInput): string {
   }
 
   if (target) {
-    sections.push(`## Current training target\n- Ability: ${String(target.ability_title)} (${ability?.ability.status ?? "uncertain"})\n- Gap: ${String(target.specific_gap)}\n- Evidence sought: ${String(target.desired_evidence)}\n- Set ${ago(String(target.created_at))}. set_challenge's aim replaces it.`);
+    sections.push([`## Current training target`, `- Ability: ${String(target.ability_title)} (${ability?.ability.status ?? "uncertain"})`, target.specific_gap ? `- Gap: ${String(target.specific_gap)}` : "", target.desired_evidence ? `- Evidence sought: ${String(target.desired_evidence)}` : "", `- Set ${ago(String(target.created_at))}. A new aim replaces it.`].filter(Boolean).join("\n"));
   }
 
   const abilities = store.listAbilities(trackId).slice(0, 8);

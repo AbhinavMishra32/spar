@@ -329,7 +329,7 @@ it("earns an ability from evidence and keeps the date it was earned",()=>{const 
   const forming=store.upsertAbility({title:"Two-pointer passes",markdown:"# Two-pointer passes\n\nIntroduced as a hypothesis from the stated goal.",evidenceEventIds:[]});
   // Introduced is not earned. Nothing has been observed yet, so it says so.
   expect(forming).toMatchObject({status:"uncertain",earnedAt:null});
-  const earned=store.upsertAbility({title:"Two-pointer passes",markdown:"# Two-pointer passes\n\nHolds two indices under a rule.",summary:"You can hold two indices under a rule instead of scanning twice.",evidenceEventIds:[history.evidence.id],concepts:[{slug:"two-pointers"},{slug:"index-arithmetic"}],practice:["I want to try two pointers on a linked list instead of an array."]});
+  const earned=store.upsertAbility({title:"Two-pointer passes",markdown:"# Two-pointer passes\n\nHolds two indices under a rule.",summary:"You can hold two indices under a rule instead of scanning twice.",status:"developing",evidenceEventIds:[history.evidence.id],concepts:[{slug:"two-pointers"},{slug:"index-arithmetic"}],practice:["I want to try two pointers on a linked list instead of an array."]});
   expect(earned).toMatchObject({status:"developing",summary:"You can hold two indices under a rule instead of scanning twice."});
   expect(earned.earnedAt).not.toBeNull();
   expect(earned.concepts.map((concept)=>concept.slug).sort()).toEqual(["index-arithmetic","two-pointers"]);
@@ -576,14 +576,17 @@ describe("adaptive product state",()=>{
     expect(store.todayRecommendation()).toEqual({id:expect.any(String),trackId:created.track.id,trackTitle:"Codeforces Climb",sessionId:created.sessionId,questionId:expect.any(String),challengeTitle:"Hidden transit map",abilityId:target.abilityId,abilityTitle:"Graph recognition"});
   }finally{store.close();}});
 
-  it("requires independent attempts before promoting an observation to a pattern",()=>{const store=new LocalStore(":memory:");try{
+  /* The agent's status for a pattern stands. The host used to downgrade it
+     unless the one call cited two attempts, which demoted established
+     patterns whenever only the newest event was cited. */
+  it("keeps the agent's pattern status and joins the attempts behind it",()=>{const store=new LocalStore(":memory:");try{
     const {sessionId}=store.createSession("Improve boundary-case reasoning");
     const target=store.setTrainingTarget(sessionId,{ability:"Boundary-case reasoning",specificGap:"Empty and singleton inputs",desiredEvidence:"Handles boundaries before the main loop",avoidTesting:[]});
     store.ensureAbility(target.abilityId,target.abilityTitle);
     const first=store.createQuestion(sessionId,design("Empty sequence"),{valid:true});
     const firstEvidence=store.appendNextEvent({id:randomUUID(),attemptId:first.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});
     store.updateAbility({abilityId:target.abilityId,markdown:"# Boundary-case reasoning\n\nAn empty-input miss happened once.",evidenceEventIds:[firstEvidence.id],evidence:[{eventId:firstEvidence.id,statement:"The empty input bypassed the intended initialization.",polarity:"contradictory",independence:"independent",strength:0.7}],pattern:{title:"Boundary assumptions",description:"Initialization assumes at least one item.",status:"pattern",evidenceEventIds:[firstEvidence.id]}});
-    expect(store.listPatterns()[0]?.status).toBe("hypothesis");
+    expect(store.listPatterns()[0]?.status).toBe("pattern");
     store.completeAttempt(first.attemptId,"failed");
     store.setTrainingTarget(sessionId,{ability:"Boundary-case reasoning",specificGap:"Zero-length state",desiredEvidence:"Separates empty state from the ordinary transition",avoidTesting:[]});
     const second=store.createQuestion(sessionId,design("Empty event stream"),{valid:true});
@@ -606,13 +609,13 @@ describe("adaptive product state",()=>{
      whichever way they had gone — so a learner could fail the same thing four
      times and the ledger would call it independent, then a rating built on that
      word would report it as a number somebody had measured. */
-  it("does not promote an ability on the volume of evidence against it",()=>{const store=new LocalStore(":memory:");try{
+  it("leaves the status to the agent, and reads volume of evidence against it as low proficiency",()=>{const store=new LocalStore(":memory:");try{
     const {sessionId}=store.createSession("Practise variable windows");
     const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores across several shrinks",avoidTesting:[]});
     store.ensureAbility(target.abilityId,target.abilityTitle);
     const failures=[0,1,2,3].map(()=>{const question=store.createQuestion(sessionId,design(`Shrink until valid ${randomUUID().slice(0,8)}`),{valid:true});const event=store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"failed"},source:"system",schemaVersion:1});store.completeAttempt(question.attemptId,"failed");return event.id;});
     store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nFour attempts, none of them restoring more than once.",evidenceEventIds:failures});
-    expect(store.readAbility(target.abilityId)).toMatchObject({status:"developing"});
+    expect(store.readAbility(target.abilityId)).toMatchObject({status:"uncertain"});
     const state=store.abilityStates()[0]!;
     expect(state.evidenceCount).toBe(4);
     /* Plenty of observation, all of it pointing the other way: confident, and
@@ -651,7 +654,7 @@ describe("adaptive product state",()=>{
     const target=store.setTrainingTarget(sessionId,{ability:"Variable-window restoration",specificGap:"Repeated shrinking",desiredEvidence:"Restores the invariant across several shrinks",avoidTesting:[]});
     const question=store.createQuestion(sessionId,design("Shrink until valid"),{valid:true});
     const events=[0,1,2].map(()=>store.appendNextEvent({id:randomUUID(),attemptId:question.attemptId,type:"submission_evaluated",occurredAt:new Date().toISOString(),payload:{outcome:"passed"},source:"system",schemaVersion:1}));
-    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nShrinks until the property holds again.",evidenceEventIds:events.map((event)=>event.id)});
+    store.updateAbility({abilityId:target.abilityId,markdown:"# Variable-window restoration\n\nShrinks until the property holds again.",status:"independent",evidenceEventIds:events.map((event)=>event.id)});
     expect(store.readAbility(target.abilityId)).toMatchObject({status:"independent"});
     /* Today changes nothing; the cutoff is what changes something. Passing the
        clock in beats waiting 45 days for the test to be meaningful. */

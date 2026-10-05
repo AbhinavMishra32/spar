@@ -43,6 +43,7 @@ const IDENTICAL_TOOL_CALL_LIMIT = 8;
 /** A read with the same arguments returns the same answer; the third ask is a
  *  symptom. Refused with a reason rather than withdrawn from the table. */
 const REPEATED_CALL_LIMIT = 2;
+const LIVE_READS = new Set(["read_attempt", "read_submissions"]);
 /** set_challenge calls per turn. Each owns its own repairs; three lets the coach
  *  rethink the brief after a rejection without becoming an unbounded loop. */
 const CHALLENGE_BUILD_LIMIT = 3;
@@ -345,7 +346,7 @@ async function callHostTool(runId: string, sessionId: string, name: string, inpu
 function forModel(name: string, value: unknown): unknown {
   if (name === "update_notebook" && value && typeof value === "object") {
     const { markdown: _markdown, previous: _previous, previousAuthor, ...rest } = value as Record<string, unknown>;
-    return { ...rest, ...(previousAuthor === "learner" ? { note: "Saved over a version the learner wrote. Keep what they said unless it is no longer true." } : {}) };
+    return { ...rest, ...(previousAuthor === "learner" ? { note: "Saved over a version the learner wrote." } : {}) };
   }
   if (name === "edit_challenge" && value && typeof value === "object") {
     const { before: _before, after: _after, ...rest } = value as Record<string, unknown>;
@@ -376,8 +377,8 @@ function builderMessage(brief: SetChallengeInput, context: BuilderContext): stri
   const sections = [
     "# Brief from the coach",
     `Mode: ${brief.mode}. Language: ${brief.language}. Kind: ${brief.kind}. Difficulty: ${brief.difficulty} (rated about ${PRICE[brief.difficulty]}).`,
-    `It trains: ${brief.aim.ability}. The gap it probes: ${brief.aim.gap}`,
-    `What is new relative to the learner's last challenge: ${brief.stretch}`,
+    `It trains: ${brief.aim.ability}.${brief.aim.gap ? ` The gap it probes: ${brief.aim.gap}` : ""}`,
+    brief.stretch ? `What is new relative to the learner's last challenge: ${brief.stretch}` : "",
     `Concepts: ${brief.concepts.map((tag) => tag.slug).join(", ")}.`,
     brief.solutionRequirements?.length ? `The solution must be written this way: ${brief.solutionRequirements.join("; ")}. The host prints these under the statement, so leave them out of the statement itself; the reference and tests still follow them.` : "",
     `Task:\n${brief.brief}`,
@@ -422,7 +423,7 @@ async function setChallenge(
   const { actionTitle, arguments: args } = splitActionTitle(input);
   const brief = setChallengeInputSchema.parse(args);
   const hostName = brief.mode === "new" ? "create_question" : "replace_current_question";
-  const titled = { label: brief.stretch.slice(0, 120), ...(actionTitle ? { actionTitle } : {}) };
+  const titled = { label: (brief.stretch || brief.brief).slice(0, 120), ...(actionTitle ? { actionTitle } : {}) };
   const model = { model: context.provider.model, provider: context.provider.provider };
   const emit = (event: Record<string, unknown>) => parentPort.postMessage({ kind: "event", requestId: runId, event });
   const progress = (detail: string) => emit({ type: "tool", tool: "set_challenge", phase: "progress", callId: id, detail });
@@ -478,11 +479,11 @@ async function setChallenge(
       kind: brief.kind,
       difficulty: brief.difficulty,
       concepts: brief.concepts,
-      requiresComplexityAnalysis: brief.requiresComplexityAnalysis,
+      requiresComplexityAnalysis: brief.requiresComplexityAnalysis ?? (brief.kind === "function" || brief.kind === "module"),
       ...(brief.solutionRequirements?.length ? { solutionRequirements: brief.solutionRequirements } : {}),
-      why: brief.why,
-      trainingTarget: { ability: brief.aim.ability, specificGap: brief.aim.gap, desiredEvidence: brief.aim.evidence, avoidTesting: [] },
-      ...(hostName === "replace_current_question" ? { reason: brief.reason ?? brief.stretch } : {}),
+      why: brief.why ?? "",
+      trainingTarget: { ability: brief.aim.ability, specificGap: brief.aim.gap ?? "", desiredEvidence: brief.aim.evidence ?? "", avoidTesting: [] },
+      ...(hostName === "replace_current_question" ? { reason: brief.reason ?? brief.stretch ?? "" } : {}),
       ...(brief.review ? { review: brief.review } : {}),
       ...(brief.lens ? { lens: brief.lens } : {}),
     };
@@ -620,7 +621,9 @@ async function runTurn(request: Request, stopped: AbortSignal) {
     let identical = 0;
     for (let index = signatures.length - 1; index >= 0 && signatures[index] === signature; index -= 1) identical += 1;
     if (identical >= IDENTICAL_TOOL_CALL_LIMIT) loopDetected = `Spar stopped after ${identical} identical ${name} calls in a row; the provider looks stuck in a loop.`;
-    if (!VISUALIZER_TOOLS.includes(name) && (callCounts.get(signature) ?? 0) >= REPEATED_CALL_LIMIT) {
+    /* Reads of the learner's live attempt return new data whenever they run or
+       submit mid-turn, so the same arguments are not the same call. */
+    if (!VISUALIZER_TOOLS.includes(name) && !LIVE_READS.has(name) && (callCounts.get(signature) ?? 0) >= REPEATED_CALL_LIMIT) {
       throw new Error(`This exact ${name} call already returned twice this turn. Use its result, or call it with different arguments.`);
     }
     callCounts.set(signature, (callCounts.get(signature) ?? 0) + 1);
