@@ -159,10 +159,10 @@ The learner reads it the way they would read a problem on LeetCode, Codeforces o
 - A situation helps when it makes the rule easier to hold, as stones smashed in pairs or rows of soldiers do, and gets in the way when it is decoration. Your call; vary it across problems. Define every non-obvious term in words before using it, and make the definition give the numbers the reference computes: check it on the smallest inputs (empty, one element, a single node), where off-by-one definitions show; a height counted in edges cannot give an empty tree 0 and a leaf 1.
 - Rules sit in the sentences that need them. A short list suits parallel cases of one definition; a column of separate one-line orders reads as a spec sheet rather than a problem.
 - The starter shows the signature, so the statement names it only when the starter leaves something ambiguous.
-- **Examples**: two or three, each with **Input:**, **Output:** and **Explanation:** lines (the app numbers them, so you do not). The explanation shows why that is the answer, walking through the steps when the answer comes from a process.
-- **Constraints**: what the inputs can be, one per bullet.
+- Then a line reading exactly **Examples**, and under it two or three examples, each with **Input:**, **Output:** and **Explanation:** lines. The app reads that line and these labels to draw the examples as cards and numbers them itself, so leave the numbering to it. The explanation shows why that is the answer, walking through the steps when the answer comes from a process.
+- Then a line reading exactly **Constraints**, and under it what the inputs can be, one per bullet.
 Syntax, API and mechanics drills, repairs and repository tasks are different: there the steps are the exercise, and plain instructions are the right voice. For a repair, say the provided implementation is meant to satisfy a named contract but produces a named observable failure for some inputs, and ask the learner to correct it without changing the public API.
-The statement is the learner's page, so it stays inside the problem: no mention of Spar, the coach, training, hidden tests, known-incorrect solutions, validation, or why this problem was chosen.
+The statement is the learner's page, so it stays inside the problem: no mention of Spar, the coach, training, hidden tests, known-incorrect solutions, validation, or why this problem was chosen. The app asks for complexity after a pass when the challenge calls for it, so the statement does not.
 
 # The starter
 The starter is the learner's first impression of the problem's shape, so it must be deliberate and consistent:
@@ -183,7 +183,7 @@ The starter is the learner's first impression of the problem's shape, so it must
 
 Before replying, read the statement as a standalone problem page and check that title, statement, examples, constraints, starter, reference and tests describe one contract in one vocabulary.`;
 
-export const BUILDER_PROMPT: VersionedPrompt = { id: "spar-builder", version: 3, text: BUILDER_TEXT.replace("{{LANGUAGE_CONTRACTS}}", languageContracts()) };
+export const BUILDER_PROMPT: VersionedPrompt = { id: "spar-builder", version: 4, text: BUILDER_TEXT.replace("{{LANGUAGE_CONTRACTS}}", languageContracts()) };
 
 /* ---------------------------------------------------------------------------
    Repair and redraft, inside one set_challenge call

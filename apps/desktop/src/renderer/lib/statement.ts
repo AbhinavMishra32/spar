@@ -46,7 +46,9 @@ export type ParsedStatement = {
 };
 
 /** A heading the statement gives itself, in any of the shapes a model writes. */
-const HEADING = /^\s{0,3}(?:#{1,6}\s*|\*\*)\s*([A-Za-z][A-Za-z \-]{2,40}?)\s*(?:\*\*)?\s*:?\s*$/;
+/* The colon can sit inside the bold or outside it: `**Constraints:**` and
+   `**Constraints**:` are both a heading. */
+const HEADING = /^\s{0,3}(?:#{1,6}\s*|\*\*)\s*([A-Za-z][A-Za-z \-]{2,40}?)\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*$/;
 const LEAD_HEADING = /^(problem|problem description|description|task|the problem)$/i;
 const EXAMPLES_HEADING = /^(examples?|sample|samples|sample cases?)$/i;
 const NOTE_HEADING = /^(constraints?|notes?|requirements?|rules?)$/i;
@@ -202,6 +204,10 @@ function splitByHeading(text: string): { lead: string; body: string; examples: s
       parts[current] += `${line}\n`;
       continue;
     }
+    /* An example's Input line opens the examples even when no heading came
+       before it: the cards are what the learner scans, and a missing
+       "Examples" line is a small slip to lose them over. */
+    if ((current === "lead" || current === "body") && FIELD.exec(line)?.[1]?.toLowerCase() === "input") current = "examples";
     /* The first paragraph is the lead; everything after it, up to a heading, is
        what the requirements are drawn from. */
     if (current === "lead" && seenLead && !line.trim()) current = "body";
@@ -304,13 +310,19 @@ function withoutBullets(section: string): string {
     .replace(/\n{3,}/g, "\n\n");
 }
 
-/** The requirement lines of a section: its bullets, or its sentences when it
- *  wrote none. Markers are stripped — the panel draws its own. */
+/** The requirement lines of a section: its bullets, or its lines when it
+ *  wrote one rule per line without markers. Prose written in paragraphs is a
+ *  problem told in words and stays as written; cutting it into one bullet per
+ *  sentence turned every statement into a spec sheet. Markers are stripped —
+ *  the panel draws its own. */
 function bulletsOf(section: string): string[] {
-  const lines = withoutFences(section).split("\n").map((line) => line.trim()).filter(Boolean);
+  const prose = withoutFences(section);
+  const lines = prose.split("\n").map((line) => line.trim()).filter(Boolean);
   const bullets = lines.filter((line) => /^([-*+]|\d+[.)])\s/.test(line)).map((line) => line.replace(/^([-*+]|\d+[.)])\s+/, "").trim());
   if (bullets.length) return bullets;
-  return sentences(lines.join(" ")).map((sentence) => sentence.trim()).filter((sentence) => sentence.length > 1);
+  const paragraphs = prose.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+  if (paragraphs.some((paragraph) => paragraph.includes("\n"))) return lines;
+  return [];
 }
 
 /** Every sentence after the lead becomes its own requirement line. */

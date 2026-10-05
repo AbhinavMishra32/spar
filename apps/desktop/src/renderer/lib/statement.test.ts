@@ -56,9 +56,15 @@ describe("a statement that wrote its own headings", () => {
     expect(parsed.examples[2]?.note).toContain("less than the target");
   });
 
-  it("turns the rules into the requirement lines, without their markers", () => {
-    expect(parsed.requirements).toEqual(["Return `0` when no such subarray exists.", "Do not modify `values`."]);
+  it("keeps a prose body as prose rather than one bullet per sentence", () => {
+    expect(parsed.requirements).toEqual([]);
+    expect(parsed.lead).toContain("Return `0` when no such subarray exists. Do not modify `values`.");
     expect(parsed.note).toContain("Export the function at module level.");
+  });
+
+  it("turns rules written one per line into requirement lines", () => {
+    const lines = parseStatement("Implement `f(xs)`.\n\nReturn `[]` for empty input.\nLeave `xs` unchanged.\n\n**Examples**\n\n**Input:** xs = [1]\n**Output:** [1]");
+    expect(lines.requirements).toEqual(["Return `[]` for empty input.", "Leave `xs` unchanged."]);
   });
 });
 
@@ -123,10 +129,50 @@ it("keeps the prose, figure and examples around a statement's bullets", () => {
   expect(parsed.lead).toContain("Find the node in the BST");
   expect(parsed.lead).toContain("![](https://assets.leetcode.com/uploads/2021/01/12/tree1.jpg)");
   expect(parsed.lead).toContain("Input: root = [4,2,7,1,3], val = 2");
-  expect(parsed.requirements).toEqual([
-    "The number of nodes in the tree is in the range `[1, 5000]`.",
-    "`1 <= Node.val <= 10^7`",
-  ]);
+  expect(parsed.lead).toContain("The number of nodes in the tree is in the range `[1, 5000]`.");
+  expect(parsed.requirements).toEqual([]);
+});
+
+/* Worker Assignment Order, as the 0.7.4 builder wrote it: prose paragraphs, no
+   "Examples" line above the first Input, and the colon inside the bold of
+   "**Constraints:**". It rendered as raw text with every sentence a rule. */
+it("draws example cards for examples written without an Examples heading", () => {
+  const source = [
+    "You are given a nonempty list `loads`, where `loads[i]` is worker `i`'s initial workload.",
+    "",
+    "Assign each job to the worker with the smallest current workload. If several workers have that workload, choose the worker with the smallest index.",
+    "",
+    "Return the selected worker indices in job arrival order.",
+    "",
+    "**Input:** loads = [0,1], durations = [1,2,1]",
+    "",
+    "**Output:** [0,0,1]",
+    "",
+    "**Explanation:** The first job goes to worker 0, making the workloads [1,1].",
+    "",
+    "**Input:** loads = [4,0,7], durations = []",
+    "",
+    "**Output:** []",
+    "",
+    "**Explanation:** No jobs arrive, so no workers are selected.",
+    "",
+    "**Constraints:**",
+    "- `1 <= len(loads) <= 100000`",
+    "",
+    "## How this must be solved",
+    "",
+    "- Leave loads and durations unchanged.",
+  ].join("\n");
+  const parsed = parseStatement(source);
+  expect(parsed.structured).toBe(true);
+  expect(parsed.examples).toHaveLength(2);
+  expect(parsed.examples[0]).toMatchObject({ call: "loads = [0,1], durations = [1,2,1]", result: "[0,0,1]" });
+  expect(parsed.examples[1]?.note).toContain("No jobs arrive");
+  expect(parsed.requirements).toEqual([]);
+  expect(parsed.lead).toContain("smallest current workload");
+  expect(parsed.lead).not.toContain("Input:");
+  expect(parsed.note).toContain("1 <= len(loads) <= 100000");
+  expect(parsed.note).toContain("How this must be solved");
 });
 
 describe("figures in a statement", () => {
