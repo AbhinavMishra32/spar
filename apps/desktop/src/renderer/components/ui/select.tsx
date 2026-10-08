@@ -94,7 +94,7 @@ function SelectContent({
 function SelectLabel({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Label>) {
   return (
     <SelectPrimitive.Label
-      className={cn("px-2.5 pt-1 pb-1 text-ui-sm font-medium tracking-[0.05em] text-muted-foreground/75 uppercase", className)}
+      className={cn("px-2.5 pt-1.5 pb-0.5 text-ui-sm font-normal text-muted-foreground/70 select-none", className)}
       data-slot="select-label"
       {...props}
     />
@@ -140,7 +140,7 @@ function SelectItem({
 }
 
 function SelectSeparator({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.Separator>) {
-  return <SelectPrimitive.Separator className={cn("pointer-events-none -mx-1.5 my-1 h-px bg-border", className)} data-slot="select-separator" {...props} />
+  return <SelectPrimitive.Separator className={cn("pointer-events-none mx-2.5 my-1 h-px bg-border", className)} data-slot="select-separator" {...props} />
 }
 
 function SelectScrollUpButton({ className, ...props }: React.ComponentProps<typeof SelectPrimitive.ScrollUpButton>) {

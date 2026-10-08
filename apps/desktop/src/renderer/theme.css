@@ -384,6 +384,9 @@
   --accent-foreground: oklch(14.5% 0 0 / 85%);
   --destructive: oklch(57.7% 0.245 27.325);
   --success: oklch(52% 0.11 158);
+  /* A switch that is on. A system-style green rather than `--success`, which
+     is tuned for text and reads pastel as a fill under a white knob. */
+  --switch-on: oklch(66% 0.16 150);
   --warning: oklch(62% 0.13 68);
   /* A check that fell short, inside the agent's work: a clear orange, not the
      amber of --warning, which reads as brown on a light surface. */
@@ -649,6 +652,7 @@
   --accent-foreground: oklch(98.5% 0 0 / 85%);
   --destructive: oklch(70.4% 0.191 22.216);
   --success: oklch(78% 0.14 158);
+  --switch-on: oklch(62% 0.15 150);
   --warning: oklch(82% 0.14 78);
   --miss: oklch(74% 0.16 48);
   --rating-halo: oklch(98.5% 0 0 / 14%);
@@ -1607,11 +1611,7 @@
   .floating-surface {
     border-radius: var(--radius-menu);
     corner-shape: round;
-    box-shadow:
-      inset 0 0 0 1px var(--glass-rim),
-      inset 0 1px 0 0 var(--glass-sheen),
-      0 0 0 0.5px var(--glass-hairline),
-      var(--app-shadow-overlay);
+    box-shadow: var(--popup-rim), var(--popup-hairline), var(--app-shadow-overlay);
     background: color-mix(in oklab, var(--popover) var(--glass-fill), transparent);
     backdrop-filter: blur(8px) saturate(120%);
     isolation: isolate;
@@ -1685,25 +1685,41 @@
     animation: 0.75s ease-in-out 3 settings-search-focus-flash;
   }
 
+  /* The stroke every popup shares — menu, select, popover, hover card,
+     tooltip. Light keeps the white inset rim and a faint outer hairline. Dark
+     used to draw a 1px white rim *and* a light outer hairline, two bright
+     lines a pixel apart that read as a drawn border rather than an edge. Dark
+     now separates the way macOS does: a barely-there inner rim for the lit
+     edge, a dark outer hairline that cuts it off the page, and a shadow deep
+     enough to actually show on a dark ground — the light-mode 10% drop was
+     invisible there. */
+  :root {
+    --popup-rim: inset 0 0 0 1px color-mix(in oklab, #fff 80%, transparent);
+    --popup-hairline: 0 0 0 var(--hairline, 0.5px) color-mix(in oklab, var(--foreground) 12%, transparent);
+    --popup-shadow: 0 10px 24px -6px rgb(0 0 0 / 0.12), 0 2px 6px -2px rgb(0 0 0 / 0.06);
+    --popup-shadow-sm: 0 4px 10px -3px rgb(0 0 0 / 0.12);
+  }
+
+  .dark {
+    --popup-rim: inset 0 0 0 var(--hairline, 0.5px) color-mix(in oklab, #fff 12%, transparent);
+    --popup-hairline: 0 0 0 var(--hairline, 0.5px) rgb(0 0 0 / 0.5);
+    --popup-shadow: 0 14px 36px -8px rgb(0 0 0 / 0.55), 0 4px 10px -4px rgb(0 0 0 / 0.35);
+    --popup-shadow-sm: 0 6px 16px -4px rgb(0 0 0 / 0.45);
+  }
+
   .menu-surface {
     border-radius: var(--radius-menu);
     corner-shape: round;
     background: color-mix(in oklab, var(--popover) 80%, transparent);
-    box-shadow:
-      inset 0 0 0 1px color-mix(in oklab, #fff 80%, transparent),
-      0 0 0 0.5px color-mix(in oklab, var(--foreground) 20%, transparent),
-      0 10px 15px -3px rgb(0 0 0 / 0.1),
-      0 4px 6px -4px rgb(0 0 0 / 0.1);
+    box-shadow: var(--popup-rim), var(--popup-hairline), var(--popup-shadow);
     backdrop-filter: blur(8px);
     isolation: isolate;
   }
 
+  /* A touch more fill in dark: at 80% the page behind bled through enough to
+     muddy grey row text. */
   .dark .menu-surface {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in oklab, #fff 10%, transparent),
-      0 0 0 0.5px color-mix(in oklab, var(--foreground) 20%, transparent),
-      0 10px 15px -3px rgb(0 0 0 / 0.1),
-      0 4px 6px -4px rgb(0 0 0 / 0.1);
+    background: color-mix(in oklab, var(--popover) 90%, transparent);
   }
 
   /* A glass hairline and the softer, lower tooltip shadow used by the reference.
@@ -1719,17 +1735,7 @@
      No sheen: their tooltip carries no top highlight, and adding one is what
      would make a 6px chip read as a miniature window. */
   .tooltip-surface {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in oklab, #fff 80%, transparent),
-      0 0 0 0.5px color-mix(in oklab, var(--foreground) 20%, transparent),
-      0 4px 8px -3px rgb(0 0 0 / 0.15);
-  }
-
-  .dark .tooltip-surface {
-    box-shadow:
-      inset 0 0 0 1px color-mix(in oklab, #fff 10%, transparent),
-      0 0 0 0.5px color-mix(in oklab, var(--foreground) 20%, transparent),
-      0 4px 8px -3px rgb(0 0 0 / 0.3);
+    box-shadow: var(--popup-rim), var(--popup-hairline), var(--popup-shadow-sm);
   }
 
   /* The same shell without the glass, for a surface that moves while you are
@@ -1742,11 +1748,7 @@
     border-radius: var(--radius-menu);
     corner-shape: round;
     background: var(--popover);
-    box-shadow:
-      inset 0 0 0 1px var(--glass-rim),
-      inset 0 1px 0 0 var(--glass-sheen),
-      0 0 0 0.5px var(--glass-hairline),
-      var(--app-shadow-menu);
+    box-shadow: var(--popup-rim), var(--popup-hairline), var(--popup-shadow);
     isolation: isolate;
   }
 

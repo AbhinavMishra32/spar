@@ -273,9 +273,11 @@ function DropdownMenuLabel({
   return (
     <DropdownMenuPrimitive.Label
       className={cn(
-        /* `text-ui` is 12px, which is their `text-xs` exactly; `text-ui-sm` is
-           11px and was a point light. */
-        "px-2 py-0.5 text-ui font-medium tracking-wide text-muted-foreground select-none",
+        /* A section heading, not a row: a point under the chrome size, regular
+           weight and faded, so it sorts the items without competing with them.
+           At `text-ui` medium it sat a point under the 14px items and read as
+           one more choice. */
+        "px-2 pt-1.5 pb-0.5 text-ui-sm font-normal text-muted-foreground/70 select-none",
         className
       )}
       data-slot="dropdown-menu-label"
@@ -478,7 +480,7 @@ function DropdownMenuSeparator({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Separator>) {
   return (
     <DropdownMenuPrimitive.Separator
-      className={cn("-mx-1 my-0.5 h-px bg-border", className)}
+      className={cn("mx-2 my-1 h-px bg-border", className)}
       data-slot="dropdown-menu-separator"
       {...props}
     />

@@ -17,8 +17,9 @@ import { cn } from "@/lib/utils";
  * together. The travel is computed from the knob's own width, so it lands
  * flush with either end.
  *
- * On is the brand ink and the knob takes the page colour, so the pair inverts
- * cleanly in dark mode — a white knob on a white track would vanish.
+ * On is a green track under the same white knob, in both themes. The track
+ * used to be the brand ink with the knob taking the page colour, which in dark
+ * mode turned the whole control into a white slab.
  */
 function Switch({
   className,
@@ -36,7 +37,7 @@ function Switch({
         "bg-[color-mix(in_oklab,var(--foreground)_11%,transparent)] shadow-[inset_0_0.5px_1.5px_oklch(0%_0_0/14%)]",
         "transition-[background-color,box-shadow] duration-[320ms] ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none",
         "hover:bg-[color-mix(in_oklab,var(--foreground)_15%,transparent)]",
-        "data-[state=checked]:bg-[var(--brand)] data-[state=checked]:shadow-[inset_0_0.5px_0_oklch(100%_0_0/14%),inset_0_-1px_2px_oklch(0%_0_0/18%)] data-[state=checked]:hover:bg-[color-mix(in_oklab,var(--brand)_88%,var(--background))]",
+        "data-[state=checked]:bg-(--switch-on) data-[state=checked]:shadow-[inset_0_0.5px_0_oklch(100%_0_0/14%),inset_0_-1px_2px_oklch(0%_0_0/18%)] data-[state=checked]:hover:bg-[color-mix(in_oklab,var(--switch-on)_90%,black)]",
         "focus-visible:ring-[3px] focus-visible:ring-ring/50",
         "disabled:cursor-default disabled:opacity-45",
         className,
@@ -52,8 +53,9 @@ function Switch({
           "[--th:calc(var(--sw-h)-4px)] [--tw:calc(var(--th)*1.45)]",
           "h-(--th) w-(--tw)",
           "translate-x-0 data-[state=checked]:translate-x-[calc(var(--sw-w)-4px-var(--tw))]",
-          "bg-[linear-gradient(180deg,oklch(100%_0_0),oklch(96.5%_0_0))] dark:bg-[linear-gradient(180deg,oklch(94%_0_0),oklch(86%_0_0))]",
-          "data-[state=checked]:bg-[linear-gradient(180deg,var(--background),color-mix(in_oklab,var(--background)_94%,var(--foreground)))]",
+          /* Toned down a little when off in dark so it doesn't glare off the
+             grey track; on, it's full white against the green. */
+          "bg-[linear-gradient(180deg,oklch(100%_0_0),oklch(96.5%_0_0))] dark:data-[state=unchecked]:bg-[linear-gradient(180deg,oklch(92%_0_0),oklch(84%_0_0))]",
           "shadow-[0_0_0_0.5px_oklch(0%_0_0/7%),0_1px_1px_oklch(0%_0_0/10%),0_2px_6px_oklch(0%_0_0/12%),inset_0_0.5px_0_oklch(100%_0_0/90%)]",
           "will-change-[translate] transition-[translate,background,box-shadow] duration-[320ms] ease-[cubic-bezier(0.25,1,0.5,1)] motion-reduce:transition-none",
         )}
