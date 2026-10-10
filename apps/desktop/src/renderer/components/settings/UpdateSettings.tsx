@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { IconArrowInbox, IconArrowRotateRightLeft, IconCheckmark1, IconLoader } from "central-icons";
 import type { SparApi, UpdateState } from "../../../shared/api";
 import { Button } from "@/components/ui/button";
-import { message } from "@/lib/format";
+import { message, releaseVersion } from "@/lib/format";
 import { SettingsRow } from "./layout";
 
 const STATUS: Record<UpdateState["status"], string> = {
@@ -41,7 +41,7 @@ export function UpdateSettings({ api }: { api: SparApi | undefined }) {
 
   const busy = state?.status === "checking" || state?.status === "downloading" || state?.status === "installing";
   const detail = state?.status === "available"
-    ? `Spar ${state.version} is available. Spar saves your work and restarts to install it.`
+    ? `Spar ${releaseVersion(state.version)} is available. Spar saves your work and restarts to install it.`
     : state?.status === "downloading"
       ? `${Math.round(state.percent ?? 0)}% downloaded.`
       : state?.status === "installing"
@@ -50,7 +50,7 @@ export function UpdateSettings({ api }: { api: SparApi | undefined }) {
           ? state.message
           : state?.status === "unsupported"
             ? state.message
-            : `You have ${state?.currentVersion ?? "the latest version"}. Spar checks when it opens and every few hours.`;
+            : `You have ${state?.currentVersion ? releaseVersion(state.currentVersion) : "the latest version"}. Spar checks when it opens and every few hours.`;
 
   return (
     <SettingsRow className="gap-4">

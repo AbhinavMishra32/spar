@@ -114,25 +114,47 @@ function ToastRow({ reduced, toast }: { reduced: boolean; toast: Toast }) {
         <IconCrossMedium className="size-3.5" />
       </button>
 
-      {toast.progress !== undefined && (
-        <span aria-hidden className="absolute inset-x-0 bottom-0 h-[2px] bg-[var(--color-background-elevated-secondary)]">
-          <span
-            className="block h-full bg-foreground/60 transition-[width] duration-300 ease-out"
-            style={{ width: `${Math.max(0, Math.min(100, toast.progress))}%` }}
-          />
-        </span>
-      )}
     </motion.div>
   );
 }
 
 function Body({ toast }: { toast: Toast }) {
+  if (toast.progress !== undefined) return <ProgressBody progress={toast.progress} toast={toast} />;
   return (
     <>
       {/* A failure is the one thing whose whole sentence matters: cut to a line,
           "reconnect LeetCode in Settings" is the part that goes missing. */}
       <p className={cn("text-thread font-medium text-foreground", toast.tone === "danger" ? "line-clamp-3" : "truncate")}>{toast.title}</p>
       {toast.detail && <p className={cn("mt-px text-ui-sm text-muted-foreground", toast.tone === "danger" ? "line-clamp-3" : "truncate")}>{toast.detail}</p>}
+    </>
+  );
+}
+
+/** Work still running: the title, then a track with the count beside it. Before
+ *  anything has arrived the track sweeps instead of sitting empty, so a slow
+ *  start reads as starting rather than as stuck at nothing. */
+function ProgressBody({ progress, toast }: { progress: number; toast: Toast }) {
+  const value = Math.max(0, Math.min(100, progress));
+  const waiting = value <= 0;
+  return (
+    <>
+      <p className="truncate text-thread font-medium text-foreground">{toast.title}</p>
+      <div className="mt-1.5 flex items-center gap-2.5">
+        <span
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={waiting ? undefined : Math.round(value)}
+          className="relative h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-[var(--color-background-elevated-secondary)] ring-[0.5px] ring-inset ring-[var(--border-surface-strong)]"
+          role="progressbar"
+        >
+          {waiting ? (
+            <span className="toast-progress-sweep absolute inset-y-0 left-0 w-1/3 rounded-full bg-foreground/45" />
+          ) : (
+            <span className="block h-full rounded-full bg-foreground/75 transition-[width] duration-300 ease-out" style={{ width: `${value}%` }} />
+          )}
+        </span>
+        {toast.detail && <span className="shrink-0 text-ui-sm tabular-nums text-muted-foreground">{toast.detail}</span>}
+      </div>
     </>
   );
 }

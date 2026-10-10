@@ -94,3 +94,10 @@ export function initials(value: string): string {
   const parts = value.trim().split(/\s+/).slice(0, 2);
   return parts.map((part) => part.charAt(0).toUpperCase()).join("") || "?";
 }
+
+/** A release as the learner sees it: always `v0.7.7`, whether the feed handed
+ *  over `0.7.7` or `v0.7.7`. */
+export function releaseVersion(version: string | null | undefined): string {
+  if (!version) return "";
+  return `v${version.replace(/^v/i, "")}`;
+}

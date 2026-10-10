@@ -2850,3 +2850,17 @@ html.theme-reveal::view-transition-new(root) {
    Central icon strokes inside a mask's group, so the override reaches its
    strokes and nothing else that happens to be an SVG. */
 svg > mask > g [stroke-width="2"] { stroke-width: 1.75; }
+
+/* The download toast before its first byte: a short segment crossing the track. */
+@keyframes toast-progress-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
+
+.toast-progress-sweep {
+  animation: toast-progress-sweep 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast-progress-sweep { animation: none; width: 100%; opacity: 0.4; }
+}

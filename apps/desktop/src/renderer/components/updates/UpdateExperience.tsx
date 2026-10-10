@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Markdown } from "@/components/agent/Markdown";
 import { SparDots } from "@/components/common/SparDots";
 import { dismissToast, toast } from "@/hooks/use-toasts";
-import { message } from "@/lib/format";
+import { message, releaseVersion } from "@/lib/format";
 
 const KEY = "spar-update";
 
@@ -69,7 +69,7 @@ export function UpdateExperience({ api }: { api: SparApi }) {
 
   useEffect(() => {
     if (!state) return;
-    const version = state.version ?? "";
+    const version = releaseVersion(state.version);
     const previous = shown.current;
     shown.current = state.status;
     switch (state.status) {
@@ -86,8 +86,12 @@ export function UpdateExperience({ api }: { api: SparApi }) {
         });
         return;
       case "downloading": {
-        const of = bytes(state.transferred) && bytes(state.total) ? `${bytes(state.transferred)} of ${bytes(state.total)}` : `${Math.round(state.percent ?? 0)}%`;
-        toast({ key: KEY, title: `Downloading Spar ${version}`, detail: of, glyph: <SparDots pattern="wave" size={16} />, progress: state.percent ?? 0, duration: 0 });
+        const percent = state.percent ?? 0;
+        const done = bytes(state.transferred);
+        const total = bytes(state.total);
+        /* Nothing has arrived yet: "0%" reads as stuck, so say it is starting. */
+        const detail = percent <= 0 && !state.transferred ? "Starting…" : done && total ? `${done} of ${total}` : `${Math.round(percent)}%`;
+        toast({ key: KEY, title: `Downloading Spar ${version}`, detail, glyph: <SparDots pattern="wave" size={16} />, progress: percent, duration: 0 });
         return;
       }
       case "installing":
@@ -121,8 +125,8 @@ export function UpdateExperience({ api }: { api: SparApi }) {
       <Dialog open={notesOpen && state?.status === "available"} onOpenChange={setNotesOpen}>
         <DialogContent className="sm:max-w-[34rem]">
           <DialogHeader>
-            <DialogTitle>Spar {state?.version}</DialogTitle>
-            <DialogDescription>You have {state?.currentVersion}. Spar saves your work and restarts to install it.</DialogDescription>
+            <DialogTitle>Spar {releaseVersion(state?.version)}</DialogTitle>
+            <DialogDescription>You have {releaseVersion(state?.currentVersion)}. Spar saves your work and restarts to install it.</DialogDescription>
           </DialogHeader>
           <div className="app-scroll -mx-1 max-h-[22rem] overflow-y-auto px-1">
             {state?.notes ? <Markdown source={inAppNotes(state.notes)} /> : <p className="text-ui text-muted-foreground">No notes were published for this release.</p>}
@@ -137,7 +141,7 @@ export function UpdateExperience({ api }: { api: SparApi }) {
       <Dialog open={Boolean(state?.changelog)} onOpenChange={(open) => { if (!open) dismissChangelog(); }}>
         <DialogContent className="sm:max-w-[34rem]">
           <DialogHeader>
-            <DialogTitle>Updated to {state?.changelog?.version}</DialogTitle>
+            <DialogTitle>Updated to {releaseVersion(state?.changelog?.version)}</DialogTitle>
             <DialogDescription>What changed in this version.</DialogDescription>
           </DialogHeader>
           <div className="app-scroll -mx-1 max-h-[24rem] overflow-y-auto px-1">
